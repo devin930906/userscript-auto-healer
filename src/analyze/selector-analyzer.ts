@@ -62,18 +62,21 @@ export function analyzeSelectors(source:string):SelectorAnalysis {
     return {status:'PARSE_ERROR',sites:[]};
   }
   const sites:SelectorSite[]=[];
-  function walk(node:AstNode,owners:string[],fallback:number|null):void {
+  function walk(node:AstNode,owners:string[],fallback:number|null,functionLabel?:string):void {
     let scope=owners;
-    if(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'){
+    if(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
+        node.type==='ArrowFunctionExpression'){
       const n=nodeOf(node.id)?.name;
-      scope=[...owners,typeof n==='string'?n:'<anonymous>'];
+      const inferred=typeof n==='string'?n:
+        node.type==='ArrowFunctionExpression'?'<arrow>':'<anonymous>';
+      scope=[...owners,functionLabel??inferred];
     }
     if(node.type==='VariableDeclarator'){
       const child=nodeOf(node.init);
       const name=nodeOf(node.id)?.name;
       if(child && (child.type==='ArrowFunctionExpression'||child.type==='FunctionExpression') &&
           typeof name==='string'){
-        walk(child,[...owners,name],fallback);
+        walk(child,owners,fallback,name);
         return;
       }
     }
