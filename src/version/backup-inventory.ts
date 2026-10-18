@@ -9,7 +9,7 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
-import {lstat,open,readdir} from 'node:fs/promises';
+import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
@@ -93,11 +93,20 @@ export async function inspectBackupInventoryReadOnly(
    if(directoryStart.isSymbolicLink()||!directoryStart.isDirectory())
      return blocked('BACKUP_DIRECTORY_INVALID');
    const prefix=backupPrefix(sourcePath)+'.';
-   const entries=await readdir(backupDirectory,{withFileTypes:true});
-   if(entries.length>MAX_DIRECTORY_ENTRIES)return blocked('TOO_MANY_ENTRIES');
-   const names=entries.map(e=>e.name).filter(name=>
-     name.startsWith(prefix)&&UUID_V4.test(name.slice(prefix.length))).sort();
-   if(names.length>MAX_CANDIDATES)return blocked('TOO_MANY_ENTRIES');
+   // Read entries incrementally. Materializing the entire directory before
+   // enforcing the cap would allow an untrusted large folder to exhaust memory.
+   const names:string[]=[];
+   let entryCount=0;
+   const directory=await opendir(backupDirectory);
+   for await(const entry of directory){
+     if(++entryCount>MAX_DIRECTORY_ENTRIES)return blocked('TOO_MANY_ENTRIES');
+     if(entry.name.startsWith(prefix)&&
+        UUID_V4.test(entry.name.slice(prefix.length))){
+       names.push(entry.name);
+       if(names.length>MAX_CANDIDATES)return blocked('TOO_MANY_ENTRIES');
+     }
+   }
+   names.sort();
    const observations:ObservedBackupCandidate[]=[];
    for(const name of names){
      const path=join(backupDirectory,name);
