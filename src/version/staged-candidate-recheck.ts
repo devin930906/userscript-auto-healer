@@ -6,17 +6,17 @@
  * consent, a verified receipt expires immediately, and no GM/business test
  * or write/restore authorization is inferred.
  */
-import {createHash} from 'node:crypto';
-import {constants} from 'node:fs';
-import type {BigIntStats} from 'node:fs';
-import {lstat,open} from 'node:fs/promises';
+
 import {basename,isAbsolute,join} from 'node:path';
+import {lstat} from 'node:fs/promises';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
+import type {BigIntStats} from 'node:fs';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
 import {verifyBackupRecoverySource} from './recovery-source';
 import {backupPrefix} from './verified-backup';
 import {hasUnsafePathLink} from './path-boundary';
+import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'REVIEW_REJECTED'|
@@ -65,10 +65,6 @@ function validAbsolute(v:unknown):v is string{
  return typeof v==='string'&&v.length>0&&v.length<=4096&&
   !v.includes('\0')&&isAbsolute(v);
 }
-function same(a:BigIntStats,b:BigIntStats):boolean{
- return a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
-  a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
-}
 function sameDirectory(a:BigIntStats,b:BigIntStats):boolean{
  return a.dev===b.dev&&a.ino===b.ino;
 }
@@ -107,41 +103,6 @@ function receiptFrom(input:unknown):Receipt|null{
     obj.automaticPatchAllowed!==false||obj.automaticRollbackAllowed!==false||
     obj.tampermonkeyVerified!==false||obj.businessVerified!==false)return null;
  return obj as Receipt;
-}
-/** Descriptor checked, bounded, no symlinks or hard links.
- * Compare entire candidate bytes, not just caller-provided SHA-256.
- */
-async function checkCandidateFile(path:string,expected:Buffer):Promise<'MATCH'|'CHANGED'|'MISMATCH'>{
- if(await hasUnsafePathLink(path))return 'CHANGED';
- const first=await lstat(path,{bigint:true});
- if(first.isSymbolicLink()||!first.isFile()||first.nlink!==1n||
-    first.size!==BigInt(expected.length))return 'CHANGED';
- const handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
- try{
-   const opened=await handle.stat({bigint:true});
-   if(!opened.isFile()||opened.nlink!==1n||!same(first,opened))return 'CHANGED';
-   let position=0;
-   const observedHash=createHash('sha256');
-   const expectedHash=createHash('sha256').update(expected).digest('hex');
-   const buffer=Buffer.allocUnsafe(64*1024);
-   let identical=true;
-   while(true){
-     const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
-     if(bytesRead===0)break;
-     position+=bytesRead;
-     if(position>MAX_SCRIPT_BYTES)return 'CHANGED';
-     const block=buffer.subarray(0,bytesRead);
-     observedHash.update(block);
-     if(!block.equals(expected.subarray(position-bytesRead,position)))identical=false;
-   }
-   const after=await handle.stat({bigint:true});
-   const byPath=await lstat(path,{bigint:true});
-   if(byPath.isSymbolicLink()||byPath.nlink!==1n||
-      !same(first,after)||!same(after,byPath)||
-      position!==expected.length)return 'CHANGED';
-   if(observedHash.digest('hex')!==expectedHash||!identical)return 'MISMATCH';
-   return 'MATCH';
- }finally{await handle.close();}
 }
 /** Caller must still independently prove native user selection and any future
  * Tampermonkey/business approval. This call NEVER returns installation,
@@ -189,7 +150,7 @@ export async function verifyStagedCandidateReadOnly(
      if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
        return deny('BACKUP_UNVERIFIED');
      const path=join(options.backupDirectory,receipt.candidateFileName);
-     const checked=await checkCandidateFile(path,candidate);
+     const checked=await verifyExactCandidateBytesReadOnly(path,candidate);
      if(checked==='CHANGED')return deny('CANDIDATE_CHANGED');
      if(checked==='MISMATCH')return deny('CANDIDATE_MISMATCH');
      if(await hasUnsafePathLink(options.backupDirectory))return deny('UNSAFE_PATH');
