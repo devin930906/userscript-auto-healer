@@ -66,16 +66,35 @@ async function main() {
     try {
       await permissionPage.goto('chrome://extensions/?id='+info.id,{waitUntil:'domcontentloaded',timeout:12000});
       await permissionPage.waitForTimeout(1500);
-      const label=permissionPage.getByText('Allow User Scripts',{exact:true});
-      const count=await label.count();
-      console.log('Chrome extensions detail Allow User Scripts label count='+count);
-      if(count===1){
-        try {
-          await label.click({timeout:5000});
+      // Chrome settings is shadow-DOM based. Locate the actual control rather than
+      // assuming clicking a static label changes its state.
+      const controls=await permissionPage.evaluate(()=>{
+        const hits=[];
+        function walk(root){
+          for(const el of root.querySelectorAll('*')){
+            if(el.matches('cr-toggle,[role="switch"]')){
+              const container=el.parentElement;
+              hits.push({id:el.id,parentId:container?.id||'',title:container?.textContent?.trim().slice(0,130)||'',checked:el.checked,ariaChecked:el.getAttribute('aria-checked')});
+            }
+            if(el.shadowRoot)walk(el.shadowRoot);
+          }
+        }
+        walk(document);return hits;
+      });
+      console.log('Chrome extension details toggle inventory: '+JSON.stringify(controls.slice(0,25)));
+      const chosen=controls.find(x=>/user scripts/i.test(x.title+" "+x.id+" "+x.parentId));
+      if(chosen){
+        const toggle=permissionPage.locator('cr-toggle#'+chosen.id);
+        const exact=chosen.id?toggle:permissionPage.getByRole('switch',{name:/allow user scripts/i});
+        const found=await exact.count();
+        if(found===1){
+          const before=await exact.evaluate(el=>Boolean(el.checked||el.getAttribute('aria-checked')==='true'));
+          if(!before)await exact.click({timeout:7000});
           await permissionPage.waitForTimeout(1000);
-          console.log('Disposable test profile: attempted explicit Allow User Scripts UI opt-in.');
-        }catch(err){console.log('INCOMPLETE userScripts opt-in: '+String(err.message).slice(0,180));}
-      } else console.log('INCOMPLETE userScripts opt-in: extension detail toggle not discoverable.');
+          const after=await exact.evaluate(el=>Boolean(el.checked||el.getAttribute('aria-checked')==='true'));
+          console.log('Explicit userScripts consent in disposable profile: before='+before+', after='+after);
+        } else console.log('INCOMPLETE userScripts opt-in: ambiguous matching toggle count='+found);
+      } else console.log('INCOMPLETE userScripts opt-in: toggle not found.');
     } catch(err){console.log('INCOMPLETE extension details UI: '+String(err.message).slice(0,200));}
     await permissionPage.close();
     
@@ -102,7 +121,7 @@ async function main() {
         await installer.locator('#confirm').waitFor({state:'visible',timeout:12000});
         await installer.locator('#confirm').click({timeout:7000});
         await installer.waitForTimeout(2000);
-        console.log('Authentic manager install confirmation clicked in ephemeral profile.');
+        console.log('Authentic manager install confirmation clicked in ephemeral profile; current URL='+installer.url()+'; status='+String(await installer.locator('body').innerText()).slice(0,340));
       } catch(err){
         console.log('INCOMPLETE authentic installer confirmation: '+String(err.message).slice(0,230));
       }
