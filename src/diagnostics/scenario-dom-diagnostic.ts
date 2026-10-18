@@ -40,6 +40,35 @@ function response(
 const blocked=(code:ScenarioDomTriageCode)=>
  response('BLOCKED',code,0,unknownSignals());
 
+// DOM.querySelectorAll only inspects a bounded subset of the page. Do not
+// treat an incomplete or changing iframe/shadow-root inventory as stable
+// selector evidence; its shape is part of the observation contract.
+const knownBlindSpots=new Set([
+ 'IFRAME_CONTENT_UNVERIFIED','CLOSED_SHADOW_ROOT_UNKNOWN',
+ 'CROSS_ORIGIN_FRAME_UNVERIFIED'
+]);
+function validDomSummary(summary:unknown):boolean{
+ if(!summary||typeof summary!=='object'||Array.isArray(summary))return false;
+ const value=summary as Record<string,unknown>;
+ const elements=value.elementCount;
+ const frames=value.iframeCount;
+ const shadows=value.visibleShadowRoots;
+ if(!Number.isSafeInteger(elements)||!Number.isSafeInteger(frames)||
+    !Number.isSafeInteger(shadows)||
+    (elements as number)<0||(frames as number)<0||(shadows as number)<0||
+    (frames as number)>(elements as number)||
+    (shadows as number)>(elements as number))
+   return false;
+ if(!Array.isArray(value.blindSpots)||value.blindSpots.length>knownBlindSpots.size||
+    !value.blindSpots.every(v=>typeof v==='string'&&knownBlindSpots.has(v))||
+    new Set(value.blindSpots).size!==value.blindSpots.length)return false;
+ const iframeBlind=value.blindSpots.includes('IFRAME_CONTENT_UNVERIFIED');
+ const crossOrigin=value.blindSpots.includes('CROSS_ORIGIN_FRAME_UNVERIFIED');
+ if(iframeBlind!==((frames as number)>0)||crossOrigin&&(frames as number)===0)
+   return false;
+ return true;
+}
+
 /** A static READY_TO_TEST signal does not authorize a browser action.
  * Only top-level selector-present assertions without login or active steps
  * can be handled; business, text and click assertions require another gate.
@@ -96,8 +125,7 @@ export function summarizeReadOnlyScenarioDom(
  if(observed.routeChanged!==false)return blocked('INVALID_OBSERVATION');
  if(!observed.selectorCounts||typeof observed.selectorCounts!=='object'||
    Array.isArray(observed.selectorCounts)||
-   !observed.summary||!Number.isSafeInteger(observed.summary.elementCount)||
-   observed.summary.elementCount<0)
+   !validDomSummary(observed.summary))
    return blocked('INVALID_OBSERVATION');
  // A snapshot of unapproved selectors cannot be treated as the requested
  // scenario's observation, even if it contains all expected keys.
@@ -176,6 +204,9 @@ export function summarizeReadOnlyScenarioDomSeries(
    lastTime=time;
    if(first){
      if(sample.summary.elementCount!==first.summary.elementCount||
+        sample.summary.iframeCount!==first.summary.iframeCount||
+        sample.summary.visibleShadowRoots!==first.summary.visibleShadowRoots||
+        sample.summary.blindSpots.join('|')!==first.summary.blindSpots.join('|')||
         checked.selectors.some(s=>sample.selectorCounts[s]!==first!.selectorCounts[s]))
        return blocked('UNSTABLE_OBSERVATION');
    }else{
