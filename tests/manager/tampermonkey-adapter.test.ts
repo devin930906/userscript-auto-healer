@@ -32,7 +32,7 @@ test('TEST-017 stage: unrelated manager/page target cannot impersonate Tampermon
 test('TEST-017 stage: invalid/duplicate target metadata fails closed',()=>{
  for(const payload of [
   null,{},new Array(513).fill(worker),[null],[{type:'service_worker'}],
-  [{...worker,targetId:'too-short'}],[worker,{...worker}],
+  [{...worker,targetId:'bad'}],[worker,{...worker}],
   [{...worker,url:6}],[{...worker,url:'x'.repeat(8193)}]
  ]){
    assert.deepEqual(inspectTampermonkeyTargetHints(payload),
