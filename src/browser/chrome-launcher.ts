@@ -124,11 +124,7 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
       console.error('TASK-005 identity tool diagnostic',JSON.stringify({
         exitCode:typeof err.code==='number'?err.code:typeof err.code==='string'?err.code:null,
         stderrLength:stderr.length,stdoutLength:stdout.length,
-        errorXml:(stderr.match(/<S S="Error">([^<]{0,800})<\\/S>/)?.[1]??'')
-          .replace(/[A-Za-z]:\\\\[^\\s&'\\\"}]*/g,'<path>').slice(0,500),
-        // Windows runner-only, scrub any path and bound diagnostic output.
-        firstReason:(stderr.split(/\\r?\\n/).find(line=>line.includes('Get-AuthenticodeSignature :'))??'')
-          .replace(/[A-Za-z]:\\\\[^\\s'\\\"}]*/g,'<path>').slice(0,180),hints
+        errorXml:(stderr.split('<S S="Error">')[1]??'').split('</S>')[0].slice(0,300),hints
       }));
     }
     return {ok:false,code:'IDENTITY_UNAVAILABLE'};
