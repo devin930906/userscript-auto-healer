@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {request} from 'node:http';
 import {strict as assert} from 'node:assert';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -50,6 +51,25 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
  assert.equal((await send({token:'wrong',mode:'fixed',
    gmDefaultMatched:true,businessAction:true})).status,403);
  assert.deepEqual(probe.receiptSnapshot(),{});
+ // A browser's cross-origin Origin must not submit a purported fixture receipt.
+ assert.equal((await send({token,mode:'fixed',
+   gmDefaultMatched:true,businessAction:true},{
+   'Content-Type':'application/json','Origin':'http://unrelated.invalid'})).status,403);
+ assert.deepEqual(probe.receiptSnapshot(),{});
+ // Reject an HTTP absolute-form request target even if Host is local. URL()
+ // otherwise uses the supplied external origin instead of the local base.
+ const absoluteTargetStatus=await new Promise<number>((resolve,reject)=>{
+   const req=request(probe.origin,{method:'POST',
+     path:'http://unrelated.invalid/receipt',
+     headers:{'Content-Type':'application/json'}},response=>{
+     response.resume();response.on('end',()=>resolve(response.statusCode??0));
+   });
+   req.on('error',reject);
+   req.end(JSON.stringify({token,mode:'fixed',
+     gmDefaultMatched:true,businessAction:true}));
+ });
+ assert.equal(absoluteTargetStatus,400);
+ assert.deepEqual(probe.receiptSnapshot(),{});
  assert.equal((await send({token,mode:'fixed',
    gmDefaultMatched:'true',businessAction:true})).status,403);
  assert.equal((await send({token,mode:'fixed',
@@ -60,6 +80,11 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
    gmDefaultMatched:true,businessAction:false})).status,204);
  assert.equal((await send({token,mode:'fixed',
    gmDefaultMatched:true,businessAction:true})).status,204);
+ // The same mode's later conflicting report must never overwrite the first.
+ assert.equal((await send({token,mode:'fixed',
+   gmDefaultMatched:false,businessAction:false})).status,409);
+ assert.equal((await send({token,mode:'broken',
+   gmDefaultMatched:false,businessAction:true})).status,409);
  const receipts=probe.receiptSnapshot();
  assert.equal(receipts.broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
  assert.equal(receipts.broken?.reportedBusinessAction,false);
