@@ -314,12 +314,23 @@ export async function startApprovedTampermonkeyDiagnostic(
    sessionCancelled.signal;
  const ready=()=>!stopped&&!sessionSignal.aborted&&
    Date.now()<probe.expiresAt&&isLiveApprovedChromeSession(browser);
- const stop=async()=>{
-   if(stopped)return;
+ let stopping:Promise<void>|undefined;
+ const stop=():Promise<void>=>{
+   if(stopping)return stopping;
    stopped=true;
    sessionCancelled.abort();
-   await probe.stop();
+   options.signal?.removeEventListener('abort',onCallerAbort);
+   stopping=probe.stop();
+   return stopping;
  };
+ // Revoking session consent must also close the disposable HTTP listener,
+ // not just suppress a future positive diagnostic assessment.
+ const onCallerAbort=()=>{void stop().catch(()=>undefined);};
+ options.signal?.addEventListener('abort',onCallerAbort,{once:true});
+ if(options.signal?.aborted){
+   await stop();
+   return {ok:false,code:'CANCELLED'};
+ }
  const visit:ManualTampermonkeyDiagnosticSession['visit']=async(mode,explicitUserApproved)=>{
    if(explicitUserApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
    if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
