@@ -91,6 +91,21 @@ export type ListenerOwnerResult =
      readonly executableVerified:false}
   | {readonly ok:false; readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
       'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'|'LISTENER_PID_MISMATCH'};
+/** Parse numeric Windows TCP LISTENING sockets on the exact IPv4 loopback port.
+ * Only 127.0.0.1:port -> 0.0.0.0:0 qualifies, never wildcard or remote peers.
+ * An invalid PID remains ambiguous, never trusted.
+ */
+export function parseWindowsLoopbackListeners(output:string,port:number):number[]{
+  if(!Number.isInteger(port)||port<1024||port>65535)return [];
+  const selected:number[]=[];
+  for(const line of output.split(/\r?\n/)){
+    const cols=line.trim().split(/\s+/);
+    if(cols.length!==5||cols[0].toUpperCase()!=='TCP' ||
+       cols[1]!=='127.0.0.1:'+port||cols[2]!=='0.0.0.0:0')continue;
+    selected.push(/^\d+$/.test(cols[4])?Number(cols[4]):NaN);
+  }
+  return selected;
+}
 export async function verifyWindowsLoopbackListenerPid(
   port:number, expectedPid:number
 ):Promise<ListenerOwnerResult> {
@@ -98,27 +113,22 @@ export async function verifyWindowsLoopbackListenerPid(
   if(!Number.isInteger(port)||port<1024||port>65535 ||
      !Number.isSafeInteger(expectedPid)||expectedPid<1)
     return {ok:false,code:'INVALID_ARGUMENTS'};
-  // Both dynamic values are validated integers, never interpolated paths/input.
-  const command='$ErrorActionPreference="Stop";'+
-    ' @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort '+port+
-    ' -State Listen -ErrorAction Stop) | ForEach-Object { $_.OwningProcess }';
+  // netstat avoids repeated, expensive PowerShell NetTCP module startup in
+  // concurrent Windows tests and in the actual app; no shell interpolation.
   let output:string;
   try {
-    const result=await execFileAsync('powershell.exe',
-      ['-NoLogo','-NoProfile','-NonInteractive','-Command',command],
-      {windowsHide:true,timeout:20000,maxBuffer:4096});
+    const result=await execFileAsync('netstat.exe',['-ano','-p','TCP'],
+      {windowsHide:true,timeout:12000,maxBuffer:8*1024*1024});
     output=result.stdout;
-  } catch {
+  }catch{
     return {ok:false,code:'LISTENER_UNAVAILABLE'};
   }
-  const lines=output.trim().split(/\r?\n/).filter(Boolean);
-  if(lines.length===0)return {ok:false,code:'LISTENER_UNAVAILABLE'};
-  if(lines.length!==1 || !/^[0-9]+$/.test(lines[0].trim()))
+  const pids=parseWindowsLoopbackListeners(output,port);
+  if(pids.length===0)return {ok:false,code:'LISTENER_UNAVAILABLE'};
+  if(pids.length!==1||!Number.isSafeInteger(pids[0])||pids[0]<1)
     return {ok:false,code:'LISTENER_AMBIGUOUS'};
-  const pid=Number(lines[0].trim());
-  if(!Number.isSafeInteger(pid)||pid<1)return {ok:false,code:'LISTENER_AMBIGUOUS'};
-  if(pid!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
-  return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid,executableVerified:false};
+  if(pids[0]!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
+  return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid:pids[0],executableVerified:false};
 }
 
 

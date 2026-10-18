@@ -63,7 +63,7 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
 
 
 import { createServer } from 'node:net';
-import { verifyWindowsLoopbackListenerPid } from '../../src/browser/cdp-session';
+import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
 test('TEST-009: OS loopback listener must belong to the expected process PID',async t=>{
   if(process.platform!=='win32')return;
   const server=createServer();
@@ -85,4 +85,21 @@ test('TEST-009: OS loopback listener must belong to the expected process PID',as
   assert.deepEqual(await verifyWindowsLoopbackListenerPid(0,process.pid),
     {ok:false,code:'INVALID_ARGUMENTS'});
   assert.equal(server.listening,true);
+});
+
+test('TEST-009: listener netstat parsing excludes wildcard and connected remote sockets',()=>{
+  const sample=[
+    'Proto   Local Address          Foreign Address        State           PID',
+    ' TCP    127.0.0.1:9223          0.0.0.0:0              LISTENING       1234',
+    ' TCP    0.0.0.0:9223            0.0.0.0:0              LISTENING       1111',
+    ' TCP    127.0.0.1:9223          127.0.0.1:49150        ESTABLISHED    1112',
+    ' TCP    [::1]:9223              [::]:0                 LISTENING       1113',
+    ' TCP    127.0.0.1:9333          0.0.0.0:0              LISTENING       1114'
+  ].join('\\r\\n');
+  assert.deepEqual(parseWindowsLoopbackListeners(sample,9223),[1234]);
+  assert.deepEqual(parseWindowsLoopbackListeners(sample,9333),[1114]);
+  assert.deepEqual(parseWindowsLoopbackListeners(sample,9222),[]);
+  assert.deepEqual(parseWindowsLoopbackListeners(sample,0),[]);
+  assert.deepEqual(parseWindowsLoopbackListeners(
+    'TCP 127.0.0.1:9223 0.0.0.0:0 LISTENING not-a-pid',9223).length,1);
 });
