@@ -160,3 +160,10 @@ PR [#53](https://github.com/devin930906/userscript-auto-healer/pull/53) 增加�
 ## TASK-007 / TEST-017 一次性 URL 导入测试边界（2026-10-19）
 
 `src/manager/tampermonkey-gm-probe.ts` 的隔离回环服务现支持短时 `/install.user.js?key=<随机令牌>`，用于**真实 Tampermonkey 中由测试者主动尝试的手动 URL 导入**。自动化负例覆盖错误/缺失令牌、额外参数、非 GET、非授权跨来源、关闭后的监听拒绝及 GET 不产生运行回执；仍需真实扩展安装授权、版本、GM_getValue、脚本执行业务前后断言与产品修复验证。此测试不是 Tampermonkey 云端 PoC 成功证据，不能提升 TEST-017/018 或 GATE-004/005 状态。
+
+
+## （7）TASK-007 / TEST-017 临时 Tampermonkey 脚本运行时到期保护（2026-10-19）
+
+临时隔离 GM 诊断 HTTP 服务原有 TTL，但用户**已经安装**的 `.user.js` 可以在服务关闭后继续留存，若本地端口后来被复用，旧脚本仍可能执行 DOM/GM/网络操作。新增 TEST-017 的 Node VM 隔离运行回归，用实际生成的临时脚本对比授权到期前、到期时与到期后的脚本副作用。先在测试提交 `0c2e0065ad4ca14baa9e17a420f047abebb9ea38` 的 [Windows CI #39158174162](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158174162) 证明失败（177 cases：175 pass、1 fail、1 skip），确认到期后仍发生一次 DOM 查询、属性修改、GM 模拟调用和网络调用；随后修复生成器，将一次性绝对到期时间嵌入脚本并在任何脚本副作用前阻断执行。代码提交 `46880b3ae2a1b72f260ef07bd5caaed32dcae619` 的 [Windows CI #39158298596](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158298596) 通过：177 cases，176 pass、0 fail、1 skip；TypeScript 与真实 Electron IPC smoke 均成功。
+
+此项是**本地临时脚本安全门槛**，不是正式 Tampermonkey 扩展内 GM/注入/业务执行的独立验收：VM 中的 GM 函数是假实现，测试用户仍需主动卸载临时脚本；系统时间可能被调整，不能把客户端时间检查当成撤销扩展授权的机制。TEST-017/018、TASK-007 与 GATE-004/005 仍未全部通过。
