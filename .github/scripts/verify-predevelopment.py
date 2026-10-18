@@ -67,7 +67,7 @@ def check_stage_contract():
     required = {
         "docs/13-predevelopment-admission.md": [
             "POC-04A", "POC-04B", "broken", "fixed", "TASK-001",
-            "Tampermonkey", "RAR5", "Stable",
+            "Tampermonkey", "RAR5", "Stable", "ADR-004", "ZIP",
         ],
         "docs/11-readiness.md": [
             "有限工程准入", "TASK-001", "全部开发前置仍未完成",
@@ -80,11 +80,28 @@ def check_stage_contract():
         "docs/adr/ADR-001-application-baseline.md": [
             "有条件工程决策", "TASK-001", "Electron", "TypeScript",
         ],
+        "docs/adr/ADR-004-portable-zip.md": ["ADR-004", "REQ-028", "ZIP"],
     }
     for path, markers in required.items():
         content = read(path)
         for marker in markers:
             assert marker in content, f"{path}: stage/handoff marker missing: {marker}"
+    # Verify current ZIP release contract, allowing historical RAR PoC evidence.
+    req = read("docs/02-requirements.md")
+    tests = read("docs/07-testing.md")
+    plan = read("docs/09-development-plan.md")
+    release = read("docs/08-release.md")
+    matrix = read("docs/10-traceability.md")
+    assert "| REQ-028 | 真实 ZIP 便携交付 | I-010 |" in req
+    assert "| NFR-011 | 可携性 | ZIP 解压" in req
+    assert "| TEST-028 | REQ-028 |" in tests and "真实 ZIP" in tests
+    assert "| TASK-020 | 真实 ZIP 便携发行 | REQ-028 |" in plan
+    assert "| GATE-009 | 便携运行 | REQ-028 | 真实 ZIP" in release
+    assert "Userscript-Auto-Healer-vX.Y.Z-Portable.zip" in release
+    assert "| I-010 | REQ-028 |" in matrix
+    for line in release.splitlines():
+        if line.startswith("| GATE-009 |") or line.startswith("| GATE-011 |"):
+            assert "RAR" not in line and "ZIP" in line, "Old RAR contract remains in release gate"
     handoff = read("docs/12-handoff.md")
     assert "仍是候选技术基线，不是实测最终决定" not in handoff, (
         "Handoff incorrectly contradicts conditional ADR-001 decision"
@@ -100,6 +117,7 @@ def main():
         "docs/adr/ADR-001-application-baseline.md",
         "docs/adr/ADR-002-real-userscript-acceptance.md",
         "docs/adr/ADR-003-windows-dual-package.md",
+        "docs/adr/ADR-004-portable-zip.md",
     ]
     for item in required:
         assert (ROOT / item).is_file(), f"Missing required authority: {item}"

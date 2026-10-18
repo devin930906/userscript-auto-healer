@@ -1,5 +1,6 @@
-# POC-03A: disposable Windows installer smoke test and license-safe RAR audit.
-# This does not package the product or create RAR files.
+# POC-03A: disposable Windows installer smoke test.
+# POC-03C: native Windows ZIP round-trip feasibility in a disposable folder.
+# This does not package or validate the real software.
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:RUNNER_TEMP "packaging-audit-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
 if (Test-Path $root) { throw 'Refusing to overwrite prior audit directory' }
@@ -48,7 +49,31 @@ if (-not $uninst) { throw 'Uninstaller absent' }
 $uninstall = Start-Process -FilePath $uninst.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
 if ($uninstall.ExitCode -ne 0 -or (Test-Path (Join-Path $dest 'payload.txt'))) { throw 'Uninstall incomplete' }
 Write-Output 'PASS: temporary installer payload removed via uninstaller'
-$rar = Get-Command rar.exe -ErrorAction SilentlyContinue
-if (-not $rar) { Write-Output 'BLOCKED RAR: rar.exe not available in PATH; no RAR created and no unlicensed trial bundled.' }
-else { Write-Output "RAR executable found: $($rar.Source); license status unknown; creation BLOCKED until authorization." }
-Write-Output 'Scope: only ephemeral installer tooling, not the application install, Portable RAR, signing, or real userscript E2E.'
+# POC-03C: create an ordinary ZIP in a disposable test folder and verify safe round-trip.
+$portable = Join-Path $root 'portable-fixture'
+New-Item -ItemType Directory -Path $portable | Out-Null
+Set-Content -Path (Join-Path $portable 'readme.txt') -Value 'Disposable ZIP smoke test; not application code.' -Encoding utf8
+$zip = Join-Path $root 'poc-portable.zip'
+Compress-Archive -Path (Join-Path $portable '*') -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
+if (-not (Test-Path $zip) -or (Get-Item $zip).Length -le 4) { throw 'ZIP missing or empty' }
+$magic = [IO.File]::ReadAllBytes($zip) | Select-Object -First 4
+$prefix = ($magic | ForEach-Object { $_.ToString('X2') }) -join ' '
+if ($prefix -ne '50 4B 03 04') { throw "Unexpected ZIP header: $prefix" }
+Add-Type -AssemblyName System.IO.Compression
+$archive = [IO.Compression.ZipFile]::OpenRead($zip)
+try {
+  $entries = @($archive.Entries)
+  if ($entries.Count -ne 1 -or $entries[0].FullName -ne 'readme.txt') { throw 'Unexpected ZIP entry list' }
+  foreach ($entry in $entries) {
+    $name = $entry.FullName.Replace([char]92,[char]47)
+    if ($name.StartsWith('/') -or $name -match '(^|/)\.\.(?:/|$)' -or $name -match '^[A-Za-z]:') { throw 'Unsafe ZIP entry path' }
+  }
+} finally { $archive.Dispose() }
+$unpacked = Join-Path $root 'zip-extracted'
+Expand-Archive -LiteralPath $zip -DestinationPath $unpacked -ErrorAction Stop
+$source = Join-Path $portable 'readme.txt'
+$restored = Join-Path $unpacked 'readme.txt'
+if (-not (Test-Path $restored)) { throw 'ZIP extraction missing file' }
+if ((Get-FileHash $source -Algorithm SHA256).Hash -ne (Get-FileHash $restored -Algorithm SHA256).Hash) { throw 'ZIP payload SHA-256 mismatch' }
+Write-Output "PASS POC-03C: native ZIP signature, entry safety, extraction and SHA-256 round trip; zip SHA256 $((Get-FileHash $zip -Algorithm SHA256).Hash)"
+Write-Output 'Scope: disposable installer+ZIP fixtures only; NOT actual Userscript Auto Healer binaries or Stable verification.'

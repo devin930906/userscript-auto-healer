@@ -1,4 +1,4 @@
-name: Windows packaging tooling compliance audit
+name: Windows installer and ZIP archive feasibility
 
 on:
   push:
@@ -16,6 +16,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Exercise isolated EXE installer and audit RAR availability
+      - name: Exercise isolated EXE installer and native ZIP round trip
         shell: pwsh
         run: ./poc/windows-packaging-audit.ps1
