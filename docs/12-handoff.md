@@ -114,3 +114,10 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 [PR #7](https://github.com/devin930906/userscript-auto-healer/pull/7) 已按当前源 SHA `824f9c89f673e0d05adbaf3084fd609f8e20eca0` 的成功检查合并至 main：`ee360dbdd936b92cc44609e7680d551fe364289d`。合并代码包括只读 `src/observe/dom-observer.ts`（自管 CDP/来源保护/iframe 与 shadow 限制、选择器计数、SPA 定时采样与跨源导航双次核对）及 `tests/observe/`。Windows [App Checks 39110563542](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563542) 57 通过、0 失败、1 项专项跳过、真实 Electron 进程运行测试成功；[Chrome 39110563531](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563531) 与 [docs 39110563515](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563515) 通过。旧的初始化竞态失败 run 39110333660 有历史记录，不得篡改。该证据为源提交验证，合并后的 main SHA 和后续 CI 需按实时检查确认。
 
 **下一正式任务 TASK-007（REQ-017/018；TEST-017/018）**：在既有受控浏览器会话与测试场景上，构建真实 Tampermonkey 管理器适配，保守检测扩展身份/版本/授权、脚本安装启用、站点和 GM API 权限及真业务断言；缺任一必要实证都不能声称 VERIFIED。不得复制/接管用户现有 Chrome Profile，不得以纯 CDP DOM 或 Violentmonkey PoC 充当 Tampermonkey 产品通过。随后按依赖推进 008..021，正式 EXE/ZIP 尚未生成且所有 Stable GATE 尚待验收。
+
+
+## （7）TASK-007 第一阶段并入 main，完整 Tampermonkey 尚待续做（2026-10-18）
+
+只读 Tampermonkey 运行目标查询已合并 [PR #9](https://github.com/devin930906/userscript-auto-healer/pull/9)，main merge SHA `ca573cfc6a83d934b10d1de349d83311267ed642`，源 HEAD `f09e0e68fcb67c3dbdeb4b2b8fc48af250614bb0`。产品代码仅在真正的自管理 Chrome/CDP 及用户明确授权下查询扩展运行目标；只返回未验证线索，**不能据此得出脚本已安装、执行、GM API 工作或业务恢复**。Windows [39111259895](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259895) 在 64 项 Node 测试中 63 通过、0 失败、1 由独立 Chrome 工作流覆盖，真实 Electron smoke 通过；[39111259835](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259835) Chrome 专项成功。
+
+下一仍为 **TASK-007**：基于独立合法可信的 Tampermonkey 测试环境，把扩展身份与版本、安装/站点/userScripts 权限、实际脚本注入/GM 调用和真实业务断言联成不可跳过的可审计证据链；没有对应授权或环境就保留阻断，禁止借 CDP DOM 或 Violentmonkey 顶替。TASK-007 未正式完成，后续 TASK-008..021 均不可提前标记完成；EXE+ZIP 产品尚未构建，全部 Stable GATE 尚未通过。需按当前 main SHA 重新读 CI/PR，不将历史源 SHA 当作当前基准。
