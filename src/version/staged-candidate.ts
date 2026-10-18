@@ -173,6 +173,17 @@ export async function stageReviewedCandidateOnly(
       });
       if(finalSource.status!=='MATCHED_READ_ONLY')
         return block('SOURCE_UNVERIFIED');
+      // The independent backup was checked before writing the candidate.
+      // An external editor may alter that copy during staging, despite our
+      // cooperative source lock. Recheck the recovery bytes before reporting
+      // a successful pair; never imply that a stale copy can be restored.
+      const finalBackup=await verifyBackupRecoverySource({
+        sourcePath:options.sourcePath,backupDirectory:options.backupDirectory,
+        backupFileName:backup.backupFileName,expectedSha256:backup.sourceSha256,
+        expectedByteLength:backup.backupByteLength,userApproved:true
+      });
+      if(finalBackup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
+        return block('BACKUP_UNVERIFIED');
       return Object.freeze({
         status:'CANDIDATE_STAGED_RUNTIME_UNVERIFIED' as const,
         backupFileName:backup.backupFileName,candidateFileName,
