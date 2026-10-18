@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
@@ -49,6 +50,35 @@ async function createMainWindow(): Promise<void> {
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
   await win.loadFile(uiFile);
+  if (process.argv.includes('--uahtest-shell-only')) {
+    // The test is run inside a real Electron renderer. A static source assertion
+    // cannot prove that the sandbox preload or frame-checked IPC actually work.
+    const probe = await win.webContents.executeJavaScript(
+      "(async () => { const a = window.healer; " +
+      "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
+      "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
+      "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
+      "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
+      "bad.code === 'INVALID_SHAPE', keys:Object.keys(a).sort()}; })()",
+      true
+    ) as { ok?: boolean; keys?: string[] };
+    const prefs = win.webContents.getLastWebPreferences();
+    if (!probe?.ok || probe.keys?.join(',') !== 'getStatus,validateConfig' ||
+        !prefs?.sandbox || !prefs.contextIsolation || prefs.nodeIntegration ||
+        prefs.webSecurity === false) {
+      throw new Error('SHELL_SMOKE_SECURITY_FAILED');
+    }
+    const receipt = process.env.UAH_SMOKE_RECEIPT;
+    if (!receipt) throw new Error('SHELL_SMOKE_RECEIPT_NOT_CONFIGURED');
+    writeFileSync(receipt, JSON.stringify({
+      shell: 'development-skeleton',
+      preloadIpcVerified: true,
+      rendererSandboxVerified: true,
+      automaticRepairAvailable: false
+    }), { encoding: 'utf-8', flag: 'wx' });
+    app.exit(0);
+    return;
+  }
   if (!win.isDestroyed()) win.show();
 }
 
