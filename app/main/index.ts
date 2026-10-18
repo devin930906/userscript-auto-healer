@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
-import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory } from '../../src/import/import-service';
+import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript } from '../../src/import/import-service';
+import { previewImportedScriptAnalysis } from '../../src/analyze/import-preview';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,8 +23,10 @@ function authorizeSender(event: Electron.IpcMainInvokeEvent): void {
   }
 }
 
-function summarize(script: {filename:string; byteLength:number; sha256:string; textEncoding:string}) {
-  return {filename:script.filename, byteLength:script.byteLength, sha256:script.sha256, textEncoding:script.textEncoding};
+function summarize(script: ImportedScript) {
+  return {filename:script.filename, byteLength:script.byteLength,
+    sha256:script.sha256, textEncoding:script.textEncoding,
+    analysis:previewImportedScriptAnalysis(script)};
 }
 function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>) {
   return {canceled:false, scripts:result.scripts.map(summarize),
