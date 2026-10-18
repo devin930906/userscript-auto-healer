@@ -15,7 +15,7 @@
 CDP 默认绑定 127.0.0.1:9223，使用用户指定 Chrome 与合规非默认 Profile；严禁接管外部浏览器进程/改写旧 Profile；本地优先、AI 可选且默认关闭；只有真实油猴管理器运行+业务断言成功才算已验证恢复；任意自动应用必须有备份回滚；Windows EXE 与真 RAR 格式固定。Electron+TypeScript 仍是候选技术基线，不是实测最终决定。
 
 ## 待处理风险
-BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome 155 非默认 Profile/CDP 已取得局部实证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685）；多便携 Chrome、GM API/扩展真实运行、RAR 长期正式创建许可、Windows 正式产品构建、目标最低版本和业务场景仍缺证据。缺少 LICENSE 选择不自行补造。
+BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome 155 非默认 Profile/CDP 已取得局部实证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685）；多便携 Chrome 与目标管理器/真实业务脚本覆盖、RAR 长期正式创建许可、Windows 正式产品构建、目标最低版本和业务场景仍缺证据。缺少 LICENSE 选择不自行补造。
 
 ### 2026-10-18 本轮技术验证续接点
 
@@ -24,10 +24,11 @@ BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome
 - POC-03A 通过 Inno Setup 6 临时测试安装器制作/安装/卸载，不是正式产品 EXE：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574。
 - POC-03B 经 WinRAR 7.23 官方签名有效的限期评估创建真 RAR5、测试、解压与 SHA-256 核对成功；生产/正式 CI 长期许可证**仍未提供**，禁止自动反复试用或把测试归档当便携软件：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。
 - POC-02C 最新复核：完整重启临时 Chromium 后，扩展 userScripts API available=true、registrations=1；管理器存储测试脚本 enabled=1 且 @match 对应本地测试页，仍未真实注入/运行 GM_getValue。工作流已明确失败，不再误将扩展加载或安装成功等同脚本功能成功：https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121。须继续查站点授权、注册注入、管理器真实运行日志与用户所选正式 Chrome 的差异，不能无条件准入。
-- 下一准备阶段重点：获授权 Chrome+真实目标管理器启用用户脚本开关并检测实际 GM/注入行为；确认用户支持矩阵、真实场景、便携 Chrome 类型与 RAR 合规长期生产途径；依照 11 准入重新核对，不允许提前执行 TASK-001 产品开发。
+- POC-02D **最新已通过**：标准 HTTPS 目标 `https://example.com/`、真实 Violentmonkey v2.49.0 MV3、隔离 Windows Chromium。通过打开扩展级 Allow User Scripts、安装真实 `.user.js`、执行 DOM 行为及调用 `GM_getValue("__poc_fixture_unset__", "poc-default")` 的严格断言。日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277。原随机端口 PoC 属历史失败，不能继续将全部 POC-02 描述为未通过；但 Tampermonkey、用户正式 Chrome、真实损坏脚本修复仍未验证。
+- 当前准备阶段重点：已有真实 Violentmonkey .user.js 注入与 GM_getValue 调用成功证据，下一步转向确认目标管理器、目标 Chrome/Windows 支持矩阵、真实坏脚本/业务断言及 ADR-001；生产 RAR 许可在发布阶段仍须落实。不得把隔离环境技术 PoC 当 Stable 功能完成。
 
 ## 开发起点
-当前**受阻**，Windows runner POC-01A/B 已通过系统与独立目录 Chrome 的限定验证，但 POC-02B 脚本实际注入与 GM API 尚未通过，需先完成获授权的真实管理器验证并经需求/架构复核，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
+当前为**限定核心可行性已通过、全范围开发准入暂缓**：Windows runner POC-01A/B 以及 Violentmonkey POC-02D 的真实脚本注入和实际 GM_getValue 调用均已通过，但首选 Tampermonkey/Chrome 与业务脚本支持范围和 ADR-001 仍需确认，准入复核完成后，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
 
 ## 任务顺序
 M0：POC-01/02，RAR 合规供应调查/POC-03；M1：TASK-001..004；M2：TASK-005..008；M3：TASK-009..017；M4：TASK-018..020；M5：TASK-021。依赖顺序与并发边界以 docs/09-development-plan.md 实际编号为准，不盲目逐编号执行有前置未满足的任务。

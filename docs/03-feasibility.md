@@ -1,6 +1,6 @@
 # 技术可行性与技术选型
 
-> 核验日期：2026-10-18。状态：已进行多项真实 Windows 云端技术 PoC；正式油猴管理器脚本注入/GM API、完整用户环境与商业 RAR 授权仍有阻断。
+> 核验日期：2026-10-18。状态：Windows 托管环境中的 Chrome/CDP、Violentmonkey 真实 .user.js 注入及 GM_getValue 调用、临时 EXE 和 RAR5 均有正向 PoC；目标管理器与实际损坏脚本/修复回归、Windows 产品包与 RAR 生产授权仍待确认。
 
 ## 技术候选
 A: Electron + TypeScript/Node（统一 GUI、AST、CDP、Windows 安装器）；B: .NET 桌面 UI + Node/JS 分析器（Windows 原生集成但双语言接口成本较高）；C: Python + 桌面 UI（AST JS/打包与浏览器管理增加异构依赖）。需求满足：A 高、B 高、C 中；兼容性：均须验证真实 Chrome；复杂度：A 中、B 高、C 中高；安全性：均需主动设计隔离；维护：A 统一 TS 优、B 双运行时负担；云端构建：A/B/C 理论可行未实证；许可成本：RAR 均有授权依赖；主要风险：A 的 Electron 安全默认配置、扩展自动化验证与产物体积。
@@ -43,7 +43,7 @@ ADR-001：条件性技术基线 Electron+TypeScript + CDP + AST（核心设计�
 - POC-02（开发前关键）：用户授权的真实 Chrome+目标油猴管理器，在测试 Profile 导入测试脚本、确认 @match/@grant/@run-at/GM API、真实执行/回归；无法自动装载则固定受支持的初始化/人工授权步骤。
 - POC-03（发布链关键）：Windows Actions runner 用有合法授权的 rar.exe 创建、RAR 校验、解压及 EXE 安装；许可证供应、安装权限和工件保持待核实。
 - POC-04（开发早期）：AST 解析静态/动态/函数封装与源码位置、脚本沙箱隔离的验证。
-POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2025 中，Chrome/155.0.8059.40（C:\Program Files\Google\Chrome\Application\chrome.exe）使用临时非默认 Profile、127.0.0.1:9223 成功启动，/json/version 握手、WebSocket 浏览器端点、监听进程可执行文件/命令行 Profile 归属及 /json/list（1 个目标）均通过；证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685。**仅验证托管运行器内的 Chrome 实例，不代表用户任选便携 Chrome、Profile 迁移、错误场景或油猴管理器成功。** POC-02A、POC-03A、POC-03B 已进行了部分实证，详见下面新增记录；POC-02B 真脚本运行仍未通过，POC-04 未执行。核心用户脚本兼容性仍阻断无条件架构确认；RAR 长期生产许可、真实应用打包及 GM 脚本行为验收仍阻断 Stable。
+POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2025 中，Chrome/155.0.8059.40（C:\Program Files\Google\Chrome\Application\chrome.exe）使用临时非默认 Profile、127.0.0.1:9223 成功启动，/json/version 握手、WebSocket 浏览器端点、监听进程可执行文件/命令行 Profile 归属及 /json/list（1 个目标）均通过；证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685。**仅验证托管运行器内的 Chrome 实例，不代表用户任选便携 Chrome、Profile 迁移、错误场景或油猴管理器成功。** POC-02A、POC-03A、POC-03B 已进行了部分实证，详见下面新增记录；旧版非标准端口测试的 POC-02B 曾失败；标准 HTTPS 场景的 POC-02D 已实际通过 .user.js 运行及 GM_getValue 读取。POC-04 未执行。限定的核心技术可行性已成立，但实际目标管理器/浏览器/损坏脚本修复回归、RAR 生产许可和正式产品双包仍阻断无条件 Stable 验收。
 
 ### 2026-10-18 新增真实 PoC 证据与边界
 
@@ -55,5 +55,12 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 - **POC-03B 通过（有限）**：RARLab 官方 WinRAR 7.23 评估安装器的 Authenticode 签名有效；实际创建、校验与解压 RAR5，原始与解压文件 SHA-256 一致。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。RAR 官方 EULA（https://www.rarlab.com/license.htm）允许限期评估，**正式长期 CI 使用尚无获授权的创建器/许可证，仍然阻断 Stable**；评估工作流已限制为手动确认资格，不在每次提交运行。
 - **剩余真实阻断**：用户目标 Chrome 与油猴管理器矩阵、扩展级权限+真实脚本加载/GM API/业务断言、最终 EXE 和 RAR 应用包直启/升级测试、生产 RAR 许可、供应链/最低系统基线均需核验。POC-04 未运行。所有技术 PoC 仅处理临时测试资料，无正式产品功能代码。
 
-- **POC-02C 最新独立证据，2026-10-18**：在托管 Windows 上使用同一临时 Profile 启用 Allow User Scripts 后**完整关闭并重新打开浏览器**，已真实调用扩展源中的 `chrome.userScripts.getScripts()`（available=true，registrations=1）；点击原生 Violentmonkey 安装确认后，在扩展本地存储看到了 `scr:1` 与 `code:1`，其中 `config.enabled=1`，`meta.match=["http://127.0.0.1/*"]`，而 `userScripts` 的注册记录 ID 为 `1001`、`matches=["<all_urls>"]`、`allFrames=true`、`runAt=document_start`。但测试页仍未出现脚本执行标记，也未证明 `GM_getValue` 运行，**POC-02B 未通过，真实功能门槛依然阻断**。真实失败运行：https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121。以上仅限版本 Violentmonkey 2.49.0 + 隔离 Playwright Chromium（并非用户选择的正式 Chrome），不能据此断言管理器或 API 在所有浏览器失效。已避免自动测试在未达成业务断言时报告 overall success。
+- **POC-02C 历史失败案例，2026-10-18**：在托管 Windows 上使用同一临时 Profile 启用 Allow User Scripts 后**完整关闭并重新打开浏览器**，已真实调用扩展源中的 `chrome.userScripts.getScripts()`（available=true，registrations=1）；点击原生 Violentmonkey 安装确认后，在扩展本地存储看到了 `scr:1` 与 `code:1`，其中 `config.enabled=1`，`meta.match=["http://127.0.0.1/*"]`，而 `userScripts` 的注册记录 ID 为 `1001`、`matches=["<all_urls>"]`、`allFrames=true`、`runAt=document_start`。但测试页仍未出现脚本执行标记，也未证明 `GM_getValue` 运行，**此轮 POC-02B 未通过，现已被下述标准 HTTPS 场景的真实通过结果部分解除**。真实失败运行：https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121。以上仅限版本 Violentmonkey 2.49.0 + 隔离 Playwright Chromium（并非用户选择的正式 Chrome），不能据此断言管理器或 API 在所有浏览器失效。已避免自动测试在未达成业务断言时报告 overall success。
 - **已排除的简单解释（有范围限制）**：不再把失败直接归咎于“CDP 不可用”“扩展完全未加载”“Allow User Scripts 尚未启用”“脚本没有写入管理器本地存储”或“只因为 Headless 模式”。尚未查明实际页面注入未发生的根因；下一技术路径应检查扩展实际站点权限、注册注入世界、管理器运行日志、脚本依赖/时机与真实桌面 Google Chrome 兼容矩阵，在用户授权的独立 Profile 下复核。
+
+### 2026-10-18 POC-02D 当前有效结论：限定环境的真脚本运行已通过
+
+- **技术实测通过**：GitHub Windows 2025 托管运行器，真实发行版 Violentmonkey MV3 2.49.0、隔离 Playwright Chromium 临时 Profile，确认 Chrome 138+「Allow User Scripts」许可，随后从临时本地 HTTP 服务器点击安装真正的测试 `.user.js`。脚本使用有效 `@match https://example.com/*` 和 `@grant GM_getValue`，在公共保留示例页 `https://example.com/` 上观察到脚本在真实管理器环境执行。并且通过实际调用 `GM_getValue("__poc_fixture_unset__", "poc-default")` 验证返回 `poc-default`（不仅是 `typeof` 检查）。成功运行及日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277。先前仅检查 GM 函数存在性的首个成功记录：https://github.com/devin930906/userscript-auto-healer/actions/runs/39092415791。
+- **重要对照**：同一临时 Chromium 上，Chrome 官方 `chrome.userScripts.register()` 直接注入标记也成功，且扩展 HTTP webRequest 监听能观察到测试页请求。早先 `http://127.0.0.1:<动态端口>/fixture` 场景的脚本曾未执行；改用规范的标准 HTTPS 目标网址后通过。结合 Violentmonkey 公共源码中的 host 匹配与动态注册逻辑，非标准端口差异是有证据的**可能原因**；不能据此对第三方管理器普遍的端口兼容性作最终结论。尝试将临时服务绑定 Windows 80 端口曾得到 `EACCES`，仅说明该 runner 的受限端口不可用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092300187），不意味着真实油猴管理器不兼容。
+- **与正式项目严格区分**：此 PoC 证明了 Windows 云端至少存在一条可工作的“扩展安装→用户授予脚本权限→安装真实 .user.js→网页注入→GM API 读取”的链路；**没有**证明 Tampermonkey、用户任选 Google Chrome/便携 Chrome、登录场景、真实损坏脚本诊断与自动修复、共享兼容层、稳定恢复、真实 EXE/便携 RAR 可以工作。PoC 成功不等于 TEST-018 或 Stable GATE 已通过。
+- **开发前准入续接**：已解除“任何真实管理器都不能运行 GM API”的关键技术疑虑；待确认首选管理器及受支持 Chrome/Windows 范围、实际业务断言样本与条件性 ADR-001，再判定是否可进入 TASK-001。正式 RAR 创建器的持续合法授权应作为产品正式发布硬门槛，不因一次评估通过而自动放行。
