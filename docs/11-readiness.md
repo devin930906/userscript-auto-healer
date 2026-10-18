@@ -20,8 +20,8 @@
 | Userscript Auto Healer | Windows EXE 可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 没有真实 Windows 构建/安装 | 完成 POC-03 与 TEST-027 |
 | Userscript Auto Healer | RAR 便携可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 合法创建器、解压运行未验证 | 取得授权工具并执行 TEST-028 |
 | Userscript Auto Healer | 任务可执行 | 待确认 | docs/09-development-plan.md | TASK-001 前核心技术 PoC 仍受阻 | 完成 PoC 并固定 ADR |
-| Userscript Auto Healer | 工程追踪一致 | 已完成 | docs/10-traceability.md | 尚无 CI 实测校验记录 | 文档 lint/编号检查通过 |
-| Userscript Auto Healer | 云端工程可用 | 无法确认 | docs/08-release.md | Actions 权限及 Windows runner 没有运行结果 | 运行并查看对应 CI 日志 |
+| Userscript Auto Healer | 工程追踪一致 | 待确认 | docs/10-traceability.md | 结构编号检查已通过，但跨文件语义与引用尚未自动全检 | 扩展引用验证并人工复核 |
+| Userscript Auto Healer | 云端工程可用 | 待确认 | docs/08-release.md；Actions run 39082363404 | Ubuntu 文档 CI 已成功，Windows runner/打包权限和配额仍未验证 | 实际运行 Windows PoC 并查证运行记录 |
 | Userscript Auto Healer | 外部依赖可用合法 | 受阻 | docs/03-feasibility.md | RAR 商业许可、npm 锁定包未核验 | 合法许可与依赖审核 |
 | Userscript Auto Healer | 下一正式开发起点 | 已确认 | docs/09-development-plan.md | 必须先完成 POC-01/02 | 完成 PoC 后开始 TASK-001 |
 | Userscript Auto Healer | 正式成果存储 | 已完成 | main 的 docs/ 和 AGENTS.md | 新交接文件提交后的 HEAD 需复核 | 读取 main 确认全部路径 |
@@ -36,7 +36,7 @@ BLOCK-01 Chrome 136+ 安全数据目录、自有进程归属与 CDP 真实连接
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；将 RAR 许可与真格式设为发布阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
 
 ## 未解决事项
-POC-01/02/03 未运行。尚无产品源码、真实浏览器测试日志、Windows 构建安装与许可证实测结果，也没有经过用户选择的应用 LICENSE。
+POC-01/02/03 未运行。文档检查工作流 https://github.com/devin930906/userscript-auto-healer/actions/runs/39082363404 已成功，仅核对 Markdown 文件与编号。尚无产品源码、真实浏览器测试日志、Windows 构建安装与许可证实测结果，也没有经过用户选择的应用 LICENSE。
 
 ## 准入结果
 暂缓准入：核心浏览器/管理器可行性和真 RAR 合规构建仍是影响核心架构及正式发行的阻断，不能宣称完整工程准备通过。
