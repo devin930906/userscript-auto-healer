@@ -14,6 +14,10 @@ jobs:
   extension-manager:
     runs-on: windows-2025
     timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [broken, fixed]
     steps:
       - uses: actions/checkout@v4
       - name: Obtain pinned public manager release and isolated Playwright Chromium
@@ -42,6 +46,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }
           $env:NODE_PATH = Join-Path $pkg 'node_modules'
           $env:USERSCRIPT_POC_GUI = 'true' # hosted Windows interactive feasibility only
+          $env:USERSCRIPT_POC_SCENARIO = '${{ matrix.scenario }}'
           $env:USERSCRIPT_TEST_EXTENSION_DIR = $dir
           $env:USERSCRIPT_TEST_PROFILE_DIR = Join-Path $base 'profile'
           node ./poc/windows-manager-extension.cjs

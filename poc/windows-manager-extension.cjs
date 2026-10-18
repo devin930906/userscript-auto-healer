@@ -11,6 +11,10 @@ const profileDir = process.env.USERSCRIPT_TEST_PROFILE_DIR;
 if (!extensionDir || !profileDir) throw new Error('Missing isolated PoC directories');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'),'utf8'));
 assert.equal(manifest.manifest_version, 3, 'Expected the pinned MV3 extension release');
+const scenario = process.env.USERSCRIPT_POC_SCENARIO || 'fixed';
+assert.ok(['broken','fixed'].includes(scenario),'Only deterministic broken/fixed PoC scenarios allowed');
+const selector = scenario === 'broken' ? '#poc-obsolete-anchor' : '#poc-new-anchor';
+console.log('Predevelopment selector regression fixture scenario='+scenario+' selector='+selector);
 const payload = [
   '// ==UserScript==',
   '// @name        Userscript feasibility fixture',
@@ -26,6 +30,10 @@ const payload = [
   'let gmPocRead = false;',
   'try { gmPocRead = typeof GM_getValue === "function" && GM_getValue("__poc_fixture_unset__", "poc-default") === "poc-default"; } catch (e) {}',
   'document.documentElement.dataset.gmApiPresent = String(gmPocRead);',
+  // This synthetic fixture checks a known old-vs-new selector; it does NOT auto-repair.
+  'const target = document.querySelector(' + JSON.stringify(selector) + ');',
+  'if (target && gmPocRead) target.dataset.fixtureClicked = "yes";',
+  'document.documentElement.dataset.selectorOutcome = target && gmPocRead ? "recovered" : "missing-target";',
 ].join('\n');
 
 async function main() {
@@ -282,6 +290,16 @@ async function main() {
     const probe=await context.newPage();
     probe.on('console',m=>{if(m.type()==='error')console.log('FIXTURE_CONSOLE_ERROR: '+m.text().slice(0,380))});
     probe.on('pageerror',e=>console.log('FIXTURE_PAGE_ERROR: '+String(e).slice(0,380)));
+    // Synthetic DOM fixture lives only in a disposable Playwright page.
+    // No modification to example.com servers, real accounts or user scripts.
+    await probe.addInitScript(()=>{
+      document.addEventListener('DOMContentLoaded',()=>{
+        const target=document.createElement('button');
+        target.id='poc-new-anchor';
+        target.textContent='PoC target';
+        document.body.append(target);
+      },{once:true});
+    });
     await probe.goto('https://example.com/',{waitUntil:'domcontentloaded',timeout:30000});
     let control={directApi:false};
     try {
@@ -300,9 +318,22 @@ async function main() {
       await probe.waitForFunction(()=>document.documentElement.dataset.userscriptFixture==='executed',{timeout:7000});
       execution={installed:true,gm:await probe.evaluate(()=>document.documentElement.dataset.gmApiPresent)};
     } catch(e){}
-    if (execution.installed && execution.gm==='true')
-      console.log('PASS POC-02B: .user.js actually injected via Violentmonkey, GM_getValue invoked successfully with a default-value assertion.');
-    else {console.log('INCOMPLETE POC-02B: no verified userscript injection/GM API; installation/real assertions still blocked; observed='+JSON.stringify(execution));process.exitCode=2;}
+    const business = await probe.evaluate(()=>({
+      outcome:document.documentElement.dataset.selectorOutcome,
+      targetExists:Boolean(document.querySelector('#poc-new-anchor')),
+      action:document.querySelector('#poc-new-anchor')?.dataset.fixtureClicked||'',
+    }));
+    const gmExecuted=execution.installed && execution.gm==='true';
+    const expected=scenario==='broken'
+      ? business.outcome==='missing-target' && business.targetExists && business.action!=='yes'
+      : business.outcome==='recovered' && business.targetExists && business.action==='yes';
+    if (gmExecuted && expected) {
+      console.log('PASS POC-02B: real Violentmonkey script + GM_getValue invocation, scenario='+scenario+'; business='+JSON.stringify(business));
+      console.log('PASS POC-04-FIXTURE: verified controlled selector regression '+scenario+'; this is a manually prepared fixture, NOT an auto-repair implementation.');
+    } else {
+      console.error('FAIL POC-02B/04-FIXTURE: real script or business assertion mismatch, scenario='+scenario+'; installed='+JSON.stringify(execution)+'; business='+JSON.stringify(business));
+      process.exitCode=2;
+    }
     await page.close(); await probe.close(); await optionsProbe.close();
   } finally {
     if (context) await context.close().catch(()=>{});
