@@ -186,3 +186,9 @@ PR [#44](https://github.com/devin930906/userscript-auto-healer/pull/44) 在 `src
 [PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45) 在已整合的原脚本只读指纹检查之后新增 `src/version/verified-backup.ts` 与 `tests/version/verified-backup.test.ts`：仅对受信任原生选择与初步授权的 `.user.js`，重新读取并校验文件身份/字节 SHA-256，在用户选定的目录创建随机唯一名称的私有暂存副本、`fsync`、验证暂存哈希，再以无覆盖硬链接发布并复核内容；若文件系统不支持必要操作则保守拒绝。未知授权、过期源文件、超限脚本、符号链接与异常输入均拒绝，原脚本永不被此模块写入。Windows CI 结果须以 PR 当前 SHA 和 Actions 实际状态为准。
 
 **TASK-011 仍为开发中**：该阶段备份副本不代表崩溃恢复版本库、原子应用、回滚、独立确认的用户授权或 Tampermonkey/GM/业务验收；不向 renderer 暴露任意文件路径接口。TEST-020 的真正写入中断/冲突/文件锁/回滚、TEST-021、TASK-010 可信运行门槛、EXE/ZIP 与 Stable GATE 均未完成。
+
+## （7）TASK-011 恢复来源核验增量（2026-10-19）
+
+继 [PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45) 已合并的备份-only 阶段，新增 [PR #46](https://github.com/devin930906/userscript-auto-healer/pull/46) 的 `src/version/recovery-source.ts` 与 `tests/version/recovery-source.test.ts`。在真实隔离测试文件上，按明确指定的备份名/目录、预期 SHA-256/长度只读核查副本，并拒绝伪造硬链接、符号链接、篡改副本及不可信输入。该收据只能证明当前观察时的恢复来源完整性，**不是可信授权、不能代替事务锁、自动写入或回滚许可**；文件可能在检查后再次变化。CI 实际执行结果以 PR 和目标提交 Actions 为准。
+
+**TASK-011 继续开发中**；剩余：经独立核实的文件选择和授权、排他锁、原子/可恢复写入、操作日志、冲突恢复、真实失败回滚及同版业务验收。TASK-007/010、TEST-017/018/020/021 与正式 EXE/ZIP/GATE 均未因此解除。

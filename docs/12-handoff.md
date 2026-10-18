@@ -157,3 +157,7 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-011 备份-only 阶段续接（2026-10-19）
 
 续接 [PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45)：`src/version/verified-backup.ts` 以只读磁盘原文比对、独立备份副本的 SHA-256 与无覆盖发布推进 REQ-020/TEST-020，并增加 Windows 安全负例。PR 当前 SHA、Windows 测试和合并结果须另行核实。**未完成**可恢复事务版本库、自动应用与写中断恢复、回滚及可信 Tampermonkey/业务验收。下一步只有在 TASK-007/010 可信证据、安全锁定及崩溃恢复方案可验证后才连接任何真实脚本写入；不得将备份成功当作修复成功，也不得称 Stable 已交付。
+
+## （7）TASK-011 恢复来源只读验证阶段续接（2026-10-19）
+
+[PR #46](https://github.com/devin930906/userscript-auto-healer/pull/46) 在 PR #45 备份-only 基础上增加 `verifyBackupRecoverySource` 及 Windows 单元负例。新的只读收据要求符合生成器格式的 UUID 文件名、独立普通文件与单链接、原文长度和 SHA-256 一致，并拒绝源文件硬链接冒充备份；不会恢复或修改脚本。恢复源在核验后仍可能变化，因此下一步必须在**可信 Tampermonkey/业务证据、原生授权、事务锁和可恢复写入日志**俱备时，重新校验并实现真实回滚。请重新读取 main SHA、PR 合并状态和当前 CI；不可把阶段性测试当作完整 TEST-020 / GATE-007 或 Stable。正式 EXE+ZIP 尚未构建。
