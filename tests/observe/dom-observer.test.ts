@@ -48,3 +48,14 @@ test('TEST-010: CDP snapshot rejects a top-frame origin switch, opaque URL and m
     assert.equal(isApprovedTopFrame(value,'https://example.com'),false);
   }
 });
+
+test('TEST-010: malformed CDP DOM evidence and unrelated top-level origins fail closed',()=>{
+  const approved='https://example.com';
+  const frames={frame:{url:'https://example.com/safe'}};
+  const valid={nodeType:9,nodeName:'#document',children:[]};
+  assert.equal(summarizeDomTree(valid,{frame:{url:'https://unapproved.example/'}},approved),null);
+  assert.equal(summarizeDomTree({nodeType:1,nodeName:17},frames,approved),null);
+  assert.equal(summarizeDomTree({nodeType:'1',nodeName:'DIV'},frames,approved),null);
+  assert.equal(summarizeDomTree({},frames,approved),null);
+  assert.equal(summarizeDomTree(valid,frames,approved)?.elementCount,0);
+});
