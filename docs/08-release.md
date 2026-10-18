@@ -1,6 +1,6 @@
 # 发布策略与最终 Stable 门槛
 
-> 状态：发行路径已设计但尚未在 Windows/CI 实际运行；任何双包构建或真实验收均不得冒称完成。
+> 状态：Windows runner 的 CDP、Inno Setup 临时 EXE 构建/安装/卸载及官方 WinRAR 限期评估真 RAR5 创建/解压已通过工具链 PoC；**正式应用双包、签名、真实运行和生产 RAR 授权仍未执行/满足**，不能冒称已发布。
 
 ## 支持平台
 目标 Windows x64（起始支持建议，不表示用户确认最低 Windows/Chrome 版本）；应用运行依赖外部所选 Chrome 和授权的真实油猴管理器，Chrome 多便携版兼容范围由 POC-01/02 建立矩阵，不能保证任意 Chrome。
@@ -45,4 +45,4 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 | GATE-011 | 发布产物完整性 | REQ-027,REQ-028 | 同一 commit 的 EXE 与 RAR、版本与 SHA-256、下载与溯源一致 | Release 附件重新下载验证 | Releases/校验清单 | 阻断 | 未完成 |
 
 ## 最终发布机制
-先测试/锁版本/可复现构建→真实安装/便携/油猴扩展回归→受控签名/合规确认→生成两份文件与哈希→创建正式 Release→重新下载比对哈希、运行证据归档。关键 RAR 商业授权、真实油猴管理器功能验收及正式 Windows 安装/便携验证未解决前仍阻断 Stable。Windows runner 已通过基础 CDP 探针，但它不是任何正式产品构建。
+先测试/锁版本/可复现构建→真实安装/便携/油猴扩展回归→受控签名/合规确认→生成两份文件与哈希→创建正式 Release→重新下载比对哈希、运行证据归档。RAR 长期合法使用授权、真实损坏脚本修复/回归、正式 Windows 安装与便携应用运行验证未解决前仍阻断 Stable。限定环境 Violentmonkey+Chromium 的真实 .user.js 注入、GM_getValue 调用 PoC 已通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277），**但它不是任何正式产品构建、修复验证或 Stable 验收**。
