@@ -26,6 +26,7 @@ interface Window {
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
+    createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
@@ -197,6 +198,7 @@ void window.healer.getStatus().then(s => {
 // native dialog; status alone never attests an installed or working userscript.
 const chooseChromeButton=document.getElementById('choose-chrome') as HTMLButtonElement|null;
 const chooseProfileButton=document.getElementById('choose-profile') as HTMLButtonElement|null;
+const createProfileButton=document.getElementById('create-profile') as HTMLButtonElement|null;
 const launchButton=document.getElementById('launch-chrome') as HTMLButtonElement|null;
 const inspectButton=document.getElementById('inspect-tampermonkey') as HTMLButtonElement|null;
 const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|null;
@@ -213,6 +215,7 @@ function setBrowserStatus(value:string):void{
 function browserControls():void{
  if(chooseChromeButton)chooseChromeButton.disabled=browserBusy||browserConnected;
  if(chooseProfileButton)chooseProfileButton.disabled=browserBusy||browserConnected;
+ if(createProfileButton)createProfileButton.disabled=browserBusy||browserConnected||!chromeSelected;
  if(portInput)portInput.disabled=browserBusy||browserConnected;
  if(launchButton)launchButton.disabled=browserBusy||browserConnected||
    !chromeSelected||!profileSelected;
@@ -239,6 +242,14 @@ chooseProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
   profileSelected=true;
   setBrowserStatus('已通过系统窗口选择独立 Profile；尚未启动或验证。');
  }else setBrowserStatus('Profile 选择未完成：'+(result.code??'UNKNOWN'));
+}));
+createProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
+ setBrowserStatus('通过系统窗口选择新 Profile 的父目录并确认授权；绝不覆盖已有目录。');
+ const result=await window.healer.createProfile();
+ if(result.ok){
+  profileSelected=true;
+  setBrowserStatus('已创建独立空 Profile；启动 Chrome 仍需要单独确认。');
+ }else setBrowserStatus('新 Profile 未创建：'+(result.code??'UNKNOWN'));
 }));
 launchButton?.addEventListener('click',()=>void browserAction(async()=>{
  const value=portInput?.value??'';
