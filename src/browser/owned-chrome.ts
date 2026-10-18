@@ -56,6 +56,8 @@ export interface ChromeLaunchOptions {
   /** Disposable GitHub Actions test profile only. */
   readonly testHeadless?:boolean;
   readonly signal?:AbortSignal;
+  /** Called only if a verified, still-owned Chrome process exits unexpectedly. */
+  readonly onUnexpectedExit?:()=>void;
 }
 /** Only references actually issued by this process can open CDP targets.
  * A serialized/forged success-shaped result is not an authorized session.
@@ -130,8 +132,16 @@ export async function launchApprovedIsolatedChrome(
                 stop:()=>{liveSessions.delete(verified);stopOwnChild(child);}
               });
               liveSessions.set(verified,child);
-              child.once('exit',()=>liveSessions.delete(verified));
-              child.once('error',()=>liveSessions.delete(verified));
+              // An externally closed/crashed Chrome must revoke any native
+              // consented GM fixture immediately. Intentional stop() removes
+              // ownership before exit, and must not invoke this callback.
+              const onUnexpectedExit=()=>{
+                if(!liveSessions.delete(verified))return;
+                try{options.onUnexpectedExit?.();}
+                catch{/* Lifecycle cleanup must not crash the main process. */}
+              };
+              child.once('exit',onUnexpectedExit);
+              child.once('error',onUnexpectedExit);
               retained=true;
               return verified;
             }

@@ -54,8 +54,11 @@ function stopOnlyOwnedBrowser():void {
   if(ownedBrowser){ownedBrowser.stop();ownedBrowser=null;}
 }
 function readOwnedBrowser(){
-  if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser))
+  if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser)){
+    // Defensive fallback when a child exits before its lifecycle notification.
     ownedBrowser=null;
+    stopOnlyGmProbe();
+  }
   return ownedBrowser;
 }
 
@@ -209,10 +212,16 @@ function registerSafeIpc(): void {
       if(decision.response!==0||controller.signal.aborted||win.isDestroyed()||
          win!==mainWindow)
         return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      let launched:Extract<ManagedLaunchResult,{ok:true}>|null=null;
       const result=await launchApprovedIsolatedChrome(config.config,{
-        userApproved:true,signal:controller.signal
+        userApproved:true,signal:controller.signal,
+        onUnexpectedExit:()=>{
+          // Never revoke a later replacement session on an older child exit.
+          if(ownedBrowser===launched){ownedBrowser=null;stopOnlyGmProbe();}
+        }
       });
       if(!result.ok)return {ok:false,code:result.code,...unverified};
+      launched=result;
       if(controller.signal.aborted||win.isDestroyed()||win!==mainWindow){
         result.stop();
         return {ok:false,code:'ABORTED',...unverified};
