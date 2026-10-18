@@ -30,7 +30,7 @@ I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批�
 | I-005 | REQ-020 | VersionStore | TASK-011 | TEST-020 | GATE-001..007 |
 | I-008 | REQ-021 | AcceptanceGate | TASK-010, TASK-011 | TEST-021 | GATE-001..007 |
 | I-003 | REQ-022 | BatchCoordinator | TASK-013 | TEST-022 | GATE-001..007 |
-| I-008 | REQ-023 | ExportService | TASK-012 | TEST-023 | GATE-001..007 |
+| I-008 | REQ-023 | VersionStore/Export | TASK-012 | TEST-023 | GATE-001..007 |
 | I-005 | REQ-024 | HealthHistory | TASK-015 | TEST-024 | GATE-001..007 |
 | I-006 | REQ-025 | CompatibilityLayer | TASK-016 | TEST-025 | GATE-001..007 |
 | I-008 | REQ-026 | SecurityBoundary | TASK-001, TASK-018 | TEST-026 | GATE-001..007 |
