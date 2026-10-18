@@ -97,6 +97,10 @@ function ambiguousDocumentBinding(source:string):boolean{
          (Array.isArray(node.params)&&node.params.some(bindsDocument))))||
        ((node.type==='ClassDeclaration'||node.type==='ClassExpression')&&
         bindsDocument(node.id))||
+       // for-in/of assignment targets can rebind the global document without
+       // appearing as AssignmentExpression nodes in the parsed AST.
+       ((node.type==='ForInStatement'||node.type==='ForOfStatement')&&
+        bindsDocument(node.left))||
        (node.type==='AssignmentExpression'&&bindsDocument(node.left))||
        (node.type==='UpdateExpression'&&bindsDocument(node.argument))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
