@@ -10,6 +10,7 @@
 import {randomBytes} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
+import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
 export type GmProbeMode='broken'|'fixed';
 export interface GmProbeReceipt {
@@ -26,6 +27,9 @@ export interface GmProbeSession {
  readonly status:'ISOLATED_GM_TEST_READY';
  readonly origin:string;
  readonly source:string;
+ /** Short-lived URL for explicit "Import from URL" in an isolated manager.
+  * URL possession is not proof of manager identity or actual script execution. */
+ readonly installUrl:string;
  readonly expiresAt:number;
  readonly receiptSnapshot:()=>Readonly<Partial<Record<GmProbeMode,GmProbeReceipt>>>;
  readonly stop:()=>Promise<void>;
@@ -82,6 +86,8 @@ export async function startIsolatedTampermonkeyGmProbe(
  if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000)
    return {ok:false,code:'INVALID_OPTIONS'};
  const token=randomBytes(32).toString('hex');
+ const installKey=randomBytes(32).toString('hex');
+ const managerOrigin='chrome-extension://'+TAMPERMONKEY_EXTENSION_ID;
  const expiresAt=Date.now()+ttlMs;
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
  let server:Server;
@@ -104,11 +110,31 @@ export async function startIsolatedTampermonkeyGmProbe(
      res.writeHead(400).end();return;
    }
    if(url.origin!=='http://'+host){res.writeHead(400).end();return;}
-   // The page's same-origin fetch sends Origin in browsers that supply it.
-   // This is defense in depth, not proof of a genuine userscript or manager.
-   if(req.headers.origin!==undefined&&req.headers.origin!=='http://'+host){
+   // Only an exact unguessable capability URL serves the disposable source.
+   // The real manager may fetch it from its extension origin; Origin is NOT
+   // authentication and is never interpreted as evidence of installation.
+   // A normal website cannot fetch it across origins by guessing a filename.
+   const isInstall=url.pathname==='/install.user.js'&&
+     url.search==='?key='+installKey&&req.method==='GET';
+   if(req.headers.origin!==undefined&&req.headers.origin!=='http://'+host&&
+      !(isInstall&&req.headers.origin===managerOrigin)){
      res.writeHead(403).end();return;
    }
+   if(url.pathname==='/install.user.js'){
+     if(!isInstall){res.writeHead(403).end();return;}
+     const headers:Record<string,string>={
+       'Content-Type':'text/javascript; charset=utf-8',
+       'Content-Disposition':'inline; filename="UAH-Isolated-GM-Diagnostic.user.js"',
+       'Vary':'Origin'
+     };
+     if(req.headers.origin===managerOrigin)
+       headers['Access-Control-Allow-Origin']=managerOrigin;
+     res.writeHead(200,headers);
+     res.end(produceFixtureSource('http://'+host,token));
+     return;
+   }
+   // The fixture page's same-origin POST may supply Origin. Never treat a
+   // browser-supplied Origin as manager or GM attestation.
    if(req.method==='GET'&&url.pathname==='/'&&
        (url.search===''||url.search==='?mode=broken'||url.search==='?mode=fixed')){
      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
@@ -187,7 +213,8 @@ export async function startIsolatedTampermonkeyGmProbe(
  };
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',
-   origin,source:produceFixtureSource(origin,token),expiresAt,
+   origin,source:produceFixtureSource(origin,token),
+   installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
    receiptSnapshot:()=>Object.freeze({...receipts}),
    stop
  }};
