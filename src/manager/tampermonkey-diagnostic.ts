@@ -95,7 +95,7 @@ export function summarizeFixtureDomEvidence(
     !Number.isSafeInteger(actedOnTarget)||actedOnTarget!==acted||
     acted>summary.elementCount||
     typeof observed.observedAt!=='string'||
-    !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(observed.observedAt)||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(observed.observedAt)||
     !Number.isFinite(Date.parse(observed.observedAt))||
     new Date(observed.observedAt).toISOString()!==observed.observedAt)
    return invalid();
