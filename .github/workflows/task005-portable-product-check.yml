@@ -1,0 +1,70 @@
+name: TASK-005 Portable Chrome Product Validation
+
+on:
+  pull_request:
+    paths:
+      - 'src/browser/**'
+      - 'tests/browser/**'
+      - 'package.json'
+      - '.github/workflows/task005-portable-product-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-product-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-chrome:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked compiler without running install scripts
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile product browser tests
+        shell: pwsh
+        run: npm run build
+      - name: Verify signed Chrome moved to independent application path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $candidates = @(
+            (Join-Path $env:ProgramFiles 'Google\Chrome\Application'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application')
+          )
+          $source = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath (Join-Path $candidate 'chrome.exe')) {
+              $source = $candidate
+              break
+            }
+          }
+          if (!$source) { throw 'Signed installed Chrome unavailable on this runner' }
+          $sourceBinary = Join-Path $source 'chrome.exe'
+          $signature = Get-AuthenticodeSignature -LiteralPath $sourceBinary
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
+            throw 'Installed source Chrome signature untrusted'
+          }
+          $root = Join-Path $env:RUNNER_TEMP ("uah-portable-product-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $root) { throw 'Refuse existing test directory' }
+          New-Item -Path $root -ItemType Directory | Out-Null
+          $copy = Join-Path $root 'IndependentChrome'
+          New-Item -Path $copy -ItemType Directory | Out-Null
+          & robocopy.exe $source $copy /E /XJ /R:1 /W:1 /NFL /NDL /NP
+          if ($LASTEXITCODE -ge 8) { throw "Chrome runtime copy failed: $LASTEXITCODE" }
+          $binary = Join-Path $copy 'chrome.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Independent Chrome binary absent' }
+          $copiedSignature = Get-AuthenticodeSignature -LiteralPath $binary
+          if ($copiedSignature.Status -ne 'Valid' -or $copiedSignature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
+            throw 'Copied Chrome signature untrusted'
+          }
+          $env:UAH_TEST_PORTABLE_CHROME = $binary
+          node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
