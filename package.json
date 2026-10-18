@@ -1,0 +1,19 @@
+{
+  "name": "userscript-auto-healer",
+  "version": "0.0.1-dev",
+  "private": true,
+  "description": "Local-first Windows userscript repair tool (early development skeleton)",
+  "main": "dist/app/main/index.js",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.cjs",
+    "test": "npm run build && node --test dist/tests/security/desktop-boundary.test.js",
+    "start": "electron ."
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "electron": "44.9.0",
+    "typescript": "5.9.3"
+  }
+}

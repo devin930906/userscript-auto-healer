@@ -78,3 +78,11 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 
 ## 2026-10-18 实时浏览器 Tampermonkey 限定测试增量
 后续在**同一浏览器连接**执行了独立临时脚本安装、真实 `GM_getValue`、人工预设 broken/fixed 两阶段业务断言及删除后不再注入的验证；完整步骤与实际返回见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。此结果与上文更早的只读预检不同，标记为 `POC-02T-LIVE: LIMITED_POC_PASS`。不是独立 Windows GitHub Actions 的 POC-02T，也没有正式产品代码或测试套件，所以 **TEST-017、TEST-018 仍为“已规划/未正式执行”**。
+
+## （7）TASK-001 初期自动化执行证据（2026-10-18）
+
+提交 `244f853fae7e5f7443f86a69b5804bc14b7883aa` 的 Windows GitHub Actions run `39100320005`：TypeScript 类型检查成功，11 项 Node 自动化安全/配置负例全部通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39100320005）。**仅是 TEST-026 的局部安全边界覆盖**；尚未在真实 Electron 桌面进程验证 preload、IPC frame 拦截、沙箱、导航与权限阻断，TEST-026 保持未完成；TEST-001 与其余产品正式 TEST 仍未执行。产品自动化验证不等于此前开发前 PoC。证据对应原始 commit，不可直接转用于后续新提交。
+
+## （7）TASK-001 Windows 实际 Electron 运行结果（2026-10-18）
+
+对应提交 `5f2830d52d349ab19583740dc177427e1652e355` 的 [Application Skeleton Checks run 39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) 通过：typecheck、11 项 Node 安全配置测试、Electron 下载及构建、隔离渲染进程加载、通过受限 preload 的真实 IPC、拒绝无效配置输入。测试在 GitHub Windows 2025 runner 运行，不构成 Windows 10/11 真实用户 Profile、任意网页脚本运行或完整 TEST-026 的证明。对应 TEST-026 的其他危险输入/完整权限边界将于 TASK-018 继续验证。
