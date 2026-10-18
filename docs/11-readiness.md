@@ -30,7 +30,7 @@
 初始化提交 1205776e91ede1cbb122e699acb7fb7805be23cb；需求研究 32830ad793b48ccfa59bdb03eb97699a00635bee；架构风险 dc79b66671f6c888ce21e55967918414f7ed3ec0；测试及计划 df82a2c50b4cdec2faaae676d0141939b9479664；追踪矩阵 e69fe9e115ecc68d6af42a9c86bd6c07be2e0a2d。发布结论必须再读取 main HEAD。
 
 ## 发现问题
-BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 的“管理器不具备真实脚本注入/GM API 路线”疑虑已在限定场景解除：真实 Violentmonkey 2.49.0 在标准 HTTPS 示例页面完成 .user.js 注入并实际调用 GM_getValue（Actions run 39092523277）；随机端口的本地示例页曾失败，不能推断为全部管理器不兼容。目标 Tampermonkey 与用户 Chrome、登录网站业务断言及故障修复回归仍未验证；BLOCK-03 历史 RAR5 工具链已完成限期评估但已被 ZIP 决策取代；真实 ZIP 与正式应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式 EXE+ZIP 构建、依赖许可证和配额缺证据。
+BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 的“管理器不具备真实脚本注入/GM API 路线”疑虑已在限定场景解除：真实 Violentmonkey 2.49.0 在标准 HTTPS 示例页面完成 .user.js 注入并实际调用 GM_getValue（Actions run 39092523277）；随机端口的本地示例页曾失败，不能推断为全部管理器不兼容。用户现有 Chrome+Tampermonkey 的一次性 GM/人工业务 PoC 已有受限实证（docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md），但云端专项 Tampermonkey、已登录网站和**产品自动修复前后**业务回归仍未验证；BLOCK-03 历史 RAR5 工具链已完成限期评估但已被 ZIP 决策取代；真实 ZIP 与正式应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式 EXE+ZIP 构建、依赖许可证和配额缺证据。
 
 ## 修复记录
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；随用户新 I-010/ADR-004 将原 RAR 许可阻断改为 ZIP 内容完整性、路径安全和便携运行阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
@@ -66,7 +66,7 @@ Windows Actions https://github.com/devin930906/userscript-auto-healer/actions/ru
 
 Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.40**，并在真实 `Tampermonkey/篡改猴` **5.5.1（MV3）** Extension Service Worker 中只读调用 `chrome.userScripts.getScripts()` 成功（2 条 API 注册，非脚本数量）；`chrome.permissions.getAll()` 含 `userScripts`，测试用途的 `https://example.com/*` 和 `http://127.0.0.1/*` 原点均获权限。没有读取用户脚本或其持久化资料，亦没有安装/改写/删除脚本。当前会话插件回传为原始证据；详细范围见 docs/13-predevelopment-admission.md。
 
-**严守范围**：上文可以标记 `TampermonkeyPresenceAndPermission = CHECKED`，**不能**标记 `TampermonkeyInjection/GM/Business = VERIFIED`；亦不能证明用户 Chrome.exe、9223 端口、自管调试 Profile 或修复逻辑通过。现行 EXE+ZIP，POC-03C Windows ZIP 工具链已实测通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797），正式 ZIP 应用包仍未制作。
+**严守阶段范围**：上文较早的只读阶段仅可标记 `TampermonkeyPresenceAndPermission = CHECKED`；后续 POC-02T-LIVE 已获得指定临时脚本的有限 GM/人工业务实证，但**不能**把完整产品 `TampermonkeyInjection/GM/Business = VERIFIED`；亦不能证明用户 Chrome.exe、9223 端口、自管调试 Profile 或修复逻辑通过。现行 EXE+ZIP，POC-03C Windows ZIP 工具链已实测通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797），正式 ZIP 应用包仍未制作。
 
 ## POC-02T-LIVE — 真 Tampermonkey 运行时补充（2026-10-18）
 用户连接的真实 Tampermonkey 5.5.1 经 Chrome Browser MCP 已完成**新增**限定实测：专名临时 `.user.js` 在 `https://example.net/` 注入，`GM_getValue` 返回 `gm-default-ok`，预设无效旧 selector 时 `missing-target/none`，人工改成 `p` 后 `recovered/done` 且目标节点确有动作标记；删掉专名临时脚本和回收站副本后，重新载入无脚本标记/动作。见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。该结果可以证明**当前浏览器上的指定 GM 和业务动作**，不等于 GitHub Actions 云端 POC-02T、正式 TASK-007/TEST-017/018、真实失效脚本的自动修复/回滚，或 GATE-004/005。先前只读预检的 `GM/Business 未验证` 是早前阶段快照，已由本次**有限**功能 PoC 补充；未支持/未测环境仍受阻。TASK-001 有条件准入不变。

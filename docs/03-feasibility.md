@@ -21,7 +21,7 @@ A: Electron + TypeScript/Node（统一 GUI、AST、CDP、Windows 安装器）；
 | REF-11 | GitHub 工作流工件 | https://docs.github.com/en/actions/tutorials/store-and-share-data | 构建工件是工作流归档，现行 .zip/.exe 需作为正式发行文件本体检验（旧 RAR 已替代） |
 
 ## 能力验证
-CDP 浏览器协议读取：官方机制已确认；完整跨域/闭合 Shadow DOM 获取能力不得保证。AST 只覆盖可静态确定的调用；闭包/动态拼接转运行时待确认。用户连接的真实 Chrome 中 Tampermonkey **身份、版本、userScripts API 与权限**已经过只读核验（详见下方补充）；它与不同 Chrome/Profile 组合中的真实脚本注入、GM 调用与业务验收仍未验证。第三方 AI 模型列表端点并非所有服务同构：需兼容检测及手填 fallback。
+CDP 浏览器协议读取：官方机制已确认；完整跨域/闭合 Shadow DOM 获取能力不得保证。AST 只覆盖可静态确定的调用；闭包/动态拼接转运行时待确认。用户连接的真实 Chrome 中 Tampermonkey **身份、版本、userScripts API 与权限**已经过只读核验（详见下方补充）；随后 POC-02T-LIVE 已在用户现有 Chrome+Tampermonkey 5.5.1 上有限实测 GM_getValue 与人工 broken/fixed 业务断言；**其他 Chrome/Profile 组合、独立云端真 Tampermonkey、真实用户失效脚本的产品自动修复仍未验证**。第三方 AI 模型列表端点并非所有服务同构：需兼容检测及手填 fallback。
 
 ## 兼容性分析
 待定义 Chrome 稳定版/便携版最低版本与操作系统；Chrome 136+ 使用非默认 Profile；默认端口 9223 且绑定本机回环地址；登录态只能在用户自行授权的测试 Profile 建立。强制 side-load 扩展在正式 Chrome 的可行性不可靠，须走受支持的管理器可用/用户授权初始化路径。即便 CDP 可见 DOM，不能冒称 GM API 已在真管理器中运行。

@@ -16,3 +16,7 @@
 用户明确首选 Tampermonkey（非 Violentmonkey），独立决策见 ADR-005。分层验收原则不变，声称“Tampermonkey 已验证”必须来自实际 Tampermonkey/GM API/业务断言证据；原 POC-02D/04A 仅是 Violentmonkey 的历史可行性记录。
 
 - 用户连接 Chrome 的后续分层证据（2026-10-18）：Windows x64 Chrome 155.0.8059.40 上实际识别 Tampermonkey/篡改猴 5.5.1（MV3），可调用扩展 `chrome.userScripts.getScripts()`（2 条注册记录），`userScripts` 权限和测试原点权限存在。**这是管理器预检，不是 Tampermonkey 脚本运行、GM API 或真实业务恢复的验证结果**。未更改用户已安装脚本。引用边界见 docs/13-predevelopment-admission.md，须按实际功能回归逐层确认 `VERIFIED`。
+
+## POC-02T-LIVE 后续功能证据（2026-10-18）
+
+对用户当前 Chrome+真实 Tampermonkey 5.5.1，专名临时脚本曾经成功安装/注入，实际调用 GM_getValue，人工编排旧/新选择器两个版本产生符合预期的业务失败/成功结果，临时脚本已删除并确认不再注入。详细脱敏依据：docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。此前“只读预检、不证明 GM/业务执行”是该证据出现**之前**的阶段记录，不再用它否定后来的限定成功。**独立 GitHub Actions POC-02T、真实产品 TEST-017/018 和自动修复/回滚仍然未通过**。
