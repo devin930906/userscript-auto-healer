@@ -93,7 +93,22 @@ export async function startIsolatedTampermonkeyGmProbe(
    if(!address||req.headers.host!==host||Date.now()>=expiresAt){
      res.writeHead(403).end();return;
    }
-   const url=new URL(req.url||'/', 'http://127.0.0.1:'+address.port);
+   // HTTP absolute-form URLs can override URL's base origin. Accept only
+   // origin-form paths so a forged Host header cannot route this fixture as
+   // if it were a different site. Never let malformed URLs crash the server.
+   if(!req.url||!req.url.startsWith('/')||req.url.startsWith('//')){
+     res.writeHead(400).end();return;
+   }
+   let url:URL;
+   try{url=new URL(req.url,'http://'+host);}catch{
+     res.writeHead(400).end();return;
+   }
+   if(url.origin!=='http://'+host){res.writeHead(400).end();return;}
+   // The page's same-origin fetch sends Origin in browsers that supply it.
+   // This is defense in depth, not proof of a genuine userscript or manager.
+   if(req.headers.origin!==undefined&&req.headers.origin!=='http://'+host){
+     res.writeHead(403).end();return;
+   }
    if(req.method==='GET'&&url.pathname==='/'&&
        (url.search===''||url.search==='?mode=broken'||url.search==='?mode=fixed')){
      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
@@ -119,6 +134,9 @@ export async function startIsolatedTampermonkeyGmProbe(
    });
    req.on('end',()=>{
      if(oversized||res.writableEnded)return;
+     // Recheck after the entire body arrives: a slow POST must not outlive
+     // the consented probe interval merely because headers arrived in time.
+     if(Date.now()>=expiresAt){res.writeHead(403).end();return;}
      let input:unknown;
      try{input=JSON.parse(body);}catch{res.writeHead(400).end();return;}
      if(!isObject(input)||input.token!==token||
@@ -130,6 +148,9 @@ export async function startIsolatedTampermonkeyGmProbe(
        res.writeHead(403).end();return;
      }
      const mode=input.mode as GmProbeMode;
+     // First receipt wins per mode: replay or a late contradictory POST must
+     // never silently rewrite an earlier captured diagnostic observation.
+     if(receipts[mode]!==undefined){res.writeHead(409).end();return;}
      // Preserve the raw reported failures; never rewrite them into success.
      receipts[mode]=Object.freeze({
        status:'SELF_REPORTED_FIXTURE_ONLY',mode,
