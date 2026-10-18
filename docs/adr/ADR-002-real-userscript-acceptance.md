@@ -14,3 +14,5 @@
 
 ## I-011 补充决定
 用户明确首选 Tampermonkey（非 Violentmonkey），独立决策见 ADR-005。分层验收原则不变，声称“Tampermonkey 已验证”必须来自实际 Tampermonkey/GM API/业务断言证据；原 POC-02D/04A 仅是 Violentmonkey 的历史可行性记录。
+
+- 用户连接 Chrome 的后续分层证据（2026-10-18）：Windows x64 Chrome 155.0.8059.40 上实际识别 Tampermonkey/篡改猴 5.5.1（MV3），可调用扩展 `chrome.userScripts.getScripts()`（2 条注册记录），`userScripts` 权限和测试原点权限存在。**这是管理器预检，不是 Tampermonkey 脚本运行、GM API 或真实业务恢复的验证结果**。未更改用户已安装脚本。引用边界见 docs/13-predevelopment-admission.md，须按实际功能回归逐层确认 `VERIFIED`。

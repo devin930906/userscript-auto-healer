@@ -21,7 +21,7 @@ A: Electron + TypeScript/Node（统一 GUI、AST、CDP、Windows 安装器）；
 | REF-11 | GitHub 工作流工件 | https://docs.github.com/en/actions/tutorials/store-and-share-data | 构建工件是工作流归档，现行 .zip/.exe 需作为正式发行文件本体检验（旧 RAR 已替代） |
 
 ## 能力验证
-CDP 浏览器协议读取：官方机制已确认；完整跨域/闭合 Shadow DOM 获取能力不得保证。AST 只覆盖可静态确定的调用；闭包/动态拼接转运行时待确认。Tampermonkey 与不同 Chrome/Profile 的真实运行链：未验证。第三方 AI 模型列表端点并非所有服务同构：需兼容检测及手填 fallback。
+CDP 浏览器协议读取：官方机制已确认；完整跨域/闭合 Shadow DOM 获取能力不得保证。AST 只覆盖可静态确定的调用；闭包/动态拼接转运行时待确认。用户连接的真实 Chrome 中 Tampermonkey **身份、版本、userScripts API 与权限**已经过只读核验（详见下方补充）；它与不同 Chrome/Profile 组合中的真实脚本注入、GM 调用与业务验收仍未验证。第三方 AI 模型列表端点并非所有服务同构：需兼容检测及手填 fallback。
 
 ## 兼容性分析
 待定义 Chrome 稳定版/便携版最低版本与操作系统；Chrome 136+ 使用非默认 Profile；默认端口 9223 且绑定本机回环地址；登录态只能在用户自行授权的测试 Profile 建立。强制 side-load 扩展在正式 Chrome 的可行性不可靠，须走受支持的管理器可用/用户授权初始化路径。即便 CDP 可见 DOM，不能冒称 GM API 已在真管理器中运行。
@@ -80,3 +80,7 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 
 ### POC-03C — Windows 云端原生 ZIP 工具链（2026-10-18）
 真实 Windows Actions 已使用 PowerShell `Compress-Archive` 创建临时 `.zip` 测试归档，并检查 ZIP PK 文件头、单一安全相对路径条目、`Expand-Archive` 解压与 SHA-256 内容往返一致，Job 成功：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797。本项验证确认原生 ZIP 工具链在该 runner 可用，不涉及实际产品可执行程序及正式便携启动，故不能代替 TASK-020 / TEST-028 / GATE-009。
+
+### 用户连接 Chrome 上 Tampermonkey 实际预检（2026-10-18，只读）
+
+经用户主动提供的 Chrome Browser MCP，读到 Windows x64 Google Chrome `155.0.8059.40` 和运行中的 Tampermonkey/篡改猴 `5.5.1`（MV3、扩展 ID `dhdgffkkebhmkfjojejmpbldhnkbfhlneefdaaip`）。**注意**：此扩展 ID 必须与后续实际探测记录一致；本记录中准确 ID 以 docs/13-predevelopment-admission.md 中实时捕获为权威。Tampermonkey 扩展 Service Worker 的 `chrome.userScripts.getScripts()` 实际调用成功，出现 2 条注册记录，包含 `USER_SCRIPT` world、`document_start` runAt。`chrome.permissions.getAll()` 包含 `userScripts`，示例原点读取权限成功。没有读取个人脚本源码、存储数据或改动扩展配置；未证实真实 Tampermonkey 的 GM/业务执行，也没有核实浏览器启动命令/独立 Profile/9223 端口。此次实测来自对话中的浏览器连接而非 CI，不能将本段冒充 Actions 测试证据。

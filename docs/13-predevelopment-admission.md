@@ -37,10 +37,25 @@
 | 维度 | 实证通过的实验室组合 | 正式产品目标（仍待矩阵测试） | 不得现在宣称支持 |
 |---|---|---|---|
 | Windows | Windows 2025 GitHub 托管运行器 | Windows 10/11 x64，依据实际设备与可执行包测试确认最低版本 | 任何未经测试的 Windows 版本、所有硬件 |
-| 浏览器/CDP | 托管 Chrome 155、独立 Chrome for Testing 154 的 CDP；bundled Chromium 能跑扩展 | 用户选择 Google Chrome 和部分便携 Chrome；`--remote-debugging-address=127.0.0.1`、默认端口 9223、独立非默认 Profile | 所有便携版、接管正在使用的默认 Profile、自动获取未授权登录 |
-| 油猴管理器 | Violentmonkey MV3 2.49.0 真安装、GM_getValue、已知选择器对照 | Tampermonkey 等按管理器单独适配，优先确认用户实际在用版本与 GM API 范围 | 预先宣布 Tampermonkey 所有版本、所有 GM API 和沙箱/注入组合已经通过 |
+| 浏览器/CDP | 托管 Chrome 155、独立 Chrome for Testing 154 的 CDP；bundled Chromium 能跑扩展；**已连接用户 Chrome 155.0.8059.40 真实页面 JS 读取成功** | 用户选择 Google Chrome 和部分便携 Chrome；`--remote-debugging-address=127.0.0.1`、默认端口 9223、独立非默认 Profile | 当前浏览器可读不等于已核验实际 Chrome.exe 路径、CDP 启动参数、9223 端口归属、默认/便携 Profile 或所有便携版 |
+| 油猴管理器 | Windows Chromium + Violentmonkey MV3 2.49.0 实际注入、GM_getValue 与人工 broken/fixed；**用户连接的 Chrome 155 上 Tampermonkey 5.5.1 身份、权限、userScripts API/注册可读** | 以当前 Tampermonkey 5.5.1 为优先验证版本，后续通过获授权的独立测试脚本证明 GM/运行时业务断言，并按版本扩展覆盖 | 禁止宣称这次只读预检证明真实 Tampermonkey 脚本已经执行、用户脚本修复成功或所有版本兼容 |
 | 脚本网站 | 标准 HTTPS `example.com` 的无账户合成场景 | 用户授权实际目标 URL、SPA、异步 DOM、业务断言 | 任意网站、无权访问/登录受控页面；不以“元素找到”当业务成功 |
 | Windows 双包 | 临时 EXE 已验证；历史 RAR5 PoC 不能作为 ZIP 证据 | 稳定版正式 Inno Setup EXE + 原生工具真实 ZIP；同源提交、双包独立验收 | 已生成正式 EXE/ZIP、干净 Windows 直启及升级/卸载验收 |
+
+## 连接用户 Chrome 的只读预检（2026-10-18，Chrome Browser MCP）
+
+**来源**：用户主动连接的 Chrome Browser MCP，实际在浏览器普通页面与 Tampermonkey 扩展 Service Worker 上执行**只读** JavaScript。当前会话的插件结果为原始核验依据；本检查不是独立运行于 GitHub Actions，不能伪造 CI run URL 或将其当成产品 TEST-017/018 通过。
+
+| 验证对象 | 实测返回 | 允许得出的结论 |
+|---|---|---|
+| 真实浏览器 | Windows 64 位平台、Google Chrome **155.0.8059.40**（浏览器 User-Agent Client Hints） | 确认当前连接的是 Windows 版 Chrome；该值不足以单独证明 Windows 10/11 具体版本 |
+| Tampermonkey 身份 | `chrome.runtime.id=dhdgffkkebhmkfjojejmpbldmpobfkfo`、名称 `篡改猴`、**5.5.1**、Manifest V3 | 确认真实扩展存在且 Service Worker 可访问 |
+| 实际 API 可用 | 扩展背景环境 `chrome.userScripts.getScripts()` **调用成功** | Chrome 用户脚本 API 已具备读取运行条件；不代表任何特定 .user.js 实际执行 |
+| 权限 | `chrome.permissions.getAll()` 含 `userScripts`，`chrome.permissions.contains({origins:[...]})` 对 `https://example.com/*` 和 `http://127.0.0.1/*` 均返回 true | 这些权限在调用当时存在；不代表所有网站、所有沙箱和全部 GM API 兼容 |
+| 已注册 loader | `getScripts()` 返回 2 条用户脚本注册记录，world=`USER_SCRIPT`，runAt=`document_start` | **不是**“用户安装了 2 个脚本”的统计，不能替代脚本实际注入和业务断言 |
+| 用户资料安全 | 未读取已安装脚本源码、扩展存储值、Cookie、API Key、用户 Profile 路径；未调用扩展注册/安装/卸载或更改权限操作 | 仅限只读预检，不构成用户已授权更改个人脚本或调试 Profile 的许可 |
+
+**新增结论**：以前的“用户实际 Tampermonkey 完全没接入、连扩展身份和权限都不能确定”阻断已经**部分解除**；可将 5.5.1 作为实际首选版本建立后续 TEST-017/018 的预检矩阵。仍需在**独立、获用户授权的测试脚本与页面**中完成真实脚本安装、`@match`、GM API、功能行为断言和必要的业务失效/修复对照。Chrome Browser MCP 没有核实 Windows 上真实 Chrome.exe 路径、`--remote-debugging-port=9223` 启动与归属或正在使用的 Profile；不得声称已通过这些条件。不要对用户现有 Tampermonkey 脚本尝试非授权修改。
 
 ## 决策边界：开发准入不等于发布准入
 
@@ -49,7 +64,7 @@
 **开始 TASK-001 的必要事项**：候选架构及预期安全契约确认（ADR-001）、能够说明适用的首期测试组合（以上矩阵）、约定真实脚本安装与用户授权的明确边界、确定 TASK-001 的安全失败测试。已得到 CDP/真实脚本/GM API 的一个可行受限组合；可针对上述有限组合进行安全骨架的前置审查。**不得因此提前宣布完整兼容、正式自动修复通过或 Stable 合格。**
 
 **尚未完成的全面开发准入/后续任务前置**：
-1. 以用户实际使用的 Tampermonkey 和 Chrome（含真实便携版）确认目标范围、最低支持版本、授权与 Profile 策略；若无法访问实际设备/登录，不得虚构实测，明示需在授权环境完成。
+1. 已通过用户连接的 Chrome Browser MCP **只读确认** Google Chrome 155.0.8059.40、Tampermonkey 5.5.1、userScripts 权限/API 与 loader 注册；仍须核验实际 Chrome.exe/便携版路径、CDP 端口与 Profile 归属，以及**获授权**的 Tampermonkey 真脚本/GM API 功能测试。不能把预检当真实业务验收。
 2. 用用户授权的真实失效脚本或可公开复现的复杂场景建立“损坏→诊断证据→最小补丁→安装到管理器→业务断言→回滚”合同。当前 POC-04A 只是**合成回归夹具**。
 3. 依后续 TASK-007/018 覆盖 GM API、沙箱、SPA、iframe、登录条件、功能测试；未经实测的场景返回 UNKNOWN/DETECTED_ONLY。
 4. 正式依赖锁定、Windows 安装/便携、签名及 ZIP 内容完整性与真实运行验证为**相应开发里程碑和 Stable 发布**硬门槛，不应不合理地阻止项目最初的安全骨架开发，也不能忽略到发布时。

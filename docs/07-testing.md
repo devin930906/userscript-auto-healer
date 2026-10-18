@@ -69,3 +69,9 @@ GitHub Windows 2025 的两个**独立**真实 Violentmonkey MV3 v2.49.0 任务�
 
 ## Tampermonkey 专项验收差异（I-011）
 POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TEST-017/018。正式用例覆盖扩展真实版本、Chrome 138+ Allow User Scripts、Chrome 152+ .user.js 安装机制、Content Script/UserScripts API/UserScripts API Dynamic 的实际支持模式、@grant/@run-at/@match、GM API 与真实业务断言。授权/安装/加载/GM 调用失败时应 BLOCKED/UNKNOWN，不可借 Violentmonkey 结果填补。每个正式结果须关联目标代码提交、版本与运行证据。
+
+## 真实 Tampermonkey 5.5.1 预检与功能验收分界（2026-10-18）
+
+通过已连接的 Chrome Browser MCP，在用户真实 Chrome 155.0.8059.40 上仅执行**只读**扩展身份、API 和权限检查：Tampermonkey 5.5.1、MV3、userScripts API 调用成功、注册记录 2、含 userScripts 权限及示例站点原点访问许可。此为 `TEST-017` 中的一部分**先验条件**，不能把完整 TEST-017 或 TEST-018 标记通过。此会话没有安装临时脚本、访问已有脚本源码/私密存储或验证真实 GM 行为。
+
+剩余 `TEST-017/018` 的真实测试须在用户认可的独立 Profile/测试页面内：1) 明确测试脚本范围及所需 `@grant`、安装/启用与 `@match`；2) 在真实 Tampermonkey 注入并调用 GM API，记录真实业务动作和失败场景；3) 比较人为预设坏/好与**产品真正生成的补丁**，将用户数据和权限限制列为未达门槛；4) 在不影响已安装脚本的前提下保存最小化脱敏证据。若无授权或工具无法安全安装测试脚本，返回 `UNKNOWN/NOT_VERIFIED`，不得用纯 DOM 断言填补。参见 docs/13-predevelopment-admission.md。

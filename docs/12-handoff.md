@@ -42,7 +42,7 @@ M0：POC-01/02，ZIP 工具链验证/POC-03C；M1：TASK-001..004；M2：TASK-00
 暂无 package.json、lockfile、真正可运行产品功能或 npm test/build 命令，当前“不适用”。后续创建技术骨架后须把真实 test/lint/build/Windows E2E 指令和退出码更新到 07/09/本文件；未运行不能写通过。
 
 ## 云端限制
-GitHub 连接账户有该仓库写入权限；最新 Ubuntu 文档 CI https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797 成功。Windows runner 已完成 Chrome/CDP 和独立路径探针、真实 Violentmonkey/GM_getValue PoC（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno 临时 EXE 与历史试用 RAR5 工具链验证（现行 ZIP 待验证），但 Secrets、正式生产 RAR 授权、配额和应用构建仍未验证；截至 2026-10-18 查询 main 的 protected=false，不代表可忽略将来的规则变动。网页会话不等于用户 Windows 的实际浏览器登录环境；依赖实机用户授权的 GM 测试不能只用普通 DOM/模拟测试替代。
+GitHub 连接账户有该仓库写入权限；最新 Ubuntu 文档 CI https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797 成功。Windows runner 已完成 Chrome/CDP 和独立路径探针、真实 Violentmonkey/GM_getValue PoC（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno 临时 EXE、历史 RAR5 和**现行原生 ZIP 工具链 POC-03C** 有限定验证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797）；但正式 ZIP 应用包、Secrets、配额和产品构建仍未验证；截至 2026-10-18 查询 main 的 protected=false，不代表可忽略将来的规则变动。网页会话不等于用户 Windows 的实际浏览器登录环境；依赖实机用户授权的 GM 测试不能只用普通 DOM/模拟测试替代。
 
 ## 续接规则
 读取 main、所有相关开发分支、Open PR/Issues、历史提交与 CI；按 11 把准入阻断优先处理；按 09 选择最高优先级可执行任务；先写测试/证据再实施最小代码并留痕；更新 REQ↔TEST↔TASK↔GATE、ADR、安全风险和本文。禁止重复生成新准备体系、无限新建 PR、静默覆盖用户脚本、绕过 Chrome 安全限制或在准入前正式开发。
@@ -52,3 +52,9 @@ GitHub 连接账户有该仓库写入权限；最新 Ubuntu 文档 CI https://gi
 
 ## ZIP 工具链执行证据
 POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，run：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797；该成功只是临时夹具测试，不是用户实际可运行的便携程序。后续仍须实现 TASK-020/TEST-028 并通过 GATE。旧 RAR 试用工作流已从现行 GitHub Actions 工作流删除，历史评估脚本仍留存供审计，禁止将其纳入正式发行。
+
+## Chrome Browser MCP 真实 Tampermonkey 只读核验（2026-10-18）
+
+用户已连接的 Windows x64 Google Chrome **155.0.8059.40**，真正的 Tampermonkey/篡改猴 **5.5.1**（扩展 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`、MV3）已实际通过只读身份、`chrome.userScripts.getScripts()` API（返回 2 条注册记录）、`userScripts` 权限与示例目标原点的授权检查。**这些不是油猴脚本安装数量，亦不证明 Tampermonkey 下已执行测试脚本、GM API 或用户业务动作。** 没有读取、安装、修改或卸载任何用户脚本，也没有处理用户个人 Chrome Profile。原始证据来自本次连接的 Chrome Browser MCP；不得编造 GitHub Actions run 作为这次的测试链接。
+
+后续最优先的是在获授权的独立脚本/页面下完成真实 Tampermonkey 的 .user.js 安装、注入、GM_getValue/其他声明 GM API 与业务断言，再验证用户实际 Chrome/便携版/9223 CDP Profile 归属。若无法安全获得专用测试环境，就明确记为未验证而不是改动现有脚本；可依已通过的有限 PoC 进入 TASK-001 安全骨架开发。现行便携格式为 ZIP；最新资料请以 docs/13-predevelopment-admission.md 与 docs/11-readiness.md 为准。

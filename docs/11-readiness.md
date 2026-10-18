@@ -12,7 +12,7 @@
 | Userscript Auto Healer | 原始需求保留 | 已完成 | docs/00-intake.md | 完整逐字复核仍可加强 | 对照会话原文做最终核对 |
 | Userscript Auto Healer | 必须需求可验收 | 已完成 | docs/02-requirements.md；docs/07-testing.md | 真实场景输入尚未提供 | 获取坏/好脚本、场景与断言 |
 | Userscript Auto Healer | Stable 范围锁定 | 待确认 | docs/01-product.md | GUI 形态、最低系统与扩展矩阵待确认 | 形成有证据的受支持范围 |
-| Userscript Auto Healer | 核心技术可行 | 有条件实证 | docs/03-feasibility.md | POC-01A/B CDP、POC-02D 真实 Violentmonkey .user.js 注入及实际 GM_getValue 调用已在限定 Windows Chromium 场景通过；Tampermonkey/目标 Chrome 与真实损坏脚本回归待验证 | Chrome/Profile/CDP 与扩展真实 PoC |
+| Userscript Auto Healer | 核心技术可行 | 有条件实证 | docs/03-feasibility.md；docs/13-predevelopment-admission.md | POC-01A/B CDP 与 Violentmonkey POC-02D 实际 GM_getValue 已在有限 CI 场景通过；另在用户连接的 Chrome 155 只读验证 Tampermonkey 5.5.1 身份、userScripts API/权限和注册；**真实 Tampermonkey 脚本业务执行仍未验证** | 用独立授权测试脚本建立真实 Tampermonkey 注入、GM/业务断言；后续核验 CDP/Profile/便携版 |
 | Userscript Auto Healer | 架构满足需求 | 有条件工程基线 | docs/04-architecture.md；docs/adr/ADR-001-application-baseline.md | Electron+TypeScript 已作为 TASK-001 的有限安全工程基线；实际管理器/Chrome 兼容待验证 | TASK-001 骨架需真实安全测试；其余模块按各自 TEST 核验 |
 | Userscript Auto Healer | 安全风险处理 | 受阻 | docs/06-security-risk.md | 只有威胁模型，缺安全负例 | 执行 TEST-007/009/020/026 |
 | Userscript Auto Healer | 测试策略完整 | 已完成 | docs/07-testing.md | 无实际测试代码与结果 | 开发后逐项运行并留证 |
@@ -36,13 +36,13 @@ BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/�
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；随用户新 I-010/ADR-004 将原 RAR 许可阻断改为 ZIP 内容完整性、路径安全和便携运行阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
 
 ## 未解决事项
-POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认已验证，POC-02C 随机端口测试曾失败（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-02D 的标准 HTTPS 目标已实际通过 .user.js 注入和 GM_getValue 调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。最新文档完整性工作流对关键 Markdown 文件、编号、记录字段宽度和需求测试对应关系已成功（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797）；不是产品运行测试。尚无产品源码、真实损坏脚本修复前后回归与选定 Tampermonkey 兼容矩阵、正式 Windows 产品包和长期 RAR 许可实测结果，也没有经过用户选择的应用 LICENSE。
+POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认已验证，POC-02C 随机端口测试曾失败（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-02D 的标准 HTTPS 目标已实际通过 .user.js 注入和 GM_getValue 调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。最新文档完整性工作流对关键 Markdown 文件、编号、记录字段宽度和需求测试对应关系已成功（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797）；不是产品运行测试。尚无产品源码、真实损坏脚本修复前后回归与 Tampermonkey 真脚本 GM/业务验收、正式 Windows EXE+ZIP 应用双包，也没有经过用户选择的应用 LICENSE。旧 RAR 创建器已退出现行发布范围，不再要求其生产许可证。
 
 ## 准入结果
 
 **有限工程准入：TASK-001 安全骨架的开发前技术准备具备条件。** Chrome/CDP、真实 Violentmonkey 2.49.0 的 `GM_getValue` 调用以及两个独立 `broken/fixed` 已知选择器状态有真实 Windows 实测；后者是提前人工准备的脚本版本，并未开发自动诊断、自动修复或回滚。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。工程架构仅将 Electron+TypeScript 有条件选作首项安全基础（ADR-001）。
 
-**全部开发前置仍未完成**：用户实际目标 Tampermonkey、Windows 10/11、真实 Chrome 便携版、真实失效脚本/登录条件及修复前后业务验证暂无充分证据。没有用户授权的真实环境不得声称已测试，后续 TASK-007、TEST-018、全量实机验收仍受阻。
+**全部开发前置仍未完成**：用户连接的真实 Chrome 155 和 Tampermonkey 5.5.1 已完成只读身份/API/权限预检，但 Windows 10/11 精确系统版本、真实 Chrome.exe/便携路径、CDP 端口/Profile 归属、Tampermonkey 的实际 .user.js 运行/GM 功能及真实失效脚本/登录条件与修复前后业务验证暂无充分证据。没有用户授权的真实环境不得声称已测试，后续 TASK-007、TEST-018、全量实机验收仍受阻。
 
 **Stable 发布门槛尚未达到**：产品源码/单元测试与 28 项 TEST、实际 Electron EXE、正式便携 ZIP 的安全解压与运行、真实安全/兼容/回滚测试与全部 GATE 尚未完成。试验性的 EXE/RAR 工具链不等于可发布产品；发布门槛不是初步安全骨架开发的先决全部条件。
 
@@ -61,3 +61,9 @@ POC-04B 在 Ubuntu runner 真正执行 Acorn 的静态 JavaScript AST 样本，�
 
 ## POC-03C 工具链验收补充
 Windows Actions https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797 已成功通过临时原生 ZIP 创建、PK 文件头、安全单一相对路径、解压与 SHA-256 一致性检查。结论仅解除“标准云端运行器能否制作普通 ZIP”的工具链疑虑，**不解除正式产品 ZIP 的 TEST-028 / GATE-009/011 阻断**。
+
+## 用户连接的真实浏览器核验增量（2026-10-18）
+
+Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.40**，并在真实 `Tampermonkey/篡改猴` **5.5.1（MV3）** Extension Service Worker 中只读调用 `chrome.userScripts.getScripts()` 成功（2 条 API 注册，非脚本数量）；`chrome.permissions.getAll()` 含 `userScripts`，测试用途的 `https://example.com/*` 和 `http://127.0.0.1/*` 原点均获权限。没有读取用户脚本或其持久化资料，亦没有安装/改写/删除脚本。当前会话插件回传为原始证据；详细范围见 docs/13-predevelopment-admission.md。
+
+**严守范围**：上文可以标记 `TampermonkeyPresenceAndPermission = CHECKED`，**不能**标记 `TampermonkeyInjection/GM/Business = VERIFIED`；亦不能证明用户 Chrome.exe、9223 端口、自管调试 Profile 或修复逻辑通过。现行 EXE+ZIP，POC-03C Windows ZIP 工具链已实测通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797），正式 ZIP 应用包仍未制作。
