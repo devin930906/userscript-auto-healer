@@ -146,3 +146,7 @@ PR #44 增加三项只读源文件校验负例，源 SHA `31a31f111a7e6dbd35dbe4
 [PR #46](https://github.com/devin930906/userscript-auto-healer/pull/46) 新增只读 `verifyBackupRecoverySource`，供未来事务回滚前独立检查指定备份副本的文件身份、SHA-256、字节长度、硬链接别名/符号链接风险与目录替换。不以调用方 `userApproved` 布尔值冒充已认证授权，要求后续受信任原生界面建立授权。Windows 单元测试对真实临时文件验证正常读回、篡改/丢失、越权字段、路径穿越、硬链接伪装及符号链接拒绝。测试的当前主分支 SHA 和结论须以实际 Actions 记录为准。
 
 **范围：TEST-020 仍未完整通过**。本模块不返回文件原文、不编辑或恢复脚本、不授予自动回滚、不代表持久文件锁、故障日志或断电恢复已完成；完整 TEST-020/021、TASK-010、真实 Tampermonkey/业务断言与 GATE-007 仍为发布阻断。
+
+## （7）TEST-019／020／021 本地审核至恢复来源的集成负例（2026-10-19）
+
+[PR #48](https://github.com/devin930906/userscript-auto-healer/pull/48) 新增只针对受信任原生调用方的 `prepareReviewedLocalBackupOnly` 和四项 Windows Node 集成用例；同一请求中复核候选补丁、当前磁盘源指纹、独立备份副本 SHA-256 与只读恢复来源，并在返回前重新读取源文件。验证与失败结果均不授予自动修改/回滚，不泄露路径或脚本内容。源 SHA `3ef164150d66eea542bc741e27e1802181fc5227` 的 [应用 CI #39151296629](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296629) 已 success（164 cases：163 pass、0 fail、1 条件 skip；Electron smoke 通过），[便携 Chrome 专项 #39151296637](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296637) success。**仅为 TEST-019/020/021 局部集成**：仍无可信真实 Tampermonkey/GM/业务来源、独立授权令牌、事务锁、写入故障注入或回滚，完整 TEST 与 GATE 保持未完成。
