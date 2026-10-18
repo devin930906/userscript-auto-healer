@@ -108,9 +108,14 @@ async function createMainWindow(): Promise<void> {
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
+      "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
+      "transfer.items.add(new File(['// other'], 'drop-other.user.js')); " +
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer})); " +
       "const rendered=await new Promise(resolve=>{ const start=Date.now(); const tick=()=>{ " +
-      "const yes=Array.from(document.querySelectorAll('#import-list li')).some(x=>x.textContent.includes('drop-smoke.user.js')); " +
+      "const list=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
+      "const yes=list.filter(x=>x.startsWith('drop-smoke.user.js:')).length===1 && " +
+      "list.filter(x=>x.startsWith('drop-other.user.js:')).length===1 && " +
+      "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
