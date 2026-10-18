@@ -13,6 +13,73 @@ test('TEST-017: explicit consent and bounded lifetime required before binding pr
      {ok:false,code:'INVALID_OPTIONS'});
  }
 });
+test('TEST-017: only supported GM injection timing values can be requested',async()=>{
+ for(const invalid of ['document-body','document-end','document-start;unsafe','',null,17]){
+   assert.deepEqual(await startIsolatedTampermonkeyGmProbe(
+     true,30000,invalid as 'document-start'),{ok:false,code:'INVALID_OPTIONS'});
+ }
+});
+test('TEST-017: document-start invokes GM at injection and defers DOM until ready',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-start');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ assert.equal(probe.runAt,'document-start');
+ assert.match(probe.source,/\/\/ @run-at document-start/);
+ assert.doesNotMatch(probe.source,/\/\/ @run-at document-idle/);
+ let now=probe.expiresAt-1000;
+ let handler:(()=>void)|undefined;
+ const effects={gm:0,queries:0,actions:0,reports:0};
+ const document={
+   readyState:'loading',
+   addEventListener:(type:string,callback:()=>void,options:{once:boolean})=>{
+     assert.equal(type,'DOMContentLoaded');
+     assert.equal(options.once,true);
+     handler=callback;
+   },
+   querySelector:()=>{effects.queries++;return {setAttribute:()=>effects.actions++};}
+ };
+ const clock=class extends Date{static now(){return now;}};
+ runInNewContext(probe.source,{
+   Date:clock,URL,document,
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+   fetch:()=>{effects.reports++;return Promise.resolve();}
+ });
+ assert.deepEqual(effects,{gm:1,queries:0,actions:0,reports:0});
+ assert.equal(typeof handler,'function');
+ handler?.();
+ assert.deepEqual(effects,{gm:1,queries:1,actions:1,reports:1});
+ // A late DOM-ready event must not revive an expired consent window.
+ now=probe.expiresAt+1;
+ handler?.();
+ assert.deepEqual(effects,{gm:1,queries:1,actions:1,reports:1});
+});
+test('TEST-017: document-start expired while parsing never mutates DOM or reports',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-start');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ t.after(()=>started.session.stop());
+ let clockNow=started.session.expiresAt-1;
+ let handler:(()=>void)|undefined;
+ const effects={gm:0,query:0,report:0};
+ runInNewContext(started.session.source,{
+  Date:class extends Date{static now(){return clockNow;}},URL,
+  location:{origin:started.session.origin,href:started.session.origin+'/?mode=fixed'},
+  document:{
+    readyState:'loading',
+    addEventListener:(_name:string,fn:()=>void)=>{handler=fn;},
+    querySelector:()=>{effects.query++;return null;}
+  },
+  GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+  fetch:()=>{effects.report++;return Promise.resolve();}
+ });
+ assert.equal(effects.gm,1);
+ clockNow=started.session.expiresAt;
+ handler?.();
+ assert.deepEqual(effects,{gm:1,query:0,report:0});
+});
 test('TEST-017/018 stage: isolated local probe generates explicit GM userscript but no verified claims',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
