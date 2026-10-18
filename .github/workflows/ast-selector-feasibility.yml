@@ -1,0 +1,27 @@
+name: Static JavaScript selector AST feasibility
+
+on:
+  push:
+    paths:
+      - 'poc/ast-selector-feasibility.cjs'
+      - '.github/workflows/ast-selector-feasibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ast-feasibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse static and dynamic selector fixtures without executing scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          npm install --prefix "$tmp" --no-audit --no-fund --ignore-scripts acorn@8.14.0
+          export NODE_PATH="$tmp/node_modules"
+          node poc/ast-selector-feasibility.cjs
