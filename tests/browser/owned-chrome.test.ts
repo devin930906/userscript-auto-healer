@@ -49,10 +49,19 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.equal(result.ok,true,JSON.stringify(result));
   if(result.ok) {
     stop=result.stop;
-    assert.equal(result.status,'OWNED_CDP_HTTP_VERIFIED');
-    assert.equal(result.websocketHandshakeVerified,false);
+    assert.equal(result.status,'OWNED_CDP_BROWSER_VERIFIED');
+    assert.equal(result.websocketHandshakeVerified,true);
     assert.equal(result.targetVerified,false);
     assert.ok(result.pid>0);
     assert.match(result.chromeVersion,/^\d+\.\d+\.\d+\.\d+$/);
   }
+});
+
+
+import { verifyCdpBrowserWebSocket } from '../../src/browser/cdp-session';
+test('TEST-009: WebSocket handshake never connects to foreign origins',async()=>{
+  assert.equal(await verifyCdpBrowserWebSocket(
+    'ws://outside.example:9223/devtools/browser/aabbccdd',9223,'155.0.1.1'),false);
+  assert.equal(await verifyCdpBrowserWebSocket(
+    'ws://127.0.0.1:9223/devtools/browser/aabbccdd',9223,'not-a-version'),false);
 });

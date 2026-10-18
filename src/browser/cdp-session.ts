@@ -120,3 +120,54 @@ export async function verifyWindowsLoopbackListenerPid(
   if(pid!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
   return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid,executableVerified:false};
 }
+
+
+/** Perform a real, read-only Browser.getVersion CDP WebSocket roundtrip.
+ * No Runtime.evaluate, website navigation, scripts, or GM APIs are invoked.
+ */
+export async function verifyCdpBrowserWebSocket(
+  websocketUrl:string,expectedPort:number,expectedVersion:string
+):Promise<boolean>{
+  if(typeof websocketUrl!=='string'||typeof expectedVersion!=='string'||
+     !/^\d+\.\d+\.\d+\.\d+$/.test(expectedVersion)||
+     !Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535)
+    return false;
+  let parsed:URL;
+  try{parsed=new URL(websocketUrl);}catch{return false;}
+  if(parsed.protocol!=='ws:'||parsed.hostname!=='127.0.0.1'||
+     Number(parsed.port)!==expectedPort||parsed.username||parsed.password||
+     parsed.search||parsed.hash||
+     !/^\/devtools\/browser\/[a-zA-Z0-9-]{8,128}$/.test(parsed.pathname))
+    return false;
+  return new Promise(resolve=>{
+    let client:WebSocket,settled=false;
+    const finish=(passed:boolean)=>{
+      if(settled)return;
+      settled=true;clearTimeout(timer);
+      try{client.close();}catch{ /* socket already closed */ }
+      resolve(passed);
+    };
+    const timer=setTimeout(()=>finish(false),4000);
+    try{
+      client=new WebSocket(websocketUrl);
+      client.addEventListener('open',()=>{
+        try{client.send(JSON.stringify({id:1,method:'Browser.getVersion'}));}
+        catch{finish(false);}
+      });
+      client.addEventListener('message',event=>{
+        try{
+          const payload=JSON.parse(String(event.data)) as {
+            id?:unknown;result?:{product?:unknown};error?:unknown
+          };
+          if(payload.id!==1)return;
+          finish(!payload.error && (
+            payload.result?.product==='Chrome/'+expectedVersion||
+            payload.result?.product==='HeadlessChrome/'+expectedVersion
+          ));
+        }catch{finish(false);}
+      });
+      client.addEventListener('error',()=>finish(false));
+      client.addEventListener('close',()=>finish(false));
+    }catch{finish(false);}
+  });
+}

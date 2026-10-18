@@ -5,15 +5,15 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
-import { inspectCdpVersion, verifyWindowsLoopbackListenerPid } from './cdp-session';
+import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket } from './cdp-session';
 
 export type LaunchFailure = 'NOT_AUTHORIZED'|'ABORTED'|'PREFLIGHT_FAILED'|
-  'BINARY_NOT_VERIFIED'|'LAUNCH_FAILED'|'CDP_TIMEOUT'|'OWNER_MISMATCH'|'VERSION_MISMATCH';
+  'BINARY_NOT_VERIFIED'|'LAUNCH_FAILED'|'CDP_TIMEOUT'|'OWNER_MISMATCH'|'VERSION_MISMATCH'|'WEBSOCKET_VERIFICATION_FAILED';
 export type ManagedLaunchResult =
   | {readonly ok:false;readonly code:LaunchFailure}
-  | {readonly ok:true;readonly status:'OWNED_CDP_HTTP_VERIFIED';
+  | {readonly ok:true;readonly status:'OWNED_CDP_BROWSER_VERIFIED';
       readonly pid:number;readonly chromeVersion:string;readonly browserWebsocket:string;
-      readonly websocketHandshakeVerified:false;readonly targetVerified:false;
+      readonly websocketHandshakeVerified:true;readonly targetVerified:false;
       readonly stop:()=>void};
 export interface ChromeLaunchOptions {
   /** Explicit user approval to launch THIS isolated Chrome, not general script consent. */
@@ -75,10 +75,13 @@ export async function launchApprovedIsolatedChrome(
               const owner=await verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid);
               if(!owner.ok)return {ok:false,code:'OWNER_MISMATCH'};
               if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
+              const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
+                cfg.remoteDebuggingPort,binary.version);
+              if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               retained=true;
-              return {ok:true,status:'OWNED_CDP_HTTP_VERIFIED',pid,
+              return {ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
-                websocketHandshakeVerified:false,targetVerified:false,
+                websocketHandshakeVerified:true,targetVerified:false,
                 stop:()=>stopOwnChild(child)};
             }
           }
