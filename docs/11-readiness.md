@@ -18,7 +18,7 @@
 | Userscript Auto Healer | 测试策略完整 | 已完成 | docs/07-testing.md | 无实际测试代码与结果 | 开发后逐项运行并留证 |
 | Userscript Auto Healer | Stable 门槛完整 | 已完成 | docs/08-release.md | 无真实发布证据 | 逐项执行 GATE |
 | Userscript Auto Healer | Windows EXE 可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 仅 Inno Setup 临时文本安装/卸载通过，产品打包未执行 | 完成 POC-03 与 TEST-027 |
-| Userscript Auto Healer | ZIP 便携可交付 | 受阻 | docs/08-release.md；docs/adr/ADR-004-portable-zip.md | 尚无正式应用 ZIP，未执行完整性、安全解压和真实启动验收 | 执行 ZIP PoC（POC-03C）及 TEST-028 |
+| Userscript Auto Healer | ZIP 便携可交付 | 受阻 | docs/08-release.md；docs/adr/ADR-004-portable-zip.md | POC-03C 原生 ZIP 工具链已通过，但正式应用 ZIP、完整性与干净 Windows 直启验收未执行 | 完成 TASK-020 与 TEST-028 |
 | Userscript Auto Healer | 任务可执行 | 首项有条件可执行 | docs/09-development-plan.md；docs/13-predevelopment-admission.md | 真实 GM 与合成 broken/fixed PoC 均已通过，但不等于自动修复 | TASK-001 仅做安全骨架与测试，后续管理器/修复仍有独立验证门槛 |
 | Userscript Auto Healer | 工程追踪一致 | 待确认 | docs/10-traceability.md | 结构编号检查已通过，但跨文件语义与引用尚未自动全检 | 扩展引用验证并人工复核 |
 | Userscript Auto Healer | 云端工程可用 | 待确认 | docs/08-release.md；Actions 既有 PoC | Ubuntu 文档/Windows CDP/Inno 已有限验证；旧 RAR5 为历史 PoC，正式 ZIP 构建、配额和发布权限仍未验证 | Windows EXE+ZIP 构建/发行验证 |
@@ -58,3 +58,6 @@ POC-04B 在 Ubuntu runner 真正执行 Acorn 的静态 JavaScript AST 样本，�
 
 ## 发行格式更正（2026-10-18，I-010）
 用户已改为 EXE 安装版 + ZIP 便携版。原 RAR5 试用 PoC 仍是历史证据，但 RAR 生产许可证不再属于 Stable 阻断。正式 ZIP 格式、内容完整性、路径安全、干净 Windows 解压/直启分别按 TASK-020、TEST-028、GATE-009/011 验证。当前仅 TASK-001 有条件准入不变；本文件历史研发记录不得被解释为仍需 RAR。
+
+## POC-03C 工具链验收补充
+Windows Actions https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797 已成功通过临时原生 ZIP 创建、PK 文件头、安全单一相对路径、解压与 SHA-256 一致性检查。结论仅解除“标准云端运行器能否制作普通 ZIP”的工具链疑虑，**不解除正式产品 ZIP 的 TEST-028 / GATE-009/011 阻断**。

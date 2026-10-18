@@ -1,6 +1,6 @@
 # 正式开发实施计划
 
-> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE 与历史 RAR5 工具链已有技术实证；现行便携格式改为 ZIP（ZIP 验证尚待执行）。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
+> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE 与历史 RAR5 工具链已有技术实证；现行便携格式改为 ZIP（ZIP 工具链 POC-03C 已有限通过，正式 ZIP 产品验证未执行）。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
 
 ## 开发阶段
 M0：证实 Chrome/管理器/交付可行性；M1：可运行安全入口+导入+静态分析；M2：动态诊断与真实管理器验收；M3：修复/版本/批处理/AI/监控/共享层；M4：风险/性能/集成与 Windows 双包装；M5：全部 Stable 门槛和 Release。未人为指定发布日期。
@@ -57,3 +57,6 @@ POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/
 ## 开发前 AST 技术验证（POC-04B）
 
 真实验证 Acorn 对选择器字面值、拼接/计算成员、嵌套函数与源码行列的解析和未知标记可行：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314。因此 TASK-003 可采用可审计 AST 测试先行，但必须补全真实 .user.js 元数据、作用域/封装分析、备用定位器、动态运行时二次确认与失败样本。该 PoC 的三处动态/未知调用**不得**自动修复，亦不表示已交付 TASK-003。
+
+## POC-03C ZIP 工具链验证记录
+Windows GitHub Actions 已通过原生 ZIP 临时文件头/解压/安全相对路径/SHA-256 往返测试：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797。TASK-020/TEST-028 仍为未开始，正式便携软件未生成。

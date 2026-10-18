@@ -26,3 +26,5 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 
 ## 2026-10-18 ZIP 发行格式变更
 用户已批准 Windows 正式发行改为 **EXE 安装版 + ZIP 便携版**（I-010 / ADR-004）。REQ-028、TEST-028、TASK-020 及 Stable GATE 已更新；不再依赖 RAR 生产许可证。RAR5 试用 PoC 仅为历史技术研究，不等于已生成或验收 ZIP 产品。目前仍没有正式安装包或便携 ZIP。
+
+- **POC-03C 已通过（限于工具链）**：Windows Actions 使用原生 ZIP 压缩，验证文件头、相对路径、解压及 SHA-256 一致性（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797）；仍无正式产品 ZIP、真实运行或 Stable 验收。

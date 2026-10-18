@@ -13,6 +13,7 @@
 | POC-04B | 真 Acorn AST：字面 selector 与动态表达式区分、源码行列/所属函数 | **通过静态解析 PoC** | https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314；三处字面、三处未知；未生成修复补丁、未执行输入脚本 |
 | POC-03A | Inno Setup 6 临时 Windows 安装器生成、安装、卸载 | 已通过工具链 PoC | https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；不是正式应用安装包 |
 | POC-03B | 官方试用 WinRAR 真 RAR5 创建、校验、解压 | 已通过限期评估 | https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242；长期生产使用许可证**未落实** |
+| POC-03C | Windows 原生 ZIP 创建/解压/哈希往返 | **已通过工具链 PoC** | https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797；不等于正式应用便携 ZIP 或 GATE 通过 |
 
 ### POC-04A 人工故障/修正场景：可复用基准
 
@@ -58,4 +59,4 @@
 最新进度以每次重新读取 `main`、PR/Issues、CI 为准，不使用固定 SHA 假设。若本文件与 `docs/11-readiness.md` 结论冲突，应基于真实 GitHub Actions 记录同步修订，不得以纯文字或临时工具链 PoC 代替产品验收。完成准入事项后，由 `docs/09-development-plan.md` 进入 TASK-001；继续遵守 `AGENTS.md`，原则上复用现有主集成路径，不积累重复 PR/分支。
 
 ## 2026-10-18 便携发行格式更新
-依据用户新决定 I-010 / ADR-004，正式 Stable 必需文件现为 EXE 安装版与 ZIP 便携版。旧 RAR5 试用 PoC 仅是历史记录，不再需要为正式 ZIP 购买 RAR 生产许可证。ZIP 工具链 POC-03C、正式 TASK-020 / TEST-028 仍需执行；TASK-001 有条件准入状态不变。
+依据用户新决定 I-010 / ADR-004，正式 Stable 必需文件现为 EXE 安装版与 ZIP 便携版。旧 RAR5 试用 PoC 仅是历史记录，不再需要为正式 ZIP 购买 RAR 生产许可证。ZIP 工具链 POC-03C 已在云端有限通过，正式 TASK-020 / TEST-028 仍需执行；TASK-001 有条件准入状态不变。

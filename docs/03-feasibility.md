@@ -18,7 +18,7 @@ A: Electron + TypeScript/Node（统一 GUI、AST、CDP、Windows 安装器）；
 | REF-08 | GitHub 托管运行器 | https://docs.github.com/en/actions/reference/runners/github-hosted-runners | 可设计 windows-2025 x64 工作流，当前仓库 Actions 权限/用量尚未读取 |
 | REF-09 | RAR 与 WinRAR EULA | https://www.rarlab.com/license.htm | 40 天试用期后须购买许可证；不能随软件打包未授权 WinRAR |
 | REF-10 | RAR 命令行工具 | https://www.win-rar.com/cmd-shell-mode.html?L=1 | Windows WinRAR 提供 rar.exe，支持命令行创建；实际运行器安装与许可证待验证 |
-| REF-11 | GitHub 工作流工件 | https://docs.github.com/en/actions/tutorials/store-and-share-data | 构建工件是工作流归档，最终 .rar/.exe 需作为正式文件本体检验 |
+| REF-11 | GitHub 工作流工件 | https://docs.github.com/en/actions/tutorials/store-and-share-data | 构建工件是工作流归档，现行 .zip/.exe 需作为正式发行文件本体检验（旧 RAR 已替代） |
 
 ## 能力验证
 CDP 浏览器协议读取：官方机制已确认；完整跨域/闭合 Shadow DOM 获取能力不得保证。AST 只覆盖可静态确定的调用；闭包/动态拼接转运行时待确认。Tampermonkey 与不同 Chrome/Profile 的真实运行链：未验证。第三方 AI 模型列表端点并非所有服务同构：需兼容检测及手填 fallback。
@@ -52,7 +52,7 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 - **扩展权限复测（2026-10-18）**：Windows Chromium 独立临时 Profile 中，已实际找到 Violentmonkey 扩展的 `allow-user-scripts` 控件，读取状态从 `before=false` 变为 `after=true`，确认开关可按用户授权启用；仍在确认安装后报告 `INCOMPLETE POC-02B`，没有脚本 DOM 标记或 GM_getValue 成功证据。日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39090258155。**缺少此开关并非能够单独解释所有失败，根因仍无法确认。**
 - **关键权限机制**：Chrome 138 及以后，需要用户在扩展详情页主动打开「Allow User Scripts」，不等于开启 CDP 或安装扩展即可启用。官方：https://developer.chrome.com/docs/extensions/reference/api/userScripts；https://developer.chrome.com/blog/chrome-userscript。该权限缺失可能解释当前注入失败，但**具体根因尚未核实**。必须设计真实扩展授权预检与按版本提示，不得自动绕过用户同意。
 - **POC-03A 通过（有限）**：Windows runner 的 Inno Setup 6 实际生成临时文本 .exe 安装程序，完成安装/卸载；未制作真正产品安装版。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574。
-- **POC-03B 通过（有限）**：RARLab 官方 WinRAR 7.23 评估安装器的 Authenticode 签名有效；实际创建、校验与解压 RAR5，原始与解压文件 SHA-256 一致。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。RAR 官方 EULA（https://www.rarlab.com/license.htm）允许限期评估，**正式长期 CI 使用尚无获授权的创建器/许可证，仍然阻断 Stable**；评估工作流已限制为手动确认资格，不在每次提交运行。
+- **POC-03B 通过（有限）**：RARLab 官方 WinRAR 7.23 评估安装器的 Authenticode 签名有效；实际创建、校验与解压 RAR5，原始与解压文件 SHA-256 一致。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。RAR 官方 EULA（https://www.rarlab.com/license.htm）允许限期评估；当时的 RAR 正式授权阻断已被现行 ZIP 决策 I-010/ADR-004 解除；评估工作流已限制为手动确认资格，不在每次提交运行。
 - **剩余真实阻断**：用户目标 Chrome 与油猴管理器矩阵、扩展级权限+真实脚本加载/GM API/业务断言、最终 EXE 和 ZIP 应用包直启/升级与 ZIP 完整性测试、供应链/最低系统基线均需核验。POC-04 未运行。所有技术 PoC 仅处理临时测试资料，无正式产品功能代码。
 
 - **POC-02C 历史失败案例，2026-10-18**：在托管 Windows 上使用同一临时 Profile 启用 Allow User Scripts 后**完整关闭并重新打开浏览器**，已真实调用扩展源中的 `chrome.userScripts.getScripts()`（available=true，registrations=1）；点击原生 Violentmonkey 安装确认后，在扩展本地存储看到了 `scr:1` 与 `code:1`，其中 `config.enabled=1`，`meta.match=["http://127.0.0.1/*"]`，而 `userScripts` 的注册记录 ID 为 `1001`、`matches=["<all_urls>"]`、`allFrames=true`、`runAt=document_start`。但测试页仍未出现脚本执行标记，也未证明 `GM_getValue` 运行，**此轮 POC-02B 未通过，现已被下述标准 HTTPS 场景的真实通过结果部分解除**。真实失败运行：https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121。以上仅限版本 Violentmonkey 2.49.0 + 隔离 Playwright Chromium（并非用户选择的正式 Chrome），不能据此断言管理器或 API 在所有浏览器失效。已避免自动测试在未达成业务断言时报告 overall success。
@@ -77,3 +77,6 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 
 ## 2026-10-18 发行格式变更
 用户新指令 I-010 将便携发行格式由 RAR 改为 ZIP，现行基线见 ADR-004、REQ-028、TEST-028、TASK-020 与 docs/08-release.md。REF-09/10 和 POC-03B 的 RAR 条款、试用工具及历史结果仅用于追溯旧选型，不再是产品发行阻断。ZIP 工具链 PoC 与正式 ZIP 应用验收须分别取得真实证据，不得借用历史 RAR 通过结果。
+
+### POC-03C — Windows 云端原生 ZIP 工具链（2026-10-18）
+真实 Windows Actions 已使用 PowerShell `Compress-Archive` 创建临时 `.zip` 测试归档，并检查 ZIP PK 文件头、单一安全相对路径条目、`Expand-Archive` 解压与 SHA-256 内容往返一致，Job 成功：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797。本项验证确认原生 ZIP 工具链在该 runner 可用，不涉及实际产品可执行程序及正式便携启动，故不能代替 TASK-020 / TEST-028 / GATE-009。

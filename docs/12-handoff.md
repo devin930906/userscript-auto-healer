@@ -49,3 +49,6 @@ GitHub 连接账户有该仓库写入权限；最新 Ubuntu 文档 CI https://gi
 
 ## 2026-10-18 ZIP 发行续接说明
 用户已明确将原 RAR 便携改为真实 ZIP 便携，安装 EXE 不变。I-010/ADR-004 生效；后续 TASK-020 生成并验证真实产品 ZIP。RAR5 PoC 和试用许可证信息仅存档，不是现行 Stable 采购或发布阻断。继续从 TASK-001 条件准入推进，不把格式变更误判为正式产品功能已开发。
+
+## ZIP 工具链执行证据
+POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，run：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797；该成功只是临时夹具测试，不是用户实际可运行的便携程序。后续仍须实现 TASK-020/TEST-028 并通过 GATE。旧 RAR 试用工作流已从现行 GitHub Actions 工作流删除，历史评估脚本仍留存供审计，禁止将其纳入正式发行。
