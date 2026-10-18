@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.cjs",
-    "test": "npm run build && node --test dist/tests/security/desktop-boundary.test.js dist/tests/import/import-service.test.js",
+    "test": "npm run build && node --test dist/tests/security/desktop-boundary.test.js dist/tests/import/import-service.test.js dist/tests/analyze/metadata.test.js dist/tests/analyze/selector.test.js",
     "start": "electron ."
   },
   "engines": {
@@ -17,5 +17,8 @@
     "@types/node": "22.18.0",
     "electron": "44.9.0",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "acorn": "8.14.0"
   }
 }
