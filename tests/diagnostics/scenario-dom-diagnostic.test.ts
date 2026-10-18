@@ -143,7 +143,8 @@ test('TEST-013: stable sampling rejects iframe, shadow and blind-spot drift',()=
      selectorCountChanged:false,domCountChanged:false,
      userscriptVerified:false as const
    };
-   const result=summarizeReadOnlyScenarioDomSeries(baseScenario,series,true);
+   const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
+     series as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
    assert.equal(result.status,'BLOCKED',JSON.stringify(summary));
    assert.equal(result.code,'UNSTABLE_OBSERVATION');
    assert.equal(result.automaticPatchAllowed,false);
