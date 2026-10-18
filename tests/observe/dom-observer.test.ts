@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {summarizeDomTree,observeApprovedDom} from '../../src/observe/dom-observer';
+import {summarizeDomTree,observeApprovedDom,isApprovedTopFrame} from '../../src/observe/dom-observer';
 test('TEST-010: iframe and shadow scope remain limited, not full-page coverage',()=>{
   const node={nodeType:9,nodeName:'#document',children:[
     {nodeType:1,nodeName:'HTML',children:[
@@ -30,4 +30,21 @@ test('TEST-012: missing authorization/session never produces a runtime claim',as
     {ok:false,code:'NOT_AUTHORIZED'});
   assert.deepEqual(await observeApprovedDom(unavailable,target,'https://example.com/',true),
     {ok:false,code:'UNVERIFIED_BROWSER'});
+});
+
+test('TEST-010: CDP snapshot rejects a top-frame origin switch, opaque URL and malformed frame tree',()=>{
+  assert.equal(isApprovedTopFrame({frame:{url:'https://example.com/next'}},'https://example.com'),true);
+  for(const value of [
+    {frame:{url:'https://elsewhere.example/'}},
+    {frame:{url:'https://example.com.evil.test/'}},
+    {frame:{url:'about:blank'}},
+    {frame:{url:'data:text/html,hi'}},
+    {frame:{url:'https://user:pass@example.com/'}},
+    {frame:{url:'invalid URL'}},
+    {frame:{url:12}},
+    {childFrames:[{frame:{url:'https://example.com/'}}]},
+    null
+  ]) {
+    assert.equal(isApprovedTopFrame(value,'https://example.com'),false);
+  }
 });
