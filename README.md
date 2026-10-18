@@ -13,3 +13,11 @@
 
 ## 运行与发布状态
 尚无应用入口、安装程序、便携包或正式 Release。不得将本准备文件当作可执行软件。
+
+## 2026-10-18 开发前实测状态
+
+Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0 注入与 `GM_getValue` 调用，及**人工预设**的 `broken`/ `fixed` 选择器业务断言（https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851）。这并不代表自动修复功能已开发。
+
+- **条件性首期入口**：ADR-001 已将 Electron+TypeScript 选为可修订的安全骨架工程基线，只允许基于 AGENTS.md / docs/09-development-plan.md 开始有证据的 TASK-001 安全实现。
+- **尚未完成的前置与发布验收**：用户真实 Tampermonkey/Windows/Chrome 与便携版、用户授权实际失效脚本/业务断言、自动修复和回滚、正式 EXE/RAR 双包、RAR 长期生产许可与全部 Stable 门槛。
+- 证据矩阵与分阶段准入：`docs/13-predevelopment-admission.md`；最新准入结论：`docs/11-readiness.md`；续接：`docs/12-handoff.md`。

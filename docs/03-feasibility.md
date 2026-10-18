@@ -64,3 +64,9 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 - **重要对照**：同一临时 Chromium 上，Chrome 官方 `chrome.userScripts.register()` 直接注入标记也成功，且扩展 HTTP webRequest 监听能观察到测试页请求。早先 `http://127.0.0.1:<动态端口>/fixture` 场景的脚本曾未执行；改用规范的标准 HTTPS 目标网址后通过。结合 Violentmonkey 公共源码中的 host 匹配与动态注册逻辑，非标准端口差异是有证据的**可能原因**；不能据此对第三方管理器普遍的端口兼容性作最终结论。尝试将临时服务绑定 Windows 80 端口曾得到 `EACCES`，仅说明该 runner 的受限端口不可用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092300187），不意味着真实油猴管理器不兼容。
 - **与正式项目严格区分**：此 PoC 证明了 Windows 云端至少存在一条可工作的“扩展安装→用户授予脚本权限→安装真实 .user.js→网页注入→GM API 读取”的链路；**没有**证明 Tampermonkey、用户任选 Google Chrome/便携 Chrome、登录场景、真实损坏脚本诊断与自动修复、共享兼容层、稳定恢复、真实 EXE/便携 RAR 可以工作。PoC 成功不等于 TEST-018 或 Stable GATE 已通过。
 - **开发前准入续接**：已解除“任何真实管理器都不能运行 GM API”的关键技术疑虑；待确认首选管理器及受支持 Chrome/Windows 范围、实际业务断言样本与条件性 ADR-001，再判定是否可进入 TASK-001。正式 RAR 创建器的持续合法授权应作为产品正式发布硬门槛，不因一次评估通过而自动放行。
+
+### POC-04A：已知失效选择器与人工更正版（限定真实管理器基准）
+
+真实 Windows 2025 runner 的 Violentmonkey MV3 2.49.0 测试矩阵已分别执行两个独立的 `.user.js` 情境：旧定位器 `#poc-obsolete-anchor` 虽然脚本与 GM_getValue 真实执行，但业务结果 `missing-target`；新定位器 `#poc-new-anchor` 同样经真实脚本管理器执行后业务结果为 `recovered` 且目标动作完成。两项实际通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851；代码路径 `poc/windows-manager-extension.cjs`、`.github/workflows/windows-manager-extension-poc.yml`。这是合成测试中**事先人工准备的两个版本**，不是程序已经自动诊断或修复，不能替代真实用户油猴脚本修复前后的测试。
+
+范围、依赖、正式首期工程基线和开发/发布不同准入门槛，统一归档：docs/13-predevelopment-admission.md。Windows 10/11 实际设备、目标 Tampermonkey、部分便携 Chrome 和真实受登录保护的业务场景仍需后续实际授权验证。

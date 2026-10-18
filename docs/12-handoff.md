@@ -1,6 +1,6 @@
 # 项目开发交接
 
-> 状态：准备资料已陆续保存至 main，正式产品功能代码未开始；当前准入“暂缓准入”。
+> 状态：准备材料已保存 main；仅首个 TASK-001 安全骨架的技术准备有条件完成，全部前置/实际管理器支持范围与 Stable 尚未完成，产品源码仍未开始。
 
 ## 项目身份
 仓库 https://github.com/devin930906/userscript-auto-healer；默认分支 main；产品为 Windows 本地优先、自动诊断与保守修复因网页变化失效的油猴脚本，交付 EXE 安装版与真实 RAR 便携包。不得混淆其他用户项目。
@@ -28,7 +28,10 @@ BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome
 - 当前准备阶段重点：已有真实 Violentmonkey .user.js 注入与 GM_getValue 调用成功证据，下一步转向确认目标管理器、目标 Chrome/Windows 支持矩阵、真实坏脚本/业务断言及 ADR-001；生产 RAR 许可在发布阶段仍须落实。不得把隔离环境技术 PoC 当 Stable 功能完成。
 
 ## 开发起点
-当前为**限定核心可行性已通过、全范围开发准入暂缓**：Windows runner POC-01A/B 以及 Violentmonkey POC-02D 的真实脚本注入和实际 GM_getValue 调用均已通过，但首选 Tampermonkey/Chrome 与业务脚本支持范围和 ADR-001 仍需确认，准入复核完成后，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
+
+**仅对 TASK-001 开放有条件工程入口**：Chrome/CDP 系统和独立路径 PoC 已通过，Violentmonkey 2.49.0 在隔离 Windows Chromium 真实安装 .user.js 并调用 GM_getValue；另外两组独立 `broken`（旧 selector 未找到、业务失败）和 `fixed`（新 selector 命中、业务恢复）的人工作成版本已经得到真实管理器业务断言。记录：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。后者**不是自动修复实现**。
+
+ADR-001 已有条件选定 Electron+TypeScript 作为 TASK-001 安全骨架基线；首任务需真正编写并测试 sandbox/contextIsolation、Node Integration 关闭、白名单 IPC 与安全配置入口，现阶段仍然没有这些正式产品代码。用户实际 Tampermonkey/Windows 10 或 11/不同便携 Chrome、实际损坏脚本及登录站点的完整业务回归均未验证；在后续任务各自的真实验收前不得声称支持。RAR 长期生产许可、产品真实 EXE/RAR 双包属于正式 Stable 发布门槛，并不因一次限期试用通过而解除。证据矩阵和恢复执行说明见 docs/13-predevelopment-admission.md。
 
 ## 任务顺序
 M0：POC-01/02，RAR 合规供应调查/POC-03；M1：TASK-001..004；M2：TASK-005..008；M3：TASK-009..017；M4：TASK-018..020；M5：TASK-021。依赖顺序与并发边界以 docs/09-development-plan.md 实际编号为准，不盲目逐编号执行有前置未满足的任务。

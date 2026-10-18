@@ -1,6 +1,6 @@
 # 系统整体架构
 
-> 状态：设计基线，核心 Chrome/CDP、限定 Violentmonkey 真脚本+GM API 和临时双格式工具链均有真实 PoC；应用框架仍是待确定的技术候选。与 02、03 及 ADR 对应。
+> 状态：Chrome/CDP、限定真实 Violentmonkey+GM API、两组合成 broken/fixed 业务断言与临时双格式工具链均有真实 PoC；ADR-001 已有条件选定 Electron+TypeScript 供 TASK-001 安全骨架实施，其余实机支持矩阵和最终 Stable 未验收。
 
 ## 整体结构
 Windows 用户界面/受限配置入口 → BatchCoordinator → Import/Metadata/Scenario → ChromeLauncher/CDP + ManagerAdapter → Diagnostics → LocalRepair/可选 AIGateway → AcceptanceGate → VersionStore/Export → HealthHistory；CompatibilityLayer 为带版本的共享定位能力。各服务返回类型化结果与证据引用，不能跳过真实验收/备份。

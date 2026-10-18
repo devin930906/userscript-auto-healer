@@ -52,6 +52,15 @@ TEST-001..028 对应 REQ-001..028；NFR 安全对应 007/009/015/020/026，兼�
 ## 真实环境验证
 报告必须记录脚本和网页版本/Hash、Chrome 可执行文件真实路径、Profile、端口、扩展版本和安装状态、@grant、页面前置状态、执行步骤、断言与截图/日志（全部脱敏）。管理器兼容测试的必要证据应分层记录：扩展 Worker、用户脚本授权、浏览器内脚本存储与启用、@match、注册的 loader 和站点权限、目标页面脚本真实注入、GM API、业务断言。**只满足前六项不能判定 TEST-018 通过**；2026-10-18 非标准本地动态端口 POC 曾注册但不执行（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121），在标准 HTTPS 的 IANA 保留示例网址上，**真实 Violentmonkey .user.js 注入、调用 GM_getValue 的默认值断言已通过**（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。这一实证仅是准备阶段的可行性验证，不包含修复后回归，不可直接标记产品 TEST-018 通过。目标兼容矩阵应同时覆盖标准/非标准端口的合法 @match、扩展授权/沙箱、真实浏览器差异。CI 不能启动交互式 Chrome 管理器时另由获授权 Windows VM 验证，不得替代为模拟结果。
 
+## 开发前 POC-04A：已知选择器失效与人工修正回归
+
+GitHub Windows 2025 的两个**独立**真实 Violentmonkey MV3 v2.49.0 任务（`.github/workflows/windows-manager-extension-poc.yml` 中的 `broken/fixed` matrix）已通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。
+
+- `broken`：真实油猴脚本与 GM_getValue 仍可执行，但脚本定位 `#poc-obsolete-anchor`，目标 DOM 只有 `#poc-new-anchor`，业务断言 `missing-target` 且无目标动作。
+- `fixed`：提前人工修改为 `#poc-new-anchor`，真实油猴脚本与 GM API 执行，业务断言 `recovered`，目标元素动作标记存在。
+- 这组样本由测试代码人工预置/更改定位器，不实现自动故障分类、补丁推导、原始文件覆盖、回滚。只能证明**方法能在真实管理器中区分功能失败与恢复**，未来 TEST-013/014/018/020/021 仍需在实际产品中实现与验证。
+- 如果只检测到元素、只注册 userScripts loader、脚本没有运行或 GM API 调用未成功，不能把 POC、TEST-018 或产品判为 VERIFIED。真实受支持范围另见 docs/13-predevelopment-admission.md。
+
 ## 回归要求
 任何影响诊断规则、脚本元数据、回滚、Chrome 连接或共享层的变更，必须运行相关反例；共享层更新还需全部使用者回归。修复后仅 TEST-018 类真断言合格才可声称功能恢复。
 
