@@ -9,7 +9,7 @@ const runtime=inspectTampermonkeyTargetHints([
   url:'chrome-extension://'+TAMPERMONKEY_EXTENSION_ID+'/background.js'}
 ]);
 const report={
- extensionId:TAMPERMONKEY_EXTENSION_ID,version:'5.5.1',
+ extensionId:TAMPERMONKEY_EXTENSION_ID as string,version:'5.5.1',
  enabled:true,userScriptsPermission:true,userScriptsAllowed:true,
  scriptInstalled:true,scriptEnabled:true
 };
