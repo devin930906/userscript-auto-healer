@@ -13,7 +13,7 @@ import {MAX_SCRIPT_BYTES} from '../import/import-service';
 
 type FingerprintFailure=
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SYMLINK_REJECTED'|
-  'NOT_REGULAR_FILE'|'SIZE_LIMIT'|'FILE_CHANGED'|'HASH_MISMATCH'|'IO_FAILURE';
+  'NOT_REGULAR_FILE'|'HARDLINK_REJECTED'|'SIZE_LIMIT'|'FILE_CHANGED'|'HASH_MISMATCH'|'IO_FAILURE';
 export type SourceFingerprintResult=
  |Readonly<{status:'BLOCKED';reason:FingerprintFailure;automaticPatchAllowed:false}>
  |Readonly<{status:'MATCHED_READ_ONLY';sha256:string;byteLength:number;
@@ -60,13 +60,18 @@ export async function verifyApprovedSourceFingerprint(input:unknown):Promise<Sou
     const initial=await lstat(sourcePath,{bigint:true});
     if(initial.isSymbolicLink())return blocked('SYMLINK_REJECTED');
     if(!initial.isFile())return blocked('NOT_REGULAR_FILE');
+    // A second pathname to this inode bypasses source-path consent and
+    // cannot be safely coordinated by the later native source mutex.
+    if(initial.nlink!==1n)return blocked('HARDLINK_REJECTED');
     if(initial.size===0n||initial.size>BigInt(MAX_SCRIPT_BYTES))
       return blocked('SIZE_LIMIT');
 
-    const handle=await open(sourcePath,constants.O_RDONLY);
+    // Refuse a pathname that turns into a symlink after the initial lstat,
+    // when supported by the operating system. Descriptor checks still apply.
+    const handle=await open(sourcePath,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
     try{
       const opened=await handle.stat({bigint:true});
-      if(!opened.isFile()||!sameIdentity(initial,opened))
+      if(!opened.isFile()||opened.nlink!==1n||!sameIdentity(initial,opened))
         return blocked('FILE_CHANGED');
       const h=createHash('sha256');
       const buffer=Buffer.allocUnsafe(64*1024);
@@ -80,7 +85,7 @@ export async function verifyApprovedSourceFingerprint(input:unknown):Promise<Sou
       }
       const after=await handle.stat({bigint:true});
       const onPath=await lstat(sourcePath,{bigint:true});
-      if(onPath.isSymbolicLink()||!onPath.isFile()||
+      if(onPath.isSymbolicLink()||!onPath.isFile()||onPath.nlink!==1n||
          !sameIdentity(initial,after)||!sameIdentity(after,onPath)||
          BigInt(count)!==after.size)
         return blocked('FILE_CHANGED');
