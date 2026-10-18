@@ -145,3 +145,31 @@ test('TEST-013: log capacity rejects invalid resource allocations',()=>{
     assert.throws(()=>new BoundedFaultLog(capacity),/INVALID_CAPACITY/);
   }
 });
+
+test('TEST-013: hostile diagnostic accessors and proxy traps fail closed',()=>{
+  const throwingGetter={
+    get id():string{throw new Error('private stack must never run');},
+    code:'SELECTOR_NOT_FOUND'
+  };
+  const accessorCode={
+    id:'opaque',
+    get code():string{throw new Error('private token must never run');}
+  };
+  const hostileProxy=new Proxy({id:'opaque',code:'SELECTOR_NOT_FOUND'},{
+    ownKeys(){throw new Error('untrusted proxy trap');}
+  });
+  const contaminated=Object.create({id:'inherited'});
+  contaminated.code='SELECTOR_NOT_FOUND';
+  for(const candidate of [throwingGetter,accessorCode,hostileProxy,contaminated]){
+    assert.doesNotThrow(()=>{
+      const classified=classifyFaultSignals([candidate]);
+      assert.equal(classified.status,'INVALID_EVIDENCE');
+      assert.equal(classified.category,'UNKNOWN');
+      assert.equal(classified.automaticPatchAllowed,false);
+      assert.deepEqual(classified.evidenceIds,[]);
+    });
+    const log=new BoundedFaultLog(2);
+    assert.doesNotThrow(()=>log.record([candidate]));
+    assert.equal(log.list()[0].status,'INVALID_EVIDENCE');
+  }
+});

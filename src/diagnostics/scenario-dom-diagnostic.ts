@@ -7,7 +7,7 @@ import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
 import {observeApprovedDom,observeApprovedDomSeries,type DynamicObservation,type ObservationResult} from '../observe/dom-observer';
 import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
-import {classifyFaultSignals,type FaultTriage,type FaultSignal} from './fault-classifier';
+import {classifyFaultSignals,BoundedFaultLog,type FaultTriage,type FaultSignal} from './fault-classifier';
 
 export type ScenarioDomTriageCode =
  'NONE'|'NOT_AUTHORIZED'|'INVALID_SCENARIO'|'UNSUPPORTED_SCENARIO'|
@@ -266,4 +266,35 @@ export async function inspectApprovedScenarioDomSeries(
    checked.selectors,sampleCount,intervalMs,signal);
  if(signal?.aborted)return blocked('CANCELLED');
  return summarizeReadOnlyScenarioDomSeries(scenario,observed,true);
+}
+
+/** TASK-008 / TEST-013: bridge real authorized read-only CDP diagnostics to
+ * the existing bounded, local-only, strictly minimized fault journal.
+ * The journal receives opaque evidence IDs and signal codes only; no URLs,
+ * selectors, script hashes, DOM content, extension data, or error messages.
+ * This is NOT provenance, Tampermonkey, GM or business attestation.
+ */
+export async function inspectAndLogApprovedScenarioDomSeries(
+ browser:ManagedLaunchResult,target:OpenTargetResult,scenario:unknown,
+ userApproved:boolean,journal:BoundedFaultLog,
+ sampleCount=3,intervalMs=250,signal?:AbortSignal
+):Promise<ScenarioDomTriage>{
+ const result=await inspectApprovedScenarioDomSeries(
+   browser,target,scenario,userApproved,sampleCount,intervalMs,signal);
+ let safeSignals:FaultSignal[]=[{
+   id:'scenario_observation_unverified',code:'UNVERIFIED_OBSERVATION'
+ }];
+ if(result.status==='LIMITED_DOM_SIGNAL_ONLY'&&result.code==='NONE'){
+   if(result.triage.status==='SINGLE_CAUSE_SIGNAL_ONLY'&&
+      result.triage.category==='SELECTOR_ASSERTION'&&
+      result.triage.evidenceIds.length>0){
+     safeSignals=result.triage.evidenceIds.map(id=>({
+       id,code:'SELECTOR_NOT_FOUND' as const
+     }));
+   }else if(result.triage.status==='NO_FAULT_SIGNAL'){
+     safeSignals=[{id:'scenario_dom_checked',code:'NO_FAILURE_OBSERVED'}];
+   }
+ }
+ journal.record(safeSignals);
+ return result;
 }

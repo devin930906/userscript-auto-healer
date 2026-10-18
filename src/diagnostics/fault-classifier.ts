@@ -59,6 +59,7 @@ function triage(
  * Even a single selector failure is *not* authorization to edit a userscript.
  */
 export function classifyFaultSignals(input:unknown):FaultTriage {
+  try{
   if(!Array.isArray(input)||input.length===0||input.length>MAX_SIGNALS)
     return triage('INVALID_EVIDENCE','UNKNOWN',[]);
   const ids:string[]=[];
@@ -69,18 +70,28 @@ export function classifyFaultSignals(input:unknown):FaultTriage {
   for(const item of input){
     if(item===null||typeof item!=='object'||Array.isArray(item))
       return triage('INVALID_EVIDENCE','UNKNOWN',[]);
-    const record=item as Record<string,unknown>;
-    if(Object.keys(record).sort().join(',')!=='code,id'||
-      typeof record.id!=='string'||!safeId.test(record.id)||
-      typeof record.code!=='string'||
-      !Object.prototype.hasOwnProperty.call(signalCategories,record.code)||
-      unique.has(record.id))
+    // Read descriptors instead of invoking hostile accessor properties.
+    // Proxy traps and revoked proxies can throw: the enclosing fail-closed
+    // boundary returns INVALID_EVIDENCE without retaining raw payloads.
+    const fields=Object.getOwnPropertyDescriptors(item);
+    if(Reflect.ownKeys(fields).length!==2||
+      !Object.prototype.hasOwnProperty.call(fields,'id')||
+      !Object.prototype.hasOwnProperty.call(fields,'code')||
+      !Object.prototype.hasOwnProperty.call(fields.id,'value')||
+      !Object.prototype.hasOwnProperty.call(fields.code,'value'))
       return triage('INVALID_EVIDENCE','UNKNOWN',[]);
-    unique.add(record.id);
-    ids.push(record.id);
-    if(record.code==='UNVERIFIED_OBSERVATION')unknown=true;
-    if(record.code==='NO_FAILURE_OBSERVED')noFailureObserved=true;
-    const category=signalCategories[record.code as FaultSignalCode];
+    const id:unknown=fields.id.value;
+    const code:unknown=fields.code.value;
+    if(typeof id!=='string'||!safeId.test(id)||
+      typeof code!=='string'||
+      !Object.prototype.hasOwnProperty.call(signalCategories,code)||
+      unique.has(id))
+      return triage('INVALID_EVIDENCE','UNKNOWN',[]);
+    unique.add(id);
+    ids.push(id);
+    if(code==='UNVERIFIED_OBSERVATION')unknown=true;
+    if(code==='NO_FAILURE_OBSERVED')noFailureObserved=true;
+    const category=signalCategories[code as FaultSignalCode];
     if(category!==null)categories.add(category);
   }
   // A clean observation contradicts any explicit fault in the same evidence
@@ -90,6 +101,9 @@ export function classifyFaultSignals(input:unknown):FaultTriage {
   if(categories.size>1)return triage('MULTIPLE_CAUSE_SIGNALS','UNKNOWN',ids);
   if(categories.size===0)return triage('NO_FAULT_SIGNAL','UNKNOWN',ids);
   return triage('SINGLE_CAUSE_SIGNAL_ONLY',[...categories][0],ids);
+  }catch{
+    return triage('INVALID_EVIDENCE','UNKNOWN',[]);
+  }
 }
 
 export interface SafeFaultLogEntry extends FaultTriage {
