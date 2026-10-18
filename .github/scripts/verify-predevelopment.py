@@ -87,6 +87,26 @@ def check_stage_contract():
         content = read(path)
         for marker in markers:
             assert marker in content, f"{path}: stage/handoff marker missing: {marker}"
+    # Final phase-4 handoff must reflect the latest evidence, not historic snapshots.
+    current_plan = read("docs/09-development-plan.md")
+    current_ready = read("docs/11-readiness.md")
+    current_handoff = read("docs/12-handoff.md")
+    current_admission = read("docs/13-predevelopment-admission.md")
+    live_tm = read("docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md")
+    assert "M4：安全恢复及 EXE/RAR 测试" not in current_plan, "Obsolete RAR roadmap"
+    assert "M4：安全恢复及 EXE/ZIP 正式产品测试" in current_plan, "ZIP roadmap absent"
+    assert "现行 ZIP 格式需验证" not in current_plan, "ZIP toolchain PoC improperly pending"
+    assert "POC-02T-LIVE" in current_plan and "TASK-001" in current_plan
+    assert "## （4）最终三项收口审查" in current_ready, "Missing final phase-4 review"
+    assert "文档一致性复核" in current_ready and "准入结论确认" in current_ready
+    assert "（7）交接资料整理" in current_ready
+    assert "有条件准入" in current_ready and "Stable 发布门槛尚未达到" in current_ready
+    assert "## （4）终局交接收据" in current_handoff, "No future-session handoff"
+    assert "TASK-001" in current_handoff and "正式产品源码尚未" in current_handoff
+    assert "POC-02T-LIVE" in current_admission and "POC-02T-LIVE" in current_handoff
+    assert "GM_getValue" in live_tm and "temporaryScriptMarkerAbsent" in live_tm
+    assert "不是 GitHub Actions" in live_tm, "Real-browser evidence overstated as cloud PoC"
+    assert "TEST-017/018" in current_handoff, "Future real-manager product gate missing"
     # Verify current ZIP release contract, allowing historical RAR PoC evidence.
     req = read("docs/02-requirements.md")
     tests = read("docs/07-testing.md")
