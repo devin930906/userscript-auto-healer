@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson } from '../../src/browser/owned-chrome';
+import { openApprovedTarget } from '../../src/browser/cdp-target';
+import { createServer } from 'node:http';
 
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
@@ -54,6 +56,25 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     assert.equal(result.targetVerified,false);
     assert.ok(result.pid>0);
     assert.match(result.chromeVersion,/^\d+\.\d+\.\d+\.\d+$/);
+    const fixture=createServer((_req,res)=>{
+      res.writeHead(200,{'Content-Type':'text/html'});
+      res.end('<!doctype html><title>Approved local test</title>');
+    });
+    await new Promise<void>((resolve,reject)=>{
+      fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
+    });
+    t.after(()=>new Promise<void>(resolve=>fixture.close(()=>resolve())));
+    const address=fixture.address();
+    if(!address||typeof address==='string')throw Error('MISSING_LOCAL_FIXTURE');
+    const site='http://127.0.0.1:'+address.port+'/';
+    assert.deepEqual(await openApprovedTarget(result,site,false),
+      {ok:false,code:'NOT_AUTHORIZED'});
+    const target=await openApprovedTarget(result,site,true);
+    assert.equal(target.ok,true,JSON.stringify(target));
+    if(target.ok){
+      assert.equal(target.status,'TARGET_ID_AND_URL_MATCH_ONLY');
+      assert.equal(target.businessVerified,false);
+    }
   }
 });
 
@@ -89,4 +110,13 @@ test('TEST-009: CDP JSON accepts split chunks but rejects malformed UTF-8',async
   assert.deepEqual(await readBoundedCdpJson(split),{Browser:'Chrome/155.0.1.1'});
   assert.equal(await readBoundedCdpJson(new Response(
     new Uint8Array([0x7b,0xff,0x7d]))),null);
+});
+
+
+test('TEST-009: target creation is rejected without an authenticated owned session',async()=>{
+  const missing={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+  assert.deepEqual(await openApprovedTarget(missing,'https://example.com/',true),
+    {ok:false,code:'UNVERIFIED_BROWSER'});
+  assert.deepEqual(await openApprovedTarget(missing,'file:///C:/secret',false),
+    {ok:false,code:'NOT_AUTHORIZED'});
 });
