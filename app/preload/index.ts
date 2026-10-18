@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
     isolated: isolatedProcess.contextIsolated === true
   }),
   getStatus: (): Promise<unknown> => ipcRenderer.invoke('app:status'),
-  validateConfig: (config: unknown): Promise<unknown> => ipcRenderer.invoke('config:validate', config)
+  validateConfig: (config: unknown): Promise<unknown> => ipcRenderer.invoke('config:validate', config),
+  chooseFiles: (): Promise<unknown> => ipcRenderer.invoke('import:files'),
+  chooseFolder: (): Promise<unknown> => ipcRenderer.invoke('import:folder'),
+  importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes)
 }));
