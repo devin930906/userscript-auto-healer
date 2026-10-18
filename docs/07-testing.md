@@ -103,3 +103,10 @@ PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 新增 T
 
 ## （7）TASK-007 独立 DOM 对照取证接口（阶段性 Windows 验证）
 新增安全诊断会话的 `observe(mode, explicitUserApproved)` 与 `domSnapshot()`，在显式授权、自有 Chrome/CDP 会话、已确认的专用测试页目标和同源重核后，使用只读 `DOM.querySelectorAll` 比对 `#current-target` 与 `[data-uah-probe-action="done"]`。该证据仅为 `LIMITED_FIXTURE_DOM_ONLY`，不能证明脚本由 Tampermonkey 注入，也不能证明 `GM_getValue`、安装/权限、真实业务恢复或 TEST-018/GATE-004/005 通过。必要 E2E 仍依赖独立真实 Tampermonkey 及经许可的修复场景。任何失败/路由变化拒绝被当作通过；源提交 `2cf1b9ec031e58b049231de60c86c0030c3f8d72` 的 [Windows Application Checks 39125313780](https://github.com/devin930906/userscript-auto-healer/actions/runs/39125313780) 已通过（88 个 Node 测试：87 通过、0 失败、1 专项跳过；真实 Electron shell smoke 成功）。新增测试在真正 Windows 签名 Chrome 的独立 Profile 中访问本地测试页，**没有安装用户脚本**时应读到目标 DOM 存在、动作标记缺失且不得上报恢复；它是独立 CDP 负例，不是 Tampermonkey 真脚本 GM/业务恢复或完整 TEST-018 通过。
+
+
+## （7）TASK-007／TEST-018 非验证性证据交叉核对（2026-10-18）
+
+针对 `src/manager/tampermonkey-diagnostic.ts` 的 PR #19，新增临时 GM 夹具 HTTP 自报与受控 CDP DOM 标记的交叉核对，并在每次重读前使旧 DOM 快照失效；针对 `src/observe/dom-observer.ts` 只读 CDP 样本新增同一采样前、中、后顶层 URL 一致性校验，避免同源 SPA 导航中旧节点误归属新路由。来源 SHA `3b4585b0e6ec802b64624b39badff5dba42a6457` 的 [Windows Application Checks 39127069957](https://github.com/devin930906/userscript-auto-healer/actions/runs/39127069957) 已成功运行类型检查、90 项 Node 测试（89 pass、0 fail、1 skip）和真实 Electron smoke。
+
+判定仅限 `CONSISTENT_UNVERIFIED_FIXTURE_ONLY`，明确不得因此提升扩展身份、真实脚本安装、GM API、真实业务或自动修复的验证标志。独立 Tampermonkey 安装/授权/真实 `GM_getValue`、产品真正生成补丁的业务断言与失败回滚仍属于未完成的 TEST-017/018、后续 TEST-014/020/021、GATE-004/005/006/007。PR #19 未合并前，本段记录的是**开发分支的测试结果**而非 main 的完整产品验收。
