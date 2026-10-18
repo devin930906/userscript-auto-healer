@@ -10,11 +10,13 @@ import {constants} from 'node:fs';
 import {lstat,open} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
+import {backupPrefix} from './verified-backup';
 
 type RecoveryFailure=
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|
   'BACKUP_DIRECTORY_INVALID'|'SYMLINK_REJECTED'|
-  'BACKUP_ALIAS_REJECTED'|'SIZE_LIMIT'|'HASH_MISMATCH'|
+  'BACKUP_ALIAS_REJECTED'|'BACKUP_SOURCE_MISMATCH'|
+  'SIZE_LIMIT'|'HASH_MISMATCH'|
   'FILE_CHANGED'|'IO_FAILURE';
 export type RecoverySourceVerificationResult=
   |Readonly<{status:'BLOCKED';reason:RecoveryFailure;
@@ -84,6 +86,11 @@ export async function verifyBackupRecoverySource(
      !/^[^\\/\u0000-\u001f]+\.user\.js$/i.test(basename(source))||
      typeof name!=='string'||!BACKUP_NAME.test(name))
     return deny('INVALID_PATH');
+  // A matching byte hash cannot bind a backup to the selected script:
+  // different scripts can have identical bytes. Fail before opening files.
+  const nameSuffixLength=1+36+'.backup.user.js'.length;
+  if(name.slice(0,-nameSuffixLength)!==backupPrefix(source))
+    return deny('BACKUP_SOURCE_MISMATCH');
   if(typeof expectedHash!=='string'||!SHA256.test(expectedHash)||
      typeof expectedSize!=='number'||!Number.isSafeInteger(expectedSize)||
      expectedSize<=0||expectedSize>MAX_SCRIPT_BYTES)
