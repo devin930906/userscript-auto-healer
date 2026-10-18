@@ -325,8 +325,9 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
+      "const newProfileWithoutChrome=await a.createProfile(); " +
       "const selectedExe=await a.chooseChrome(); const selectedProfile=await a.chooseProfile(); " +
-      "const blockedLaunch=await a.startBrowser(9223); " +
+      "const declinedProfile=await a.createProfile(); const blockedLaunch=await a.startBrowser(9223); " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -343,7 +344,9 @@ async function createMainWindow(): Promise<void> {
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
+      "newProfileWithoutChrome.code === 'CONFIG_NOT_SELECTED' && " +
       "selectedExe.ok === true && selectedProfile.ok === true && " +
+      "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && rendered === true && " +
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
@@ -356,7 +359,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,getStatus,importDropped,inspectTampermonkey,security,startBrowser,stopBrowser,validateConfig') {
+        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,importDropped,inspectTampermonkey,security,startBrowser,stopBrowser,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
