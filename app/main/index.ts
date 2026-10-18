@@ -1,16 +1,40 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript } from '../../src/import/import-service';
 import { previewImportedScriptAnalysis, previewImportedBatch, type ImportAnalysisPreview } from '../../src/analyze/import-preview';
-import { join } from 'node:path';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join, win32 } from 'node:path';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
+import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
+import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
 
 let mainWindow: BrowserWindow | null = null;
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
 const trustedUrl = pathToFileURL(uiFile).href;
+
+// Paths are issued ONLY by native OS file/directory selectors. Renderer input
+// never supplies an executable, profile path, CDP URL or process ID.
+let selectedChrome: string | null = null;
+let selectedProfile: string | null = null;
+let ownedBrowser: Extract<ManagedLaunchResult,{ok:true}> | null = null;
+let launchInProgress = false;
+let launchAbort: AbortController | null = null;
+let probeInProgress = false;
+const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as const,
+  businessVerified:false as const,automaticPatchAllowed:false as const};
+
+function stopOnlyOwnedBrowser():void {
+  launchAbort?.abort();
+  if(ownedBrowser){ownedBrowser.stop();ownedBrowser=null;}
+}
+function readOwnedBrowser(){
+  if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser))
+    ownedBrowser=null;
+  return ownedBrowser;
+}
+
 
 function authorizeSender(event: Electron.IpcMainInvokeEvent): void {
   const win = mainWindow;
@@ -43,6 +67,128 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     return validateBrowserConfig(input);
   });
+  // Chromium selection and lifecycle remain native-only. The renderer can
+  // request an action, but cannot pass paths, PIDs, Chromium switches or CDP.
+  ipcMain.handle('browser:choose-chrome',async event=>{
+    authorizeSender(event);
+    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    const choice=await dialog.showOpenDialog(win,{
+      title:'选择独立 Chrome 或便携版 chrome.exe',
+      properties:['openFile'],filters:[{name:'Google Chrome',extensions:['exe']}]
+    });
+    if(choice.canceled||choice.filePaths.length!==1)return {ok:false,code:'CANCELLED'};
+    const path=choice.filePaths[0];
+    if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(win32.basename(path).toLowerCase()!=='chrome.exe')
+      return {ok:false,code:'INVALID_EXECUTABLE'};
+    selectedChrome=path;
+    return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',filename:'chrome.exe',
+      verifiedOnDisk:false};
+  });
+  ipcMain.handle('browser:choose-profile',async event=>{
+    authorizeSender(event);
+    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    const choice=await dialog.showOpenDialog(win,{
+      title:'选择已有的独立调试 Profile 文件夹（不要选日常 Chrome 用户目录）',
+      properties:['openDirectory']
+    });
+    if(choice.canceled||choice.filePaths.length!==1)return {ok:false,code:'CANCELLED'};
+    if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    selectedProfile=choice.filePaths[0];
+    return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',
+      directoryName:win32.basename(selectedProfile),verifiedOnDisk:false};
+  });
+  ipcMain.handle('browser:start',async (event,port:unknown)=>{
+    authorizeSender(event);
+    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
+    if(!selectedChrome||!selectedProfile)
+      return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    // Validate before asking for permission; never launch on an invalid port
+    // or a structurally unsafe Chrome/Profile combination.
+    const config=validateBrowserConfig({
+      executablePath:selectedChrome,userDataDir:selectedProfile,
+      remoteDebuggingPort:port,bindAddress:'127.0.0.1'
+    });
+    if(!config.ok)return {ok:false,code:config.code,...unverified};
+    launchInProgress=true;
+    const controller=new AbortController();
+    launchAbort=controller;
+    try{
+      // A renderer-originated IPC invoke is NOT authenticated user consent.
+      // Require an explicit, independent native dialog for each launch.
+      const decision=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许启动独立 Chrome','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认启动隔离的 Chrome 调试实例？',
+        detail:'仅使用所选 chrome.exe 与独立 Profile，CDP 绑定 127.0.0.1。'+
+          '\\n不会接管日常浏览器、安装脚本或启用自动修复。'+
+          '\\nChrome: '+selectedChrome+'\\nProfile: '+selectedProfile+
+          '\\nPort: '+port
+      });
+      if(decision.response!==0||controller.signal.aborted||win.isDestroyed()||
+         win!==mainWindow)
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const result=await launchApprovedIsolatedChrome(config.config,{
+        userApproved:true,signal:controller.signal
+      });
+      if(!result.ok)return {ok:false,code:result.code,...unverified};
+      if(controller.signal.aborted||win.isDestroyed()||win!==mainWindow){
+        result.stop();
+        return {ok:false,code:'ABORTED',...unverified};
+      }
+      ownedBrowser=result;
+      return {ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',
+        chromeVersion:result.chromeVersion,
+        targetVerified:false,...unverified};
+    }catch{
+      return {ok:false,code:'LAUNCH_FAILED',...unverified};
+    }finally{
+      launchInProgress=false;
+      if(launchAbort===controller)launchAbort=null;
+    }
+  });
+  ipcMain.handle('browser:tampermonkey-hint',async event=>{
+    authorizeSender(event);
+    if(probeInProgress)return {ok:false,code:'PROBE_BUSY',...unverified};
+    const owned=readOwnedBrowser();
+    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    probeInProgress=true;
+    try{
+      const decision=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许只读探测','取消'],defaultId:1,cancelId:1,
+        noLink:true,message:'检查独立 Chrome 中的 Tampermonkey 运行目标？',
+        detail:'只读取当前由本程序启动的浏览器 CDP 目标信息。'+
+          '\\n不会读取或修改任何已安装脚本，也不证明 GM API 或业务恢复。'
+      });
+      if(decision.response!==0||!isLiveApprovedChromeSession(owned)||
+         win.isDestroyed()||win!==mainWindow)
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const status=await inspectApprovedTampermonkeyRuntime(owned,true);
+      if(!status.ok)return {...status,...unverified};
+      return {ok:true,status:status.status,manager:status.manager,
+        matchedRuntimeTargets:status.matchedRuntimeTargets,
+        extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'PROBE_FAILED',...unverified};
+    }finally{probeInProgress=false;}
+  });
+  ipcMain.handle('browser:stop',event=>{
+    authorizeSender(event);
+    if(!readOwnedBrowser()&&!launchInProgress)
+      return {ok:false,code:'BROWSER_NOT_RUNNING'};
+    stopOnlyOwnedBrowser();
+    return {ok:true,status:'OWNED_BROWSER_STOP_REQUESTED'};
+  });
+
   // Every path MUST come from the native OS picker, not renderer-provided input.
   ipcMain.handle('import:files', async (event) => {
     authorizeSender(event);
