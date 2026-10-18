@@ -46,4 +46,4 @@ chrome.executablePath(需用户指定)；chrome.userDataDir(授权的非默认�
 CDP 断线→撤销该会话验收；脚本 hash 不匹配→冲突停止；备份失败→禁止任何覆盖；文件中断→操作日志恢复/校验；AI 超时→本地结果保持；扩展或登录前置缺失→UNKNOWN；浏览器由本工具自启才允许关闭该进程。
 
 ## 架构限制
-普通 Chrome 136+ 调试须非默认用户数据目录。现代正式 Chrome 的扩展侧载/油猴管理器安装不保证能全自动完成。CDP 看得到 DOM 不等于管理器正常执行。Windows runner 中的 CDP/独立 Profile 及官方评估 RAR5 已进行限定验证，Violentmonkey 2.49.0 的标准 HTTPS 脚本及 GM_getValue 实际调用已通过（POC-02D）；但用户首选 Tampermonkey、真实业务故障场景、所有 Chrome 便携版及长期 RAR 生产授权并未验证。对非标准端口与脚本匹配必须给出诊断和验证提示，不得把脚本未运行直接归因为选择器故障。相应阻断见 03/11。
+普通 Chrome 136+ 调试须非默认用户数据目录。现代正式 Chrome 的扩展侧载/油猴管理器安装不保证能全自动完成。CDP 看得到 DOM 不等于管理器正常执行。Windows runner 中的 CDP/独立 Profile 及原 RAR5 试用已进行历史限定验证（现行 ZIP 发行见 ADR-004），Violentmonkey 2.49.0 的标准 HTTPS 脚本及 GM_getValue 实际调用已通过（POC-02D）；但用户首选 Tampermonkey、真实业务故障场景、所有 Chrome 便携版及正式 ZIP 应用打包和便携启动仍未验证。对非标准端口与脚本匹配必须给出诊断和验证提示，不得把脚本未运行直接归因为选择器故障。相应阻断见 03/11。

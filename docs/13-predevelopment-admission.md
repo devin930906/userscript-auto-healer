@@ -39,7 +39,7 @@
 | 浏览器/CDP | 托管 Chrome 155、独立 Chrome for Testing 154 的 CDP；bundled Chromium 能跑扩展 | 用户选择 Google Chrome 和部分便携 Chrome；`--remote-debugging-address=127.0.0.1`、默认端口 9223、独立非默认 Profile | 所有便携版、接管正在使用的默认 Profile、自动获取未授权登录 |
 | 油猴管理器 | Violentmonkey MV3 2.49.0 真安装、GM_getValue、已知选择器对照 | Tampermonkey 等按管理器单独适配，优先确认用户实际在用版本与 GM API 范围 | 预先宣布 Tampermonkey 所有版本、所有 GM API 和沙箱/注入组合已经通过 |
 | 脚本网站 | 标准 HTTPS `example.com` 的无账户合成场景 | 用户授权实际目标 URL、SPA、异步 DOM、业务断言 | 任意网站、无权访问/登录受控页面；不以“元素找到”当业务成功 |
-| Windows 双包 | 工具链级 EXE 与真 RAR5 | 稳定版正式 Inno Setup EXE + 合法授权 RAR；同源提交、双包独立验收 | 当前已存在可安装程序、获许可证、已通过便携和升级/卸载测试 |
+| Windows 双包 | 临时 EXE 已验证；历史 RAR5 PoC 不能作为 ZIP 证据 | 稳定版正式 Inno Setup EXE + 原生工具真实 ZIP；同源提交、双包独立验收 | 已生成正式 EXE/ZIP、干净 Windows 直启及升级/卸载验收 |
 
 ## 决策边界：开发准入不等于发布准入
 
@@ -51,8 +51,11 @@
 1. 以用户实际使用的 Tampermonkey 和 Chrome（含真实便携版）确认目标范围、最低支持版本、授权与 Profile 策略；若无法访问实际设备/登录，不得虚构实测，明示需在授权环境完成。
 2. 用用户授权的真实失效脚本或可公开复现的复杂场景建立“损坏→诊断证据→最小补丁→安装到管理器→业务断言→回滚”合同。当前 POC-04A 只是**合成回归夹具**。
 3. 依后续 TASK-007/018 覆盖 GM API、沙箱、SPA、iframe、登录条件、功能测试；未经实测的场景返回 UNKNOWN/DETECTED_ONLY。
-4. 正式依赖锁定、Windows 安装/便携、签名及 RAR 持续合法授权为**相应开发里程碑和 Stable 发布**硬门槛，不应不合理地阻止项目最初的安全骨架开发，也不能忽略到发布时。
+4. 正式依赖锁定、Windows 安装/便携、签名及 ZIP 内容完整性与真实运行验证为**相应开发里程碑和 Stable 发布**硬门槛，不应不合理地阻止项目最初的安全骨架开发，也不能忽略到发布时。
 
 ## 恢复执行入口
 
 最新进度以每次重新读取 `main`、PR/Issues、CI 为准，不使用固定 SHA 假设。若本文件与 `docs/11-readiness.md` 结论冲突，应基于真实 GitHub Actions 记录同步修订，不得以纯文字或临时工具链 PoC 代替产品验收。完成准入事项后，由 `docs/09-development-plan.md` 进入 TASK-001；继续遵守 `AGENTS.md`，原则上复用现有主集成路径，不积累重复 PR/分支。
+
+## 2026-10-18 便携发行格式更新
+依据用户新决定 I-010 / ADR-004，正式 Stable 必需文件现为 EXE 安装版与 ZIP 便携版。旧 RAR5 试用 PoC 仅是历史记录，不再需要为正式 ZIP 购买 RAR 生产许可证。ZIP 工具链 POC-03C、正式 TASK-020 / TEST-028 仍需执行；TASK-001 有条件准入状态不变。
