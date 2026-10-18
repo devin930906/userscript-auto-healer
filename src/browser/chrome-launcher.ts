@@ -106,8 +106,9 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
     'signer=[string]$signature.SignerCertificate.Subject} | ConvertTo-Json -Compress';
   let data:Record<string,unknown>;
   try{
+    const encoded=Buffer.from(script,'utf16le').toString('base64');
     const result=await runPowershell('powershell.exe',
-      ['-NoLogo','-NoProfile','-NonInteractive','-Command',script],
+      ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
       {windowsHide:true,timeout:15000,maxBuffer:8192});
     data=JSON.parse(result.stdout) as Record<string,unknown>;
   }catch{return {ok:false,code:'IDENTITY_UNAVAILABLE'};}
