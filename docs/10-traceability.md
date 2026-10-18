@@ -57,4 +57,4 @@ REQ-001..028 对应 TEST-001..028；测试层级、前置与反例见 docs/07-te
 GATE-001..011 的证据和阻断等级以 docs/08-release.md 为权威；表内缩写仅表示关联类别，不是范围取代其逐项要求。
 
 ## 覆盖缺口
-脚本管理器/GM API 兼容矩阵与真实场景、RAR 许可证、Chrome/CDP PoC、Windows runner/打包 PoC、应用许可尚缺实证。原始用户输入中的各项核心功能已进入 REQ-001..026，双 Windows 包为 REQ-027/028；仍须逐字复查 00 与需求编号以确定完整覆盖。
+Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_getValue（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno Setup 临时安装器与真实 RAR5 格式已获得开发前技术 PoC 证据；仍缺首选 Tampermonkey 与正式 Chrome/便携版的支持矩阵、真实损坏脚本修复/业务回归、RAR 正式生产许可、真实产品 EXE/RAR 安装直启和应用 LICENSE 定案。原始用户输入中的各项核心功能已进入 REQ-001..026，双 Windows 包为 REQ-027/028；仍须逐字复查 00 与需求编号以确定完整覆盖。

@@ -1,6 +1,6 @@
 # 系统整体架构
 
-> 状态：设计基线，核心 PoC 未执行；框架仅是待批准的技术候选。与 02、03 及 ADR 对应。
+> 状态：设计基线，核心 Chrome/CDP、限定 Violentmonkey 真脚本+GM API 和临时双格式工具链均有真实 PoC；应用框架仍是待确定的技术候选。与 02、03 及 ADR 对应。
 
 ## 整体结构
 Windows 用户界面/受限配置入口 → BatchCoordinator → Import/Metadata/Scenario → ChromeLauncher/CDP + ManagerAdapter → Diagnostics → LocalRepair/可选 AIGateway → AcceptanceGate → VersionStore/Export → HealthHistory；CompatibilityLayer 为带版本的共享定位能力。各服务返回类型化结果与证据引用，不能跳过真实验收/备份。
@@ -46,4 +46,4 @@ chrome.executablePath(需用户指定)；chrome.userDataDir(授权的非默认�
 CDP 断线→撤销该会话验收；脚本 hash 不匹配→冲突停止；备份失败→禁止任何覆盖；文件中断→操作日志恢复/校验；AI 超时→本地结果保持；扩展或登录前置缺失→UNKNOWN；浏览器由本工具自启才允许关闭该进程。
 
 ## 架构限制
-普通 Chrome 136+ 调试须非默认用户数据目录。现代正式 Chrome 的扩展侧载/油猴管理器安装不保证能全自动完成。CDP 看得到 DOM 不等于管理器正常执行。真实 RAR 工具授权、Windows runner 与 Profile 验证尚未执行。相应阻断见 03/11。
+普通 Chrome 136+ 调试须非默认用户数据目录。现代正式 Chrome 的扩展侧载/油猴管理器安装不保证能全自动完成。CDP 看得到 DOM 不等于管理器正常执行。Windows runner 中的 CDP/独立 Profile 及官方评估 RAR5 已进行限定验证，Violentmonkey 2.49.0 的标准 HTTPS 脚本及 GM_getValue 实际调用已通过（POC-02D）；但用户首选 Tampermonkey、真实业务故障场景、所有 Chrome 便携版及长期 RAR 生产授权并未验证。对非标准端口与脚本匹配必须给出诊断和验证提示，不得把脚本未运行直接归因为选择器故障。相应阻断见 03/11。
