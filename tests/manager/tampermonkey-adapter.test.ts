@@ -39,6 +39,9 @@ test('TEST-017 stage: invalid/duplicate target metadata fails closed',()=>{
  for(const payload of [
   null,{},new Array(513).fill(worker),[null],[{type:'service_worker'}],
   [{...worker,targetId:'bad'}],[worker,{...worker}],
+  [{...worker,type:'page',targetId:'bad'}],
+  [{...worker,type:'page'},{...worker,type:'page'}],
+  [{...worker,type:'page'},worker],
   [{...worker,url:6}],[{...worker,url:'x'.repeat(8193)}]
  ]){
    assert.deepEqual(inspectTampermonkeyTargetHints(payload),
@@ -99,4 +102,13 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
    assert.equal(probe.scriptInjectionVerified,false);
    assert.equal(probe.extensionAuthenticityVerified,false);
  }
+});
+
+test('TEST-017 stage: distinct ordinary Chrome targets remain ignorable but cannot forge identities',()=>{
+  const unrelated={targetId:'unrelated-target-01',type:'page',url:'https://example.com/'};
+  assert.deepEqual(inspectTampermonkeyTargetHints([unrelated]),
+    {ok:false,code:'RUNTIME_NOT_OBSERVED'});
+  const mixed=inspectTampermonkeyTargetHints([unrelated,worker]);
+  assert.equal(mixed.ok,true);
+  if(mixed.ok)assert.equal(mixed.matchedRuntimeTargets,1);
 });

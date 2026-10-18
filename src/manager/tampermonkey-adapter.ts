@@ -29,16 +29,17 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
  const ids=new Set<string>();
  for(const value of payload){
    if(!object(value)||typeof value.type!=='string'||typeof value.url!=='string'||
-      typeof value.targetId!=='string'||value.url.length>8192)
+      typeof value.targetId!=='string'||value.url.length>8192||
+      !/^[a-zA-Z0-9_-]{8,128}$/.test(value.targetId)||ids.has(value.targetId))
      return {ok:false,code:'INVALID_CDP_RESPONSE'};
+   // Validate all CDP identities before filtering manager-specific targets.
+   // An unrelated entry with a duplicate or forged ID makes the whole receipt unsafe.
+   ids.add(value.targetId);
    if(!acceptedTypes.has(value.type))continue;
    let url:URL;
    try{url=new URL(value.url);}catch{continue;}
    if(url.protocol!=='chrome-extension:'||url.hostname!==TAMPERMONKEY_EXTENSION_ID||
       url.username||url.password||url.port)continue;
-   if(!/^[a-zA-Z0-9_-]{8,128}$/.test(value.targetId)||ids.has(value.targetId))
-     return {ok:false,code:'INVALID_CDP_RESPONSE'};
-   ids.add(value.targetId);
    count++;
  }
  if(count===0)return {ok:false,code:'RUNTIME_NOT_OBSERVED'};
@@ -64,6 +65,9 @@ async function readBoundedTargets(websocketUrl:string,signal?:AbortSignal):Promi
   try{
    socket=new WebSocket(websocketUrl);
    socket.addEventListener('open',()=>{
+    // Abort/timeout can settle before the WebSocket reaches OPEN.
+    // Never issue a command from a late event after cancellation.
+    if(settled||signal?.aborted)return;
     try{socket?.send(JSON.stringify({id:1,method:'Target.getTargets'}));}
     catch{finish(null);}
    });
