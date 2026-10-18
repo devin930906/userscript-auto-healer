@@ -60,3 +60,16 @@ test('TEST-008: occupied CDP port is rejected without contacting existing servic
   assert.deepEqual(result,{ok:false,code:'CDP_PORT_IN_USE'});
   assert.equal(occupied.listening,true);
 });
+
+
+import { inspectWindowsChromeBinary } from '../../src/browser/chrome-launcher';
+test('TEST-006: a renamed executable fixture cannot pass signed Chrome identity',async t=>{
+  if(process.platform!=='win32')return;
+  const f=await fixture(t);
+  const verdict=await inspectWindowsChromeBinary(config(f.executable,f.profile));
+  assert.equal(verdict.ok,false,JSON.stringify(verdict));
+  assert.ok(!verdict.ok && ['IDENTITY_UNAVAILABLE','UNTRUSTED_BINARY',
+    'VERSION_UNAVAILABLE'].includes(verdict.code));
+  assert.deepEqual(await inspectWindowsChromeBinary(config(f.executable,f.profile,0)),
+    {ok:false,code:'INVALID_CONFIG'});
+});

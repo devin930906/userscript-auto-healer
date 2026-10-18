@@ -76,3 +76,49 @@ export async function preflightChrome(input:unknown):Promise<BrowserPreflight>{
   }catch{return {ok:false,code:'PORT_PROBE_FAILED'};}
   return {ok:true,status:'PATH_AND_PORT_CHECKED_ONLY',config,runtimeIdentityVerified:false};
 }
+
+
+/** Read-only executable identity gate for selected standard/portable official Chrome.
+ * File version metadata is not enough: an unsigned renamed EXE is rejected.
+ * Passing this check is NOT a running-process/CDP/profile compatibility verdict.
+ */
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
+const runPowershell=promisify(execFileCallback);
+export type ChromeBinaryInspection =
+  | {readonly ok:true; readonly status:'SIGNED_GOOGLE_CHROME_BINARY';
+     readonly version:string;readonly publisher:'Google LLC';readonly runtimeVerified:false}
+  | {readonly ok:false;readonly code:'INVALID_CONFIG'|'UNSUPPORTED_PLATFORM'|
+      'IDENTITY_UNAVAILABLE'|'UNTRUSTED_BINARY'|'VERSION_UNAVAILABLE'};
+export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBinaryInspection> {
+  if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
+  const valid=validateBrowserConfig(input);
+  if(!valid.ok)return {ok:false,code:'INVALID_CONFIG'};
+  // Base64 transport prevents shell parsing of user-selected paths. No powershell interpolation.
+  const file=Buffer.from(valid.config.executablePath,'utf16le').toString('base64');
+  const script='$ErrorActionPreference="Stop";'+
+    '$p=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String("'+file+'"));'+
+    '$item=Get-Item -LiteralPath $p -ErrorAction Stop;'+
+    '$signature=Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop;'+
+    '$vi=$item.VersionInfo;'+
+    '[pscustomobject]@{name=$vi.ProductName;fileName=$vi.OriginalFilename;'+
+    'version=$vi.ProductVersion;status=[string]$signature.Status;'+
+    'signer=[string]$signature.SignerCertificate.Subject} | ConvertTo-Json -Compress';
+  let data:Record<string,unknown>;
+  try{
+    const result=await runPowershell('powershell.exe',
+      ['-NoLogo','-NoProfile','-NonInteractive','-Command',script],
+      {windowsHide:true,timeout:15000,maxBuffer:8192});
+    data=JSON.parse(result.stdout) as Record<string,unknown>;
+  }catch{return {ok:false,code:'IDENTITY_UNAVAILABLE'};}
+  if(data.status!=='Valid' || typeof data.signer!=='string' ||
+     !/(?:^|,)\s*CN=Google LLC(?:,|$)/i.test(data.signer) ||
+     data.name!=='Google Chrome' || typeof data.fileName!=='string' ||
+     data.fileName.toLowerCase()!=='chrome.exe')
+    return {ok:false,code:'UNTRUSTED_BINARY'};
+  if(typeof data.version!=='string' ||
+     !/^\d+\.\d+\.\d+\.\d+$/.test(data.version))
+    return {ok:false,code:'VERSION_UNAVAILABLE'};
+  return {ok:true,status:'SIGNED_GOOGLE_CHROME_BINARY',
+    version:data.version,publisher:'Google LLC',runtimeVerified:false};
+}
