@@ -163,10 +163,10 @@ test('TEST-009: a forged shape cannot authorize Chrome target creation',async()=
     {ok:false,code:'UNVERIFIED_BROWSER'});
 });
 
-/** Dedicated cloud job supplies a signed, independently extracted official
+/** Dedicated cloud job supplies a signed, independently located official
  * Chrome for Testing. Standard app-check skips this optional matrix cell.
  */
-test('TEST-006/007/008/009: independently extracted signed portable Chrome',async t=>{
+test('TEST-006/007/008/009: signed Chrome from an independent application path',async t=>{
   const executable=process.env.UAH_TEST_PORTABLE_CHROME;
   if(!executable){t.skip('Dedicated portable Chrome job supplies this fixture');return;}
   assert.equal(process.platform,'win32');

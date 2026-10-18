@@ -31,35 +31,40 @@ jobs:
       - name: Compile product browser tests
         shell: pwsh
         run: npm run build
-      - name: Verify pinned extracted Chrome for Testing with real product modules
+      - name: Verify signed Chrome moved to independent application path
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
-          $version = '154.0.8037.57'
-          $root = Join-Path $env:RUNNER_TEMP ("uah-portable-product-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
-          if (Test-Path $root) { throw 'Refuse an existing test directory' }
-          New-Item -Path $root -ItemType Directory | Out-Null
-          $zip = Join-Path $root 'chrome-win64.zip'
-          $uri = "https://storage.googleapis.com/chrome-for-testing-public/$version/win64/chrome-win64.zip"
-          Invoke-WebRequest -Uri $uri -OutFile $zip -MaximumRedirection 4 -TimeoutSec 120
-          if ((Get-Item $zip).Length -lt 1000000) { throw 'Unexpectedly small official Chrome archive' }
-          Add-Type -AssemblyName System.IO.Compression
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-          try {
-            foreach ($entry in $archive.Entries) {
-              $name = $entry.FullName.Replace('/', '\')
-              if ($name.StartsWith('\') -or $name -match '(^|\\)\.\.(\\|$)' -or $name -match '^[A-Za-z]:') {
-                throw "Unsafe archive member: $name"
-              }
+          $candidates = @(
+            (Join-Path $env:ProgramFiles 'Google\Chrome\Application'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application')
+          )
+          $source = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath (Join-Path $candidate 'chrome.exe')) {
+              $source = $candidate
+              break
             }
-          } finally { $archive.Dispose() }
-          Expand-Archive -LiteralPath $zip -DestinationPath $root
-          $binary = Join-Path $root 'chrome-win64\chrome.exe'
-          if (!(Test-Path -LiteralPath $binary)) { throw 'Portable Chrome binary absent' }
-          $signature = Get-AuthenticodeSignature -LiteralPath $binary
+          }
+          if (!$source) { throw 'Signed installed Chrome unavailable on this runner' }
+          $sourceBinary = Join-Path $source 'chrome.exe'
+          $signature = Get-AuthenticodeSignature -LiteralPath $sourceBinary
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
-            throw 'Chrome for Testing executable signature untrusted'
+            throw 'Installed source Chrome signature untrusted'
+          }
+          $root = Join-Path $env:RUNNER_TEMP ("uah-portable-product-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $root) { throw 'Refuse existing test directory' }
+          New-Item -Path $root -ItemType Directory | Out-Null
+          $copy = Join-Path $root 'IndependentChrome'
+          New-Item -Path $copy -ItemType Directory | Out-Null
+          & robocopy.exe $source $copy /E /XJ /R:1 /W:1 /NFL /NDL /NP
+          if ($LASTEXITCODE -ge 8) { throw "Chrome runtime copy failed: $LASTEXITCODE" }
+          $binary = Join-Path $copy 'chrome.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Independent Chrome binary absent' }
+          $copiedSignature = Get-AuthenticodeSignature -LiteralPath $binary
+          if ($copiedSignature.Status -ne 'Valid' -or $copiedSignature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
+            throw 'Copied Chrome signature untrusted'
           }
           $env:UAH_TEST_PORTABLE_CHROME = $binary
           node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
