@@ -151,3 +151,7 @@ PR [#21](https://github.com/devin930906/userscript-auto-healer/pull/21) 已以�
 ## （7）TASK-008 / TEST-013 场景合约与自管 CDP 故障诊断接入（2026-10-18）
 
 新增 `src/diagnostics/scenario-dom-diagnostic.ts`：沿用 TASK-004 的已授权场景预检、TASK-005/006 自管 Chrome/CDP 目标归属与只读观察、TASK-008 故障信号分类器；仅接受无需登录/主动步骤、最多 8 个唯一顶层 CSS `selector-present` 断言的场景。真实观察的选择器缺失只能生成 `SELECTOR_ASSERTION` 限定信号，全部存在只代表当前 DOM 未观察到缺失，不能证明油猴脚本成功。浏览器/CDP 失败、SPA 路由变化、输入异常、权限不符均返回 BLOCKED/UNKNOWN；不执行脚本、点击、持久化或自动改文件，不传出 URL/DOM/脚本 Hash。新增 Windows 真 Chrome+无扩展的独立负例，并加入 npm 测试。**此为待 CI 核验的部分诊断集成**，不满足完整 TEST-013、TEST-017/018 和 GATE；真实 Tampermonkey 与业务断言仍受阻。
+
+## （7）TASK-008 / TEST-013 观察证据完整性加固并合并（2026-10-18）
+
+[PR #24](https://github.com/devin930906/userscript-auto-healer/pull/24) 已合并到 `main`，合并提交 `843510150d18dec390519e69d0cc7decfd23d84c`。本轮仅收紧已有只读场景 DOM 故障分类：缺少明确的 `routeChanged:false`、存在未批准的额外选择器计数、DOM 节点总数无效或选择器数量超过节点总数，均拒绝接受为有效诊断观察。增加三组 TEST-013 负例，不执行脚本安装、文件修改或自动修复。首轮 CI [39131443350](https://github.com/devin930906/userscript-auto-healer/actions/runs/39131443350) 因测试夹具 TypeScript 联合类型访问错误失败，随后修复；源提交 `681ab55967e16181e17998703af5819a85eaa397` 的完整 Windows 应用检查 [39131544473](https://github.com/devin930906/userscript-auto-healer/actions/runs/39131544473) 已成功（TypeScript 通过；Node 共 107 项，106 pass、0 fail、1 环境条件 skip；真实 Windows Electron/IPC smoke 通过）。本记录不代表合并后 `main` 的 CI 自动通过，也不代表 TASK-008、正式 TEST-013、真实 Tampermonkey 或 Stable GATE 已完成。下一优先仍是 TASK-007 真实管理器/业务取证的阻断解除，并继续 TASK-008 后续真实故障根因集成。
