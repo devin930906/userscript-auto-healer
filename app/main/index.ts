@@ -233,20 +233,40 @@ async function createMainWindow(): Promise<void> {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      stopOnlyOwnedBrowser();
+      selectedChrome=null;selectedProfile=null;
+      mainWindow=null;
+    }
+  });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
     // Fixture files live solely inside the disposable Windows Actions runner.
     const fixtureDir = mkdtempSync(join(tmpdir(), 'uah-task002-e2e-'));
+    const disposableProfile=join(fixtureDir,'isolated-profile');
+    mkdirSync(disposableProfile);
+    writeFileSync(join(fixtureDir,'chrome.exe'),'NOT_A_CHROME_BINARY');
     writeFileSync(join(fixtureDir, 'approved.user.js'), '// ==UserScript==\\n// smoke\\n');
     const nativeDialog = dialog.showOpenDialog;
+    const nativeConsent = dialog.showMessageBox;
     Object.defineProperty(dialog, 'showOpenDialog', {
       configurable: true, writable: true,
-      value: async (_window: unknown, options: {properties?: string[]}) => ({
+      value: async (_window: unknown, options: {properties?: string[];title?:string}) => ({
         canceled: false,
-        filePaths: options.properties?.includes('openDirectory')
-          ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
+        filePaths: options.title?.startsWith('选择独立 Chrome')
+          ? [join(fixtureDir,'chrome.exe')]
+          : options.title?.startsWith('选择已有的独立调试')
+            ? [disposableProfile]
+            : options.properties?.includes('openDirectory')
+              ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
       })
+    });
+    // Deny browser startup at a trusted OS dialog: Electron smoke must never
+    // launch a real browser or re-use an existing Chrome/Profile.
+    Object.defineProperty(dialog,'showMessageBox',{
+      configurable:true,writable:true,
+      value:async()=>({response:1,checkboxChecked:false})
     });
     // The test is run inside a real Electron renderer. A static source assertion
     // cannot prove that the sandbox preload or frame-checked IPC actually work.
@@ -255,6 +275,10 @@ async function createMainWindow(): Promise<void> {
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
+      "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
+      "const noStop=await a.stopBrowser(); " +
+      "const selectedExe=await a.chooseChrome(); const selectedProfile=await a.chooseProfile(); " +
+      "const blockedLaunch=await a.startBrowser(9223); " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -269,7 +293,11 @@ async function createMainWindow(): Promise<void> {
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
-      "bad.code === 'INVALID_SHAPE' && d.ok === true && rendered === true && " +
+      "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
+      "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
+      "selectedExe.ok === true && selectedProfile.ok === true && " +
+      "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
+      "d.ok === true && rendered === true && " +
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
       "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
@@ -277,8 +305,10 @@ async function createMainWindow(): Promise<void> {
       true
     ) as { ok?: boolean; keys?: string[] };
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
+    Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
-    if (!probe?.ok || probe.keys?.join(',') !== 'chooseFiles,chooseFolder,getStatus,importDropped,security,validateConfig') {
+    if (!probe?.ok || probe.keys?.join(',') !==
+        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,getStatus,importDropped,inspectTampermonkey,security,startBrowser,stopBrowser,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
@@ -309,6 +339,8 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
+app.on('before-quit',stopOnlyOwnedBrowser);
 app.on('window-all-closed', () => {
+  stopOnlyOwnedBrowser();
   if (process.platform !== 'darwin') app.quit();
 });
