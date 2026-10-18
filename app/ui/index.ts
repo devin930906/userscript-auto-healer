@@ -9,11 +9,11 @@ interface Window {
   };
 }
 
-const status = document.getElementById('status');
+const statusElement = document.getElementById('status');
 void window.healer.getStatus()
   .then((state) => {
-    if (!status) return;
-    status.textContent = state.shell === 'development-skeleton' &&
+    if (!statusElement) return;
+    statusElement.textContent = state.shell === 'development-skeleton' &&
       state.automaticRepairAvailable === false &&
       state.aiEnabled === false &&
       state.automaticApplyEnabled === false
@@ -21,5 +21,5 @@ void window.healer.getStatus()
       : '应用状态不符合预期，操作已停用。';
   })
   .catch(() => {
-    if (status) status.textContent = '无法验证应用入口，操作已停用。';
+    if (statusElement) statusElement.textContent = '无法验证应用入口，操作已停用。';
   });
