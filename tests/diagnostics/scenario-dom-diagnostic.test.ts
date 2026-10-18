@@ -115,7 +115,8 @@ test('TEST-013: stable repeated selector observations stay limited, not business
    samples:[approved,approved,approved],routeChangeDetected:false,
    selectorCountChanged:false,domCountChanged:false,userscriptVerified:false as const
  };
- const result=summarizeReadOnlyScenarioDomSeries(baseScenario,observed,true);
+ const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
+   observed as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
  assert.equal(result.status,'LIMITED_DOM_SIGNAL_ONLY');
  assert.equal(result.triage.category,'SELECTOR_ASSERTION');
  assert.deepEqual(result.triage.evidenceIds,['scenario_assertion_2']);
@@ -130,7 +131,7 @@ test('TEST-013: changing or contradictory samples cannot yield stable defect evi
    ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
    samples,routeChangeDetected:false,selectorCountChanged:false,
    domCountChanged:false,userscriptVerified:false,...extra
- }) as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1];
+ }) as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1];
  for(const observed of [
    make(snapshots),
    make([sample(matched),sample(matched,true)]),
@@ -144,7 +145,7 @@ test('TEST-013: changing or contradictory samples cannot yield stable defect evi
    make([sample(matched),sample(matched)],{routeChangeDetected:undefined}),
    make([sample(matched),{...sample(matched),observedAt:'not-a-date'}]),
    make([sample(matched),{...sample(matched),observedAt:'2026-10-17T00:00:00Z'}]),
-   make([sample(matched),{...sample(matched),summary:{...sample(matched).summary,elementCount:3}}])
+   make([sample(matched),{...sample(matched),summary:{elementCount:3,iframeCount:0,visibleShadowRoots:0,blindSpots:[]}}])
  ]){
    const result=summarizeReadOnlyScenarioDomSeries(baseScenario,observed,true);
    assert.equal(result.status,'BLOCKED');
