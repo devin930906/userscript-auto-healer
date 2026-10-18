@@ -11,7 +11,7 @@
 | Userscript Auto Healer | 项目身份 | 已确认 | docs/00-intake.md、GitHub 仓库 | 无 | 无 |
 | Userscript Auto Healer | 原始需求保留 | 已完成 | docs/00-intake.md | 完整逐字复核仍可加强 | 对照会话原文做最终核对 |
 | Userscript Auto Healer | 必须需求可验收 | 已完成 | docs/02-requirements.md；docs/07-testing.md | 真实场景输入尚未提供 | 获取坏/好脚本、场景与断言 |
-| Userscript Auto Healer | Stable 范围锁定 | 有条件准入 | docs/01-product.md | GUI 形态、最低系统与扩展矩阵待确认 | 形成有证据的受支持范围 |
+| Userscript Auto Healer | Stable 范围锁定 | 待确认 | docs/01-product.md | GUI 形态、最低系统与扩展矩阵待确认 | 形成有证据的受支持范围 |
 | Userscript Auto Healer | 核心技术可行 | 受阻 | docs/03-feasibility.md | POC-01/02 未执行 | Chrome/Profile/CDP 与扩展真实 PoC |
 | Userscript Auto Healer | 架构满足需求 | 受阻 | docs/04-architecture.md、docs/adr | 核心接入与管理器层实证缺失 | PoC 后修订 ADR 与契约 |
 | Userscript Auto Healer | 安全风险处理 | 受阻 | docs/06-security-risk.md | 只有威胁模型，缺安全负例 | 执行 TEST-007/009/020/026 |
@@ -19,7 +19,7 @@
 | Userscript Auto Healer | Stable 门槛完整 | 已完成 | docs/08-release.md | 无真实发布证据 | 逐项执行 GATE |
 | Userscript Auto Healer | Windows EXE 可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 没有真实 Windows 构建/安装 | 完成 POC-03 与 TEST-027 |
 | Userscript Auto Healer | RAR 便携可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 合法创建器、解压运行未验证 | 取得授权工具并执行 TEST-028 |
-| Userscript Auto Healer | 任务可执行 | 有条件准入 | docs/09-development-plan.md | TASK-001 前核心技术 PoC 仍受阻 | 完成 PoC 并固定 ADR |
+| Userscript Auto Healer | 任务可执行 | 待确认 | docs/09-development-plan.md | TASK-001 前核心技术 PoC 仍受阻 | 完成 PoC 并固定 ADR |
 | Userscript Auto Healer | 工程追踪一致 | 已完成 | docs/10-traceability.md | 尚无 CI 实测校验记录 | 文档 lint/编号检查通过 |
 | Userscript Auto Healer | 云端工程可用 | 无法确认 | docs/08-release.md | Actions 权限及 Windows runner 没有运行结果 | 运行并查看对应 CI 日志 |
 | Userscript Auto Healer | 外部依赖可用合法 | 受阻 | docs/03-feasibility.md | RAR 商业许可、npm 锁定包未核验 | 合法许可与依赖审核 |
