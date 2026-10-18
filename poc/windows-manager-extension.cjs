@@ -45,6 +45,12 @@ async function main() {
         '--load-extension='+extensionDir,
       ],
     });
+    // Observe only local/disposable extension errors to explain incomplete injection.
+    context.on('page', p=>{
+      if (!p.url().startsWith('chrome-extension://')) return;
+      p.on('console', m=>{if(m.type()==='error')console.log('MANAGER_PAGE_CONSOLE_ERROR: '+m.text().slice(0,450))});
+      p.on('pageerror', e=>console.log('MANAGER_PAGE_ERROR: '+String(e).slice(0,450)));
+    });
     let workers = context.serviceWorkers();
     if (!workers.length) {
       try { workers = [await context.waitForEvent('serviceworker',{timeout:30000})]; }
@@ -103,6 +109,41 @@ async function main() {
         console.log('Explicit opt-in control result on disposable profile: '+JSON.stringify(action));
       }
     } catch(err){console.log('INCOMPLETE extension details UI: '+String(err.message).slice(0,200));}
+    // Violentmonkey's own MV3 instructions recommend reloading its extension
+    // after the userScripts toggle is granted, because SW initialized before consent.
+    try{
+      const reload=permissionPage.getByRole('button',{name:/reload/i});
+      const n=await reload.count();
+      console.log('Extension reload button count='+n);
+      if(n===1){
+        await reload.click({timeout:6000});
+        await permissionPage.waitForTimeout(2500);
+        console.log('Explicitly reloaded manager after consent in disposable profile.');
+      }else{
+        const buttons=await permissionPage.evaluate(()=>{
+          const all=[];function walk(root){for(const el of root.querySelectorAll('button,cr-button,cr-icon-button')){
+            all.push({id:el.id||'',aria:el.getAttribute('aria-label'),title:el.title||'',text:el.textContent?.trim().slice(0,45)});
+            if(el.shadowRoot)walk(el.shadowRoot);
+          }} walk(document);return all;
+        });
+        console.log('Extension details button inventory: '+JSON.stringify(buttons.slice(0,35)));
+      }
+    }catch(err){console.log('INCOMPLETE extension reload UI: '+String(err.message).slice(0,210));}
+    // Check the extension's own chrome.userScripts capability, not ordinary DOM.
+    const optionsProbe=await context.newPage();
+    try{
+      await optionsProbe.goto('chrome-extension://'+info.id+'/options/index.html',{waitUntil:'domcontentloaded',timeout:12000});
+      await optionsProbe.waitForTimeout(1000);
+      const api=await optionsProbe.evaluate(async()=>{
+        try{
+          if(typeof chrome==='undefined'||!chrome.userScripts)return {available:false};
+          const scripts=await chrome.userScripts.getScripts();
+          return {available:true,registrations:scripts.length};
+        }catch(e){return {available:false,error:String(e).slice(0,170)}}
+      });
+      console.log('Actual userscript API check from extension origin: '+JSON.stringify(api));
+    }catch(e){console.log('INCOMPLETE extension-origin API probe: '+String(e.message).slice(0,190));}
+    await optionsProbe.close();
     await permissionPage.close();
     
     // Best-effort discovery of the authentic userscript installation journey.
@@ -127,7 +168,17 @@ async function main() {
       try {
         await installer.locator('#confirm').waitFor({state:'visible',timeout:12000});
         await installer.locator('#confirm').click({timeout:7000});
-        await installer.waitForTimeout(2000);
+        await installer.waitForTimeout(1000);
+        try{
+          const result=await installer.evaluate(async()=>{
+            try{
+              const area=await chrome.storage.local.get(null);
+              return {storageKeys:Object.keys(area).slice(0,24),availableUserScripts:Boolean(chrome.userScripts)};
+            }catch(e){return {error:String(e).slice(0,180)}}
+          });
+          console.log('Manager installation storage/API diagnostic: '+JSON.stringify(result));
+        }catch(e){console.log('INCOMPLETE manager install diagnostic: '+String(e.message).slice(0,200));}
+
         console.log('Authentic manager install confirmation clicked in ephemeral profile; current URL='+installer.url()+'; status='+String(await installer.locator('body').innerText()).slice(0,340));
       } catch(err){
         console.log('INCOMPLETE authentic installer confirmation: '+String(err.message).slice(0,230));
