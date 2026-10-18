@@ -12,7 +12,8 @@ export type TampermonkeyPreflightCode =
  'NOT_AUTHORIZED'|'INVALID_INPUT'|'RUNTIME_NOT_OBSERVED'|'WRONG_MANAGER'|
  'VERSION_NOT_REPORTED'|'MANAGER_NOT_ENABLED'|'USERSCRIPTS_PERMISSION_UNKNOWN'|
  'USERSCRIPTS_NOT_ALLOWED'|'SCRIPT_NOT_REPORTED_ENABLED'|'INVALID_SCRIPT_METADATA'|
- 'GM_GRANT_NOT_DECLARED'|'MATCH_NOT_CONFIRMED';
+ 'GM_GRANT_NOT_DECLARED'|'MATCH_NOT_CONFIRMED'|'RUN_AT_NOT_CONFIRMED'|
+ 'EXTERNAL_RESOURCES_UNVERIFIED';
 export type TampermonkeyPreflightResult =
  | {readonly ok:false;readonly status:'BLOCKED';readonly code:TampermonkeyPreflightCode;
     readonly gmApiVerified:false;readonly businessVerified:false}
@@ -84,7 +85,22 @@ export function inspectReportedTampermonkeyPreflight(
  if(!metadata||metadata.status!=='OK'||!metadata.tags||
     !Array.isArray(metadata.tags.grant)||!Array.isArray(metadata.tags.match))
     return blocked('INVALID_SCRIPT_METADATA');
- if(!metadata.tags.grant.includes('GM_getValue'))return blocked('GM_GRANT_NOT_DECLARED');
+ if(!metadata.tags.grant.includes('GM_getValue')||metadata.tags.grant.includes('none'))
+    return blocked('GM_GRANT_NOT_DECLARED');
+ // A missing @run-at uses the manager default, but an explicit unsupported,
+ // empty or contradictory instruction cannot be inferred from static metadata.
+ // This is only metadata eligibility: actual injection timing remains unverified.
+ const runAt=metadata.tags['run-at'];
+ if(runAt!==undefined&&(!Array.isArray(runAt)||runAt.length!==1||
+    !['document-start','document-body','document-end','document-idle'].includes(runAt[0])))
+    return blocked('RUN_AT_NOT_CONFIRMED');
+ // @require and @resource may fetch and execute/use dependencies beyond the
+ // isolated test fixture. Do not implicitly approve any remote code/resources
+ // on a caller-supplied installation report.
+ const requires=metadata.tags.require;
+ const resources=metadata.tags.resource;
+ if(requires!==undefined||resources!==undefined)
+    return blocked('EXTERNAL_RESOURCES_UNVERIFIED');
  let target:URL;
  try{target=new URL(targetUrl);}catch{return blocked('INVALID_INPUT');}
  if(!['http:','https:'].includes(target.protocol)||!target.hostname||
