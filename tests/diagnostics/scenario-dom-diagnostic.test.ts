@@ -109,6 +109,45 @@ test('TEST-013: CDP failures and same-origin SPA route change block diagnostic p
    assert.equal(result.automaticPatchAllowed,false);
  }
 });
+test('TEST-013: malformed truthy success and forged CDP error codes fail closed',()=>{
+ const valid=sample(matched);
+ for(const ok of [1,'true',{},[]]){
+   const result=summarizeReadOnlyScenarioDom(baseScenario,
+     {...valid,ok} as unknown as ObservationResult,true);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.code,'INVALID_OBSERVATION');
+   assert.equal(result.automaticPatchAllowed,false);
+ }
+ const forged=summarizeReadOnlyScenarioDom(baseScenario,
+   {ok:false,code:'VERIFIED'} as unknown as ObservationResult,true);
+ assert.equal(forged.status,'BLOCKED');
+ assert.equal(forged.code,'INVALID_OBSERVATION');
+ const realError=summarizeReadOnlyScenarioDom(baseScenario,
+   {ok:false,code:'CDP_FAILED'},true);
+ assert.equal(realError.code,'CDP_FAILED');
+
+ const later={...valid,observedAt:'2026-10-18T00:00:00.001Z'};
+ const series={
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
+   samples:[valid,later],routeChangeDetected:false,
+   selectorCountChanged:false,domCountChanged:false,userscriptVerified:false
+ };
+ const asSeries=(value:unknown)=>
+   value as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1];
+ for(const forgedSeries of [
+   {...series,ok:1},
+   {...series,ok:'true'},
+   {...series,samples:[{...valid,ok:1},later]},
+   {...series,samples:[valid,{...later,ok:'true'}]},
+   {ok:false,code:'VERIFIED'}
+ ]){
+   const result=summarizeReadOnlyScenarioDomSeries(
+     baseScenario,asSeries(forgedSeries),true);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.code,'INVALID_OBSERVATION');
+   assert.equal(result.automaticPatchAllowed,false);
+ }
+});
 test('TEST-013: malformed iframe, shadow and blind-spot inventory fails closed',()=>{
  const baseSample=sample(matched);
  if(!baseSample.ok)throw new Error('EXPECTED_VALID_OBSERVATION');
