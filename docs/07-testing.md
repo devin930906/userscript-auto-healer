@@ -110,3 +110,8 @@ PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 新增 T
 针对 `src/manager/tampermonkey-diagnostic.ts` 的 PR #19，新增临时 GM 夹具 HTTP 自报与受控 CDP DOM 标记的交叉核对，并在每次重读前使旧 DOM 快照失效；针对 `src/observe/dom-observer.ts` 只读 CDP 样本新增同一采样前、中、后顶层 URL 一致性校验，避免同源 SPA 导航中旧节点误归属新路由。来源 SHA `3b4585b0e6ec802b64624b39badff5dba42a6457` 的 [Windows Application Checks 39127069957](https://github.com/devin930906/userscript-auto-healer/actions/runs/39127069957) 已成功运行类型检查、90 项 Node 测试（89 pass、0 fail、1 skip）和真实 Electron smoke。
 
 判定仅限 `CONSISTENT_UNVERIFIED_FIXTURE_ONLY`，明确不得因此提升扩展身份、真实脚本安装、GM API、真实业务或自动修复的验证标志。独立 Tampermonkey 安装/授权/真实 `GM_getValue`、产品真正生成补丁的业务断言与失败回滚仍属于未完成的 TEST-017/018、后续 TEST-014/020/021、GATE-004/005/006/007。PR #19 未合并前，本段记录的是**开发分支的测试结果**而非 main 的完整产品验收。
+
+
+## （7）TEST-013 阶段性独立故障信号分类（2026-10-18）
+
+TASK-007 的真实 Tampermonkey 专项前提仍未满足，本阶段仅在 TASK-008 的**不依赖真实扩展**的纯本地部分落实 REQ-013：以严格白名单和有限证据 ID 接收结构化事件，将权限、网络、JavaScript 异常、选择器缺失与业务断言失败分开。多个不同故障类别、未知状态或畸形信息均不得确认单一根因；即使只有一种失败，也只返回信号类别，不给出自动修复许可、Tampermonkey 验证或业务恢复证明。内存日志仅保留类别、状态、合规证据 ID 与时间/序号，拒绝携带原始错误文本、URL、脚本、DOM 和秘密的额外字段，设置固定最大容量。新增 TEST-013 单元负例覆盖冲突信号、网络/权限误归 DOM、数据脱敏与容量界限。此为待关联 GitHub Actions 真实执行记录的阶段实现，不是完整日志中心、真实根因确认、TEST-013 集成/正式验收通过，也不意味着 TASK-007 或 TASK-008 完成。
