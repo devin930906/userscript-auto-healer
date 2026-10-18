@@ -15,10 +15,10 @@
 CDP 默认绑定 127.0.0.1:9223，使用用户指定 Chrome 与合规非默认 Profile；严禁接管外部浏览器进程/改写旧 Profile；本地优先、AI 可选且默认关闭；只有真实油猴管理器运行+业务断言成功才算已验证恢复；任意自动应用必须有备份回滚；Windows EXE 与真 RAR 格式固定。Electron+TypeScript 仍是候选技术基线，不是实测最终决定。
 
 ## 待处理风险
-BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome 155 非默认 Profile/CDP 已取得局部实证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685）；多便携 Chrome、GM API/扩展真实运行、RAR 合法创建、Windows 正式构建、目标最低版本和业务场景仍缺证据。缺少 LICENSE 选择不自行补造。
+BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome 155 非默认 Profile/CDP 已取得局部实证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685）；多便携 Chrome、GM API/扩展真实运行、RAR 长期正式创建许可、Windows 正式产品构建、目标最低版本和业务场景仍缺证据。缺少 LICENSE 选择不自行补造。
 
 ## 开发起点
-当前**受阻**，Windows runner POC-01 基础探针已通过，但需补便携 Chrome/错误场景，并完成 POC-02 后经需求与架构复核，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
+当前**受阻**，Windows runner POC-01A/B 已通过系统与独立目录 Chrome 的限定验证，但 POC-02B 脚本实际注入与 GM API 尚未通过，需先完成获授权的真实管理器验证并经需求/架构复核，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
 
 ## 任务顺序
 M0：POC-01/02，RAR 合规供应调查/POC-03；M1：TASK-001..004；M2：TASK-005..008；M3：TASK-009..017；M4：TASK-018..020；M5：TASK-021。依赖顺序与并发边界以 docs/09-development-plan.md 实际编号为准，不盲目逐编号执行有前置未满足的任务。
@@ -31,3 +31,11 @@ GitHub 连接账户有该仓库写入权限；只读 Ubuntu 文档 CI 于 https:
 
 ## 续接规则
 读取 main、所有相关开发分支、Open PR/Issues、历史提交与 CI；按 11 把准入阻断优先处理；按 09 选择最高优先级可执行任务；先写测试/证据再实施最小代码并留痕；更新 REQ↔TEST↔TASK↔GATE、ADR、安全风险和本文。禁止重复生成新准备体系、无限新建 PR、静默覆盖用户脚本、绕过 Chrome 安全限制或在准入前正式开发。
+
+### 2026-10-18 本轮技术验证续接点
+
+- POC-01B 完成部分兼容验证：Chrome for Testing 154.0.8037.57 从独立解压路径可安全建立 CDP，错误 Profile 拒绝及端口占用预检通过。日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310。
+- POC-02A 实际加载 Violentmonkey MV3 2.49.0 Service Worker，脚本安装确认页面出现并完成确认；POC-02B 无法证明 script/GM_getValue 真执行，故 **真实功能测试未完成**。Chrome 138+ 扩展详情页的 Allow User Scripts 授权需要用户主动同意。日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089315021；Chrome 官方：https://developer.chrome.com/docs/extensions/reference/api/userScripts。
+- POC-03A 通过 Inno Setup 6 临时测试安装器制作/安装/卸载，不是正式产品 EXE：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574。
+- POC-03B 经 WinRAR 7.23 官方签名有效的限期评估创建真 RAR5、测试、解压与 SHA-256 核对成功；生产/正式 CI 长期许可证**仍未提供**，禁止自动反复试用或把测试归档当便携软件：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。
+- 下一准备阶段重点：获授权 Chrome+真实目标管理器启用用户脚本开关并检测实际 GM/注入行为；确认用户支持矩阵、真实场景、便携 Chrome 类型与 RAR 合规长期生产途径；依照 11 准入重新核对，不允许提前执行 TASK-001 产品开发。
