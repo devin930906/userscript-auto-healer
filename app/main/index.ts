@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
+import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory } from '../../src/import/import-service';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +21,13 @@ function authorizeSender(event: Electron.IpcMainInvokeEvent): void {
   }
 }
 
+function summarize(script: {filename:string; byteLength:number; sha256:string; textEncoding:string}) {
+  return {filename:script.filename, byteLength:script.byteLength, sha256:script.sha256, textEncoding:script.textEncoding};
+}
+function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>) {
+  return {canceled:false, scripts:result.scripts.map(summarize),
+    errors:result.errors, duplicates:result.duplicates};
+}
 function registerSafeIpc(): void {
   // No general invoke/channel/payload gateway; no file reading, shell access or script execution.
   ipcMain.handle('app:status', (event) => {
@@ -29,6 +37,32 @@ function registerSafeIpc(): void {
   ipcMain.handle('config:validate', (event, input: unknown) => {
     authorizeSender(event);
     return validateBrowserConfig(input);
+  });
+  // Every path MUST come from the native OS picker, not renderer-provided input.
+  ipcMain.handle('import:files', async (event) => {
+    authorizeSender(event);
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) throw new Error('NO_WINDOW');
+    const choice = await dialog.showOpenDialog(win, {
+      title:'选择 .user.js 文件', properties:['openFile','multiSelections'],
+      filters:[{name:'Userscript',extensions:['js']}]
+    });
+    if (choice.canceled) return {canceled:true,scripts:[],errors:[],duplicates:0};
+    return summarizeResult(await importApprovedPaths(choice.filePaths));
+  });
+  ipcMain.handle('import:folder', async (event) => {
+    authorizeSender(event);
+    const win = mainWindow;
+    if (!win || win.isDestroyed()) throw new Error('NO_WINDOW');
+    const choice = await dialog.showOpenDialog(win, {title:'选择脚本文件夹',properties:['openDirectory']});
+    if (choice.canceled || choice.filePaths.length !== 1)
+      return {canceled:true,scripts:[],errors:[],duplicates:0};
+    return summarizeResult(await scanApprovedDirectory(choice.filePaths[0]));
+  });
+  ipcMain.handle('import:dropped', (event, name:unknown, data:unknown) => {
+    authorizeSender(event);
+    const result = importDroppedBytes(name,data);
+    return 'code' in result ? {ok:false,code:result.code} : {ok:true,script:summarize(result)};
   });
 }
 
@@ -63,7 +97,7 @@ async function createMainWindow(): Promise<void> {
       "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
-    if (!probe?.ok || probe.keys?.join(',') !== 'getStatus,security,validateConfig') {
+    if (!probe?.ok || probe.keys?.join(',') !== 'chooseFiles,chooseFolder,getStatus,importDropped,security,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
