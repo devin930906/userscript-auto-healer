@@ -12,7 +12,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
  assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch,
- summarizeFixtureDomEvidence
+ summarizeFixtureDomEvidence,correlateManualFixtureEvidence
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -169,6 +169,51 @@ test('TEST-017: assessment validates its own input instead of trusting caller cl
    const x=assessManualProbeObservations(both,flags);
    assert.notEqual(x.status,'SELF_REPORTED_EXPECTATIONS_MATCH');
  }
+});
+
+
+test('TEST-018 stage: HTTP claims and independent DOM evidence must agree, never become VERIFIED',()=>{
+ const observedAt='2026-10-18T00:00:00.000Z';
+ const dom=(mode:'broken'|'fixed',actionCount:0|1)=>({
+   status:'LIMITED_FIXTURE_DOM_ONLY' as const,mode,observedAt,targetCount:1 as const,
+   actionCount,fixtureDomMatchesExpected:actionCount===(mode==='fixed'?1:0),
+   extensionAuthenticityVerified:false as const,
+   scriptInstallationVerified:false as const,gmApiVerified:false as const,
+   businessVerified:false as const
+ });
+ const matched={broken:dom('broken',0),fixed:dom('fixed',1)};
+ const consistent=correlateManualFixtureEvidence(both,visited,matched);
+ assert.deepEqual(consistent,{
+   status:'CONSISTENT_UNVERIFIED_FIXTURE_ONLY',comparedModes:2,
+   extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+   gmApiVerified:false,businessVerified:false
+ });
+ assert.equal(correlateManualFixtureEvidence(both,{broken:false,fixed:true},matched)
+   .status,'AWAITING_BROWSER_VISITS');
+ assert.equal(correlateManualFixtureEvidence({},visited,matched).status,'AWAITING_REPORTS');
+ assert.equal(correlateManualFixtureEvidence(both,visited,{}).status,
+   'AWAITING_DOM_OBSERVATIONS');
+ assert.deepEqual(correlateManualFixtureEvidence(both,visited,{broken:matched.broken}),{
+   status:'AWAITING_DOM_OBSERVATIONS',comparedModes:1,
+   extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+   gmApiVerified:false,businessVerified:false
+ });
+ // A forged positive self-report cannot establish recovery when real DOM is unchanged.
+ assert.equal(correlateManualFixtureEvidence(both,visited,{
+   broken:matched.broken,fixed:dom('fixed',0)
+ }).status,'DOM_REPORT_CONFLICT');
+ assert.equal(correlateManualFixtureEvidence(both,visited,{
+   broken:dom('broken',1),fixed:matched.fixed
+ }).status,'DOM_REPORT_CONFLICT');
+ assert.equal(correlateManualFixtureEvidence(both,visited,{
+   broken:matched.broken,fixed:{...matched.fixed,gmApiVerified:true}
+ }).status,'INVALID_DOM_EVIDENCE');
+ assert.equal(correlateManualFixtureEvidence(both,visited,{
+   broken:matched.broken,fixed:{...matched.fixed,actionCount:42}
+ }).status,'INVALID_DOM_EVIDENCE');
+ assert.equal(correlateManualFixtureEvidence({
+   broken:selfReport('broken',false,false),fixed:both.fixed
+ },visited,matched).status,'REPORTED_MISMATCH');
 });
 
 /** Actual Windows CDP observation of the temporary fixture, with NO extension

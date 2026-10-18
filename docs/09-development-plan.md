@@ -122,3 +122,12 @@ TASK-001/002 均已合并；后续优先开展 **TASK-003**（REQ-004、REQ-011�
 现有 `src/manager/tampermonkey-adapter.ts` 只能在受控 Chrome/CDP 下取得管理器运行目标线索，并不证明扩展已安装、已授权或 GM/业务动作成功。本轮 PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 续做 TASK-007 / REQ-017 / TEST-017：新增 `src/manager/tampermonkey-preflight.ts`，只校验用户显式同意、目标线索、*报告的* Tampermonkey ID/版本、启用和 userScripts 条件，以及静态元数据 `@grant GM_getValue` 与可保守确认的精确来源 `@match`；通配主机、排除规则和不确定路径一律阻断。新增 `tests/manager/tampermonkey-preflight.test.ts`，并入 `npm test`。成功结果仅为 `METADATA_ELIGIBLE_ONLY`，真实性、脚本实际安装、GM 调用与业务效果均保持 false；绝不能由用户可伪造的报告直接生成 VERIFIED。
 
 代码源提交 `ab250732165b8635c88e68a52ffee8d371aa1e7a` 经过 [Windows Application Checks 39114195987](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195987)（72 个 Node 测试：71 通过、0 失败、1 专用路径跳过；真实 Electron smoke 成功），并经 [TASK-005 独立 Chrome 专项 39114195971](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195971) 成功验证。此前源提交 `14a9879` 的两项工作流因测试夹具 TypeScript 字面量类型错误而失败，已修复且保留历史。**TASK-007 仍开发中**，下一步仍须在授权独立 Tampermonkey 环境实际证实版本、安装、权限、脚本注入、GM_getValue 和业务断言；TEST-017/018 和全部 Stable GATE 尚未完成。PR #11 的实际合并状态需按 GitHub 实时核验。
+
+
+## （7）TASK-007 临时 GM 证据交叉核对与路由竞态修复（2026-10-18）
+
+本阶段复用已存在的 [PR #19](https://github.com/devin930906/userscript-auto-healer/pull/19)，在原本的临时自报 HTTP 与只读 DOM 观察之上增加保守的 `consistencySnapshot()` / `correlateManualFixtureEvidence()`：缺少任一浏览器访问、自报、DOM 样本，或两者业务动作矛盾／DOM 证据畸形时，禁止将一致性判为成功；即使两种证据吻合，也**只能**返回 `CONSISTENT_UNVERIFIED_FIXTURE_ONLY`，扩展真伪、脚本安装、GM API、业务恢复标志全部保持 false。重新观察前会撤销此前该模式的 DOM 快照，避免失败读数沿用旧阳性。
+
+同次修复 `src/observe/dom-observer.ts` 原先仅按顶层网页来源确认 DOM 快照的缺口：先后读取的顶层 CDP URL 必须一致，若同源 SPA 导航发生于一个 DOM 采样窗口内则拒绝快照；只有稳定快照才能将实际最新 URL 与期望路由比较。分次观测的合法 SPA 路由变化仍可继续记录。测试包含假阳性自报、损坏样本、缺失样本与真实 Windows Chrome SPA 回归。
+
+最新源 SHA `3b4585b0e6ec802b64624b39badff5dba42a6457` 的 [Windows Application Checks 39127069957](https://github.com/devin930906/userscript-auto-healer/actions/runs/39127069957) 状态 `success`，TypeScript 类型检查成功，Node 测试 90 项中 89 通过、0 失败、1 项环境条件跳过，真实 Windows Electron sandbox/preload smoke 成功。首次路由加固源 `0fa4838` 的 CI 因 TypeScript 可空帧判断失败，已在此 SHA 修复并完整复测；历史失败如实保留。**PR #19 仍须核对审核与正式合并，不能提前算作 main 已整合。** 本阶段完全没有安装真 Tampermonkey、没有验证实际 GM 调用或自动修复；TASK-007、TEST-017/018、GATE-004/005 仍未完整通过，TASK-008..021、正式 EXE+ZIP 均尚待按门槛开发。

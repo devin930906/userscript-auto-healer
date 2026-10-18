@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {summarizeDomTree,observeApprovedDom,isApprovedTopFrame} from '../../src/observe/dom-observer';
+import {summarizeDomTree,observeApprovedDom,isApprovedTopFrame,approvedTopFrameUrl} from '../../src/observe/dom-observer';
 test('TEST-010: iframe and shadow scope remain limited, not full-page coverage',()=>{
   const node={nodeType:9,nodeName:'#document',children:[
     {nodeType:1,nodeName:'HTML',children:[
@@ -58,4 +58,26 @@ test('TEST-010: malformed CDP DOM evidence and unrelated top-level origins fail 
   assert.equal(summarizeDomTree({nodeType:'1',nodeName:'DIV'},frames,approved),null);
   assert.equal(summarizeDomTree({},frames,approved),null);
   assert.equal(summarizeDomTree(valid,frames,approved)?.elementCount,0);
+});
+
+test('TEST-012: CDP frame URL distinguishes same-origin routes without elevating evidence',()=>{
+ const origin='https://example.com';
+ const first={frame:{url:origin+'/fixture?mode=broken'}};
+ const changed={frame:{url:origin+'/fixture?mode=fixed'}};
+ assert.equal(approvedTopFrameUrl(first,origin),origin+'/fixture?mode=broken');
+ assert.equal(approvedTopFrameUrl(changed,origin),origin+'/fixture?mode=fixed');
+ assert.notEqual(approvedTopFrameUrl(first,origin),approvedTopFrameUrl(changed,origin),
+   'A route transition during a DOM observation must be discarded');
+ assert.equal(isApprovedTopFrame(changed,origin),true,
+   'A stable SPA route on the same approved origin remains observable');
+ for(const frame of [
+   {frame:{url:'https://elsewhere.example/fixture?mode=fixed'}},
+   {frame:{url:'https://user:pass@example.com/private'}},
+   {frame:{url:'about:blank'}},
+   {frame:{url:'https://example.com/'+'x'.repeat(4097)}},
+   {frame:{url:12}},
+   null
+ ]){
+   assert.equal(approvedTopFrameUrl(frame,origin),null);
+ }
 });
