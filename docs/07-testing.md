@@ -30,7 +30,7 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-014 | REQ-014 | 单元/集成 | Patch 夹具 | 可确认原意 | 坏定位器/不确定候选 | 本地修复规则：生成 diff | 只做最小变更 | 删功能或越权修改 | 单元 | 已规划 |
 | TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 已规划 |
 | TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 已规划 |
-| TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 已规划 |
+| TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 仅运行目标探测与拒绝负例已阶段执行；真实 Tampermonkey 安装/授权/GM/业务验收仍未执行 |
 | TEST-018 | REQ-018 | 端到端 | Chrome+真实 Tampermonkey | 真实 Tampermonkey/测试脚本已安装并授权，场景已定义 | 失效/已修脚本、GM API、不同注入时机 | 在 Tampermonkey 中实际注入，调用 GM API、执行业务断言与回归，记录扩展和浏览器版本及运行证据 | 真实 Tampermonkey 的业务断言满足才 VERIFIED | Violentmonkey/原生 DOM/人工修正版冒充产品自动修复 | 独立 Tampermonkey E2E | 已规划 |
 | TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 已规划 |
 | TEST-020 | REQ-020 | 可靠性 | Windows NTFS | 可修改测试文件 | 成功/磁盘满/文件锁 | 版本备份回滚：应用、模拟中断、回滚 | 原字节 hash 恢复 | 原文件损坏 | 故障注入 | 已规划 |
@@ -91,3 +91,8 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 ## （7）TEST-010/012 阶段实测收据（2026-10-18）
 
 源 HEAD `824f9c89f673e0d05adbaf3084fd609f8e20eca0` 的 [Windows Application Checks 39110563542](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563542) 已完成真实签名 Chrome、自管隔离 Profile 和授权 CDP 页面上的 DOM、跨来源 iframe 可见性盲区、延迟元素、同源 `history.pushState` SPA 路由检测，另含主框架跨源/畸形输入的拒绝测试。58 项 Node 测试中 57 通过、0 失败、1 项独立便携 Chrome 测试由 [39110563531](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563531) 覆盖；相同 SHA 的 Electron sandbox smoke 和文档检查通过。早期 [39110333660](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110333660) 失败仍保留：页面导航初始化竞态导致 `CDP_FAILED`，测试夹具已修复并重新验证。该记录证明 TASK-006 阶段行为，不包含真实 Tampermonkey 的安装/GM API/业务恢复、用户 Windows 完整兼容或 Stable GATE。
+
+
+## （7）TEST-017 部分只读探测证据（2026-10-18）
+
+源 HEAD `f09e0e68fcb67c3dbdeb4b2b8fc48af250614bb0` 的 [Windows Application Checks 39111259895](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259895) 已实测产品适配器在独立 Windows Chrome 中只读调用浏览器 CDP `Target.getTargets`，并检验拒绝非目标管理器、网页冒充、畸形响应、伪造会话及未授权输入。64 项 Node 测试中 63 通过、0 失败、1 专用路径跳过；真实 Electron smoke 成功。返回仅能是 `RUNTIME_TARGET_HINT_ONLY` 或 `RUNTIME_NOT_OBSERVED` 等有限结果，**不是 Tampermonkey 产品 TEST-017 完整通过**。未实测真实 Tampermonkey 的该适配器安装/启用/版本/权限、GM 和业务断言，TEST-018 未执行；正式产品跨版本矩阵仍待独立证据。
