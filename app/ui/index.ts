@@ -183,7 +183,7 @@ dropZone?.addEventListener('drop', event => {
 void window.healer.getStatus().then(s => {
   if (statusElement) statusElement.textContent = s.shell === 'development-skeleton'
     && !s.automaticRepairAvailable && !s.aiEnabled && !s.automaticApplyEnabled
-      ? '安全入口运行中；仅允许读取用户主动选择的脚本。'
+      ? '安全入口运行中；只读导入可用，独立 Chrome 连接与 Tampermonkey 只读探测需要另外授权。'
       : '安全检查未通过，自动处理仍被禁用。';
 }).catch(() => {
   if (statusElement) statusElement.textContent = '应用入口不可用。';
