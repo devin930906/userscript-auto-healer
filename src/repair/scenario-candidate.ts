@@ -113,7 +113,10 @@ export function proposeFromReadOnlyDomDiagnostic(
 
     const candidate=proposeLiteralSelectorPatch(patch);
     if(candidate.status!=='CANDIDATE_ONLY')return blocked('PATCH_BLOCKED');
-    if(!sourceMatchesScenarioTarget(patch.source,s.targetUrl))
+    // Use the immutable planner output, not caller-controlled patch getters
+    // read a second time after SHA validation.
+    if(candidate.originalSha256!==s.scriptSha256||
+       !sourceMatchesScenarioTarget(candidate.candidateSource,s.targetUrl))
       return blocked('INVALID_SCENARIO_LINK');
     return Object.freeze({
       ...candidate,
