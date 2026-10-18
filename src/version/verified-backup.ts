@@ -26,6 +26,11 @@ function same(a:Identity,b:Identity):boolean {
   return a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
     a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
 }
+// A directory's timestamps necessarily change when a staging file is created.
+// Preserve directory object identity without requiring unchanged mtime/ctime.
+function sameDirectory(a:Identity,b:Identity):boolean {
+  return a.dev===b.dev&&a.ino===b.ino;
+}
 function validPath(path:unknown):path is string {
   return typeof path==='string'&&path.length>0&&path.length<=4096&&
     !path.includes('\0')&&isAbsolute(path);
@@ -97,7 +102,6 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     const final=join(directory,name);
     const pending=join(directory,'.'+randomUUID()+'.pending');
     let tempCreated=false;
-    let published=false;
     try {
       const out=await open(pending,'wx',0o600);
       tempCreated=true;
@@ -114,13 +118,12 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       if(latest.isSymbolicLink()||!latest.isFile()||!same(original,latest))
         return deny('SOURCE_CHANGED');
       if(currentDir.isSymbolicLink()||!currentDir.isDirectory()||
-         !same(backupDir,currentDir))return deny('BACKUP_DIRECTORY_INVALID');
+         !sameDirectory(backupDir,currentDir))return deny('BACKUP_DIRECTORY_INVALID');
 
       // Atomic, no-clobber hard link: unlike rename, it cannot replace an
       // existing backup. On unsupported filesystems, block rather than fall
       // back to a non-atomic or overwrite-prone publication path.
       await link(pending,final);
-      published=true;
       const saved=await readFile(final);
       if(saved.length!==bytes.length||
          createHash('sha256').update(saved).digest('hex')!==digest)
@@ -132,10 +135,8 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       return deny('IO_FAILURE');
     }finally{
       if(tempCreated)await unlink(pending).catch(()=>{});
-      // Do not silently delete a published backup if verification failed:
-      // it may be the only recovery copy. The caller must treat a BLOCKED
-      // result as unusable and reconcile any orphaned copy safely.
-      void published;
+      // If post-publication verification failed, leave the unique recovery
+      // copy for privileged reconciliation; never claim it was verified.
     }
   }catch{
     return deny('IO_FAILURE');
