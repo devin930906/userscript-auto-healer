@@ -70,3 +70,7 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 真实 Windows 2025 runner 的 Violentmonkey MV3 2.49.0 测试矩阵已分别执行两个独立的 `.user.js` 情境：旧定位器 `#poc-obsolete-anchor` 虽然脚本与 GM_getValue 真实执行，但业务结果 `missing-target`；新定位器 `#poc-new-anchor` 同样经真实脚本管理器执行后业务结果为 `recovered` 且目标动作完成。两项实际通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851；代码路径 `poc/windows-manager-extension.cjs`、`.github/workflows/windows-manager-extension-poc.yml`。这是合成测试中**事先人工准备的两个版本**，不是程序已经自动诊断或修复，不能替代真实用户油猴脚本修复前后的测试。
 
 范围、依赖、正式首期工程基线和开发/发布不同准入门槛，统一归档：docs/13-predevelopment-admission.md。Windows 10/11 实际设备、目标 Tampermonkey、部分便携 Chrome 和真实受登录保护的业务场景仍需后续实际授权验证。
+
+### 2026-10-18 POC-04B：真实 JavaScript AST 解析器验证通过
+
+在 Ubuntu GitHub Actions 的一次性隔离环境中，锁定 `acorn@8.14.0` 并禁用安装脚本，真实解析包含字面 querySelector、常量模板、拼接表达式、嵌套函数以及动态成员方法的测试 JavaScript；按源码行/列、所属函数与静态确定性识别出三处确定值及三处必须运行时确认的未知值。结果：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314；代码：`poc/ast-selector-feasibility.cjs`。本 PoC 不执行导入脚本、不生成补丁，不替代后续 TASK-003 的真实 AST 分析器、修复和安全验收；动态与封装计算不能伪称静态确定。

@@ -51,3 +51,7 @@ POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930
 首期 `TASK-001` 只能实施最小可信桌面安全入口和失败测试，**不能宣称已经具备油猴脚本修复能力**。管理器兼容、用户实际 Chrome/Profile/脚本、页面业务断言在后续实机验证里补齐；不支持的状态应明确标记 UNKNOWN/DETECTED_ONLY。正式发布需补真实应用双包运行、RAR 持续合法授权和全部 Stable GATE。按阶段门控，不再反复把已通过的基础 PoC 写为阻断。
 
 本轮新增的 POC-04A 证据：真实 Violentmonkey `broken` 预设旧定位器的业务失败与 `fixed` 预设新定位器的业务成功均得到独立 Windows CI 验证：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。详细授权、支持矩阵及剩余条件见 docs/13-predevelopment-admission.md。
+
+## AST 可行性补充记录
+
+POC-04B 在 Ubuntu runner 真正执行 Acorn 的静态 JavaScript AST 样本，成功识别三处确定定位器与三处运行时待确认动态/计算调用，记录源码位置与函数归属（https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314）。结论只用于技术选型，不能作为正式 TASK-003/REQ-011 实现完成或自动修复验收。其余实机 Tampermonkey、真实脚本和正式双包阻断照旧。

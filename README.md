@@ -21,3 +21,5 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 - **条件性首期入口**：ADR-001 已将 Electron+TypeScript 选为可修订的安全骨架工程基线，只允许基于 AGENTS.md / docs/09-development-plan.md 开始有证据的 TASK-001 安全实现。
 - **尚未完成的前置与发布验收**：用户真实 Tampermonkey/Windows/Chrome 与便携版、用户授权实际失效脚本/业务断言、自动修复和回滚、正式 EXE/RAR 双包、RAR 长期生产许可与全部 Stable 门槛。
 - 证据矩阵与分阶段准入：`docs/13-predevelopment-admission.md`；最新准入结论：`docs/11-readiness.md`；续接：`docs/12-handoff.md`。
+
+- 开发前 AST PoC 亦已通过：`poc/ast-selector-feasibility.cjs` 使用真实解析器，按源码位置/函数归属区分确定定位器与必须运行时确认的动态表达式；验证 https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314。此实验不代表程序已实现自动修复。

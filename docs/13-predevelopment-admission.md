@@ -10,6 +10,7 @@
 | POC-01B | 独立解压的 Chrome for Testing 154/CDP 实例归属/错误 Profile | 已通过受限方案 | https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310；不等于所有第三方便携版 |
 | POC-02D | 真 Violentmonkey 2.49.0 的 .user.js 注入与 GM_getValue 实际调用 | **通过** | https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277；Playwright bundled Chromium、独立测试 Profile、标准 HTTPS |
 | POC-04A | 真 Violentmonkey 中两个**人工准备**的已知选择器状态 | **故障与修正后两项通过** | https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851；broken 与 fixed 各独立 Windows Job；**不是自动修复引擎** |
+| POC-04B | 真 Acorn AST：字面 selector 与动态表达式区分、源码行列/所属函数 | **通过静态解析 PoC** | https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314；三处字面、三处未知；未生成修复补丁、未执行输入脚本 |
 | POC-03A | Inno Setup 6 临时 Windows 安装器生成、安装、卸载 | 已通过工具链 PoC | https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；不是正式应用安装包 |
 | POC-03B | 官方试用 WinRAR 真 RAR5 创建、校验、解压 | 已通过限期评估 | https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242；长期生产使用许可证**未落实** |
 
@@ -23,6 +24,12 @@
 | `fixed` | `#poc-new-anchor`（页面实际存在） | 脚本/GM 同样成功，`selectorOutcome=recovered`、目标节点 `data-fixture-clicked=yes` | **业务恢复** |
 
 测试源：`poc/windows-manager-extension.cjs`；Windows 工作流：`.github/workflows/windows-manager-extension-poc.yml`，固定 `scenario: [broken, fixed]` 两个独立测试任务。缺少目标业务断言、扩展用户脚本运行或 GM API 成功时该任务必须失败。脚本差异是**事先人工设定**，不得写作“产品能够诊断、自动修复或回滚”。该项目还需要开发中的 REQ/TEST、真实损坏脚本样本及登录等前置条件才能验证真正自动修复。
+
+## 静态 AST POC-04B 的结果与限制
+
+隔离 Ubuntu 2024 GitHub Actions（临时安装 `acorn@8.14.0`、禁止 npm install scripts）解析预设 JavaScript，得到六处定位器或计算成员方法调用的源码行列和所在函数。三处字面选择器可静态确定，三处拼接/动态方法只能标记为 `needs-runtime-confirmation`；必须用后续授权运行时诊断核实，不可自动改动。代码 `poc/ast-selector-feasibility.cjs`，工作流 `.github/workflows/ast-selector-feasibility.yml`，真实通过记录：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314。
+
+**不可混淆**：这是一个受限合成 AST 技术验证，不是完整 .user.js 多文件/混淆/依赖分析器，没有动态选择器求值、代码语义证明、自动修复或自动验收；TASK-003 仍须先写测试再实施正式功能。
 
 ## 受支持范围：已验证、拟验证、不可承诺三层
 
