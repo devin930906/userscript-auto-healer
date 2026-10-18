@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import type {MetadataResult} from '../../src/analyze/metadata-parser';
+import {parseUserscriptMetadata,type MetadataResult} from '../../src/analyze/metadata-parser';
 import {inspectTampermonkeyTargetHints,TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 import {inspectReportedTampermonkeyPreflight} from '../../src/manager/tampermonkey-preflight';
 
@@ -27,6 +27,20 @@ test('TEST-017: eligible metadata is not proof of installed script, actual GM or
   extensionId:TAMPERMONKEY_EXTENSION_ID,reportedVersion:'5.5.1',
   scriptMatchPattern:'https://example.com/*',extensionAuthenticityVerified:false,
   scriptInstallationVerified:false,gmApiVerified:false,businessVerified:false});
+});
+test('TEST-017: read-only parser metadata integrates with preflight without claiming GM execution',()=>{
+ const script=['// ==UserScript==','// @name Safe fixture',
+  '// @match https://example.com/*','// @grant GM_getValue',
+  '// ==/UserScript==','void 0;'].join('\\n').replace(/\\n/g,'\n');
+ const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(script),
+  textEncoding:'utf-8'});
+ assert.equal(parsed.status,'OK');
+ const result=inspect(report,parsed);
+ assert.equal(result.ok,true);
+ if(result.ok){
+   assert.equal(result.gmApiVerified,false);
+   assert.equal(result.scriptInstallationVerified,false);
+ }
 });
 test('TEST-017: consent and real owned-target hint stage cannot be bypassed',()=>{
  assert.deepEqual(inspect(report,normal,'https://example.com/',false),
