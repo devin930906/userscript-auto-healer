@@ -92,3 +92,9 @@ TASK-002（REQ-001..003 / TEST-001..003）的只读导入、字节/编码/哈希
 ## （7）TASK-003 合并与 TASK-004 续接（2026-10-18）
 
 Acorn AST 与元数据只读分析（REQ-004/011，TEST-004/011 限阶段）已在 Windows CI 通过：[Actions 39104178253](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104178253)，HEAD `534f97b464384d18559d0c61127de7c6b3abc9c0`；[PR #3](https://github.com/devin930906/userscript-auto-healer/pull/3) 已合并至 main SHA `cc15da038ecf01c4c03001e7165b7698eecab4d5`。这不是浏览器动态 DOM/脚本业务/修复的完整验收。按已确认依赖，下一项可执行为 **TASK-004** 场景登记、真实 URL/登录前提和业务断言契约；**TASK-005** Chrome/Profile/CDP 也可独立开展。不得回到 TASK-001/002/003 重做已验证代码，必须先复查当前 main SHA/PR/Actions。
+
+## （7）TASK-004 合并及 TASK-005 续接（2026-10-18）
+
+REQ-005 的场景登记、明确测试授权/目标 URL、登录前提、操作与业务断言预检已合并：[PR #4](https://github.com/devin930906/userscript-auto-healer/pull/4)，merge SHA `dc088797220f9a3d7efa5b1d89dede6ff0ae657c`。源码 `src/scenarios/scenario-registry.ts`；测试 `tests/scenarios/registry.test.ts`。Windows [Actions 39104629620](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104629620)，源提交 `a39004f973a1c72469ffa620bfa6f01a517570ab`，30 项 Node 回归和真实 Electron smoke 通过。只完成 TEST-005 静态阶段契约验证，真实登录/业务断言尚未跑。
+
+**下一 TASK-005**：在既定授权边界内校验标准/便携 Chrome 路径，拒绝默认/被占用 Profile，隔离启动与 CDP 实例归属；必须首先测试安全拒绝策略。真实用户 Profile、已登录站点和既有脚本不得擅自接管或修改。TASK-001..004 已合并；EXE+ZIP 与 Stable GATE 仍未达到。

@@ -48,3 +48,7 @@ TASK-001 安全桌面骨架已提交至 `feat/stable-development`，在 Windows 
 ## （7）TASK-003 静态分析入库（2026-10-18）
 
 [TASK-003 PR #3](https://github.com/devin930906/userscript-auto-healer/pull/3) 已合并（main `cc15da038ecf01c4c03001e7165b7698eecab4d5`）；[Windows Actions 39104178253](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104178253) 完成静态元数据/AST 单元和 Electron 安全回归。本阶段不运行导入脚本，不做自动补丁或覆盖；动态 DOM 与 Tampermonkey 实际恢复另行验收。下一开发任务为 TASK-004 场景契约。
+
+## （7）TASK-004 场景契约入库（2026-10-18）
+
+[PR #4](https://github.com/devin930906/userscript-auto-healer/pull/4) 已合并（SHA `dc088797220f9a3d7efa5b1d89dede6ff0ae657c`），Node 30/30 与 Windows 真 Electron smoke 在 [Actions 39104629620](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104629620) 全部通过。项目已具备只读导入、静态元数据/AST 与业务测试场景登记基础，**尚不具备自动修复/验证完成的能力**；下一项 TASK-005 为独立 Chrome/Profile/CDP 安全启动。
