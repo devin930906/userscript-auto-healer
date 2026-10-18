@@ -16,7 +16,7 @@ const payload = [
   '// @name        Userscript feasibility fixture',
   '// @namespace   https://userscript-auto-healer.invalid/',
   '// @version     0.0.1',
-  '// @match       http://127.0.0.1/*',
+  '// @match       https://example.com/*',
   '// @grant       GM_getValue',
   '// @run-at      document-idle',
   '// ==/UserScript==',
@@ -33,12 +33,12 @@ async function main() {
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
     res.end('<!DOCTYPE html><title>Local userscript fixture</title><h1 id="fixture">Local page</h1>');
   });
-  // Use the default HTTP port so a valid @match and Chrome userScripts match
-  // pattern do not diverge on a random :port. This probe never binds externally.
-  // If the port is occupied, listen fails; do NOT stop or take over another process.
+  // A random loopback port serves only the manager's installer .user.js.
+  // The SCRIPT under test matches the IANA-reserved https://example.com URL,
+  // whose standard HTTPS port avoids nonstandard-port match discrepancies.
   await new Promise((resolve,reject)=>{
     server.once('error',reject);
-    server.listen(80,'127.0.0.1',()=>{
+    server.listen(0,'127.0.0.1',()=>{
       server.removeListener('error',reject);
       resolve();
     });
@@ -172,7 +172,7 @@ async function main() {
           if(typeof chrome==='undefined'||!chrome.userScripts)return {available:false};
           const scripts=await chrome.userScripts.getScripts();
           const permissions=await chrome.permissions.getAll();
-          const localhost=await chrome.permissions.contains({origins:['http://127.0.0.1/*']});
+          const testHost=await chrome.permissions.contains({origins:['https://example.com/*']});
           // Temporary positive control: register a harmless marker against a
           // local fixture only. This tests Chrome injection independently of
           // Violentmonkey's manager pipeline; it cannot count as GM acceptance.
@@ -180,7 +180,7 @@ async function main() {
           try {
             await chrome.userScripts.register([{
               id:'poc-direct-control',
-              matches:['http://127.0.0.1/*'],
+              matches:['https://example.com/*'],
               js:[{code:'document.documentElement.dataset.directApiControl = "executed"'}],
               runAt:'document_idle',
               world:'USER_SCRIPT',
@@ -189,7 +189,7 @@ async function main() {
           } catch(e) {control='registration failed: '+String(e).slice(0,220)}
           return {
             available:true,registrations:scripts.length,
-            localhostPermission:localhost,
+            targetHostPermission:testHost,
             grantedOrigins:permissions.origins,
             declaredPermissions:permissions.permissions,
             directControl:control,
@@ -203,7 +203,7 @@ async function main() {
         const observation=await optionsProbe.evaluate(()=>{
           window.__pocWebRequests=[];
           chrome.webRequest.onSendHeaders.addListener(details=>{
-            if(details.url.startsWith('http://127.0.0.1:'))
+            if(details.url.startsWith('http://127.0.0.1:')||details.url.startsWith('https://example.com'))
               window.__pocWebRequests.push({url:details.url,tabId:details.tabId,type:details.type});
           },{urls:['<all_urls>']});
           return {listenerRegistered:chrome.webRequest.onSendHeaders.hasListeners()};
@@ -278,16 +278,16 @@ async function main() {
     const probe=await context.newPage();
     probe.on('console',m=>{if(m.type()==='error')console.log('FIXTURE_CONSOLE_ERROR: '+m.text().slice(0,380))});
     probe.on('pageerror',e=>console.log('FIXTURE_PAGE_ERROR: '+String(e).slice(0,380)));
-    await probe.goto('http://127.0.0.1:'+port+'/fixture',{waitUntil:'domcontentloaded'});
+    await probe.goto('https://example.com/',{waitUntil:'domcontentloaded',timeout:30000});
     let control={directApi:false};
     try {
       await probe.waitForFunction(()=>document.documentElement.dataset.directApiControl==='executed',{timeout:3000});
       control.directApi=true;
     } catch(e) {}
-    console.log('Isolated Chrome userScripts direct injection positive-control: '+JSON.stringify(control));
+    console.log('Direct Chrome userScripts injection positive-control on example.com: '+JSON.stringify(control));
     try {
       const webRequests=await optionsProbe.evaluate(()=>window.__pocWebRequests||[]);
-      console.log('Observed localhost webRequest onSendHeaders calls: '+JSON.stringify(webRequests.slice(-12)));
+      console.log('Observed local-installer + example.com webRequest events: '+JSON.stringify(webRequests.slice(-12)));
     } catch(err) {
       console.log('INCOMPLETE webRequest observed events: '+String(err.message).slice(0,180));
     }
