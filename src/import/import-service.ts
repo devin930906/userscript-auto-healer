@@ -48,7 +48,8 @@ function validName(name: unknown): name is string {
     /^[^\\/\u0000-\u001f]+\.user\.js$/i.test(name) && name !== '..';
 }
 
-function decode(raw: Uint8Array, allowGb18030: boolean): ImportedScript['textEncoding'] | ImportFailureCode {
+function decode(raw: Uint8Array, allowGb18030: boolean):
+  ImportedScript['textEncoding'] | 'INVALID_ENCODING' | 'EMPTY_FILE' | 'BINARY_CONTENT' {
   if (raw.length === 0) return 'EMPTY_FILE';
   let text: string;
   let encoding: ImportedScript['textEncoding'];
