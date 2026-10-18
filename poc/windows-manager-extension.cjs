@@ -38,7 +38,8 @@ async function main() {
   let context;
   try {
     context = await chromium.launchPersistentContext(profileDir, {
-      headless:true,
+      // Compare hosted Chromium GUI behavior with earlier headless feasibility runs.
+      headless:process.env.USERSCRIPT_POC_GUI !== 'true',
       channel:'chromium',
       args:[
         '--disable-extensions-except='+extensionDir,
