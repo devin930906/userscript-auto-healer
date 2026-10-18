@@ -6,7 +6,7 @@
 M0：证实 Chrome/管理器/交付可行性；M1：可运行安全入口+导入+静态分析；M2：动态诊断与真实管理器验收；M3：修复/版本/批处理/AI/监控/共享层；M4：风险/性能/集成与 Windows 双包装；M5：全部 Stable 门槛和 Release。未人为指定发布日期。
 
 ## 里程碑
-M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D 在隔离 Windows Chromium/Violentmonkey 2.49.0 对标准 HTTPS 页实测 .user.js 注入及 GM_getValue 实际调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。在准入 TASK-001 前仍须定案首选管理器、可承诺 Windows/Chrome 版本矩阵、至少一个真实故障/功能断言样本、条件性 ADR-001。POC-03A 与历史 POC-03B 仅证明相应临时工具链可行；现行 ZIP 格式需验证，正式 EXE 与 ZIP 应用包安装/直启属于发布门槛（可晚于初始代码，不得晚于发布）；M1 退出：TEST-001..005/011/026 的可重复结果；M2：CDP+管理器 TEST-006..013/017/018 的真实证据；M3：TEST-014..025；M4：安全恢复及 EXE/RAR 测试；M5：所有 GATE 实证通过。
+M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D 在隔离 Windows Chromium/Violentmonkey 2.49.0 对标准 HTTPS 页实测 .user.js 注入及 GM_getValue 实际调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。首选 Tampermonkey 已由 I-011/ADR-005 确认，ADR-001 的 Electron+TypeScript 为 TASK-001 有条件工程决策；真实用户浏览器 POC-02T-LIVE 的 GM_getValue 和人工 broken/fixed 业务断言亦已记录。完整 Windows/Chrome/便携/Profile 支持矩阵及真实失效脚本回归是对应后续开发阶段任务，不能假称已通过。POC-03A 与历史 POC-03B 仅证明相应临时工具链可行；现行 POC-03C 已在 Windows Actions 实测 ZIP 工具链，正式 EXE 与 ZIP 应用包安装/直启属于发布门槛（可晚于初始代码，不得晚于发布）；M1 退出：TEST-001..005/011/026 的可重复结果；M2：CDP+管理器 TEST-006..013/017/018 的真实证据；M3：TEST-014..025；M4：安全恢复及 EXE/ZIP 正式产品测试；M5：所有 GATE 实证通过。
 
 ## 任务清单
 | 编号 | 目标 | 关联需求 | 优先级 | 前置依赖 | 实施模块 | 预计文件范围 | 具体执行步骤 | 交付结果 | 测试编号 | 完成条件 | 状态 |
@@ -66,3 +66,11 @@ Windows GitHub Actions 已通过原生 ZIP 临时文件头/解压/安全相对�
 
 ## Tampermonkey POC-02T-LIVE 后续结果
 用户连接 Chrome 上已完成真实 Tampermonkey 5.5.1 一次性脚本安装、GM_getValue、人工预设 broken/fixed 业务动作与临时测试清理。证据：docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。独立 GitHub Actions Tampermonkey POC-02T 仍未执行；TASK-001 有条件准入不变；TASK-007 与正式 TEST-017/018 必须在产品实现后实测。
+
+## （4）前置准备工程收口与（7）入口（2026-10-18）
+
+- （4）按仓库证据完成需求/架构/测试/任务交叉审查，结论为**有条件准入**；没有产品功能代码，**下一任务 TASK-001**。不得继续无限扩写准备文档，也不得把 PoC 通过等同正式 TEST/GATE 通过。
+- 已锁定本阶段决策：Tampermonkey 为主要且 Stable 必测管理器（I-011/ADR-005）；Electron+TypeScript 为首项安全骨架有条件基线（ADR-001）；Windows 正式交付为 EXE+ZIP（I-010/ADR-004）。
+- 证据层级分开：POC-02T-LIVE 是用户现有 Chrome 上的真实 Tampermonkey 5.5.1 一次性脚本、GM_getValue、**人工** broken/fixed 和清理（docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md）；POC-02T 独立 GitHub Actions 真 Tampermonkey **尚未执行**；产品 TEST-017/018 与 GATE-004/005 **尚未通过**。
+- 剩余关键条件转至（7）各阶段：TASK-001 首先做 sandbox/IPC 与安全负例；TASK-005 核验浏览器 exe、独立 Profile、CDP 端口及实例归属；TASK-007/010 与 TASK-018 完成真 Tampermonkey 适配、云端和现实支持矩阵；TASK-009..011 验证真实脚本补丁与备份回滚；TASK-019..021 完成正式 EXE+ZIP、许可证/安全审计和 Stable GATE。
+- 未获实际授权的用户原脚本、已登录网页或 Chrome Profile 不得擅自读取、改写或迁移。任何阻断按相关 TASK/TEST/GATE 记录；不是返回（4）从头准备的理由。

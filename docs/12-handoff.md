@@ -1,6 +1,6 @@
 # 项目开发交接
 
-> 状态：准备材料已保存 main；仅首个 TASK-001 安全骨架的技术准备有条件完成，全部前置/实际管理器支持范围与 Stable 尚未完成，产品源码仍未开始。
+> 状态：**（4）工程准备已完成期末审查并交接，（7）可按「有条件准入」从 TASK-001 开始**。当前尚无正式产品代码，真实用户环境全面兼容和 Stable 仍待后续任务验收。
 
 ## 项目身份
 仓库 https://github.com/devin930906/userscript-auto-healer；默认分支 main；产品为 Windows 本地优先、自动诊断与保守修复因网页变化失效的油猴脚本，交付 EXE 安装版与真实 ZIP 便携包。不得混淆其他用户项目。
@@ -61,3 +61,12 @@ POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，
 
 ## 真实 Tampermonkey 功能验证交接（POC-02T-LIVE，2026-10-18）
 在用户连接的 Chrome + Tampermonkey 5.5.1 中，临时 `.user.js` 安装/注入、`GM_getValue`、人工 `broken`/`fixed` 选择器功能断言、删除及停止注入已取得真实浏览器工具返回。证据：docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。**此测试不是 Actions 云端 runner，也不是独立 Profile，更不是产品自动修复或 Stable TEST/GATE**。先前本文件的“尚未验证真 GM”是更早只读检查时的状态，后续仅该限定样本已得到正向结果。继续推进 TASK-001，正式管理器适配 TASK-007 与 TEST-017/018/GATE-004/005 必须另建产品集成测试和云端矩阵。
+
+## （4）终局交接收据（2026-10-18）
+
+**本阶段停止**：文档语义交叉审查、准入条件分类与后续 TASK 责任分配已写入 docs/11-readiness.md，正式 Windows EXE+ZIP（非 RAR）、首要 Tampermonkey（非将 Violentmonkey 当替代）、实际 POC-02T-LIVE 的限定成功均已反映在入口文件中。后续 GPT/Codex 不应继续把这些既定事项当未解决前期阻断，也不应从头生成新的准备文档。
+
+**可直接执行的（7）起点：TASK-001，Electron+TypeScript Windows 桌面最小安全骨架。** 按 ADR-001 设计 renderer sandbox=true、contextIsolation=true、nodeIntegration=false，最小可信 preload IPC，Chrome 进程/独立 Profile 保护和非授权路径拒绝；先写安全负例再实施，执行真实 CI，提交可审计代码。任何原 .user.js 均不得未经授权读取、覆盖或在高权限主进程执行。
+
+**延后而非忽略**：TASK-005 = Windows/Chrome/便携 Chrome/CDP Profile/9223 归属；TASK-007/010/018 = 独立云端真 Tampermonkey POC-02T、管理器适配、产品实际脚本业务断言/登录与安全矩阵；TASK-009..011 = 自动修复候选、备份/回滚/验收；TASK-019/020/021 = 真实应用 EXE+ZIP 及全部 Stable 门槛。PoC 无法替代任何正式 TEST/GATE。
+**停止规则**：此段不是开始 TASK-001 的授权；只有用户正式下达（7）后才进入产品代码开发。恢复时重新读取 main HEAD、CI、Open PR/Issues 并遵循 AGENTS.md；无需重复（4）。

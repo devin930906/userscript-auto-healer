@@ -38,9 +38,9 @@
 |---|---|---|---|
 | Windows | Windows 2025 GitHub 托管运行器 | Windows 10/11 x64，依据实际设备与可执行包测试确认最低版本 | 任何未经测试的 Windows 版本、所有硬件 |
 | 浏览器/CDP | 托管 Chrome 155、独立 Chrome for Testing 154 的 CDP；bundled Chromium 能跑扩展；**已连接用户 Chrome 155.0.8059.40 真实页面 JS 读取成功** | 用户选择 Google Chrome 和部分便携 Chrome；`--remote-debugging-address=127.0.0.1`、默认端口 9223、独立非默认 Profile | 当前浏览器可读不等于已核验实际 Chrome.exe 路径、CDP 启动参数、9223 端口归属、默认/便携 Profile 或所有便携版 |
-| 油猴管理器 | Windows Chromium + Violentmonkey MV3 2.49.0 实际注入、GM_getValue 与人工 broken/fixed；**用户连接的 Chrome 155 上 Tampermonkey 5.5.1 身份、权限、userScripts API/注册可读** | 以当前 Tampermonkey 5.5.1 为优先验证版本，后续通过获授权的独立测试脚本证明 GM/运行时业务断言，并按版本扩展覆盖 | 禁止宣称这次只读预检证明真实 Tampermonkey 脚本已经执行、用户脚本修复成功或所有版本兼容 |
+| 油猴管理器 | 真实 Violentmonkey 2.49.0 GM/人工 broken/fixed；**用户 Chrome+真实 Tampermonkey 5.5.1 POC-02T-LIVE 已执行一次性测试脚本、GM_getValue 与人工 broken/fixed/清理** | Tampermonkey 是稳定版首要测试目标；完整真实 Profile/云端或声明支持的 Windows/Chrome/GM 组合留给 TASK-005/007/018 | 不得把受限人工版本对照当产品自动修复、全平台兼容或独立云端 Tampermonkey CI 成功 |
 | 脚本网站 | 标准 HTTPS `example.com` 的无账户合成场景 | 用户授权实际目标 URL、SPA、异步 DOM、业务断言 | 任意网站、无权访问/登录受控页面；不以“元素找到”当业务成功 |
-| Windows 双包 | 临时 EXE 已验证；历史 RAR5 PoC 不能作为 ZIP 证据 | 稳定版正式 Inno Setup EXE + 原生工具真实 ZIP；同源提交、双包独立验收 | 已生成正式 EXE/ZIP、干净 Windows 直启及升级/卸载验收 |
+| Windows 双包 | Inno 临时 EXE 与 Windows POC-03C 真 ZIP 压缩/解压/哈希工具链分别通过；历史 RAR5 仅为已替代选型 | 稳定版正式 Inno Setup EXE + 原生工具真实 ZIP；同源提交、双包独立验收 | 不得声称正式 EXE/ZIP、干净 Windows 直启、升级/卸载和安全已完成 |
 
 ## 连接用户 Chrome 的只读预检（2026-10-18，Chrome Browser MCP）
 
@@ -64,7 +64,7 @@
 **开始 TASK-001 的必要事项**：候选架构及预期安全契约确认（ADR-001）、能够说明适用的首期测试组合（以上矩阵）、约定真实脚本安装与用户授权的明确边界、确定 TASK-001 的安全失败测试。已得到 CDP/真实脚本/GM API 的一个可行受限组合；可针对上述有限组合进行安全骨架的前置审查。**不得因此提前宣布完整兼容、正式自动修复通过或 Stable 合格。**
 
 **尚未完成的全面开发准入/后续任务前置**：
-1. 已通过用户连接的 Chrome Browser MCP **只读确认** Google Chrome 155.0.8059.40、Tampermonkey 5.5.1、userScripts 权限/API 与 loader 注册；仍须核验实际 Chrome.exe/便携版路径、CDP 端口与 Profile 归属，以及**获授权**的 Tampermonkey 真脚本/GM API 功能测试。不能把预检当真实业务验收。
+1. 用户 Chrome Browser MCP 已分别完成 **只读扩展预检**与随后 **POC-02T-LIVE 真实 Tampermonkey 5.5.1 临时脚本/GM_getValue/人工 broken/fixed/清理**；见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。仍须在 TASK-005/007/018 验证实际 Chrome.exe/便携 Chrome、CDP 9223 独立 Profile/实例归属、独立云端真 Tampermonkey 与正式产品管理器/业务回归。已通过的受限人工 PoC 不应重复充当阻断。
 2. 用用户授权的真实失效脚本或可公开复现的复杂场景建立“损坏→诊断证据→最小补丁→安装到管理器→业务断言→回滚”合同。当前 POC-04A 只是**合成回归夹具**。
 3. 依后续 TASK-007/018 覆盖 GM API、沙箱、SPA、iframe、登录条件、功能测试；未经实测的场景返回 UNKNOWN/DETECTED_ONLY。
 4. 正式依赖锁定、Windows 安装/便携、签名及 ZIP 内容完整性与真实运行验证为**相应开发里程碑和 Stable 发布**硬门槛，不应不合理地阻止项目最初的安全骨架开发，也不能忽略到发布时。
