@@ -22,7 +22,7 @@ test('TEST-006/007: preflight only verifies paths, never launches a browser',asy
   if(process.platform!=='win32')return;
   const f=await fixture(t);
   const result=await preflightChrome(config(f.executable,f.profile));
-  assert.equal(result.ok,true);
+  assert.equal(result.ok,true,JSON.stringify(result));
   if(result.ok){
     assert.equal(result.runtimeIdentityVerified,false);
     assert.equal(result.status,'PATH_AND_PORT_CHECKED_ONLY');
