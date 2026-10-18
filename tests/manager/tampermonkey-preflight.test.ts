@@ -150,3 +150,68 @@ test('TEST-017: query string participates in conservative @match path matching',
  const pathPrefix=metadata({grant:['GM_getValue'],match:['https://example.com/admin*']});
  assert.equal(inspect(report,pathPrefix,'https://example.com/admin?mode=edit').ok,true);
 });
+
+test('TEST-017: GM probe preflight refuses expanded network and update metadata',()=>{
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ for(const [tag,value] of [
+  ['connect',['*']],
+  ['connect',['https://api.example.net']],
+  ['updateurl',['https://updates.example.net/script.meta.js']],
+  ['downloadurl',['https://updates.example.net/script.user.js']],
+  ['require',['https://cdn.example.net/lib.js']],
+  ['resource',['lib https://cdn.example.net/lib.js']]
+ ] as const){
+  const result=inspect(report,metadata({...base,[tag]:value}));
+  assert.equal(result.ok,false,tag);
+  if(!result.ok)assert.equal(result.code,'EXTERNAL_RESOURCES_UNVERIFIED');
+ }
+});
+
+test('TEST-017: extra include scopes and unknown runtime directives are not silently approved',()=>{
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ for(const value of [['*://*/*'],['https://other.example/*'],['']]){
+  const result=inspect(report,metadata({...base,include:value}));
+  assert.equal(result.ok,false);
+  if(!result.ok)assert.equal(result.code,'MATCH_NOT_CONFIRMED');
+ }
+ const unknown:MetadataResult={...metadata(base),unknownNames:['inject-into']};
+ const result=inspect(report,unknown);
+ assert.equal(result.ok,false);
+ if(!result.ok)assert.equal(result.code,'INVALID_SCRIPT_METADATA');
+});
+
+test('TEST-017: a GM smoke probe cannot assume extra or repeated GM grants are safe',()=>{
+ const base={match:['https://example.com/*']};
+ for(const grant of [
+   ['GM_getValue','GM_setValue'],
+   ['GM_getValue','GM_xmlhttpRequest'],
+   ['GM_getValue','GM_getValue'],
+   ['GM_getValue','none']
+ ]){
+  const result=inspect(report,metadata({...base,grant}));
+  assert.equal(result.ok,false,grant.join(','));
+  if(!result.ok)assert.equal(result.code,'GM_GRANT_NOT_DECLARED');
+ }
+});
+
+test('TEST-017: malicious runtime reports and serialized metadata must fail closed',()=>{
+ const throwingReport=Object.defineProperty({...report},'enabled',{
+  get(){throw new Error('private extension state');}
+ });
+ const throwingMetadata=Object.defineProperty({...normal},'tags',{
+  get(){throw new Error('private userscript metadata');}
+ });
+ const revokedReport=Proxy.revocable({...report},{});revokedReport.revoke();
+ const revokedRuntime=Proxy.revocable(runtime,{});revokedRuntime.revoke();
+ for(const input of [
+  {runtime,report:throwingReport,metadata:normal},
+  {runtime,report:revokedReport.proxy,metadata:normal},
+  {runtime,report,metadata:throwingMetadata},
+  {runtime:revokedRuntime.proxy,report,metadata:normal}
+ ]){
+  const result=inspectReportedTampermonkeyPreflight(
+   input.runtime,input.report,input.metadata,'https://example.com/',true);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_INPUT',gmApiVerified:false,businessVerified:false});
+ }
+});
