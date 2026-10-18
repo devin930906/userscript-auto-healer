@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
- assessManualProbeObservations,startApprovedTampermonkeyDiagnostic
+ assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -13,6 +13,27 @@ const selfReport=(mode:'broken'|'fixed',gm:boolean,business:boolean):GmProbeRece
 });
 const both={broken:selfReport('broken',true,false),fixed:selfReport('fixed',true,true)};
 const visited={broken:true,fixed:true};
+
+test('TEST-017: concurrent or duplicate manual visits are blocked before CDP navigation',()=>{
+ const visits=createManualModeVisitLatch();
+ assert.deepEqual(visits.snapshot(),{broken:false,fixed:false});
+ assert.equal(visits.reserve('broken'),'RESERVED');
+ assert.equal(visits.reserve('broken'),'IN_PROGRESS');
+ assert.equal(visits.reserve('fixed'),'IN_PROGRESS');
+ assert.deepEqual(visits.snapshot(),{broken:false,fixed:false});
+ visits.finish('broken',false);
+ assert.equal(visits.reserve('fixed'),'RESERVED');
+ visits.finish('fixed',true);
+ assert.deepEqual(visits.snapshot(),{broken:false,fixed:true});
+ assert.equal(visits.reserve('fixed'),'ALREADY_VISITED');
+ assert.equal(visits.reserve('broken'),'RESERVED');
+ visits.finish('broken',true);
+ assert.deepEqual(visits.snapshot(),{broken:true,fixed:true});
+ assert.equal(visits.reserve('broken'),'ALREADY_VISITED');
+ // A late failure notification cannot roll back an already confirmed visit.
+ visits.finish('broken',false);
+ assert.deepEqual(visits.snapshot(),{broken:true,fixed:true});
+});
 
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
  const fake={ok:true as const,status:'OWNED_CDP_BROWSER_VERIFIED' as const,
