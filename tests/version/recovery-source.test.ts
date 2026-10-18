@@ -147,6 +147,28 @@ test('TEST-020: refuse a source hard link impersonating a backup and redirected 
   });
 });
 
+test('TEST-020: a hard-linked original is not an eligible recovery source even with a valid separate backup',async()=>{
+  await fixture(async(req,backup,source,dir)=>{
+    const alias=join(dir,'second-path.user.js');
+    await link(source,alias);
+    try{
+      // This backup was sound before the source acquired another native path.
+      // Reject aliases even though the bytes, expected hash and backup match.
+      const result=await verifyBackupRecoverySource(req);
+      assert.equal(result.status,'BLOCKED');
+      if(result.status==='BLOCKED')assert.equal(result.reason,'SOURCE_HARDLINK_REJECTED');
+      assert.equal(result.automaticRollbackAllowed,false);
+      assert.equal(result.automaticPatchAllowed,false);
+      assert.deepEqual(await readFile(source),original);
+      assert.deepEqual(await readFile(alias),original);
+      assert.deepEqual(await readFile(backup),original);
+    }finally{await unlink(alias);}
+    const safeAgain=await verifyBackupRecoverySource(req);
+    assert.equal(safeAgain.status,'RECOVERY_SOURCE_VERIFIED_READ_ONLY');
+    assert.equal(safeAgain.automaticRollbackAllowed,false);
+  });
+});
+
 test('TEST-020: symlinked destination directory is not a trusted recovery source',async(t)=>{
   await fixture(async(req,backup,source,dir)=>{
     const linkDir=join(dir,'redirected');

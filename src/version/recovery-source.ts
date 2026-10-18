@@ -17,7 +17,7 @@ type RecoveryFailure=
   'BACKUP_DIRECTORY_INVALID'|'SYMLINK_REJECTED'|
   'BACKUP_ALIAS_REJECTED'|'BACKUP_SOURCE_MISMATCH'|
   'SIZE_LIMIT'|'HASH_MISMATCH'|
-  'FILE_CHANGED'|'IO_FAILURE';
+  'FILE_CHANGED'|'SOURCE_HARDLINK_REJECTED'|'IO_FAILURE';
 export type RecoverySourceVerificationResult=
   |Readonly<{status:'BLOCKED';reason:RecoveryFailure;
     automaticPatchAllowed:false;automaticRollbackAllowed:false;
@@ -110,6 +110,10 @@ export async function verifyBackupRecoverySource(
   if(before.nlink!==1n||
     (before.dev===sourceBefore.dev&&before.ino===sourceBefore.ino))
     return deny('BACKUP_ALIAS_REJECTED');
+  // Preserve the more specific backup-as-source alias diagnosis above.
+  // An additional independent path to the source inode also defeats the
+  // native-selected source's authorization and lock identity boundary.
+  if(sourceBefore.nlink!==1n)return deny('SOURCE_HARDLINK_REJECTED');
   if(before.size<=0n||before.size>BigInt(MAX_SCRIPT_BYTES))return deny('SIZE_LIMIT');
 
   // O_NOFOLLOW is supplementary (some operating systems lack it).
@@ -137,6 +141,7 @@ export async function verifyBackupRecoverySource(
     const dirAfter=await lstat(directory,{bigint:true});
     if(byPath.isSymbolicLink()||!byPath.isFile()||byPath.nlink!==1n||
        sourceAfter.isSymbolicLink()||!sourceAfter.isFile()||
+       sourceAfter.nlink!==1n||
        dirAfter.isSymbolicLink()||!dirAfter.isDirectory()||
        !same(before,after)||!same(after,byPath)||
        !same(sourceBefore,sourceAfter)||!sameDirectory(dirBefore,dirAfter)||
