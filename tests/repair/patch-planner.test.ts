@@ -73,12 +73,12 @@ test('TEST-019: source SHA, evidence ID, site identity and metadata are mandator
 test('TEST-019: non-leading or disguised userscript headers cannot authorize candidates',()=>{
   const body="document.querySelector('#old');";
   const invalidSources=[
-    'const bootstrap=true;\\n'+meta+body,
-    '// unrelated leading comment\\n'+meta+body,
-    '/* unrelated leading block */\\n'+meta+body,
-    'function bootstrap(){}\\n'+meta+body,
-    '// ==UserScript==\\n// @name incomplete\\n'+body,
-    'const sourceText='+JSON.stringify(meta)+';\\n'+body
+    'const bootstrap=true;\n'+meta+body,
+    '// unrelated leading comment\n'+meta+body,
+    '/* unrelated leading block */\n'+meta+body,
+    'function bootstrap(){}\n'+meta+body,
+    '// ==UserScript==\n// @name incomplete\n'+body,
+    'const sourceText='+JSON.stringify(meta)+';\n'+body
   ];
   for(const bad of invalidSources){
     const result=proposeLiteralSelectorPatch(request(bad,{
@@ -89,7 +89,7 @@ test('TEST-019: non-leading or disguised userscript headers cannot authorize can
     assert.equal('candidateSource' in result,false);
   }
   // Canonical metadata may follow blank lines, but not executable code.
-  const leadingBlank='\\n\\n'+meta+body;
+  const leadingBlank='\n\n'+meta+body;
   const valid=proposeLiteralSelectorPatch(request(leadingBlank,{
     callOffset:leadingBlank.indexOf('document.querySelector')
   }));
