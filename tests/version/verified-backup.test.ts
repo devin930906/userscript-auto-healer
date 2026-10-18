@@ -145,3 +145,52 @@ test('TEST-020: long ASCII and surrogate-pair filenames remain recoverable on Wi
     }finally{await rm(dir,{recursive:true,force:true});}
   }
 });
+
+test('TEST-020: distinct long script names cannot borrow each other\'s identical-byte backups',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'uah-long-binding-'));
+  const backupDirectory=join(dir,'backups');
+  // Both stems share the entire old 203-unit truncated prefix.
+  const shared='x'.repeat(210);
+  const firstPath=join(dir,shared+'A.user.js');
+  const otherPath=join(dir,shared+'B.user.js');
+  try{
+    await mkdir(backupDirectory);
+    await writeFile(firstPath,script);
+    await writeFile(otherPath,script);
+    const first=await createVerifiedBackupOnly({
+      sourcePath:firstPath,backupDirectory,expectedSha256:hash(script),userApproved:true
+    });
+    const other=await createVerifiedBackupOnly({
+      sourcePath:otherPath,backupDirectory,expectedSha256:hash(script),userApproved:true
+    });
+    assert.equal(first.status,'BACKUP_ONLY',JSON.stringify(first));
+    assert.equal(other.status,'BACKUP_ONLY',JSON.stringify(other));
+    if(first.status!=='BACKUP_ONLY'||other.status!=='BACKUP_ONLY')return;
+
+    // The full-name binding must differ even when the source bytes match.
+    const firstPrefix=first.backupFileName.slice(0,-(1+36+'.backup.user.js'.length));
+    const otherPrefix=other.backupFileName.slice(0,-(1+36+'.backup.user.js'.length));
+    assert.notEqual(firstPrefix,otherPrefix);
+    assert.ok(first.backupFileName.length<=255);
+    assert.ok(other.backupFileName.length<=255);
+
+    const own=await verifyBackupRecoverySource({
+      sourcePath:firstPath,backupDirectory,backupFileName:first.backupFileName,
+      expectedSha256:first.sha256,expectedByteLength:first.byteLength,
+      userApproved:true
+    });
+    assert.equal(own.status,'RECOVERY_SOURCE_VERIFIED_READ_ONLY',JSON.stringify(own));
+
+    // Earlier truncation-only names would have accepted this substitution.
+    const wrong=await verifyBackupRecoverySource({
+      sourcePath:otherPath,backupDirectory,backupFileName:first.backupFileName,
+      expectedSha256:first.sha256,expectedByteLength:first.byteLength,
+      userApproved:true
+    });
+    assert.equal(wrong.status,'BLOCKED');
+    if(wrong.status==='BLOCKED')assert.equal(wrong.reason,'BACKUP_SOURCE_MISMATCH');
+    assert.equal(wrong.automaticRollbackAllowed,false);
+    assert.deepEqual(await readFile(firstPath),script);
+    assert.deepEqual(await readFile(otherPath),script);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
