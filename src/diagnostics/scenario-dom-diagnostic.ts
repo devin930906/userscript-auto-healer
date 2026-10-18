@@ -5,13 +5,13 @@
  */
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
-import {observeApprovedDom,type ObservationResult} from '../observe/dom-observer';
+import {observeApprovedDom,observeApprovedDomSeries,type DynamicObservation,type ObservationResult} from '../observe/dom-observer';
 import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
 import {classifyFaultSignals,type FaultTriage,type FaultSignal} from './fault-classifier';
 
 export type ScenarioDomTriageCode =
  'NONE'|'NOT_AUTHORIZED'|'INVALID_SCENARIO'|'UNSUPPORTED_SCENARIO'|
- 'ROUTE_CHANGED'|'INVALID_OBSERVATION'|
+ 'ROUTE_CHANGED'|'INVALID_OBSERVATION'|'UNSTABLE_OBSERVATION'|
  Extract<ObservationResult,{ok:false}>['code'];
 
 export interface ScenarioDomTriage {
@@ -138,4 +138,67 @@ export async function inspectApprovedScenarioDom(
    checked.selectors,signal);
  if(signal?.aborted)return blocked('CANCELLED');
  return summarizeReadOnlyScenarioDom(scenario,observed,true);
+}
+
+/** TASK-008 / TEST-013: time-bounded read-only sampling. A transient missing
+ * selector or changed DOM must NEVER be labelled as a stable fault.
+ * All snapshots are independently checked: the aggregated flags alone are
+ * not trusted, and matching samples still prove no userscript/GM/business.
+ */
+export function summarizeReadOnlyScenarioDomSeries(
+ scenario:unknown,observed:DynamicObservation,userApproved:boolean
+):ScenarioDomTriage{
+ const checked=preflightReadOnlyScenario(scenario,userApproved);
+ if(!checked.ok)return blocked(checked.code);
+ if(!observed||typeof observed!=='object')return blocked('INVALID_OBSERVATION');
+ if(!observed.ok)return blocked(observed.code);
+ if(observed.status!=='LIMITED_DYNAMIC_OBSERVATION'||
+    observed.userscriptVerified!==false||
+    !Array.isArray(observed.samples)||observed.samples.length<2||
+    observed.samples.length>8||
+    typeof observed.routeChangeDetected!=='boolean'||
+    typeof observed.selectorCountChanged!=='boolean'||
+    typeof observed.domCountChanged!=='boolean')
+   return blocked('INVALID_OBSERVATION');
+ if(observed.routeChangeDetected||observed.selectorCountChanged||observed.domCountChanged)
+   return blocked('UNSTABLE_OBSERVATION');
+ let first:Extract<ObservationResult,{ok:true}>|undefined;
+ let lastTime=-Infinity;
+ let firstTriage:FaultTriage|undefined;
+ for(const sample of observed.samples){
+   const result=summarizeReadOnlyScenarioDom(scenario,sample,true);
+   if(result.status!=='LIMITED_DOM_SIGNAL_ONLY')
+     return blocked(result.code);
+   if(!sample.ok)return blocked('INVALID_OBSERVATION');
+   const time=typeof sample.observedAt==='string'?Date.parse(sample.observedAt):NaN;
+   if(!Number.isFinite(time))return blocked('INVALID_OBSERVATION');
+   if(time<lastTime)return blocked('UNSTABLE_OBSERVATION');
+   lastTime=time;
+   if(first){
+     if(sample.summary.elementCount!==first.summary.elementCount||
+        checked.selectors.some(s=>sample.selectorCounts[s]!==first!.selectorCounts[s]))
+       return blocked('UNSTABLE_OBSERVATION');
+   }else{
+     first=sample;
+     firstTriage=result.triage;
+   }
+ }
+ return response('LIMITED_DOM_SIGNAL_ONLY','NONE',checked.selectors.length,firstTriage!);
+}
+
+/** Actually sample the application-owned, authorized Chrome page multiple
+ * times. Requires no extension, clicks or script execution; real manager
+ * and business acceptance remain separate tasks.
+ */
+export async function inspectApprovedScenarioDomSeries(
+ browser:ManagedLaunchResult,target:OpenTargetResult,scenario:unknown,
+ userApproved:boolean,sampleCount=3,intervalMs=250,signal?:AbortSignal
+):Promise<ScenarioDomTriage>{
+ const checked=preflightReadOnlyScenario(scenario,userApproved);
+ if(!checked.ok)return blocked(checked.code);
+ if(signal?.aborted)return blocked('CANCELLED');
+ const observed=await observeApprovedDomSeries(browser,target,checked.url,true,
+   checked.selectors,sampleCount,intervalMs,signal);
+ if(signal?.aborted)return blocked('CANCELLED');
+ return summarizeReadOnlyScenarioDomSeries(scenario,observed,true);
 }

@@ -10,7 +10,8 @@ import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 import {
- inspectApprovedScenarioDom,summarizeReadOnlyScenarioDom
+ inspectApprovedScenarioDom,summarizeReadOnlyScenarioDom,
+ inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries
 } from '../../src/diagnostics/scenario-dom-diagnostic';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import type {ObservationResult} from '../../src/observe/dom-observer';
@@ -107,6 +108,54 @@ test('TEST-013: classified result never leaks URL, selectors or script hash',()=
    assert.equal(output.includes(term),false);
 });
 
+test('TEST-013: stable repeated selector observations stay limited, not business-verified',()=>{
+ const approved=sample(matched);
+ const observed={
+   ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
+   samples:[approved,approved,approved],routeChangeDetected:false,
+   selectorCountChanged:false,domCountChanged:false,userscriptVerified:false as const
+ };
+ const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
+   observed as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
+ assert.equal(result.status,'LIMITED_DOM_SIGNAL_ONLY');
+ assert.equal(result.triage.category,'SELECTOR_ASSERTION');
+ assert.deepEqual(result.triage.evidenceIds,['scenario_assertion_2']);
+ assert.equal(result.tampermonkeyVerified,false);
+ assert.equal(result.businessVerified,false);
+ assert.equal(result.automaticPatchAllowed,false);
+});
+
+test('TEST-013: changing or contradictory samples cannot yield stable defect evidence',()=>{
+ const snapshots=[sample(matched),sample({'#current-target':1,'#obsolete-target':1})];
+ const make=(samples:unknown[],extra:Record<string,unknown>={})=>({
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
+   samples,routeChangeDetected:false,selectorCountChanged:false,
+   domCountChanged:false,userscriptVerified:false,...extra
+ }) as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1];
+ for(const observed of [
+   make(snapshots),
+   make([sample(matched),sample(matched,true)]),
+   make([sample(matched),sample({'#current-target':0,'#obsolete-target':0})]),
+   make([sample(matched),sample(matched)],{selectorCountChanged:true}),
+   make([sample(matched),sample(matched)],{routeChangeDetected:true}),
+   make([sample(matched),sample(matched)],{domCountChanged:true}),
+   make([sample(matched),sample({...matched})],{samples:[]}),
+   make([sample(matched),sample(matched)],{samples:[sample(matched)]}),
+   make([sample(matched),sample(matched)],{userscriptVerified:true}),
+   make([sample(matched),sample(matched)],{routeChangeDetected:undefined}),
+   make([sample(matched),{...sample(matched),observedAt:'not-a-date'}]),
+   make([sample(matched),{...sample(matched),observedAt:'2026-10-17T00:00:00Z'}]),
+   make([sample(matched),{...sample(matched),summary:{elementCount:3,iframeCount:0,visibleShadowRoots:0,blindSpots:[]}}])
+ ]){
+   const result=summarizeReadOnlyScenarioDomSeries(baseScenario,observed,true);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.businessVerified,false);
+   assert.equal(result.automaticPatchAllowed,false);
+ }
+ assert.equal(summarizeReadOnlyScenarioDomSeries(
+   baseScenario,make([sample(matched),sample(matched)]),false).code,'NOT_AUTHORIZED');
+});
+
 test('TEST-013: executable owned-browser entry refuses forged, unowned or cancelled sessions',async()=>{
  const bogus={ok:false,code:'PREFLIGHT_FAILED'} as const;
  const target={ok:false,code:'UNVERIFIED_BROWSER'} as const;
@@ -168,5 +217,10 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  assert.equal(result?.automaticPatchAllowed,false);
  assert.equal(result?.tampermonkeyVerified,false);
  assert.equal(result?.businessVerified,false);
+ const series=await inspectApprovedScenarioDomSeries(opened,tab,scenario,true,2,150);
+ assert.equal(series.status,'LIMITED_DOM_SIGNAL_ONLY',JSON.stringify(series));
+ assert.equal(series.triage.category,'SELECTOR_ASSERTION');
+ assert.equal(series.automaticPatchAllowed,false);
+ assert.equal(series.tampermonkeyVerified,false);
  assert.deepEqual(probe.session.receiptSnapshot(),{});
 });
