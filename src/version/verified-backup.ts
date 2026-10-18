@@ -41,7 +41,8 @@ function validPath(path:unknown):path is string {
 // valid .user.js filename needs room for the random UUID and backup suffix.
 // Iterate code points to avoid splitting surrogate pairs on truncation.
 const MAX_BACKUP_PREFIX_UNITS=255-(1+36+'.backup.user.js'.length);
-function backupPrefix(sourcePath:string):string {
+/** Stable basename binding shared with read-only recovery verification. */
+export function backupPrefix(sourcePath:string):string {
   const stem=basename(sourcePath).replace(/\.user\.js$/i,'');
   let prefix='';
   for(const character of stem){
