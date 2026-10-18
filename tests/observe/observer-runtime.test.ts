@@ -4,6 +4,7 @@ import {access,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,win32} from 'node:path';
 import {createServer} from 'node:http';
+import {setTimeout as delay} from 'node:timers/promises';
 import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
@@ -40,13 +41,21 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  const subAddr=sub.address();
  if(!subAddr||typeof subAddr==='string')throw Error('NO_SUBFRAME');
  const subUrl='http://127.0.0.1:'+subAddr.port+'/frame';
- const main=createServer((_req,res)=>{
+ let signalDynamicChange=false;
+ const main=createServer((req,res)=>{
+   if(req.url==='/trigger'){
+     res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});
+     res.end(signalDynamicChange?'go':'wait');
+     return;
+   }
    res.writeHead(200,{'Content-Type':'text/html'});
    res.end('<!doctype html><html><body><div id="initial">ready</div>'+
      '<iframe src="'+subUrl+'"></iframe>'+
-     '<script>setTimeout(()=>{let el=document.createElement("div");'+
+     '<script>async function poll(){try{const r=await fetch("/trigger",{cache:"no-store"});'+
+     'if((await r.text())==="go"){const el=document.createElement("div");'+
      'el.id="async-target";document.body.appendChild(el);'+
-     'history.pushState({},"","/route-next");},1400)</script>'+
+     'history.pushState({},"","/route-next");return}}catch(e){}'+
+     'setTimeout(poll,120)}poll()</script>'+
      '</body></html>');
  });
  await new Promise<void>((resolve,reject)=>{main.once('error',reject);main.listen(0,'127.0.0.1',resolve);});
@@ -68,12 +77,22 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  if(!tab.ok)return;
  const notApproved=await observeApprovedDom(session,tab,site,false,['#initial']);
  assert.deepEqual(notApproved,{ok:false,code:'NOT_AUTHORIZED'});
+ // Target.createTarget can register a tab before its first navigation commits.
+ // Establish a genuine CDP DOM receipt before releasing the fixture's SPA timer.
+ let ready=false;
+ for(let attempt=0;attempt<16;attempt++){
+   const baseline=await observeApprovedDom(session,tab,site,true,['#initial']);
+   if(baseline.ok&&baseline.selectorCounts['#initial']===1){ready=true;break;}
+   await delay(150);
+ }
+ assert.equal(ready,true,'Approved top frame did not finish initial navigation');
+ signalDynamicChange=true;
  const observed=await observeApprovedDomSeries(session,tab,site,true,
-   ['#initial','#async-target'],6,500);
+   ['#initial','#async-target'],8,300);
  assert.equal(observed.ok,true,JSON.stringify(observed));
  if(!observed.ok)return;
  assert.equal(observed.userscriptVerified,false);
- assert.equal(observed.samples.length,6);
+ assert.equal(observed.samples.length,8);
  assert.equal(observed.selectorCountChanged,true,'Must witness a delayed DOM change');
  assert.equal(observed.routeChangeDetected,true,'Must witness same-origin SPA route change');
  assert.equal(observed.samples.at(-1)?.selectorCounts['#async-target'],1);
