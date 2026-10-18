@@ -78,6 +78,17 @@ test('TEST-013: consent and scenario registration cannot be forged into permissi
    assert.equal(result.automaticPatchAllowed,false);
  }
 });
+test('TEST-013: missing or malformed login intent is not read-only authorization',()=>{
+  for(const requiresLogin of [undefined,null,'false',0]){
+    const result=summarizeReadOnlyScenarioDom(
+      {...baseScenario,requiresLogin},sample(matched),true);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.code,'INVALID_SCENARIO');
+    assert.equal(result.checkedAssertions,0);
+    assert.equal(result.automaticPatchAllowed,false);
+  }
+});
+
 test('TEST-013: CDP failures and same-origin SPA route change block diagnostic proof',()=>{
  for(const observed of [
    {ok:false,code:'CDP_FAILED'} as const,
@@ -169,7 +180,9 @@ test('TEST-013: stable repeated selector observations stay limited, not business
  const approved=sample(matched);
  const observed={
    ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
-   samples:[approved,approved,approved],routeChangeDetected:false,
+   samples:[approved,
+      {...approved,observedAt:'2026-10-18T00:00:00.001Z'},
+      {...approved,observedAt:'2026-10-18T00:00:00.002Z'}],routeChangeDetected:false,
    selectorCountChanged:false,domCountChanged:false,userscriptVerified:false as const
  };
  const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
@@ -180,6 +193,21 @@ test('TEST-013: stable repeated selector observations stay limited, not business
  assert.equal(result.tampermonkeyVerified,false);
  assert.equal(result.businessVerified,false);
  assert.equal(result.automaticPatchAllowed,false);
+});
+
+test('TEST-013: identical timestamps cannot count as independent stable samples',()=>{
+  const approved=sample(matched);
+  const observed={
+    ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
+    samples:[approved,{...approved}],routeChangeDetected:false,
+    selectorCountChanged:false,domCountChanged:false,userscriptVerified:false as const
+  };
+  const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
+    observed as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'UNSTABLE_OBSERVATION');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.businessVerified,false);
 });
 
 test('TEST-013: changing or contradictory samples cannot yield stable defect evidence',()=>{
