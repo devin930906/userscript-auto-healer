@@ -98,3 +98,12 @@ Acorn AST 与元数据只读分析（REQ-004/011，TEST-004/011 限阶段）已�
 REQ-005 的场景登记、明确测试授权/目标 URL、登录前提、操作与业务断言预检已合并：[PR #4](https://github.com/devin930906/userscript-auto-healer/pull/4)，merge SHA `dc088797220f9a3d7efa5b1d89dede6ff0ae657c`。源码 `src/scenarios/scenario-registry.ts`；测试 `tests/scenarios/registry.test.ts`。Windows [Actions 39104629620](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104629620)，源提交 `a39004f973a1c72469ffa620bfa6f01a517570ab`，30 项 Node 回归和真实 Electron smoke 通过。只完成 TEST-005 静态阶段契约验证，真实登录/业务断言尚未跑。
 
 **下一 TASK-005**：在既定授权边界内校验标准/便携 Chrome 路径，拒绝默认/被占用 Profile，隔离启动与 CDP 实例归属；必须首先测试安全拒绝策略。真实用户 Profile、已登录站点和既有脚本不得擅自接管或修改。TASK-001..004 已合并；EXE+ZIP 与 Stable GATE 仍未达到。
+
+
+## （7）TASK-005 Chrome/Profile/CDP 完成并整合（2026-10-18）
+
+PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并至 `main`，合并 SHA `baa05c877a98c580f67d5b7aa2e40d45f9f55580`。实现签名 Google Chrome 及用户指定独立路径的身份/版本核验、只有用户显式同意才创建空的新隔离 Profile、CDP loopback 端口/PID/进程归属、Browser.getVersion WebSocket 真握手、目标页 URL/ID 的真实创建与比对、停止后撤销会话资格及安全负例。禁止接管既有 Profile/外部浏览器，拒绝不可信签名且不会静默降级。后续用户未验证的便携 Chrome 型号不应宣布兼容。
+
+阶段验证：源 HEAD `1a2709f59b024f4cc4d7a961b55e889146967864` 的 [Application Skeleton Checks 39109205421](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205421) 两项工作成功（Node 52/53 通过、0 失败，1 项专用独立路径检查由单独工作流覆盖）；[独立路径 Chrome 产品测试 39109205450](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205450) 9/9 成功且 0 跳过；[文档完整性 39109205434](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205434) 成功。独立路径测试复制 runner 上受信任签名 Chrome 的全部应用目录再使用实际产品模块，并非全部第三方免安装 Chrome 的兼容担保。先前官方但无可验证 Authenticode 签名的 Chrome for Testing 测试 [39109021075](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109021075) 按产品安全规则**拒绝**；其独立信任模型没有批准，不能降低校验标准。合并的 `main` CI 仍需对应主干最新提交单独核实。
+
+**TASK-005 阶段成果已整合**；这不是 GATE-004/005、全部真实系统支持矩阵、Tampermonkey 产品注入/GM/业务断言或 Stable 发布通过。按照已批准依赖，下一任务为 **TASK-006（REQ-010/012；TEST-010/012）DOM/SPA 动态观测与可见性盲区**，继续以真实授权的自管 Chrome CDP 安全 API 开发；其余任务/发行仍需各自测试和验收。
