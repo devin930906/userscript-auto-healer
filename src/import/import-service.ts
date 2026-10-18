@@ -36,7 +36,7 @@ export interface ImportedScript {
 export interface ImportOutcome {
   readonly scripts: ImportedScript[];
   readonly errors: ImportFailure[];
-  readonly duplicates: number;
+  duplicates: number;
 }
 
 function failure(name: string, code: ImportFailureCode): ImportFailure {
