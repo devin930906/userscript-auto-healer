@@ -412,3 +412,65 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  assert.equal(JSON.stringify(journal.list()).includes(probe.session.origin),false);
  assert.deepEqual(probe.session.receiptSnapshot(),{});
 });
+
+test('TEST-013: hostile scenario getters or revoked proxies fail closed before CDP access',()=>{
+ const hostile=new Proxy({...baseScenario},{
+   get(target,key,receiver){
+     if(key==='requiresLogin')throw new Error('private scenario data');
+     return Reflect.get(target,key,receiver);
+   }
+ });
+ const revoked=Proxy.revocable({...baseScenario},{});
+ revoked.revoke();
+ for(const scenario of [hostile,revoked.proxy]){
+   const single=summarizeReadOnlyScenarioDom(scenario,sample(matched),true);
+   const series=summarizeReadOnlyScenarioDomSeries(scenario,{
+     ok:false,code:'CDP_FAILED'
+   },true);
+   for(const result of [single,series]){
+     assert.equal(result.status,'BLOCKED');
+     assert.equal(result.code,'INVALID_SCENARIO');
+     assert.equal(result.automaticPatchAllowed,false);
+     assert.equal(result.triage.category,'UNKNOWN');
+     assert.equal(result.checkedAssertions,0);
+   }
+ }
+});
+
+test('TEST-013: hostile serialized CDP samples fail closed without exceptions or repair permission',()=>{
+ const hostileSingle=Object.defineProperty({...sample(matched)},'selectorCounts',{
+   get(){throw new Error('private DOM payload');}
+ });
+ const first=sample(matched);
+ const second={...sample(matched),observedAt:'2026-10-18T00:00:01Z'};
+ const validSeries={
+   ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
+   samples:[first,second],routeChangeDetected:false,
+   selectorCountChanged:false,domCountChanged:false,userscriptVerified:false as const
+ };
+ const hostileSeries={
+   ...validSeries,
+   samples:new Proxy([first,second],{
+     get(target,key,receiver){
+       if(key===Symbol.iterator)throw new Error('private iteration payload');
+       return Reflect.get(target,key,receiver);
+     }
+   })
+ };
+ const revoked=Proxy.revocable({...sample(matched)},{});
+ revoked.revoke();
+ for(const observed of [hostileSingle,revoked.proxy]){
+   const result=summarizeReadOnlyScenarioDom(
+     baseScenario,observed as unknown as ObservationResult,true);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.code,'INVALID_OBSERVATION');
+   assert.equal(result.triage.category,'UNKNOWN');
+   assert.equal(result.automaticPatchAllowed,false);
+ }
+ const seriesResult=summarizeReadOnlyScenarioDomSeries(
+   baseScenario,hostileSeries as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
+ assert.equal(seriesResult.status,'BLOCKED');
+ assert.equal(seriesResult.code,'INVALID_OBSERVATION');
+ assert.equal(seriesResult.checkedAssertions,0);
+ assert.equal(seriesResult.automaticPatchAllowed,false);
+});
