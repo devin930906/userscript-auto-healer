@@ -12,13 +12,13 @@
 采用语义化版本候选，提交 SHA 为不可变来源；正式 tag 与 Release 必须指向通过 GATE 的同一个源提交，Release 不提前发布。
 
 ## 云端构建
-计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、NSIS 包装和 RAR 命令行包装；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量和许可证供应仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；未创建工作流也未运行。
+计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、已实证存在的 Inno Setup 候选安装器（NSIS 可保留备选）与获正式许可的 RAR 命令行包装；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量和许可证供应仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；未创建工作流也未运行。
 
 ## EXE 安装版
-候选 Electron+electron-builder NSIS 创建真实 .exe 安装程序（见 ADR-001/003）。计划每用户安装优先且不强求管理员权限；应用可执行入口/运行资源随包携带，用户选择的 Chrome 外置；可自选安装位置与桌面/开始菜单快捷方式，升级向后兼容，卸载保留用户数据默认应提示并可明确选删除。具体安装器许可/签名方案待核定；未签名文件不得称已签名。干净 Windows VM 实际安装、启动、核心场景、升级、卸载和数据完整性为必备验收。
+候选 Inno Setup 6 生成真实 .exe 安装程序（仅临时文本安装/卸载已通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574）；Electron+electron-builder NSIS 作为待验证备选（见 ADR-001/003）。计划每用户安装优先且不强求管理员权限；应用可执行入口/运行资源随包携带，用户选择的 Chrome 外置；可自选安装位置与桌面/开始菜单快捷方式，升级向后兼容，卸载保留用户数据默认应提示并可明确选删除。具体安装器许可/签名方案待核定；未签名文件不得称已签名。干净 Windows VM 实际安装、启动、核心场景、升级、卸载和数据完整性为必备验收。
 
 ## RAR 便携版
-必须是真实 RAR 格式，源自相同版本的便携程序目录及运行依赖，使用获合法授权的 RAR/WinRAR rar.exe 命令行创建（参考 https://www.win-rar.com/cmd-shell-mode.html?L=1）。RAR EULA: https://www.rarlab.com/license.htm；试用后需购买许可证，不擅自捆绑第三方创建器。便携包需保留入口与使用说明，默认在便携根目录的允许子目录保存配置/历史，遇只读目录必须清楚告知并经用户同意更换数据根；凭据可携性策略需按 Windows 实际实现审查。不依赖用户安装 Node/npm，不假设 Chrome 自带在包里。文件格式验证、rar t/解包、哈希、干净 Windows 直接启动、核心功能及退出数据检查均为门槛。普通 GitHub Actions 下载 ZIP 仅是工件容器，绝非 RAR 文件本体。
+必须是真实 RAR 格式，源自相同版本的便携程序目录及运行依赖，使用获合法授权的 RAR/WinRAR rar.exe 命令行创建（参考 https://www.win-rar.com/cmd-shell-mode.html?L=1）。RAR EULA: https://www.rarlab.com/license.htm；官方允许限期评估；临时 Windows runner 的真 RAR5 生成、测试、解压、SHA-256 往返已经通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。**用于正式 CI 持续创建 RAR 的生产许可证尚未提供**，不得捆绑第三方试用创建器。便携包需保留入口与使用说明，默认在便携根目录的允许子目录保存配置/历史，遇只读目录必须清楚告知并经用户同意更换数据根；凭据可携性策略需按 Windows 实际实现审查。不依赖用户安装 Node/npm，不假设 Chrome 自带在包里。文件格式验证、rar t/解包、哈希、干净 Windows 直接启动、核心功能及退出数据检查均为门槛。普通 GitHub Actions 下载 ZIP 仅是工件容器，绝非 RAR 文件本体。
 
 ## 发布产物
 预期 Userscript-Auto-Healer-vX.Y.Z-Setup.exe、Userscript-Auto-Healer-vX.Y.Z-Portable.rar、SHA256SUMS.txt、发行说明；具体文件名非实际产物。构建须记录版本、commitSHA、runner image、lockfile SHA、tool version、license evidence，上传 GitHub Releases 的是 .exe/.rar 本体；下载后校验 SHA-256 与大小。签名证书未提供、成本/授权待核查，正式签名策略必须确定或明确披露未签名风险（不宣称已签）。
