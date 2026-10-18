@@ -7,8 +7,8 @@
  * transaction, real user consent, runtime attestation, or auto-apply authority.
  * Do not expose arbitrary filesystem paths to renderer IPC.
  */
-import {createHash,randomUUID} from 'node:crypto';
-import {lstat,link,open,readFile,unlink} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {lstat,link,open,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {
   proposeLiteralSelectorPatch,type LiteralPatchRequest
@@ -20,6 +20,7 @@ import {backupPrefix} from './verified-backup';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {hasUnsafePathLink} from './path-boundary';
+import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 
 type Failure='INVALID_REQUEST'|'NOT_AUTHORIZED'|'CANDIDATE_REJECTED'|
   'BACKUP_NOT_PREPARED'|'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|
@@ -63,7 +64,6 @@ function parseOptions(input:unknown):Options|null{
     return null;
   return {sourcePath,backupDirectory,userApproved};
 }
-const sha=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
 function sameDir(a:{dev:bigint;ino:bigint},b:{dev:bigint;ino:bigint}){
   return a.dev===b.dev&&a.ino===b.ino;
 }
@@ -135,8 +135,9 @@ export async function stageReviewedCandidateOnly(
       tempCreated=true;
       try{await handle.writeFile(bytes);await handle.sync();}
       finally{await handle.close();}
-      const staged=await readFile(pending);
-      if(staged.length!==bytes.length||sha(staged)!==rebuilt.candidateSha256)
+      // Temporary files can be externally replaced/grown; never read
+      // unbounded bytes or trust pathname metadata without a descriptor.
+      if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
         return block('STAGING_FAILED');
 
       const sourceAgain=await verifyApprovedSourceFingerprint({
@@ -155,11 +156,7 @@ export async function stageReviewedCandidateOnly(
       await unlink(pending);
       tempCreated=false;
 
-      const published=await lstat(final,{bigint:true});
-      const roundtrip=await readFile(final);
-      if(!published.isFile()||published.isSymbolicLink()||
-         published.nlink!==1n||published.size!==BigInt(bytes.length)||
-         sha(roundtrip)!==rebuilt.candidateSha256)
+      if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
         return block('STAGING_FAILED');
       // A redirect after publication must never produce a successful receipt.
       if(await hasUnsafePathLink(options.backupDirectory))
