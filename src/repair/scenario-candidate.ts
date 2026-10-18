@@ -52,10 +52,21 @@ function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
   const metadata=parseUserscriptMetadata({
     bytes:Buffer.from(source,'utf8'),textEncoding:'utf-8'
   });
+  // @match alone does not describe manager execution/update behavior.
+  // A read-only DOM receipt cannot attest externally loaded code/assets,
+  // network privileges, self-update sources, or unknown manager directives.
+  // Hold those scripts for explicit inspection rather than issue a candidate
+  // from the narrow DOM-only diagnostic path.
   if(metadata.status!=='OK'||
+     metadata.unknownNames.length!==0||
      metadata.tags.include!==undefined||
      metadata.tags.exclude!==undefined||
      metadata.tags['exclude-match']!==undefined||
+     metadata.tags.require!==undefined||
+     metadata.tags.resource!==undefined||
+     metadata.tags.connect!==undefined||
+     metadata.tags.updateurl!==undefined||
+     metadata.tags.downloadurl!==undefined||
      !Array.isArray(metadata.tags.match)||
      metadata.tags.match.length===0)return false;
   return metadata.tags.match.some(pattern=>

@@ -153,6 +153,33 @@ test('TEST-019: proposed source must actually match the approved scenario URL',(
   },series(),true).status,'CANDIDATE_ONLY');
 });
 
+
+test('TEST-019: unresolved metadata execution and update dependencies block DOM-only candidates',()=>{
+  // A matching URL alone is insufficient to reason about what the manager
+  // installs/loads. DOM snapshots cannot attest @require/@resource, network
+  // grants, automatic updates, or unrecognized manager-specific directives.
+  for(const tag of [
+    '// @require https://cdn.example.test/lib.js',
+    '// @resource icon https://cdn.example.test/icon.png',
+    '// @connect api.example.test',
+    '// @updateURL https://cdn.example.test/script.meta.js',
+    '// @downloadURL https://cdn.example.test/script.user.js',
+    '// @inject-into page'
+  ]){
+    const changed=source.replace('// @grant none',tag+'\n// @grant none');
+    const request={
+      ...patch,source:changed,
+      expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
+      callOffset:changed.indexOf('document.querySelector')
+    };
+    const linked={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(request,linked,series(),true);
+    assert.equal(result.status,'BLOCKED',tag);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+});
+
 test('TEST-019: @include and @exclude precedence cannot silently authorize a candidate',()=>{
   for(const extra of [
     '// @exclude https://example.com/*\n',
