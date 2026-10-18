@@ -1,0 +1,21 @@
+name: Windows portable Chrome path CDP PoC
+
+on:
+  push:
+    paths:
+      - 'poc/windows-portable-cdp.ps1'
+      - '.github/workflows/windows-portable-cdp-poc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-cdp:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify portable Chrome and instance isolation
+        shell: pwsh
+        run: ./poc/windows-portable-cdp.ps1
