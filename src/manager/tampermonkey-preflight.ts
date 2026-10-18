@@ -40,7 +40,7 @@ export interface ReportedTampermonkeyState {
  * Wildcard hosts, regex @include and broader match semantics are UNKNOWN until
  * checked in the actual manager; never guess coverage for a website.
  */
-function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
+export function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  if(typeof pattern!=='string'||pattern.length>1024)return false;
  const match=/^(https?):\/\/([a-z0-9.-]+)(\/[^\s]*)$/i.exec(pattern);
  if(!match||match[2].startsWith('.')||match[2].endsWith('.')||match[2].includes('..')||
