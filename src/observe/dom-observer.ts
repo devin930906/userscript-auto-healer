@@ -1,6 +1,7 @@
 /** TASK-006 / REQ-010: read-only CDP observation of an explicitly approved owned tab.
  * Never evaluate page JS, claim cross-origin completeness, or infer userscript health.
  */
+import {setTimeout as delay} from 'node:timers/promises';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession,readBoundedCdpJson} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
@@ -193,4 +194,44 @@ export async function observeApprovedDom(
     observedAt:new Date().toISOString(),originMatchesApproved:true,
     routeChanged:actual.href!==approved.href,summary:found.summary,
     selectorCounts:found.selectorCounts,fullPageVerified:false,userscriptVerified:false};
+}
+
+/** Bounded repeated snapshots permit evidence of asynchronous DOM and SPA route
+ * transitions, without executing scripts or interpreting the site business result.
+ */
+export type DynamicObservation =
+ | {readonly ok:true;readonly status:'LIMITED_DYNAMIC_OBSERVATION';
+    readonly samples:readonly Extract<ObservationResult,{ok:true}>[];
+    readonly routeChangeDetected:boolean;readonly selectorCountChanged:boolean;
+    readonly domCountChanged:boolean;readonly userscriptVerified:false}
+ | Extract<ObservationResult,{ok:false}>;
+export async function observeApprovedDomSeries(
+  session:ManagedLaunchResult,target:OpenTargetResult,expectedUrl:string,
+  userApproved:boolean,selectors:string[],sampleCount:number,intervalMs:number,
+  signal?:AbortSignal
+):Promise<DynamicObservation>{
+  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+  if(!validateSelectors(selectors)||
+     !Number.isInteger(sampleCount)||sampleCount<2||sampleCount>8||
+     !Number.isInteger(intervalMs)||intervalMs<100||intervalMs>3000)
+    return {ok:false,code:'INVALID_OPTIONS'};
+  const samples:Extract<ObservationResult,{ok:true}>[]=[];
+  for(let i=0;i<sampleCount;i++){
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+    if(i!==0){
+      try{await delay(intervalMs,undefined,{signal});}
+      catch{return {ok:false,code:'CANCELLED'};}
+    }
+    const result=await observeApprovedDom(session,target,expectedUrl,
+      true,selectors,signal);
+    if(!result.ok)return result;
+    samples.push(result);
+  }
+  const first=samples[0];
+  return {ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples,
+    routeChangeDetected:samples.some(s=>s.routeChanged),
+    selectorCountChanged:samples.some(s=>selectors.some(
+      selector=>s.selectorCounts[selector]!==first.selectorCounts[selector])),
+    domCountChanged:samples.some(s=>s.summary.elementCount!==first.summary.elementCount),
+    userscriptVerified:false};
 }
