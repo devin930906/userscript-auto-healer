@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdtemp,readFile,rm,symlink,truncate,writeFile} from 'node:fs/promises';
+import {link,mkdtemp,readFile,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
@@ -67,5 +67,25 @@ test('TEST-020: reject directories, oversize files and symlinks without modifica
     const symlinkResult=await verifyApprovedSourceFingerprint({...args,sourcePath:link});
     assert.equal(symlinkResult.status,'BLOCKED');
     if(symlinkResult.status==='BLOCKED')assert.equal(symlinkResult.reason,'SYMLINK_REJECTED');
+  });
+});
+
+test('TEST-020: hard-linked source cannot receive a trusted fingerprint receipt',async()=>{
+  await fixture(async(file,dir)=>{
+    const alias=join(dir,'second-name.user.js');
+    const request={sourcePath:file,expectedSha256:sha(text),userApproved:true};
+    await link(file,alias);
+    const first=await verifyApprovedSourceFingerprint(request);
+    assert.deepEqual(first,{
+      status:'BLOCKED',reason:'HARDLINK_REJECTED',automaticPatchAllowed:false
+    });
+    const second=await verifyApprovedSourceFingerprint({...request,sourcePath:alias});
+    assert.equal(second.status,'BLOCKED');
+    if(second.status==='BLOCKED')assert.equal(second.reason,'HARDLINK_REJECTED');
+    assert.deepEqual(await readFile(file),Buffer.from(text));
+    await unlink(alias);
+    const recovered=await verifyApprovedSourceFingerprint(request);
+    assert.equal(recovered.status,'MATCHED_READ_ONLY');
+    assert.equal(recovered.automaticPatchAllowed,false);
   });
 });
