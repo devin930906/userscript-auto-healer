@@ -2,6 +2,8 @@ name: Application Skeleton Checks
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'app/**'
       - 'src/**'
@@ -61,6 +63,9 @@ jobs:
       - name: Install locked Electron runtime
         shell: pwsh
         run: npm ci --no-audit --no-fund
+      - name: Download pinned Electron runtime on demand
+        shell: pwsh
+        run: npx --no-install install-electron --no
       - name: Compile desktop application
         shell: pwsh
         run: npm run build
