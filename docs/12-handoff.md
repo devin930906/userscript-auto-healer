@@ -161,3 +161,7 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-011 恢复来源只读验证阶段续接（2026-10-19）
 
 [PR #46](https://github.com/devin930906/userscript-auto-healer/pull/46) 在 PR #45 备份-only 基础上增加 `verifyBackupRecoverySource` 及 Windows 单元负例。新的只读收据要求符合生成器格式的 UUID 文件名、独立普通文件与单链接、原文长度和 SHA-256 一致，并拒绝源文件硬链接冒充备份；不会恢复或修改脚本。恢复源在核验后仍可能变化，因此下一步必须在**可信 Tampermonkey/业务证据、原生授权、事务锁和可恢复写入日志**俱备时，重新校验并实现真实回滚。请重新读取 main SHA、PR 合并状态和当前 CI；不可把阶段性测试当作完整 TEST-020 / GATE-007 或 Stable。正式 EXE+ZIP 尚未构建。
+
+## （7）TASK-010／011 离线审核到真实备份的安全集成续接（2026-10-19）
+
+[PR #48](https://github.com/devin930906/userscript-auto-healer/pull/48) 以代码源 SHA `3ef164150d66eea542bc741e27e1802181fc5227` 连接本地补丁 AST 审查、实际磁盘 SHA-256、独立备份创建、只读恢复来源复验和源文件末次复核。Windows [应用检查 #39151296629](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296629) 已通过 164 case（163 pass、0 fail、1 条件 skip）与 Electron smoke；[便携 Chrome #39151296637](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296637) success。务必重新核查 PR 是否已合并及最新 main SHA，勿将该 CI 自动沿用至之后的代码改动。此增量绝不访问用户现有 Profile、不执行脚本、不授予自动覆盖/回滚、不证明真实 Tampermonkey；TASK-007/010/011、TEST-017/018/020/021、全部 Stable GATE 依旧未完成，正式 EXE 与 ZIP 尚未交付。
