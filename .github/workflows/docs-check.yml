@@ -28,6 +28,35 @@ jobs:
       - name: Verify document links, full traceability and staged admission
         shell: bash
         run: python3 .github/scripts/verify-predevelopment.py
+      - name: Self-test admission verifier rejects broken references
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+          with tempfile.TemporaryDirectory(prefix="predev-ci-selftest-") as tmp:
+              root = Path(tmp)
+              shutil.copytree("docs", root / "docs")
+              shutil.copytree(".github/scripts", root / ".github/scripts")
+              shutil.copy2("README.md", root / "README.md")
+              shutil.copy2("AGENTS.md", root / "AGENTS.md")
+              script = root / ".github/scripts/verify-predevelopment.py"
+              matrix = root / "docs/10-traceability.md"
+              content = matrix.read_text(encoding="utf-8")
+              assert "| TASK-002 | TEST-001 |" in content
+              matrix.write_text(content.replace("| TASK-002 | TEST-001 |", "| TASK-999 | TEST-001 |", 1), encoding="utf-8")
+              broken = subprocess.run(["python3", str(script)], capture_output=True, text=True)
+              if broken.returncode == 0 or "unknown task" not in broken.stderr:
+                  raise SystemExit("Validator failed to reject a nonexistent task reference")
+              matrix.write_text(content, encoding="utf-8")
+              (root / "docs/13-predevelopment-admission.md").rename(root / "docs/13-predevelopment-admission.md.absent")
+              missing = subprocess.run(["python3", str(script)], capture_output=True, text=True)
+              if missing.returncode == 0 or "Missing required authority" not in missing.stderr:
+                  raise SystemExit("Validator failed to reject a missing admission document")
+          print("PASS: checker rejects invalid task refs and missing authority doc in isolated temporary copies")
+          PY
       - name: Verify required documents and record numbering
         shell: bash
         run: |
