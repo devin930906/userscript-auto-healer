@@ -53,6 +53,28 @@ test('TEST-013: absence of an observed fault is not a business-success attestati
   assert.equal(result.businessRecoveredVerified,false);
 });
 
+test('TEST-013: clean and fault signals in one batch are contradictory',()=>{
+  for(const code of [
+    'PERMISSION_DENIED','NETWORK_FAILURE','SCRIPT_EXCEPTION',
+    'SELECTOR_NOT_FOUND','BUSINESS_ASSERTION_FAILED'
+  ] as const){
+    for(const reversed of [false,true]){
+      const pair=[signal('clean','NO_FAILURE_OBSERVED'),signal('fault',code)];
+      const result=classifyFaultSignals(reversed?pair.reverse():pair);
+      assert.equal(result.status,'INSUFFICIENT_EVIDENCE');
+      assert.equal(result.category,'UNKNOWN');
+      assert.equal(result.evidenceIds.length,2);
+      assert.equal(result.automaticPatchAllowed,false);
+      assert.equal(result.tampermonkeyVerified,false);
+      assert.equal(result.businessRecoveredVerified,false);
+    }
+  }
+  const log=new BoundedFaultLog(2);
+  assert.equal(log.record([
+    signal('clean','NO_FAILURE_OBSERVED'),signal('fault','SELECTOR_NOT_FOUND')
+  ]).status,'INSUFFICIENT_EVIDENCE');
+});
+
 test('TEST-013: unknown provenance blocks single-cause classification',()=>{
   const result=classifyFaultSignals([
     signal('network','NETWORK_FAILURE'),

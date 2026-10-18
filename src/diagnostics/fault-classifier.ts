@@ -65,6 +65,7 @@ export function classifyFaultSignals(input:unknown):FaultTriage {
   const unique=new Set<string>();
   const categories=new Set<FaultCategory>();
   let unknown=false;
+  let noFailureObserved=false;
   for(const item of input){
     if(item===null||typeof item!=='object'||Array.isArray(item))
       return triage('INVALID_EVIDENCE','UNKNOWN',[]);
@@ -78,10 +79,14 @@ export function classifyFaultSignals(input:unknown):FaultTriage {
     unique.add(record.id);
     ids.push(record.id);
     if(record.code==='UNVERIFIED_OBSERVATION')unknown=true;
+    if(record.code==='NO_FAILURE_OBSERVED')noFailureObserved=true;
     const category=signalCategories[record.code as FaultSignalCode];
     if(category!==null)categories.add(category);
   }
-  if(unknown)return triage('INSUFFICIENT_EVIDENCE','UNKNOWN',ids);
+  // A clean observation contradicts any explicit fault in the same evidence
+  // batch. Never label that batch as a single cause or successful recovery.
+  if(unknown||(noFailureObserved&&categories.size>0))
+    return triage('INSUFFICIENT_EVIDENCE','UNKNOWN',ids);
   if(categories.size>1)return triage('MULTIPLE_CAUSE_SIGNALS','UNKNOWN',ids);
   if(categories.size===0)return triage('NO_FAULT_SIGNAL','UNKNOWN',ids);
   return triage('SINGLE_CAUSE_SIGNAL_ONLY',[...categories][0],ids);
