@@ -9,10 +9,11 @@ import {constants} from 'node:fs';
 import {link,lstat,open,readFile,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
+import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 
 type Failure =
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SOURCE_CHANGED'|
-  'HASH_MISMATCH'|'SIZE_LIMIT'|'BACKUP_DIRECTORY_INVALID'|'IO_FAILURE';
+  'HASH_MISMATCH'|'SIZE_LIMIT'|'BACKUP_DIRECTORY_INVALID'|'SOURCE_LOCKED'|'IO_FAILURE';
 export type VerifiedBackupResult =
   | Readonly<{status:'BLOCKED';reason:Failure;automaticPatchAllowed:false}>
   | Readonly<{status:'BACKUP_ONLY';backupFileName:string;sha256:string;
@@ -88,6 +89,7 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
        !validPath(directory))return deny('INVALID_PATH');
     if(typeof expected!=='string'||!SHA256.test(expected))return deny('INVALID_REQUEST');
 
+    return await withNativeSourceLock(path,async()=>{
     const original=await lstat(path,{bigint:true});
     if(original.isSymbolicLink()||!original.isFile())return deny('INVALID_PATH');
     if(original.size===0n||original.size>BigInt(MAX_SCRIPT_BYTES))return deny('SIZE_LIMIT');
@@ -181,7 +183,10 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       // If post-publication verification failed, leave the unique recovery
       // copy for privileged reconciliation; never claim it was verified.
     }
-  }catch{
+    });
+  }catch(error){
+    if(error instanceof NativeSourceLockError&&error.code==='SOURCE_LOCKED')
+      return deny('SOURCE_LOCKED');
     return deny('IO_FAILURE');
   }
 }
