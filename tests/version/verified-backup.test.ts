@@ -27,8 +27,8 @@ test('TEST-020: explicit backup-only creates independently verified immutable-na
       expectedSha256:hash(before),userApproved:true};
     const first=await createVerifiedBackupOnly(request);
     const second=await createVerifiedBackupOnly(request);
-    assert.equal(first.status,'BACKUP_ONLY');
-    assert.equal(second.status,'BACKUP_ONLY');
+    assert.equal(first.status,'BACKUP_ONLY',JSON.stringify(first));
+    assert.equal(second.status,'BACKUP_ONLY',JSON.stringify(second));
     if(first.status!=='BACKUP_ONLY'||second.status!=='BACKUP_ONLY')return;
     assert.notEqual(first.backupFileName,second.backupFileName);
     for(const result of [first,second]){
