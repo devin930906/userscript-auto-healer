@@ -192,3 +192,9 @@ PR [#44](https://github.com/devin930906/userscript-auto-healer/pull/44) 在 `src
 继 [PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45) 已合并的备份-only 阶段，新增 [PR #46](https://github.com/devin930906/userscript-auto-healer/pull/46) 的 `src/version/recovery-source.ts` 与 `tests/version/recovery-source.test.ts`。在真实隔离测试文件上，按明确指定的备份名/目录、预期 SHA-256/长度只读核查副本，并拒绝伪造硬链接、符号链接、篡改副本及不可信输入。该收据只能证明当前观察时的恢复来源完整性，**不是可信授权、不能代替事务锁、自动写入或回滚许可**；文件可能在检查后再次变化。CI 实际执行结果以 PR 和目标提交 Actions 为准。
 
 **TASK-011 继续开发中**；剩余：经独立核实的文件选择和授权、排他锁、原子/可恢复写入、操作日志、冲突恢复、真实失败回滚及同版业务验收。TASK-007/010、TEST-017/018/020/021 与正式 EXE/ZIP/GATE 均未因此解除。
+
+## （7）TASK-010／TASK-011 本地审核与备份链路集成（2026-10-19）
+
+[PR #48](https://github.com/devin930906/userscript-auto-healer/pull/48) 复用已存在的候选 AST/diff 审查、磁盘原字节 SHA-256 指纹、仅备份副本和只读恢复来源检查，在 `src/acceptance/local-backup-preflight.ts` 中增加受信任原生调用方专用的串行预备流程：先审核候选与源版本，再从磁盘独立校验相同原文，写入不覆盖的备份，重新校验备份副本与源文件。新增 `tests/acceptance/local-backup-preflight.test.ts` 并纳入 npm 测试。测试涵盖真实临时磁盘文件、外部修改的过期原文、伪造候选/授权字段、恶意访问器、符号链接备份目录。源提交 `3ef164150d66eea542bc741e27e1802181fc5227` 的 [Windows 应用 CI #39151296629](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296629) 已完成 success（164 项：163 pass／0 fail／1 条件 skip；Windows Electron 沙箱与 IPC smoke 通过）；[独立便携 Chrome CI #39151296637](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296637) success。此证据仅对应所列源 SHA；PR 合并及后续 main CI 以 GitHub 新记录为准。
+
+**TASK-010／011 仍开发中**：该流程只是有实际磁盘副本的本地审核准备，不是独立身份认证、持久事务锁、崩溃恢复日志、自动应用、真实回滚、Tampermonkey 扩展/GM/业务验收；任意正向回执仍然将自动写入与回滚许可固定为 false。完整 TEST-017/018/020/021、GATE-004..007 与正式 EXE+ZIP/GATE-008/009/011 均未通过。下一阶段仍须优先取得可信真实 Tampermonkey 业务证据，再在独立安全事务设计下实施与验证写入/回滚；不得基于本回执写原脚本。
