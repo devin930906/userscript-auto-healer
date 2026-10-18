@@ -10,9 +10,11 @@ import {analyzeSelectors,type SelectorKind} from './selector-analyzer';
 
 const MAX_ANALYSIS_BYTES=256*1024;
 const MAX_VISIBLE_SITES=8;
+const MAX_BATCH_PREVIEW_BYTES=1024*1024;
+const MAX_BATCH_PREVIEW_FILES=16;
 export type ImportPreviewStatus=
  'STATIC_ANALYSIS_ONLY'|'SKIPPED_TOO_LARGE'|'INVALID_ENCODING'|
- 'INVALID_METADATA'|'PARSE_ERROR';
+ 'INVALID_METADATA'|'PARSE_ERROR'|'SKIPPED_BATCH_BUDGET';
 export interface ImportSelectorPreview {
  readonly line:number;
  readonly column:number;
@@ -70,4 +72,26 @@ export function previewImportedScriptAnalysis(
   // Pathological syntax/depth and hostile objects do not reach the renderer.
   return unavailable('PARSE_ERROR','NOT_CHECKED');
  }
+}
+
+/** Bound the synchronous AST budget for one native-picker/folder response.
+ * A batch may contain 1000 approved files; full batch analysis belongs in a
+ * future cancellable worker, not the privileged Electron main event loop.
+ */
+export function previewImportedBatch(
+ scripts:readonly Pick<ImportedScript,'bytes'|'textEncoding'>[]
+):ImportAnalysisPreview[]{
+ let analyzedFiles=0;
+ let bytesBudgetUsed=0;
+ return scripts.map(script=>{
+  if(!(script.bytes instanceof Uint8Array)||
+     script.bytes.byteLength>MAX_ANALYSIS_BYTES)
+   return previewImportedScriptAnalysis(script);
+  if(analyzedFiles>=MAX_BATCH_PREVIEW_FILES||
+     bytesBudgetUsed+script.bytes.byteLength>MAX_BATCH_PREVIEW_BYTES)
+   return unavailable('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
+  analyzedFiles++;
+  bytesBudgetUsed+=script.bytes.byteLength;
+  return previewImportedScriptAnalysis(script);
+ });
 }
