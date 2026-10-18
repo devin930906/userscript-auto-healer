@@ -165,3 +165,10 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-010／011 离线审核到真实备份的安全集成续接（2026-10-19）
 
 [PR #48](https://github.com/devin930906/userscript-auto-healer/pull/48) 以代码源 SHA `3ef164150d66eea542bc741e27e1802181fc5227` 连接本地补丁 AST 审查、实际磁盘 SHA-256、独立备份创建、只读恢复来源复验和源文件末次复核。Windows [应用检查 #39151296629](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296629) 已通过 164 case（163 pass、0 fail、1 条件 skip）与 Electron smoke；[便携 Chrome #39151296637](https://github.com/devin930906/userscript-auto-healer/actions/runs/39151296637) success。务必重新核查 PR 是否已合并及最新 main SHA，勿将该 CI 自动沿用至之后的代码改动。此增量绝不访问用户现有 Profile、不执行脚本、不授予自动覆盖/回滚、不证明真实 Tampermonkey；TASK-007/010/011、TEST-017/018/020/021、全部 Stable GATE 依旧未完成，正式 EXE 与 ZIP 尚未交付。
+
+
+## （7）TASK-007 到期后临时脚本副作用安全回归交接（2026-10-19）
+
+本轮复用已有 `feat/task007-isolated-tampermonkey-install-url` 分支，处理短期授权诊断服务器关闭后脚本仍可能留存运行的安全缺口。TEST-017 测试提交 `0c2e0065ad4ca14baa9e17a420f047abebb9ea38` 在 [Actions #39158174162](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158174162) 确认旧行为失败；修复提交 `46880b3ae2a1b72f260ef07bd5caaed32dcae619` 在 [Actions #39158298596](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158298596) 已通过 Windows TypeScript、177 项 Node 回归（176 pass/0 fail/1 skip）与真实 Electron smoke。PR [#58](https://github.com/devin930906/userscript-auto-healer/pull/58) 的实际合并及 main 复核需以当前 GitHub 状态确认；不重复开发此前已合并 #57 的原脚本硬链接拒绝。
+
+到期拒绝只在本应用**生成的临时测试脚本**内生效，不能撤销已安装扩展权限，用户仍需自行清理测试脚本；没有真实 Tampermonkey 产品级 GM 与业务恢复验收。后续优先 TASK-007 的授权实际 Tampermonkey 支持矩阵和可靠验收证据，在可信运行条件不具备时推进不依赖真实扩展且已有规格的独立功能；任务 TASK-008..021、完整 TEST-017/018 与 Stable GATE、正式 EXE/ZIP 均不可标完成。

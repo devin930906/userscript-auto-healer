@@ -43,7 +43,7 @@ const PROBE_DEFAULT='UAH_GM_PROBE_DEFAULT';
 function isObject(value:unknown):value is Record<string,unknown>{
  return value!==null&&typeof value==='object'&&!Array.isArray(value);
 }
-function produceFixtureSource(origin:string,token:string):string {
+function produceFixtureSource(origin:string,token:string,expiresAt:number):string {
  // Userscript @match does not encode a port. The explicit origin check below
  // ensures the test script does nothing on another loopback port.
  const script=[
@@ -58,6 +58,10 @@ function produceFixtureSource(origin:string,token:string):string {
  '// ==/UserScript==',
  '(function(){',
  " 'use strict';",
+ // A manually installed fixture may outlive its short-lived HTTP server.
+ // Even if the loopback port is later reused, it must not perform GM, DOM
+ // or network actions after the consent interval expires.
+ ' if(Date.now()>='+expiresAt+')return;',
  ' if(location.origin!=='+JSON.stringify(origin)+')return;',
  " const mode=new URL(location.href).searchParams.get('mode');",
  " if(mode!=='broken'&&mode!=='fixed')return;",
@@ -130,7 +134,7 @@ export async function startIsolatedTampermonkeyGmProbe(
      if(req.headers.origin===managerOrigin)
        headers['Access-Control-Allow-Origin']=managerOrigin;
      res.writeHead(200,headers);
-     res.end(produceFixtureSource('http://'+host,token));
+     res.end(produceFixtureSource('http://'+host,token,expiresAt));
      return;
    }
    // The fixture page's same-origin POST may supply Origin. Never treat a
@@ -213,7 +217,7 @@ export async function startIsolatedTampermonkeyGmProbe(
  };
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',
-   origin,source:produceFixtureSource(origin,token),
+   origin,source:produceFixtureSource(origin,token,expiresAt),
    installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
    receiptSnapshot:()=>Object.freeze({...receipts}),
    stop

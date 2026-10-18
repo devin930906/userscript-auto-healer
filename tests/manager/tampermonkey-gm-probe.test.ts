@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import {request} from 'node:http';
+import {runInNewContext} from 'node:vm';
 import {strict as assert} from 'node:assert';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -157,4 +158,38 @@ test('TEST-017: disposable import URL serves only the authorized, expiring users
  assert.deepEqual(probe.receiptSnapshot(),{});
  await probe.stop();
  await assert.rejects(fetch(probe.installUrl));
+});
+
+
+test('TEST-017: installed temporary fixture stops all DOM/GM/network effects after authorization expires',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const execute=(now:number)=>{
+   const effects={queries:0,attributes:0,gmCalls:0,network:0};
+   const target={setAttribute:()=>{effects.attributes++;}};
+   const clock=class extends Date {static now(){return now;}};
+   runInNewContext(probe.source,{
+     Date:clock,URL,
+     location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+     document:{querySelector:()=>{effects.queries++;return target;}},
+     GM_getValue:(_key:string,fallback:string)=>{effects.gmCalls++;return fallback;},
+     fetch:()=>{effects.network++;return Promise.resolve();}
+   });
+   return effects;
+ };
+ // The live window remains a permitted disposable diagnostic fixture only,
+ // NOT independently verified Tampermonkey or production acceptance.
+ assert.deepEqual(execute(probe.expiresAt-1),{
+   queries:1,attributes:1,gmCalls:1,network:1
+ });
+ // An already-installed script can survive its short-lived HTTP service.
+ // Reusing that loopback port later must not resurrect its actions.
+ for(const time of [probe.expiresAt,probe.expiresAt+1000]){
+   assert.deepEqual(execute(time),{
+     queries:0,attributes:0,gmCalls:0,network:0
+   });
+ }
 });
