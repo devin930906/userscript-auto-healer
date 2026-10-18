@@ -132,3 +132,11 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 复用 `feat/stable-development` 并提交 PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11)：`src/manager/tampermonkey-preflight.ts` 只在明确授权、已有运行线索、报告的 Tampermonkey 身份/版本及权限、已声明的 GM_getValue 和保守的 @match 检查满足时返回 `METADATA_ELIGIBLE_ONLY`；这一状态**不保证**报告真实、扩展已安装、脚本执行、GM API 或业务断言通过，必须由后续实际管理器实验独立验证。对禁用、错 ID、畸形版本、无 @grant、通配/排除规则等提供拒绝负例，测试文件加入 Windows `npm test`。
 
 源 SHA `ab250732165b8635c88e68a52ffee8d371aa1e7a` 的 [Windows Application Checks 39114195987](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195987) success（71 pass、0 fail、1 skip），[专用 Chrome 39114195971](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195971) success，Electron 沙箱运行 smoke success。修复了此前 PR #11 的 TypeScript 测试夹具类型错误；失败运行保留。以 PR #11 和 main 最新 SHA 重新核对是否整合。**下一任务继续 TASK-007 真实 Tampermonkey 授权 Profile / 版本与脚本安装状态 / GM API / 业务断言取证**，没有安全可信的实测证据时不能自动标记 TEST-017/018 通过；TASK-008..021 与 EXE+ZIP 仍未全部实现。
+
+## （7）TASK-007 独立诊断 DOM 对照与 Windows 负例（2026-10-18）
+
+在此前已整合的管理器线索、静态预检及手动临时 GM fixture 基础上，[PR #18](https://github.com/devin930906/userscript-auto-healer/pull/18) 补充针对应用自管 Chrome 已确认目标页的只读 DOM 对照：`observe(mode,explicitUserApproved)`、`domSnapshot()`，读取 `#current-target` 与 `[data-uah-probe-action="done"]`，对未授权、错误来源/路由、畸形观察及缺少访问前置条件保守拒绝，绝不因 DOM 命中转为 GM/业务 VERIFIED。
+
+该阶段源码 `2cf1b9ec031e58b049231de60c86c0030c3f8d72` 的 [Windows Application Checks 39125313780](https://github.com/devin930906/userscript-auto-healer/actions/runs/39125313780) 已成功：88 项 Node 回归、87 pass、0 fail、1 专用路径跳过；Windows Electron smoke success。新增真实 Windows 签名 Chrome＋独立 Profile **无脚本负例**验证测试 DOM 存在但固定模式下无动作标记，因此不能伪报脚本恢复。文档完整性 [39125313781](https://github.com/devin930906/userscript-auto-healer/actions/runs/39125313781) success。PR 最终合并状态须重新核验，不能根据本文推定已合并。
+
+**TASK-007 仍开发中**：独立合法的真实 Tampermonkey 完整安装/授权、GM API、注入时机及产品业务断言尚未获取，TEST-017/018 和 GATE-004/005 均不能据此通过。下一步优先做经许可的真实 Tampermonkey 专项 E2E 与产品验收，严禁复制既有用户 Profile、改写现有脚本或把 CDP 模拟当管理器结果。其余 TASK-008..021、正式 EXE＋ZIP 双包均须按依赖与发布门槛推进。
