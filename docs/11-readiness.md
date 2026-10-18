@@ -1,6 +1,6 @@
 # 开发前最终准入审查
 
-> 审查日期：2026-10-18；结论：暂缓准入。文档提交不等于核心技术、测试或发布已验证。
+> 审查日期：2026-10-18；结论：**仅 TASK-001 安全骨架的有条件工程准入**。全范围开发前置、真实设备兼容与 Stable 验收尚未全部完成。参见 docs/13-predevelopment-admission.md。
 
 ## 审查范围
 仅本仓库 Userscript Auto Healer 的产品与工程准备，核对原始输入、REQ/NFR/ADR/RISK/TEST/TASK/GATE、Windows EXE 与真 RAR 的可执行依据，不开发核心产品代码。
@@ -13,17 +13,17 @@
 | Userscript Auto Healer | 必须需求可验收 | 已完成 | docs/02-requirements.md；docs/07-testing.md | 真实场景输入尚未提供 | 获取坏/好脚本、场景与断言 |
 | Userscript Auto Healer | Stable 范围锁定 | 待确认 | docs/01-product.md | GUI 形态、最低系统与扩展矩阵待确认 | 形成有证据的受支持范围 |
 | Userscript Auto Healer | 核心技术可行 | 有条件实证 | docs/03-feasibility.md | POC-01A/B CDP、POC-02D 真实 Violentmonkey .user.js 注入及实际 GM_getValue 调用已在限定 Windows Chromium 场景通过；Tampermonkey/目标 Chrome 与真实损坏脚本回归待验证 | Chrome/Profile/CDP 与扩展真实 PoC |
-| Userscript Auto Healer | 架构满足需求 | 受阻 | docs/04-architecture.md、docs/adr | 核心接入与管理器层实证缺失 | PoC 后修订 ADR 与契约 |
+| Userscript Auto Healer | 架构满足需求 | 有条件工程基线 | docs/04-architecture.md；docs/adr/ADR-001-application-baseline.md | Electron+TypeScript 已作为 TASK-001 的有限安全工程基线；实际管理器/Chrome 兼容待验证 | TASK-001 骨架需真实安全测试；其余模块按各自 TEST 核验 |
 | Userscript Auto Healer | 安全风险处理 | 受阻 | docs/06-security-risk.md | 只有威胁模型，缺安全负例 | 执行 TEST-007/009/020/026 |
 | Userscript Auto Healer | 测试策略完整 | 已完成 | docs/07-testing.md | 无实际测试代码与结果 | 开发后逐项运行并留证 |
 | Userscript Auto Healer | Stable 门槛完整 | 已完成 | docs/08-release.md | 无真实发布证据 | 逐项执行 GATE |
 | Userscript Auto Healer | Windows EXE 可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 仅 Inno Setup 临时文本安装/卸载通过，产品打包未执行 | 完成 POC-03 与 TEST-027 |
 | Userscript Auto Healer | RAR 便携可交付 | 受阻 | docs/03-feasibility.md；docs/08-release.md | 试用真 RAR5 格式生成/解压/校验已通过，生产许可及应用直启未验证 | 取得授权工具并执行 TEST-028 |
-| Userscript Auto Healer | 任务可执行 | 待确认 | docs/09-development-plan.md | TASK-001 前核心技术 PoC 仍受阻 | 完成 PoC 并固定 ADR |
+| Userscript Auto Healer | 任务可执行 | 首项有条件可执行 | docs/09-development-plan.md；docs/13-predevelopment-admission.md | 真实 GM 与合成 broken/fixed PoC 均已通过，但不等于自动修复 | TASK-001 仅做安全骨架与测试，后续管理器/修复仍有独立验证门槛 |
 | Userscript Auto Healer | 工程追踪一致 | 待确认 | docs/10-traceability.md | 结构编号检查已通过，但跨文件语义与引用尚未自动全检 | 扩展引用验证并人工复核 |
 | Userscript Auto Healer | 云端工程可用 | 待确认 | docs/08-release.md；Actions runs 39082363404、39082627685 | Ubuntu 文档、CDP（含独立目录 Chrome）、Inno 临时安装与真 RAR5 归档 PoC 成功；正式应用包、生产授权/配额仍未验证 | 执行 Windows 打包/发行 PoC |
 | Userscript Auto Healer | 外部依赖可用合法 | 受阻 | docs/03-feasibility.md | RAR 商业许可、npm 锁定包未核验 | 合法许可与依赖审核 |
-| Userscript Auto Healer | 下一正式开发起点 | 已确认 | docs/09-development-plan.md | POC-01A/B 与限定 POC-02D 已有正向证据；仍须定案首选管理器/Windows/Chrome 版本矩阵、实际业务断言及 ADR-001 | 核心支持范围和架构复核通过后开始 TASK-001 |
+| Userscript Auto Healer | 下一正式开发起点 | 已确认 | docs/09-development-plan.md；docs/adr/ADR-001-application-baseline.md | 首期技术基线有条件选定且真实扩展/两组合成断言成功 | 可在安全范围内开始 TASK-001；实际管理器覆盖范围和 Stable 另行按门槛验证 |
 | Userscript Auto Healer | 正式成果存储 | 已完成 | main 的 docs/ 和 AGENTS.md | 新交接文件提交后的 HEAD 需复核 | 读取 main 确认全部路径 |
 
 ## 证据
@@ -39,7 +39,15 @@ BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/�
 POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认已验证，POC-02C 随机端口测试曾失败（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-02D 的标准 HTTPS 目标已实际通过 .user.js 注入和 GM_getValue 调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。最新文档完整性工作流对关键 Markdown 文件、编号、记录字段宽度和需求测试对应关系已成功（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797）；不是产品运行测试。尚无产品源码、真实损坏脚本修复前后回归与选定 Tampermonkey 兼容矩阵、正式 Windows 产品包和长期 RAR 许可实测结果，也没有经过用户选择的应用 LICENSE。
 
 ## 准入结果
-暂缓准入（适用于全范围、无条件正式开发）：已有一个真实 Violentmonkey+Chromium+标准 HTTPS 的 .user.js 注入和 GM API 实际调用成功的工程证据，**核心技术可行性疑虑部分消除**；但是受支持的目标管理器/Chrome/Windows 矩阵、实际损坏脚本业务场景、条件性技术选型及部分发布依赖仍未最终定案。真实 EXE/RAR 产品双包和 RAR 长期生产授权是 Stable 发布硬门槛，不能冒充已经交付。
+
+**有限工程准入：TASK-001 安全骨架的开发前技术准备具备条件。** Chrome/CDP、真实 Violentmonkey 2.49.0 的 `GM_getValue` 调用以及两个独立 `broken/fixed` 已知选择器状态有真实 Windows 实测；后者是提前人工准备的脚本版本，并未开发自动诊断、自动修复或回滚。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。工程架构仅将 Electron+TypeScript 有条件选作首项安全基础（ADR-001）。
+
+**全部开发前置仍未完成**：用户实际目标 Tampermonkey、Windows 10/11、真实 Chrome 便携版、真实失效脚本/登录条件及修复前后业务验证暂无充分证据。没有用户授权的真实环境不得声称已测试，后续 TASK-007、TEST-018、全量实机验收仍受阻。
+
+**Stable 发布门槛尚未达到**：产品源码/单元测试与 28 项 TEST、实际 Electron EXE、正式便携 RAR、合法长期 RAR 生产许可、真实安全/兼容/回滚测试与全部 GATE 尚未完成。试验性的 EXE/RAR 工具链不等于可发布产品；发布门槛不是初步安全骨架开发的先决全部条件。
 
 ## 准入阻断
-POC-02D 已证明真实脚本管理器链路可行；下一准备重点改为确定首选管理器（含 Tampermonkey 与否）、在获授权实际 Chrome/便携版上核验脚本及权限流程、确定至少一套真实“故障脚本→目标页面→业务断言”的安全验证场景，并把支持矩阵/条件技术选型定案。RAR 正式生产许可、产品双包直启属于发布硬门槛，需按阶段落实，不与已通过的工具链 PoC 混淆。完成后同步更新 03/04/07/08/09/10/11/12 并重新判定准入，避免无限增写文档。
+
+首期 `TASK-001` 只能实施最小可信桌面安全入口和失败测试，**不能宣称已经具备油猴脚本修复能力**。管理器兼容、用户实际 Chrome/Profile/脚本、页面业务断言在后续实机验证里补齐；不支持的状态应明确标记 UNKNOWN/DETECTED_ONLY。正式发布需补真实应用双包运行、RAR 持续合法授权和全部 Stable GATE。按阶段门控，不再反复把已通过的基础 PoC 写为阻断。
+
+本轮新增的 POC-04A 证据：真实 Violentmonkey `broken` 预设旧定位器的业务失败与 `fixed` 预设新定位器的业务成功均得到独立 Windows CI 验证：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。详细授权、支持矩阵及剩余条件见 docs/13-predevelopment-admission.md。

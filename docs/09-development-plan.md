@@ -1,6 +1,6 @@
 # 正式开发实施计划
 
-> 状态：POC-01A/B、限定条件下的 POC-02D（真实管理器+实际 GM 读取）、POC-03A/B 的技术路线均有实证。首选管理器及 Windows/Chrome 支持矩阵、真实业务验收样本/条件架构仍未全部核定，暂不无条件开始 TASK-001。路径为预计新增，不代表已有正式源码。
+> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE/RAR5 工具链均有实证。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
 
 ## 开发阶段
 M0：证实 Chrome/管理器/交付可行性；M1：可运行安全入口+导入+静态分析；M2：动态诊断与真实管理器验收；M3：修复/版本/批处理/AI/监控/共享层；M4：风险/性能/集成与 Windows 双包装；M5：全部 Stable 门槛和 Release。未人为指定发布日期。
@@ -49,4 +49,7 @@ POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/
 各任务需保留代码路径、提交SHA、关联 TEST 和 CI/真实环境证据；最终 GATE 按 08 原类别逐项判断，不能以任务数代替工程进度。
 
 ## 下一任务
-真实脚本管理器的关键技术验证已在有边界的 POC-02D **通过**（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；先前随机端口 localhost 场景仍是历史失败反例，不得再将其写作全部油猴脚本无法运行。正式 TASK-001 需要先确认目标管理器与版本矩阵、用户关心的至少一个真实故障场景及断言、Windows/Chrome 下限、应用框架选择与 ADR-001/002 适用范围。RAR 长期生产许可应在正式发布前核实，而不虚构为已取得。
+
+在当前有限工程准入下，下一首要任务为 **TASK-001：最小安全桌面骨架及其安全负例**。按 ADR-001 的 Electron/TypeScript 条件基线实现 renderer sandbox/contextIsolation/无 Node Integration、白名单 preload IPC、路径/配置验证与错误处理，真正运行适用测试并提交可追溯源码；**本准备阶段没有实际开发这些产品功能**。
+
+后续 TASK-007/018 的 Tampermonkey 与用户实际便携 Chrome、真正损坏脚本、授权登录与完整业务断言尚须单独验证；本轮 POC-04A 的两组 `broken/fixed` 由人手预设，仅证明验收方法可重复（https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851），绝不代表自动修复或回滚已开发。RAR 生产许可、真实应用双包与稳定发布留给 TASK-019..021 的硬门槛，不能无期限拖延也不能假装已解决。详细见 docs/13-predevelopment-admission.md。
