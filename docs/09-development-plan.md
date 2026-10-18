@@ -227,3 +227,9 @@ Windows 源 SHA `14c51715435da5ec02ff07347f37d772f0bf70b6` 的 [应用工作流 
 [PR #69](https://github.com/devin930906/userscript-auto-healer/pull/69) 已合并至 `main`，合并 SHA `13d02d544f8779732df02160115ca14abbe9dd46`。修复 `src/repair/scenario-candidate.ts`：即使 @match 与授权场景一致，携带未核实的 `@require`、`@resource`、`@connect`、`@updateURL`、`@downloadURL` 或未识别元数据的脚本，也不能仅凭只读 DOM 样本生成修复候选；无源码、私密页面内容或自动操作写入。
 
 先行测试提交 `3b56e1d93aed2401975e161a48889219cbb44ec7` 的 [Windows CI #39167672723](https://github.com/devin930906/userscript-auto-healer/actions/runs/39167672723) 因真实复现 `@require` 不当返回 `CANDIDATE_ONLY` 而失败；修复提交 `5a645676176f815a45d1e599778be43386e8ba49` 的 [Windows CI #39167770757](https://github.com/devin930906/userscript-auto-healer/actions/runs/39167770757) 已完成成功：TypeScript、195 项 Node（194 pass、0 fail、1 条件 skip）、真实 Electron sandbox/preload IPC smoke。合并后主干 CI 需要按最终 SHA 重新复核。本修复仅推进 TEST-019 安全负例，不代表 TASK-009 完结；可信 Tampermonkey/GM/业务验收、自动补丁应用与回滚、TASK-019/020 EXE+ZIP 以及全部 Stable GATE 仍未完成。
+
+## （7）TASK-007 / TEST-017 临时 GM 夹具桌面入口（2026-10-19）
+
+[PR #70](https://github.com/devin930906/userscript-auto-healer/pull/70) 已合并至 `main`，合并 SHA `8c9e1ca71d4008254457234ad2bf40a19634f4b7`。应用窗口现在可在实际本程序拥有的独立 Chrome/CDP 会话成立后，经独立原生同意对话启动已有 `startIsolatedTampermonkeyGmProbe` 的最长五分钟回环夹具，显示供测试员自行在隔离 Tampermonkey 中“从 URL 导入”的一次性地址和固定 broken/fixed 测试页，并查看有限、自报、不可信的 HTTP 回执或主动关闭夹具；独立 Chrome 停止/窗口退出时请求关闭测试服务。临时脚本**不会自动安装或清理**，测试后需手动移除。应用没有公开任意脚本读写、URL 导航、权限提升或自动补丁入口。
+
+阶段证据：PR 源 SHA `ffb78005c991805ec019cf542917a727d2a5b722` 的 [Windows Application Skeleton Checks #39168605006](https://github.com/devin930906/userscript-auto-healer/actions/runs/39168605006) 已成功完成 TypeScript、Node 全部适用回归与真实 Electron sandbox/preload IPC smoke（含未启动独立 Chrome 时新增 GM 控件的拒绝）。合并后 `main` 的 CI 需另行读取，不能凭来源 CI 宣称合并基线已再次测试。此次没有在 CI 正式加载 Tampermonkey、安装临时脚本、实际调用 `GM_getValue`、取得独立 GM/业务证据、生成自动修复/回滚或 Windows EXE/ZIP 发行包；用户手动正向界面路径亦尚未实测。完整 TASK-007/TEST-017/018、GATE-004/005 及最终 Stable 依旧受阻。
