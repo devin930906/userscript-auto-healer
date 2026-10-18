@@ -99,6 +99,30 @@ test('TEST-014: dynamic, computed and unrelated methods are not patched',()=>{
   }
 });
 
+test('TEST-019: shadowed or reassigned document never yields a DOM patch candidate',()=>{
+  for(const snippet of [
+    "function run(document) { return document.querySelector('#old'); }",
+    "function run() { const document = {querySelector(){return null}}; return document.querySelector('#old'); }",
+    "const {document} = globalThis; document.querySelector('#old');",
+    "const [document] = []; document.querySelector('#old');",
+    "document = anotherDocument; document.querySelector('#old');",
+    "with (window) { document.querySelector('#old'); }",
+    "eval('var document = null'); document.querySelector('#old');"
+  ]){
+    const script=meta+snippet;
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.indexOf('document.querySelector')
+    }));
+    assert.equal(result.status,'BLOCKED',snippet);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  const normal=meta+"function run(node) { return document.querySelector('#old'); }";
+  assert.equal(proposeLiteralSelectorPatch(request(normal,{
+    callOffset:normal.indexOf('document.querySelector')
+  })).status,'CANDIDATE_ONLY');
+});
+
 test('TEST-014: exact call location prevents replacing repeated selectors globally',()=>{
   const repeated=meta+
     "document.querySelector('#old');\n"+

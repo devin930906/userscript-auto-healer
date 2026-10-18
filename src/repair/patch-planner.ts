@@ -58,6 +58,63 @@ const blocked=(reason:PatchBlockReason):BlockedLiteralPatch=>Object.freeze({
   tampermonkeyVerified:false,businessRecoveredVerified:false
 });
 
+/** A textual `document.querySelector` is not evidence of a browser DOM call
+ * when source code can rebind `document`. Phase-one candidates intentionally
+ * reject the entire source if ANY such binding is present: scope analysis and
+ * execution order are not verified by this offline repair planner. */
+function bindsDocument(pattern:unknown):boolean{
+  const node=asNode(pattern);
+  if(!node)return false;
+  switch(node.type){
+    case 'Identifier':return node.name==='document';
+    case 'RestElement':return bindsDocument(node.argument);
+    case 'AssignmentPattern':return bindsDocument(node.left);
+    case 'Property':return bindsDocument(node.value);
+    case 'ArrayPattern':
+      return Array.isArray(node.elements)&&node.elements.some(bindsDocument);
+    case 'ObjectPattern':
+      return Array.isArray(node.properties)&&node.properties.some(bindsDocument);
+    default:return false;
+  }
+}
+
+/** Reject source whose `document` reference cannot be conservatively trusted.
+ * Direct eval and with-statements also make name resolution ambiguous.
+ * This does NOT prove all remaining calls use the native browser DOM API;
+ * resulting proposals remain review-only, never automatically applicable. */
+function ambiguousDocumentBinding(source:string):boolean{
+  const ast=parse(source,{ecmaVersion:'latest',sourceType:'script'}) as unknown as AstNode;
+  let ambiguous=false;
+  function walk(node:AstNode):void{
+    if(ambiguous)return;
+    if(node.type==='WithStatement'||
+       (node.type==='VariableDeclarator'&&bindsDocument(node.id))||
+       (node.type==='CatchClause'&&bindsDocument(node.param))||
+       ((node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
+         node.type==='ArrowFunctionExpression')&&
+        (bindsDocument(node.id)||
+         (Array.isArray(node.params)&&node.params.some(bindsDocument))))||
+       ((node.type==='ClassDeclaration'||node.type==='ClassExpression')&&
+        bindsDocument(node.id))||
+       (node.type==='AssignmentExpression'&&bindsDocument(node.left))||
+       (node.type==='UpdateExpression'&&bindsDocument(node.argument))||
+       (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
+        asNode(node.callee)?.name==='eval')){
+      ambiguous=true;return;
+    }
+    for(const [key,value] of Object.entries(node)){
+      if(key==='start'||key==='end'||key==='loc'||key==='raw')continue;
+      if(Array.isArray(value)){
+        for(const item of value){const child=asNode(item);if(child)walk(child);}
+      }else{
+        const child=asNode(value);if(child)walk(child);
+      }
+    }
+  }
+  walk(ast);
+  return ambiguous;
+}
+
 /** Only locate the *actual AST argument token*, never global string-replace. */
 function findLiteralArgument(
   source:string,offset:number,method:string
@@ -119,6 +176,8 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
        !SIMPLE_SELECTOR.test(input.replacementSelector)||
        input.originalSelector===input.replacementSelector)
       return blocked('INVALID_CANDIDATE');
+    // A text match on a shadowed document could patch an unrelated object.
+    if(ambiguousDocumentBinding(input.source))return blocked('UNSUPPORTED_TARGET');
     const boundary=headerEnd(input.source);
     if(boundary===null||input.callOffset<=boundary)return blocked('INVALID_METADATA');
     const analysis=analyzeSelectors(input.source);
