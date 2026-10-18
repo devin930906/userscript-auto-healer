@@ -162,10 +162,32 @@ async function main() {
         try {
           if(typeof chrome==='undefined'||!chrome.userScripts)return {available:false};
           const scripts=await chrome.userScripts.getScripts();
-          return {available:true,registrations:scripts.length};
-        } catch(e) {return {available:false,error:String(e).slice(0,180)}}
+          const permissions=await chrome.permissions.getAll();
+          const localhost=await chrome.permissions.contains({origins:['http://127.0.0.1/*']});
+          // Temporary positive control: register a harmless marker against a
+          // local fixture only. This tests Chrome injection independently of
+          // Violentmonkey's manager pipeline; it cannot count as GM acceptance.
+          let control='not attempted';
+          try {
+            await chrome.userScripts.register([{
+              id:'poc-direct-control',
+              matches:['http://127.0.0.1/*'],
+              js:[{code:'document.documentElement.dataset.directApiControl = "executed"'}],
+              runAt:'document_idle',
+              world:'USER_SCRIPT',
+            }]);
+            control='registered';
+          } catch(e) {control='registration failed: '+String(e).slice(0,220)}
+          return {
+            available:true,registrations:scripts.length,
+            localhostPermission:localhost,
+            grantedOrigins:permissions.origins,
+            declaredPermissions:permissions.permissions,
+            directControl:control,
+          };
+        } catch(e) {return {available:false,error:String(e).slice(0,220)}}
       });
-      console.log('UserScripts API after browser restart: '+JSON.stringify(api));
+      console.log('UserScripts API and localhost direct-control diagnostic after browser restart: '+JSON.stringify(api));
     } catch(err) {console.log('INCOMPLETE extension API check after browser restart: '+String(err.message).slice(0,200));}
     await optionsProbe.close();
 
@@ -225,6 +247,12 @@ async function main() {
     probe.on('console',m=>{if(m.type()==='error')console.log('FIXTURE_CONSOLE_ERROR: '+m.text().slice(0,380))});
     probe.on('pageerror',e=>console.log('FIXTURE_PAGE_ERROR: '+String(e).slice(0,380)));
     await probe.goto('http://127.0.0.1:'+port+'/fixture',{waitUntil:'domcontentloaded'});
+    let control={directApi:false};
+    try {
+      await probe.waitForFunction(()=>document.documentElement.dataset.directApiControl==='executed',{timeout:3000});
+      control.directApi=true;
+    } catch(e) {}
+    console.log('Isolated Chrome userScripts direct injection positive-control: '+JSON.stringify(control));
     let execution={installed:false};
     try {
       await probe.waitForFunction(()=>document.documentElement.dataset.userscriptFixture==='executed',{timeout:7000});
