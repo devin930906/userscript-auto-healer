@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
+import {proposeLiteralSelectorPatch,auditProposedLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
 
 const meta='// ==UserScript==\n// @name Repair test\n// @match https://example.com/*\n// @grant GM_getValue\n// ==/UserScript==\n';
 const hash=(s:string)=>createHash('sha256').update(s,'utf8').digest('hex');
@@ -136,5 +136,110 @@ test('TEST-019: malformed inputs and unsafe diagnostic getters never produce pat
     assert.equal(result.automaticPatchAllowed,false);
     assert.equal('candidateSource' in result,false);
     assert.equal(JSON.stringify(result).includes('secret'),false);
+  }
+});
+
+
+test('TEST-019: independent local audit re-generates one permitted AST diff only',()=>{
+  const req=request();
+  const candidate=proposeLiteralSelectorPatch(req);
+  assert.equal(candidate.status,'CANDIDATE_ONLY');
+  const review=auditProposedLiteralSelectorPatch(req,candidate);
+  assert.equal(review.status,'REVIEWABLE_ONLY');
+  assert.equal(review.automaticPatchAllowed,false);
+  assert.equal(review.tampermonkeyVerified,false);
+  assert.equal(review.businessRecoveredVerified,false);
+  assert.equal('candidateSource' in review,false);
+  assert.equal('before' in review,false);
+  assert.equal(Object.isFrozen(review),true);
+  if(candidate.status==='CANDIDATE_ONLY'&&review.status==='REVIEWABLE_ONLY'){
+    assert.equal(review.originalSha256,hash(source));
+    assert.equal(review.candidateSha256,hash(candidate.candidateSource));
+    assert.deepEqual(review.change,{
+      start:candidate.change.start,end:candidate.change.end
+    });
+    // The review boundary also works for a serialized message from a worker.
+    assert.equal(auditProposedLiteralSelectorPatch(
+      req,JSON.parse(JSON.stringify(candidate))).status,'REVIEWABLE_ONLY');
+    assert.equal(Object.isFrozen(review.change),true);
+  }
+});
+
+test('TEST-019: altered source, hashes, diff and privilege flags are rejected',()=>{
+  const req=request();
+  const generated=proposeLiteralSelectorPatch(req);
+  assert.equal(generated.status,'CANDIDATE_ONLY');
+  if(generated.status!=='CANDIDATE_ONLY')return;
+  const edit=(mutation:Record<string,unknown>)=>
+    auditProposedLiteralSelectorPatch(req,{...generated,...mutation});
+  for(const altered of [
+    {candidateSource:generated.candidateSource.replace(
+      '// @grant GM_getValue','// @grant GM_xmlhttpRequest')},
+    {candidateSource:generated.candidateSource+'// injected trailing code'},
+    {candidateSha256:'0'.repeat(64)},
+    {originalSha256:'f'.repeat(64)},
+    {faultEvidenceId:'unknown_evidence'},
+    {status:'VERIFIED'},
+    {reason:'ALREADY_VERIFIED'},
+    {automaticPatchAllowed:true},
+    {tampermonkeyVerified:true},
+    {businessRecoveredVerified:true},
+    {change:{...generated.change,after:'"arbitrary"'}},
+    {change:{...generated.change,start:generated.change.start+1}},
+    {change:{...generated.change,end:generated.change.end+1}}
+  ]){
+    const result=edit(altered);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  assert.equal(auditProposedLiteralSelectorPatch(
+    req,{...generated,approved:true}).status,'BLOCKED');
+  assert.equal(auditProposedLiteralSelectorPatch(
+    req,{...generated,change:{...generated.change,grantPermission:true}}
+  ).status,'BLOCKED');
+});
+
+test('TEST-019: stale inputs and malformed or hostile receipts fail closed',()=>{
+  const req=request();
+  const generated=proposeLiteralSelectorPatch(req);
+  assert.equal(generated.status,'CANDIDATE_ONLY');
+  if(generated.status!=='CANDIDATE_ONLY')return;
+  assert.equal(auditProposedLiteralSelectorPatch({
+    ...req,source:source+'//changed'
+  },generated).status,'BLOCKED');
+  assert.deepEqual(auditProposedLiteralSelectorPatch({
+    ...req,expectedSourceSha256:'0'.repeat(64)
+  },generated),{
+    status:'BLOCKED',reason:'PLANNER_REJECTED',automaticPatchAllowed:false,
+    tampermonkeyVerified:false,businessRecoveredVerified:false
+  });
+  const contaminated=Object.create({status:'CANDIDATE_ONLY'});
+  Object.assign(contaminated,generated);
+  const throwingGetter={...generated};
+  Object.defineProperty(throwingGetter,'candidateSource',{
+    enumerable:true,get(){throw Error('secret user data');}
+  });
+  const hostileProxy=new Proxy({...generated},{
+    ownKeys(){throw Error('private metadata');}
+  });
+  const hostileChange={...generated,change:{
+    get start(){throw Error('private input');},
+    end:generated.change.end,before:generated.change.before,
+    after:generated.change.after
+  }};
+  for(const input of [
+    null,{},false,[],contaminated,throwingGetter,hostileProxy,
+    hostileChange,{...generated,change:null},
+    {...generated,change:{...generated.change,extra:'secret'}}
+  ]){
+    assert.doesNotThrow(()=>{
+      const result=auditProposedLiteralSelectorPatch(req,input);
+      assert.equal(result.status,'BLOCKED');
+      assert.equal(result.automaticPatchAllowed,false);
+      assert.equal(result.tampermonkeyVerified,false);
+      assert.equal(result.businessRecoveredVerified,false);
+      assert.equal(JSON.stringify(result).includes('private'),false);
+    });
   }
 });

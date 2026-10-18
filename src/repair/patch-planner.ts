@@ -161,3 +161,110 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
     return blocked('UNSUPPORTED_SOURCE');
   }
 }
+
+
+/** TASK-009 / REQ-019 / TEST-019: independently recheck a candidate at the
+ * local review boundary, treating even a planner-shaped object as untrusted.
+ *
+ * This checks one deterministic, AST-anchored edit against the original
+ * request. It does NOT authenticate any manager, diagnose a real website,
+ * authorize a file write, or declare recovery. Always require TASK-010/011
+ * acceptance + transactional backup before a future application path.
+ */
+export type CandidateAuditResult=
+ |Readonly<{
+    status:'BLOCKED';
+    reason:'PLANNER_REJECTED'|'UNTRUSTED_CANDIDATE'|'CANDIDATE_MISMATCH';
+    automaticPatchAllowed:false;tampermonkeyVerified:false;
+    businessRecoveredVerified:false;
+  }>
+ |Readonly<{
+    status:'REVIEWABLE_ONLY';
+    originalSha256:string;candidateSha256:string;faultEvidenceId:string;
+    /** Source and selector text are deliberately absent from audit receipts. */
+    change:Readonly<{start:number;end:number}>;
+    automaticPatchAllowed:false;tampermonkeyVerified:false;
+    businessRecoveredVerified:false;
+  }>;
+
+function blockedAudit(reason:Extract<CandidateAuditResult,{status:'BLOCKED'}>['reason']):
+ CandidateAuditResult {
+ return Object.freeze({status:'BLOCKED' as const,reason,
+   automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
+   businessRecoveredVerified:false as const});
+}
+const candidateFields=[
+ 'status','reason','originalSha256','candidateSha256','faultEvidenceId',
+ 'candidateSource','change','automaticPatchAllowed','tampermonkeyVerified',
+ 'businessRecoveredVerified'
+].sort();
+const changeFields=['start','end','before','after'].sort();
+
+/** Re-generates the permitted edit; never trusts claimed hashes or diffs.
+ * A successful result is a limited integrity receipt, not write permission.
+ */
+export function auditProposedLiteralSelectorPatch(
+ request:LiteralPatchRequest,untrustedCandidate:unknown
+):CandidateAuditResult {
+ try{
+   const expected=proposeLiteralSelectorPatch(request);
+   if(expected.status!=='CANDIDATE_ONLY')return blockedAudit('PLANNER_REJECTED');
+   if(!untrustedCandidate||typeof untrustedCandidate!=='object'||
+      Array.isArray(untrustedCandidate))
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+   // Read own data descriptors, not getters. Symbols, extra approval fields,
+   // prototype tricks and unknown fields are never admitted as audit input.
+   const obj=untrustedCandidate as object;
+   const proto=Object.getPrototypeOf(obj);
+   if(proto!==Object.prototype&&proto!==null)
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+   const fields=Object.getOwnPropertyDescriptors(obj);
+   const keys=Reflect.ownKeys(fields);
+   if(keys.some(k=>typeof k!=='string')||
+      keys.length!==candidateFields.length||
+      (keys as string[]).sort().some((k,i)=>k!==candidateFields[i]))
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+   const field=(key:string):unknown=>{
+     const d=fields[key];
+     if(!d||!Object.prototype.hasOwnProperty.call(d,'value'))
+       throw Error('untrusted candidate field');
+     return d.value;
+   };
+   const change=field('change');
+   if(!change||typeof change!=='object'||Array.isArray(change))
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+   const changeProto=Object.getPrototypeOf(change);
+   if(changeProto!==Object.prototype&&changeProto!==null)
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+   const parts=Object.getOwnPropertyDescriptors(change);
+   const partKeys=Reflect.ownKeys(parts);
+   if(partKeys.some(k=>typeof k!=='string')||
+      partKeys.length!==changeFields.length||
+      (partKeys as string[]).sort().some((k,i)=>k!==changeFields[i])||
+      changeFields.some(k=>!Object.prototype.hasOwnProperty.call(parts[k],'value')))
+     return blockedAudit('UNTRUSTED_CANDIDATE');
+
+   if(field('status')!==expected.status||field('reason')!==expected.reason||
+      field('originalSha256')!==expected.originalSha256||
+      field('candidateSha256')!==expected.candidateSha256||
+      field('faultEvidenceId')!==expected.faultEvidenceId||
+      field('candidateSource')!==expected.candidateSource||
+      field('automaticPatchAllowed')!==false||
+      field('tampermonkeyVerified')!==false||
+      field('businessRecoveredVerified')!==false||
+      changeFields.some(k=>
+        parts[k].value!==expected.change[k as keyof typeof expected.change]))
+     return blockedAudit('CANDIDATE_MISMATCH');
+   return Object.freeze({
+     status:'REVIEWABLE_ONLY' as const,
+     originalSha256:expected.originalSha256,
+     candidateSha256:expected.candidateSha256,
+     faultEvidenceId:expected.faultEvidenceId,
+     change:Object.freeze({start:expected.change.start,end:expected.change.end}),
+     automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
+     businessRecoveredVerified:false as const
+   });
+ }catch{
+   return blockedAudit('UNTRUSTED_CANDIDATE');
+ }
+}
