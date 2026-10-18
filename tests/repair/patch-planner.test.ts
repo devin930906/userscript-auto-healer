@@ -70,6 +70,33 @@ test('TEST-019: source SHA, evidence ID, site identity and metadata are mandator
   assert.equal(proposeLiteralSelectorPatch(request(withinMeta)).status,'BLOCKED');
 });
 
+test('TEST-019: non-leading or disguised userscript headers cannot authorize candidates',()=>{
+  const body="document.querySelector('#old');";
+  const invalidSources=[
+    'const bootstrap=true;\\n'+meta+body,
+    '// unrelated leading comment\\n'+meta+body,
+    '/* unrelated leading block */\\n'+meta+body,
+    'function bootstrap(){}\\n'+meta+body,
+    '// ==UserScript==\\n// @name incomplete\\n'+body,
+    'const sourceText='+JSON.stringify(meta)+';\\n'+body
+  ];
+  for(const bad of invalidSources){
+    const result=proposeLiteralSelectorPatch(request(bad,{
+      callOffset:bad.lastIndexOf('document.querySelector')
+    }));
+    assert.equal(result.status,'BLOCKED',bad.slice(0,80));
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  // Canonical metadata may follow blank lines, but not executable code.
+  const leadingBlank='\\n\\n'+meta+body;
+  const valid=proposeLiteralSelectorPatch(request(leadingBlank,{
+    callOffset:leadingBlank.indexOf('document.querySelector')
+  }));
+  assert.equal(valid.status,'CANDIDATE_ONLY');
+  assert.equal(valid.automaticPatchAllowed,false);
+});
+
 test('TEST-014: complex/new selectors and injection-looking strings fail closed',()=>{
   for(const replacementSelector of [
     '', '#new target', '#new, body', '[data-token]',':has(*)',
