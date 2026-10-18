@@ -153,3 +153,7 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-011 阶段进度续接（2026-10-19）
 
 [PR #44](https://github.com/devin930906/userscript-auto-healer/pull/44) 以独立只读磁盘 `.user.js` 原文一致性检查推进 REQ-020 / TEST-020，源 `31a31f111a7e6dbd35dbe454305d99431c1ad954` 的 Windows Application Checks `39147314079`（151 cases: 150 pass / 0 fail / 1 conditional skip + real Electron smoke）与 portable Chrome `39147314150` 均为 success。仍须重新核实 PR 实际是否已合并、最终 main SHA 与 CI；本模块不暴露任意路径 IPC、不修改用户脚本、不完成授权可信来源、持久备份、原子写入或回滚。下阶段优先解除 TASK-007/010 的真 Tampermonkey / 业务证据阻断，TASK-011 的真正事务写入不得绕过这些安全门槛。EXE/ZIP/GATE 仍为正式发布阻断。
+
+## （7）TASK-011 备份-only 阶段续接（2026-10-19）
+
+续接 [PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45)：`src/version/verified-backup.ts` 以只读磁盘原文比对、独立备份副本的 SHA-256 与无覆盖发布推进 REQ-020/TEST-020，并增加 Windows 安全负例。PR 当前 SHA、Windows 测试和合并结果须另行核实。**未完成**可恢复事务版本库、自动应用与写中断恢复、回滚及可信 Tampermonkey/业务验收。下一步只有在 TASK-007/010 可信证据、安全锁定及崩溃恢复方案可验证后才连接任何真实脚本写入；不得将备份成功当作修复成功，也不得称 Stable 已交付。
