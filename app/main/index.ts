@@ -11,7 +11,7 @@ import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../s
 import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
-import { startIsolatedTampermonkeyGmProbe, type GmProbeSession } from '../../src/manager/tampermonkey-gm-probe';
+import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 
 let mainWindow: BrowserWindow | null = null;
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
@@ -29,18 +29,21 @@ let probeInProgress = false;
 // Serialize native Chrome/Profile selection: IPC dialogs must not race each other
 // or a consented browser launch. This flag is not proof of user authorization.
 let nativeSelectionInProgress = false;
-let gmProbeSession: GmProbeSession | null = null;
+let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
+let gmStartAbort: AbortController | null = null;
+let gmActionInProgress = false;
 let gmProbeEpoch = 0;
 /** Revokes the application's short-lived HTTP fixture without touching any
  * extension or installed script. Manual removal remains the tester's duty. */
 function stopOnlyGmProbe():void {
   gmProbeEpoch++;
+  gmStartAbort?.abort();
   const active=gmProbeSession;
   gmProbeSession=null;
   if(active)void active.stop().catch(()=>undefined);
 }
-function liveGmProbe():GmProbeSession|null {
+function liveGmProbe():ManualTampermonkeyDiagnosticSession|null {
   if(gmProbeSession&&Date.now()>=gmProbeSession.expiresAt)
     stopOnlyGmProbe();
   return gmProbeSession;
@@ -284,6 +287,8 @@ function registerSafeIpc(): void {
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
     gmStartInProgress=true;
     const epoch=gmProbeEpoch;
+    const controller=new AbortController();
+    gmStartAbort=controller;
     try{
       const decision=await dialog.showMessageBox(win,{
         type:'warning',buttons:['允许临时本机测试','取消'],
@@ -297,7 +302,11 @@ function registerSafeIpc(): void {
       if(decision.response!==0||win!==mainWindow||win.isDestroyed()||
          epoch!==gmProbeEpoch||!isLiveApprovedChromeSession(owned))
         return {ok:false,code:'NOT_AUTHORIZED',...unverified};
-      const created=await startIsolatedTampermonkeyGmProbe(true,300000);
+      // Verify a runtime target hint inside this exact owned browser BEFORE
+      // exposing the disposable fixture. The hint is never manager attestation.
+      const created=await startApprovedTampermonkeyDiagnostic(owned,true,{
+        ttlMs:300000,signal:controller.signal
+      });
       if(!created.ok)return {ok:false,code:created.code,...unverified};
       if(epoch!==gmProbeEpoch||win!==mainWindow||win.isDestroyed()||
          !isLiveApprovedChromeSession(owned)){
@@ -314,25 +323,99 @@ function registerSafeIpc(): void {
         expiresAt:created.session.expiresAt,...unverified};
     }catch{
       return {ok:false,code:'PROBE_FAILED',...unverified};
-    }finally{gmStartInProgress=false;}
+    }finally{
+      gmStartInProgress=false;
+      if(gmStartAbort===controller)gmStartAbort=null;
+    }
   });
   ipcMain.handle('gm-probe:status',event=>{
     authorizeSender(event);
     const active=liveGmProbe();
     if(!active||!readOwnedBrowser())
       return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
-    const reports=active.receiptSnapshot();
-    // Even both positive HTTP receipts do NOT authenticate a manager/GM API.
-    return {ok:true,status:'SELF_REPORTED_FIXTURE_ONLY',
+    // Correlate independent, read-only CDP DOM observations with the
+    // self-reported HTTP receipts. Never elevate the result to VERIFIED.
+    const summary=active.snapshot();
+    const consistency=active.consistencySnapshot();
+    const dom=active.domSnapshot();
+    return {ok:true,status:'UNVERIFIED_FIXTURE_CORRELATION_ONLY',
       expiresAt:active.expiresAt,
-      broken:reports.broken?{
-        gmReported:reports.broken.reportedGmDefaultMatched,
-        actionReported:reports.broken.reportedBusinessAction
-      }:null,
-      fixed:reports.fixed?{
-        gmReported:reports.fixed.reportedGmDefaultMatched,
-        actionReported:reports.fixed.reportedBusinessAction
-      }:null,...unverified};
+      observedModes:summary.observedModes,
+      reportedGmDefaultMatched:summary.reportedGmDefaultMatched,
+      reportedBrokenFailed:summary.reportedBrokenFailed,
+      reportedFixedRecovered:summary.reportedFixedRecovered,
+      consistencyStatus:consistency.status,comparedModes:consistency.comparedModes,
+      brokenDomAction:dom.broken?.actionCount??null,
+      fixedDomAction:dom.fixed?.actionCount??null,...unverified};
+  });
+  // Renderer can request only an exact fixture mode, never an arbitrary URL,
+  // target, selector, browser, script source or path. Native consent is separate.
+  ipcMain.handle('gm-probe:visit',async(event,mode:unknown)=>{
+    authorizeSender(event);
+    if(mode!=='broken'&&mode!=='fixed')
+      return {ok:false,code:'INVALID_MODE',...unverified};
+    if(gmActionInProgress)return {ok:false,code:'PROBE_BUSY',...unverified};
+    const active=liveGmProbe();
+    if(!active||!readOwnedBrowser())
+      return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const epoch=gmProbeEpoch;
+    gmActionInProgress=true;
+    try{
+      const decision=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许打开测试页','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'允许在独立 Chrome 打开 '+mode+' 测试页？',
+        detail:'只会在本程序已验证归属的 Chrome 中打开本机一次性测试页。'+
+          '\\n不会安装脚本或证明 Tampermonkey/GM API 功能。'
+      });
+      if(decision.response!==0||epoch!==gmProbeEpoch||
+         win!==mainWindow||win.isDestroyed()||active!==liveGmProbe())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const result=await active.visit(mode,true);
+      if(epoch!==gmProbeEpoch||active!==liveGmProbe())
+        return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(!result.ok)return {ok:false,code:result.code,...unverified};
+      return {ok:true,status:result.status,mode:result.mode,...unverified};
+    }catch{
+      return {ok:false,code:'VISIT_FAILED',...unverified};
+    }finally{gmActionInProgress=false;}
+  });
+  ipcMain.handle('gm-probe:observe',async(event,mode:unknown)=>{
+    authorizeSender(event);
+    if(mode!=='broken'&&mode!=='fixed')
+      return {ok:false,code:'INVALID_MODE',...unverified};
+    if(gmActionInProgress)return {ok:false,code:'PROBE_BUSY',...unverified};
+    const active=liveGmProbe();
+    if(!active||!readOwnedBrowser())
+      return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const epoch=gmProbeEpoch;
+    gmActionInProgress=true;
+    try{
+      const decision=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许只读对照','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'允许只读检查 '+mode+' 专用测试页的 DOM？',
+        detail:'仅检查本次测试页的四个固定选择器与动作标记。'+
+          '\\n结果只能证明 DOM 对照状态，不能证明 GM API 或脚本来源。'
+      });
+      if(decision.response!==0||epoch!==gmProbeEpoch||
+         win!==mainWindow||win.isDestroyed()||active!==liveGmProbe())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const result=await active.observe(mode,true);
+      if(epoch!==gmProbeEpoch||active!==liveGmProbe())
+        return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(!result.ok)return {ok:false,code:result.code,...unverified};
+      return {ok:true,status:'LIMITED_FIXTURE_DOM_ONLY',
+        mode:result.evidence.mode,actionCount:result.evidence.actionCount,
+        fixtureDomMatchesExpected:result.evidence.fixtureDomMatchesExpected,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'OBSERVATION_FAILED',...unverified};
+    }finally{gmActionInProgress=false;}
   });
   ipcMain.handle('gm-probe:stop',event=>{
     authorizeSender(event);
@@ -438,7 +521,8 @@ async function createMainWindow(): Promise<void> {
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
       "const noGmStart=await a.startGmProbe(); const noGmStatus=await a.gmProbeStatus(); " +
-      "const noGmStop=await a.stopGmProbe(); " +
+      "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
+       "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +
       "const newProfileWithoutChrome=await a.createProfile(); " +
       "const selectedExe=await a.chooseChrome(); const selectedProfile=await a.chooseProfile(); " +
       "const race=await Promise.all([a.chooseChrome(),a.chooseProfile()]); " +
@@ -462,7 +546,9 @@ async function createMainWindow(): Promise<void> {
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
       "noGmStart.code === 'BROWSER_NOT_RUNNING' && " +
-      "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmStop.ok === false && " +
+      "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
+       "noGmObserve.code === 'NO_ACTIVE_FIXTURE' && badMode.code === 'INVALID_MODE' && " +
+       "noGmStop.ok === false && " +
       "newProfileWithoutChrome.code === 'CONFIG_NOT_SELECTED' && " +
       "selectedExe.ok === true && selectedProfile.ok === true && raceSerialized && " +
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
@@ -478,7 +564,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig') {
+        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;

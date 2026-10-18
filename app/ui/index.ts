@@ -33,8 +33,13 @@ interface Window {
     startGmProbe(): Promise<{ok:boolean;code?:string;status?:string;
       installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
     gmProbeStatus(): Promise<{ok:boolean;code?:string;status?:string;
-      broken?:{gmReported:boolean;actionReported:boolean}|null;
-      fixed?:{gmReported:boolean;actionReported:boolean}|null}>;
+      observedModes?:number;reportedGmDefaultMatched?:boolean;
+      reportedBrokenFailed?:boolean;reportedFixedRecovered?:boolean;
+      consistencyStatus?:string;comparedModes?:number;
+      brokenDomAction?:number|null;fixedDomAction?:number|null}>;
+    visitGmFixture(mode:'broken'|'fixed'): Promise<{ok:boolean;code?:string;status?:string}>;
+    observeGmFixture(mode:'broken'|'fixed'): Promise<{ok:boolean;code?:string;
+      status?:string;actionCount?:number;fixtureDomMatchesExpected?:boolean}>;
     stopGmProbe(): Promise<{ok:boolean;status?:string}>;
   };
 }
@@ -219,6 +224,14 @@ let gmProbeActive=false;
 const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
 const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
 const gmStopButton=document.getElementById('gm-probe-stop') as HTMLButtonElement|null;
+const gmVisitButtons={
+ broken:document.getElementById('gm-probe-visit-broken') as HTMLButtonElement|null,
+ fixed:document.getElementById('gm-probe-visit-fixed') as HTMLButtonElement|null
+};
+const gmObserveButtons={
+ broken:document.getElementById('gm-probe-observe-broken') as HTMLButtonElement|null,
+ fixed:document.getElementById('gm-probe-observe-fixed') as HTMLButtonElement|null
+};
 const gmLinks=document.getElementById('gm-probe-links');
 const gmResult=document.getElementById('gm-probe-result');
 function clearGmDisplay(message:string):void{
@@ -241,7 +254,12 @@ function browserControls():void{
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
- if(gmStopButton)gmStopButton.disabled=browserBusy||!gmProbeActive;
+ for(const button of Object.values(gmVisitButtons))
+  if(button)button.disabled=browserBusy||!gmProbeActive;
+ for(const button of Object.values(gmObserveButtons))
+  if(button)button.disabled=browserBusy||!gmProbeActive;
+ // Stop remains available during an in-flight CDP operation to revoke consent.
+ if(gmStopButton)gmStopButton.disabled=!gmProbeActive;
 }
 async function browserAction(fn:()=>Promise<void>):Promise<void>{
  if(browserBusy)return;
@@ -329,7 +347,8 @@ gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
    result.installUrl+' ｜ 失败测试页：'+result.brokenUrl+
    ' ｜ 预设修正测试页：'+result.fixedUrl;
  if(gmResult)gmResult.textContent='测试服务已开启，至 '+new Date(result.expiresAt).toLocaleTimeString()+
-   ' 到期；脚本需要手动安装和清理。此状态不是 GM API 或业务恢复证明。';
+   ' 到期；先安装临时脚本，再分别通过按钮打开并只读检查 broken / fixed。'+
+   '扩展运行目标仅是提示，测试结果不是 GM 或业务恢复证明。';
 }));
 gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.gmProbeStatus();
@@ -338,18 +357,39 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
     '。如已安装临时脚本，请自行清理。');
   return;
  }
- const reported=(value:typeof result.broken)=>
-   value===null||value===undefined?'无回执':
-     '自报 GM 默认值 '+(value.gmReported?'true':'false')+
-     ' / 自报页面动作 '+(value.actionReported?'true':'false');
- if(gmResult)gmResult.textContent='失败预设：'+reported(result.broken)+
-   '；修正预设：'+reported(result.fixed)+
-   '。数据未经扩展独立认证，不等于 Tampermonkey、GM 或业务验收通过。';
+ if(gmResult)gmResult.textContent='报告模式数：'+(result.observedModes??0)+
+   '；自报 GM 默认值匹配：'+Boolean(result.reportedGmDefaultMatched)+
+   '；自报 broken 失败：'+Boolean(result.reportedBrokenFailed)+
+   '；自报 fixed 动作：'+Boolean(result.reportedFixedRecovered)+
+   '；独立 DOM 对照：'+(result.consistencyStatus??'UNKNOWN')+
+   '（已比较 '+(result.comparedModes??0)+' 组；broken 动作 '+
+   (result.brokenDomAction??'未观察')+'、fixed 动作 '+
+   (result.fixedDomAction??'未观察')+'）。仅限未经认证的夹具对照，不证明真实 GM 或业务恢复。';
 }));
-gmStopButton?.addEventListener('click',()=>void browserAction(async()=>{
- const result=await window.healer.stopGmProbe();
- clearGmDisplay(result.ok
-  ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
-  :'没有活动的本机测试服务。');
-}));
+for(const mode of ['broken','fixed'] as const){
+ gmVisitButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const result=await window.healer.visitGmFixture(mode);
+  if(gmResult)gmResult.textContent=result.ok
+   ?mode+' 专用测试页已在本程序拥有的 Chrome 打开；脚本执行未验证。'
+   :'测试页未打开：'+(result.code??'UNKNOWN');
+ }));
+ gmObserveButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const result=await window.healer.observeGmFixture(mode);
+  if(gmResult)gmResult.textContent=result.ok
+   ?mode+' 只读 DOM 动作数：'+result.actionCount+
+      '；符合人工预设：'+Boolean(result.fixtureDomMatchesExpected)+
+      '。这不是管理器或 GM API 验证。'
+   :'只读 DOM 对照失败：'+(result.code??'UNKNOWN');
+ }));
+}
+// Do not hold browserAction's busy lock when stopping; native stop cancels
+// pending visit/DOM checks and the short-lived loopback fixture.
+gmStopButton?.addEventListener('click',()=>{
+ if(!gmProbeActive)return;
+ void window.healer.stopGmProbe().then(result=>{
+  clearGmDisplay(result.ok
+   ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
+   :'没有活动的本机测试服务。');
+ }).catch(()=>clearGmDisplay('关闭操作受阻；请确认本机测试已结束。'));
+});
 browserControls();
