@@ -49,6 +49,32 @@ test('TEST-020: a byte-identical standalone backup is a read-only recovery sourc
   });
 });
 
+test('TEST-020: matching bytes cannot substitute another script backup',async()=>{
+  await fixture(async(req,backup,source,dir)=>{
+    const unrelated=join(dir,'another-script.user.js');
+    await writeFile(unrelated,original);
+    const mistaken=await verifyBackupRecoverySource({...req,sourcePath:unrelated});
+    assert.equal(mistaken.status,'BLOCKED');
+    if(mistaken.status==='BLOCKED')
+      assert.equal(mistaken.reason,'BACKUP_SOURCE_MISMATCH');
+    assert.equal(mistaken.automaticRollbackAllowed,false);
+    assert.deepEqual(await readFile(unrelated),original);
+    assert.deepEqual(await readFile(source),original);
+    assert.deepEqual(await readFile(backup),original);
+
+    // An extended prefix with a genuine-looking UUID is also rejected.
+    const insertedName='my-script.extra.'+
+      req.backupFileName.slice('my-script.'.length);
+    const falsePrefix=await verifyBackupRecoverySource({
+      ...req,backupFileName:insertedName
+    });
+    assert.equal(falsePrefix.status,'BLOCKED');
+    if(falsePrefix.status==='BLOCKED')
+      assert.equal(falsePrefix.reason,'BACKUP_SOURCE_MISMATCH');
+    assert.deepEqual(await readFile(source),original);
+  });
+});
+
 test('TEST-020: changed, truncated or missing recovery bytes fail without writing to original',async()=>{
   await fixture(async(req,backup,source)=>{
     await writeFile(backup,Buffer.from('tampered'));
