@@ -98,6 +98,59 @@ test('TEST-013: CDP failures and same-origin SPA route change block diagnostic p
    assert.equal(result.automaticPatchAllowed,false);
  }
 });
+test('TEST-013: malformed iframe, shadow and blind-spot inventory fails closed',()=>{
+ const base=sample(matched).summary;
+ for(const summary of [
+   {...base,iframeCount:-1},
+   {...base,iframeCount:NaN},
+   {...base,iframeCount:5},
+   {...base,visibleShadowRoots:Infinity},
+   {...base,visibleShadowRoots:5},
+   {...base,blindSpots:'CLOSED_SHADOW_ROOT_UNKNOWN'},
+   {...base,blindSpots:['UNRECOGNIZED']},
+   {...base,blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN','CLOSED_SHADOW_ROOT_UNKNOWN']},
+   {...base,iframeCount:1,blindSpots:[]},
+   {...base,blindSpots:['IFRAME_CONTENT_UNVERIFIED']},
+   {...base,blindSpots:['CROSS_ORIGIN_FRAME_UNVERIFIED']}
+ ]){
+   const result=summarizeReadOnlyScenarioDom(baseScenario,
+     {...sample(matched),summary} as ObservationResult,true);
+   assert.equal(result.code,'INVALID_OBSERVATION',JSON.stringify(summary));
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+ }
+ const validIframe={...base,iframeCount:1,
+   blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED']};
+ const bounded=summarizeReadOnlyScenarioDom(baseScenario,
+   {...sample(matched),summary:validIframe},true);
+ assert.equal(bounded.status,'LIMITED_DOM_SIGNAL_ONLY');
+ assert.equal(bounded.tampermonkeyVerified,false);
+});
+
+test('TEST-013: stable sampling rejects iframe, shadow and blind-spot drift',()=>{
+ const first=sample(matched);
+ const changed=[
+   {...first.summary,iframeCount:1,
+     blindSpots:['IFRAME_CONTENT_UNVERIFIED']},
+   {...first.summary,visibleShadowRoots:1},
+   {...first.summary,blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']}
+ ];
+ for(const summary of changed){
+   const second={...sample(matched),summary};
+   const series={
+     ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
+     samples:[first,second],routeChangeDetected:false,
+     selectorCountChanged:false,domCountChanged:false,
+     userscriptVerified:false as const
+   };
+   const result=summarizeReadOnlyScenarioDomSeries(baseScenario,series,true);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(summary));
+   assert.equal(result.code,'UNSTABLE_OBSERVATION');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.businessVerified,false);
+ }
+});
+
 test('TEST-013: classified result never leaks URL, selectors or script hash',()=>{
  const result=summarizeReadOnlyScenarioDom(
    {...baseScenario,targetUrl:'https://example.test/private?token=DO_NOT_LEAK'},
