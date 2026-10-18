@@ -59,7 +59,8 @@ async function createMainWindow(): Promise<void> {
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
-      "bad.code === 'INVALID_SHAPE' && a.security.sandboxed === true && "a.security.isolated === true, keys:Object.keys(a).sort()}; })()"",
+      "bad.code === 'INVALID_SHAPE' && a.security.sandboxed === true && " +
+      "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
     if (!probe?.ok || probe.keys?.join(',') !== 'getStatus,security,validateConfig') {
