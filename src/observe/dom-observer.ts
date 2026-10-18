@@ -158,7 +158,7 @@ async function pageCdp(url:string,selectors:string[],approvedOrigin:string,
     const dom=await query('DOM.getDocument',{depth:-1,pierce:true});
     const frames=await query('Page.getFrameTree');
     const middleUrl=frames?approvedTopFrameUrl(frames.frameTree,approvedOrigin):null;
-    if(!dom||!record(dom.root)||middleUrl===null||middleUrl!==initialUrl)return null;
+    if(!dom||!record(dom.root)||!frames||middleUrl===null||middleUrl!==initialUrl)return null;
     const summary=summarizeDomTree(dom.root,frames.frameTree,approvedOrigin);
     if(!summary||typeof dom.root.nodeId!=='number')return null;
     const selectorCounts:Record<string,number>=Object.create(null);
