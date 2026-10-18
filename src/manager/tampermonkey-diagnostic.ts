@@ -13,7 +13,8 @@ import {
  inspectApprovedTampermonkeyRuntime,type ManagerPresenceResult
 } from './tampermonkey-adapter';
 import {
- startIsolatedTampermonkeyGmProbe,type GmProbeReceipt,type GmProbeMode
+ startIsolatedTampermonkeyGmProbe,type GmProbeReceipt,type GmProbeMode,
+ type GmProbeRunAt
 } from './tampermonkey-gm-probe';
 
 export interface ManualDiagnosticAssessment {
@@ -128,6 +129,7 @@ type VisitStatus=
    Extract<OpenTargetResult,{ok:false}>['code']};
 export interface ManualTampermonkeyDiagnosticSession {
  readonly status:'MANUAL_TEST_READY_NOT_VERIFIED';
+ readonly runAt:GmProbeRunAt;
  /** Contains a single-run token. Never log or put this in arbitrary renderer content. */
  readonly source:string;
  /** Sensitive, temporary URL; native diagnostic tester must import explicitly. */
@@ -289,12 +291,15 @@ export function createManualModeVisitLatch() {
  */
 export async function startApprovedTampermonkeyDiagnostic(
  browser:ManagedLaunchResult,userApproved:boolean,
- options:{readonly ttlMs?:number;readonly signal?:AbortSignal}={}
+ options:{readonly ttlMs?:number;readonly signal?:AbortSignal;
+   readonly runAt?:GmProbeRunAt}={}
 ):Promise<StartDiagnosticResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
  if(options.signal?.aborted)return {ok:false,code:'CANCELLED'};
  const ttlMs=options.ttlMs??60000;
- if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000)
+ if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000||
+    (options.runAt!==undefined&&options.runAt!=='document-start'&&
+     options.runAt!=='document-idle'))
    return {ok:false,code:'INVALID_OPTIONS'};
  if(!browser?.ok||!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
@@ -303,7 +308,8 @@ export async function startApprovedTampermonkeyDiagnostic(
  if(options.signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
- const fixture=await startIsolatedTampermonkeyGmProbe(true,ttlMs);
+ const fixture=await startIsolatedTampermonkeyGmProbe(
+   true,ttlMs,options.runAt??'document-idle');
  if(!fixture.ok)return {ok:false,code:fixture.code};
  if(options.signal?.aborted||!isLiveApprovedChromeSession(browser)){
    await fixture.session.stop();
@@ -390,7 +396,7 @@ export async function startApprovedTampermonkeyDiagnostic(
    return assessManualProbeObservations(probe.receiptSnapshot(),visits.snapshot());
  };
  return {ok:true,session:Object.freeze({
-   status:'MANUAL_TEST_READY_NOT_VERIFIED',source:probe.source,
+   status:'MANUAL_TEST_READY_NOT_VERIFIED',runAt:probe.runAt,source:probe.source,
    installUrl:probe.installUrl,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
    visit,observe,domSnapshot,
