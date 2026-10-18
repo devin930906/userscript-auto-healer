@@ -107,10 +107,21 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
   let data:Record<string,unknown>;
   try{
     const encoded=Buffer.from(script,'utf16le').toString('base64');
-    const result=await runPowershell('powershell.exe',
-      ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
-      {windowsHide:true,timeout:15000,maxBuffer:8192});
-    data=JSON.parse(result.stdout) as Record<string,unknown>;
+    let output:string|undefined;
+    for(const executable of ['pwsh.exe','powershell.exe']){
+      try{
+        const result=await runPowershell(executable,
+          ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
+          {windowsHide:true,timeout:15000,maxBuffer:8192});
+        output=result.stdout;break;
+      }catch(e){
+        // Only fall back when the modern host is absent, never after an identity failure.
+        if(executable==='pwsh.exe' && (e as NodeJS.ErrnoException).code==='ENOENT')continue;
+        throw e;
+      }
+    }
+    if(!output)throw Error('EMPTY_IDENTITY_PROBE');
+    data=JSON.parse(output) as Record<string,unknown>;
   }catch(error){
     // Only emit non-sensitive error categories on GitHub's disposable runner.
     if(process.env.GITHUB_ACTIONS==='true'){
