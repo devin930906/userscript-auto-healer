@@ -30,8 +30,8 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-014 | REQ-014 | 单元/集成 | Patch 夹具 | 可确认原意 | 坏定位器/不确定候选 | 本地修复规则：生成 diff | 只做最小变更 | 删功能或越权修改 | 单元 | 已规划 |
 | TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 已规划 |
 | TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 已规划 |
-| TEST-017 | REQ-017 | 端到端 | Chrome+油猴管理器 | 真实测试 Profile | 管理器未就绪/GM 缺权/未获授权 Allow User Scripts | 扩展管理器预检：验证管理器/安装、Chrome 138+ 的扩展级 userScripts API 授权、脚本执行条件 | 缺项阻断 VERIFIED | 把 CDP 当管理器 | 真实 E2E | 已规划 |
-| TEST-018 | REQ-018 | 端到端 | Chrome+真实管理器 | 脚本安装、场景已定义 | 已知坏脚本/已修脚本 | 油猴实际功能验收：观察真实注入并执行业务断言 | 证据+断言满足才 VERIFIED | 仅元素存在判通过 | 真实 E2E | 已规划 |
+| TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 已规划 |
+| TEST-018 | REQ-018 | 端到端 | Chrome+真实 Tampermonkey | 真实 Tampermonkey/测试脚本已安装并授权，场景已定义 | 失效/已修脚本、GM API、不同注入时机 | 在 Tampermonkey 中实际注入，调用 GM API、执行业务断言与回归，记录扩展和浏览器版本及运行证据 | 真实 Tampermonkey 的业务断言满足才 VERIFIED | Violentmonkey/原生 DOM/人工修正版冒充产品自动修复 | 独立 Tampermonkey E2E | 已规划 |
 | TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 已规划 |
 | TEST-020 | REQ-020 | 可靠性 | Windows NTFS | 可修改测试文件 | 成功/磁盘满/文件锁 | 版本备份回滚：应用、模拟中断、回滚 | 原字节 hash 恢复 | 原文件损坏 | 故障注入 | 已规划 |
 | TEST-021 | REQ-021 | 单元/集成 | Windows FS | 候选+证据 | VERIFIED / UNKNOWN | 自动应用策略：分别执行门控 | UNKNOWN 原文件不变 | 无证据覆盖 | 单元+集成 | 已规划 |
@@ -66,3 +66,6 @@ GitHub Windows 2025 的两个**独立**真实 Violentmonkey MV3 v2.49.0 任务�
 
 ## 阻断规则
 文件损坏、未经授权 Profile 修改、CDP 错实例、AI 泄密、未验证自动覆盖、严重安全负例、正式安装包与 ZIP 便携真实验收缺失均阻断 Stable。
+
+## Tampermonkey 专项验收差异（I-011）
+POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TEST-017/018。正式用例覆盖扩展真实版本、Chrome 138+ Allow User Scripts、Chrome 152+ .user.js 安装机制、Content Script/UserScripts API/UserScripts API Dynamic 的实际支持模式、@grant/@run-at/@match、GM API 与真实业务断言。授权/安装/加载/GM 调用失败时应 BLOCKED/UNKNOWN，不可借 Violentmonkey 结果填补。每个正式结果须关联目标代码提交、版本与运行证据。

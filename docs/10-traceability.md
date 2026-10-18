@@ -3,7 +3,7 @@
 > 状态：准备阶段的设计映射，代码及测试未运行。
 
 ## 原始要求映射
-I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批量；I-004=AST/动态诊断/自愈；I-005=验收/备份回滚/监控；I-006=共享兼容层；I-007=AI；I-008=补充安全和管理器行为约束；I-009=开发前原始 Windows EXE+RAR 历史约束；I-010=用户 2026-10-18 明确将便携格式变更为 ZIP（覆盖 I-009 的 RAR 部分，保留 EXE）。源原文 docs/00-intake.md，正式需求 docs/02-requirements.md。
+I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批量；I-004=AST/动态诊断/自愈；I-005=验收/备份回滚/监控；I-006=共享兼容层；I-007=AI；I-008=补充安全和管理器行为约束；I-009=开发前原始 Windows EXE+RAR 历史约束；I-010=用户 2026-10-18 明确将便携格式变更为 ZIP（覆盖 I-009 的 RAR 部分，保留 EXE）；I-011=用户 2026-10-18 确认 Tampermonkey 首选，纠正 Violentmonkey 验收替代风险。源原文 docs/00-intake.md，正式需求 docs/02-requirements.md。
 
 ## 功能需求映射
 | 来源 | 功能需求 | 负责架构模块 | 开发任务 | 测试映射 | 发布门槛 |
@@ -24,8 +24,8 @@ I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批�
 | I-004 | REQ-014 | RepairService | TASK-009 | TEST-014 | GATE-001..007 |
 | I-007 | REQ-015 | AIGateway | TASK-014 | TEST-015 | GATE-001..007 |
 | I-007 | REQ-016 | AIGateway | TASK-014 | TEST-016 | GATE-001..007 |
-| I-008 | REQ-017 | ManagerAdapter | TASK-007 | TEST-017 | GATE-001..007 |
-| I-005 | REQ-018 | AcceptanceGate | TASK-007, TASK-010 | TEST-018 | GATE-001..007 |
+| I-011 | REQ-017 | TampermonkeyManagerAdapter | TASK-007 | TEST-017 | GATE-001..007 |
+| I-011 | REQ-018 | TampermonkeyAcceptanceGate | TASK-007, TASK-010 | TEST-018 | GATE-001..007 |
 | I-008 | REQ-019 | RepairService | TASK-009 | TEST-019 | GATE-001..007 |
 | I-005 | REQ-020 | VersionStore | TASK-011 | TEST-020 | GATE-001..007 |
 | I-008 | REQ-021 | AcceptanceGate | TASK-010, TASK-011 | TEST-021 | GATE-001..007 |

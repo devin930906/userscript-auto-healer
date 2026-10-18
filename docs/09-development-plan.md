@@ -17,7 +17,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 | TASK-004 | 网站与验证场景登记 | REQ-005 | 必须实现 | TASK-003 | src/scenarios tests/scenarios | 预计新增：src/scenarios/scenario-registry.ts；tests/scenarios/registry.test.ts | 设计登录/操作/断言契约与缺失状态 | 可管理的测试场景 | TEST-005 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-005 | Chrome/Profile/CDP 安全启动 | REQ-006..009 | 必须实现 | TASK-001;POC-01 | src/browser tests/browser | 预计新增：src/browser/chrome-launcher.ts；src/browser/cdp-session.ts；tests/browser/launch.test.ts | 先写默认 Profile/占用/错实例失败测试，再写自管启动与身份核对 | 仅接入授权 Chrome | TEST-006..009 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-006 | DOM/SPA 动态观测 | REQ-010;REQ-012 | 必须实现 | TASK-005 | src/observe tests/observe | 预计新增：src/observe/dom-observer.ts；tests/observe/dynamic.test.ts | 盲区和延迟/SPA 夹具驱动 CDP 观测 | 可见性快照 | TEST-010;TEST-012 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
-| TASK-007 | 真实油猴管理器适配 | REQ-017;REQ-018 | 必须实现 | TASK-004..006;POC-02 | src/manager tests/manager | 预计新增：src/manager/manager-adapter.ts；tests/manager/manager-e2e.test.ts | 先构建用户许可 Profile 初始化和管理器预检，后验实际脚本运行/GM断言 | 可复核真实运行证据 | TEST-017;TEST-018 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
+| TASK-007 | 真实 Tampermonkey 管理器适配 | REQ-017;REQ-018 | 必须实现 | TASK-004..006;POC-02T 或经验证的安全授权加载路径 | src/manager tests/manager | 预计新增：src/manager/tampermonkey-adapter.ts；tests/manager/tampermonkey-e2e.test.ts | 核验真实 Tampermonkey 身份/版本、注入模式、用户授权、脚本安装执行及 GM 调用；其他管理器单独适配 | 可复核 Tampermonkey 运行证据 | TEST-017;TEST-018 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-008 | 故障根因与日志中心 | REQ-013 | 必须实现 | TASK-003;TASK-006;TASK-007 | src/diagnostics tests/diagnostics | 预计新增：src/diagnostics/fault-classifier.ts；tests/diagnostics/fault-classifier.test.ts | 分类非 DOM、JS 异常与业务断言；日志脱敏 | 结构化故障证据 | TEST-013 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-009 | 本地多级修复 | REQ-014;REQ-019 | 必须实现 | TASK-008 | src/repair tests/repair | 预计新增：src/repair/patch-planner.ts；tests/repair/patch.test.ts | 测试最小选择器修复/拒绝扩权与未知场景 | 可审核补丁候选 | TEST-014;TEST-019 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-010 | 自动验收与门控 | REQ-018;REQ-021 | 必须实现 | TASK-007;TASK-009 | src/acceptance tests/acceptance | 预计新增：src/acceptance/acceptance-gate.ts；tests/acceptance/gate.test.ts | 实现真实证据/业务断言与 UNKNOWN 拦截 | 验收决定和证据链 | TEST-018;TEST-021 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
@@ -28,7 +28,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 | TASK-015 | 健康监控与历史 | REQ-024 | 必须实现 | TASK-010;TASK-013 | src/health tests/health | 预计新增：src/health/health-registry.ts；tests/health/registry.test.ts | 实现按授权复检和按证据判健康 | 时间线监控 | TEST-024 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-016 | 共享兼容层与依赖回归 | REQ-025 | 必须实现 | TASK-009;TASK-010;TASK-015 | src/compat tests/compat | 预计新增：src/compat/compatibility-layer.ts；tests/compat/compat-e2e.test.ts | 实现版本语义/多脚本回归和回退 | 稳定共享层 | TEST-025 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-017 | 完整 UI 与批量用户旅程 | REQ-001..025 | 必须实现 | TASK-013..016 | app/ui tests/e2e | 预计新增：app/ui/task-screen.tsx；tests/e2e/main-flow.test.ts | 先主流程/异常/取消验收，再连接实际模块 | 可用交互入口 | TEST-002;TEST-022 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
-| TASK-018 | 安全审计与端到端回归 | REQ-001..026 | 必须实现 | TASK-017 | tests/security tests/e2e | 预计新增：tests/security/permissions.test.ts；tests/e2e/browser-userscript.test.ts | 覆盖严重风险、真实扩展及资源负例 | 安全/回归证据 | TEST-007;TEST-018;TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
+| TASK-018 | 安全审计与端到端回归 | REQ-001..026 | 必须实现 | TASK-017 | tests/security tests/e2e | 预计新增：tests/security/permissions.test.ts；tests/e2e/tampermonkey-userscript.test.ts | 覆盖严重风险、真实 Tampermonkey、授权/注入模式/回滚负例，Violentmonkey 仅辅助 | 安全/回归证据 | TEST-007;TEST-018;TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-019 | Windows EXE 安装版 | REQ-027 | 必须实现 | TASK-018;POC-03 | packaging/windows .github/workflows | 预计新增：packaging/windows/installer.iss；.github/workflows/build-windows.yml（预计新增；Inno Setup 候选） | 锁定安装工具/权限/升级测试，Windows 构建验收 | 真实 EXE 安装包 | TEST-027 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-020 | 真实 ZIP 便携发行 | REQ-028 | 必须实现 | TASK-018;ZIP 工具可用性验证 | packaging/portable .github/workflows | 预计新增：packaging/portable/create-zip.ps1；.github/workflows/build-windows.yml | 创建真实 ZIP，校验文件头/路径安全/文件哈希/解压/干净 Windows 直启 | 真实 ZIP 包 | TEST-028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
@@ -60,3 +60,6 @@ POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/
 
 ## POC-03C ZIP 工具链验证记录
 Windows GitHub Actions 已通过原生 ZIP 临时文件头/解压/安全相对路径/SHA-256 往返测试：https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797。TASK-020/TEST-028 仍为未开始，正式便携软件未生成。
+
+## I-011 Tampermonkey 验收实施顺序
+独立 POC-02T：取得官方合法可信的 Tampermonkey MV3→隔离授权 Profile→核对身份/版本→Chrome 授权→兼容的安装机制→GM_getValue 真实调用→独立 broken/fixed 业务断言→Actions run/SHA 证据。当前 **未执行/未通过**；不能由 POC-02D/04A 的 Violentmonkey 成果代替。TASK-001 安全骨架的有限准入不受阻断；TASK-007、010、018、TEST-017/018、GATE-004/005 必须证明真实 Tampermonkey 兼容，不允许静默以其他管理器替代。
