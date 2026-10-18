@@ -1,7 +1,18 @@
+import {access,mkdtemp,rm} from 'node:fs/promises';
+import {join,win32} from 'node:path';
+import {tmpdir} from 'node:os';
+import {createServer} from 'node:net';
+import {setTimeout as delay} from 'node:timers/promises';
+import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
+import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
+import {openApprovedTarget} from '../../src/browser/cdp-target';
+import {observeApprovedDom} from '../../src/observe/dom-observer';
+import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
- assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch
+ assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch,
+ summarizeFixtureDomEvidence
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -33,6 +44,61 @@ test('TEST-017: concurrent or duplicate manual visits are blocked before CDP nav
  // A late failure notification cannot roll back an already confirmed visit.
  visits.finish('broken',false);
  assert.deepEqual(visits.snapshot(),{broken:true,fixed:true});
+});
+
+test('TEST-018 stage: read-only DOM fixture marker is evidence, never a GM or manager attestation',()=>{
+ const sample=(actionCount:number,routeChanged=false)=>({
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged,
+   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
+   selectorCounts:{'#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':actionCount},
+   fullPageVerified:false as const,userscriptVerified:false as const
+ });
+ const broken=summarizeFixtureDomEvidence('broken',sample(0));
+ const fixed=summarizeFixtureDomEvidence('fixed',sample(1));
+ for(const [result,expected] of [[broken,true],[fixed,true]] as const){
+   assert.equal(result.ok,true);
+   if(result.ok){
+     assert.equal(result.evidence.fixtureDomMatchesExpected,expected);
+     assert.equal(result.evidence.extensionAuthenticityVerified,false);
+     assert.equal(result.evidence.scriptInstallationVerified,false);
+     assert.equal(result.evidence.gmApiVerified,false);
+     assert.equal(result.evidence.businessVerified,false);
+   }
+ }
+ const absent=summarizeFixtureDomEvidence('fixed',sample(0));
+ assert.equal(absent.ok,true);
+ if(absent.ok)assert.equal(absent.evidence.fixtureDomMatchesExpected,false);
+ const inappropriate=summarizeFixtureDomEvidence('broken',sample(1));
+ assert.equal(inappropriate.ok,true);
+ if(inappropriate.ok)assert.equal(inappropriate.evidence.fixtureDomMatchesExpected,false);
+});
+test('TEST-018: different URL, malformed DOM or failed CDP cannot become fixture evidence',()=>{
+ const base={
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged:false,
+   summary:{elementCount:3,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
+   selectorCounts:{'#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':1},
+   fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ for(const change of [
+   {routeChanged:true},{originMatchesApproved:false},
+   {selectorCounts:{...base.selectorCounts,'#current-target':0}},
+   {selectorCounts:{...base.selectorCounts,'#obsolete-target':1}},
+   {selectorCounts:{...base.selectorCounts,'[data-uah-probe-action="done"]':2}},
+   {observedAt:'not-a-timestamp'},
+   {fullPageVerified:true},
+   {userscriptVerified:true}
+ ]){
+   const result=summarizeFixtureDomEvidence('fixed',{...base,...change} as typeof base);
+   assert.deepEqual(result,{ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
+ }
+ assert.deepEqual(summarizeFixtureDomEvidence('fixed',{ok:false,code:'CDP_FAILED'}),
+   {ok:false,code:'CDP_FAILED'});
 });
 
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
@@ -103,4 +169,64 @@ test('TEST-017: assessment validates its own input instead of trusting caller cl
    const x=assessManualProbeObservations(both,flags);
    assert.notEqual(x.status,'SELF_REPORTED_EXPECTATIONS_MATCH');
  }
+});
+
+/** Actual Windows CDP observation of the temporary fixture, with NO extension
+ * installed. This negative is intentionally distinct from TEST-018's future
+ * real Tampermonkey/GM and repaired userscript business acceptance.
+ */
+test('TEST-018 stage: real isolated Windows Chrome never reports a repair without a userscript',async t=>{
+ if(process.platform!=='win32'){t.skip('Requires real signed Chrome on Windows');return;}
+ let chrome:string|undefined;
+ for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+   if(!base)continue;
+   const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+   try{await access(candidate);chrome=candidate;break;}catch{/* no candidate */}
+ }
+ assert.ok(chrome,'Windows CI should provide signed Chrome');
+ const root=await mkdtemp(join(tmpdir(),'uah-tm-diagnostic-negative-'));
+ let stopChrome=()=>{};
+ t.after(async()=>{stopChrome();await rm(root,{recursive:true,force:true}).catch(()=>undefined);});
+ const socket=createServer();
+ await new Promise<void>((resolve,reject)=>{
+   socket.once('error',reject);socket.listen(0,'127.0.0.1',resolve);
+ });
+ const address=socket.address();
+ await new Promise<void>(resolve=>socket.close(()=>resolve()));
+ if(!address||typeof address==='string')throw Error('NO_PORT');
+ const cfg={executablePath:chrome!,userDataDir:join(root,'isolated-profile'),
+   remoteDebuggingPort:address.port,bindAddress:'127.0.0.1' as const};
+ const prep=await prepareApprovedIsolatedProfile(cfg,true);
+ assert.equal(prep.ok,true,JSON.stringify(prep));
+ const opened=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+ assert.equal(opened.ok,true,JSON.stringify(opened));
+ if(!opened.ok)return;
+ stopChrome=opened.stop;
+ const probe=await startIsolatedTampermonkeyGmProbe(true,90000);
+ assert.equal(probe.ok,true,JSON.stringify(probe));
+ if(!probe.ok)return;
+ t.after(()=>probe.session.stop());
+ const expectedUrl=probe.session.origin+'/?mode=fixed';
+ const tab=await openApprovedTarget(opened,expectedUrl,true);
+ assert.equal(tab.ok,true,JSON.stringify(tab));
+ if(!tab.ok)return;
+ // On Windows, a registered target may precede the first DOM navigation commit.
+ let observed:Awaited<ReturnType<typeof observeApprovedDom>>={ok:false,code:'CDP_FAILED'};
+ for(let tries=0;tries<25;tries++){
+   observed=await observeApprovedDom(opened,tab,expectedUrl,true,
+     ['#current-target','#obsolete-target','[data-uah-probe-action="done"]']);
+   if(observed.ok&&observed.selectorCounts['#current-target']===1)break;
+   await delay(160);
+ }
+ assert.equal(observed.ok,true,JSON.stringify(observed));
+ if(!observed.ok)return;
+ const classified=summarizeFixtureDomEvidence('fixed',observed);
+ assert.equal(classified.ok,true,JSON.stringify(classified));
+ if(!classified.ok)return;
+ assert.equal(classified.evidence.actionCount,0);
+ assert.equal(classified.evidence.fixtureDomMatchesExpected,false);
+ assert.equal(classified.evidence.gmApiVerified,false);
+ assert.equal(classified.evidence.businessVerified,false);
+ assert.deepEqual(probe.session.receiptSnapshot(),{},
+   'No manager is installed, so the fixture has no GM userscript report');
 });
