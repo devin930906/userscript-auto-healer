@@ -1,0 +1,76 @@
+name: Windows Chrome CDP feasibility probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/windows-cdp-poc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cdp-probe:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - name: Verify isolated Chrome remote debugging (no user data)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $port = 9223
+          $candidatePaths = @()
+          $pf = [Environment]::GetEnvironmentVariable('ProgramFiles')
+          $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+          if ($pf) { $candidatePaths += (Join-Path $pf 'Google\Chrome\Application\chrome.exe') }
+          if ($pf86) { $candidatePaths += (Join-Path $pf86 'Google\Chrome\Application\chrome.exe') }
+          $candidatePaths += (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+          $chrome = $candidatePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $chrome) { throw "Chrome executable absent on Windows runner; candidates: $($candidatePaths -join ', ')" }
+          $existing = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+          if ($existing.Count -gt 0) { throw "Debugging port $port is already in use; refusing to attach." }
+          $profile = Join-Path $env:RUNNER_TEMP "userscript-cdp-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path $profile) { throw "Profile already exists; refusing to modify." }
+          New-Item -ItemType Directory -Path $profile | Out-Null
+          $proc = $null
+          try {
+            $args = @(
+              '--headless=new',
+              '--no-first-run',
+              '--no-default-browser-check',
+              '--disable-extensions',
+              '--remote-debugging-address=127.0.0.1',
+              "--remote-debugging-port=$port",
+              "--user-data-dir=$profile",
+              'about:blank'
+            )
+            $proc = Start-Process -FilePath $chrome -ArgumentList $args -PassThru -WindowStyle Hidden
+            $version = $null
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $version = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 2
+                if ($version.Browser -and $version.webSocketDebuggerUrl) { break }
+              } catch { }
+            }
+            if (-not $version -or -not $version.Browser -or -not $version.webSocketDebuggerUrl) { throw 'Chrome launched but CDP handshake failed.' }
+            $ws = [Uri]$version.webSocketDebuggerUrl
+            if ($ws.Host -ne '127.0.0.1' -or $ws.Port -ne $port) { throw 'CDP browser endpoint is not bound to the expected local address.' }
+            $listener = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
+            if ($listener.Count -ne 1) { throw 'Listener ownership is ambiguous.' }
+            $pidOfListener = $listener[0].OwningProcess
+            $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$pidOfListener" -ErrorAction Stop
+            if (-not $owner -or -not $owner.ExecutablePath -or ([IO.Path]::GetFullPath($owner.ExecutablePath) -ine [IO.Path]::GetFullPath($chrome))) {
+              throw 'Debugging port belongs to unexpected executable.'
+            }
+            if ($owner.CommandLine -notlike "*$profile*") { throw 'Debugging listener was not launched with the owned isolated profile.' }
+            $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 5)
+            if ($targets.Count -lt 1) { throw 'CDP has no inspectable targets.' }
+            Write-Output "POC-01 partial pass: runner Chrome version $($version.Browser); executable $chrome; PID $pidOfListener; inspectable targets $($targets.Count); isolated profile $profile"
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+            # Ephemeral runner is destroyed after this job. Do not touch any pre-existing Chrome profile.
+          }
