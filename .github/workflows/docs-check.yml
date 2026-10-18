@@ -61,7 +61,7 @@ jobs:
                       if line.startswith(f"| {prefix}-")]
               ids = []
               for line in rows:
-                  match = re.match(r"\\| "+prefix+r"-(\\d{3}) \\|", line)
+                  match = re.match(r"\| "+prefix+r"-(\d{3}) \|", line)
                   if not match:
                       raise SystemExit(f"Bad record prefix in {filename}: {line[:80]}")
                   ids.append(int(match.group(1)))
