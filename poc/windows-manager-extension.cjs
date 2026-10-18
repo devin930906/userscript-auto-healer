@@ -33,7 +33,16 @@ async function main() {
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});
     res.end('<!DOCTYPE html><title>Local userscript fixture</title><h1 id="fixture">Local page</h1>');
   });
-  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  // Use the default HTTP port so a valid @match and Chrome userScripts match
+  // pattern do not diverge on a random :port. This probe never binds externally.
+  // If the port is occupied, listen fails; do NOT stop or take over another process.
+  await new Promise((resolve,reject)=>{
+    server.once('error',reject);
+    server.listen(80,'127.0.0.1',()=>{
+      server.removeListener('error',reject);
+      resolve();
+    });
+  });
   const port = server.address().port;
   let context;
   try {
