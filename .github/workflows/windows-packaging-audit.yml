@@ -1,0 +1,21 @@
+name: Windows packaging tooling compliance audit
+
+on:
+  push:
+    paths:
+      - 'poc/windows-packaging-audit.ps1'
+      - '.github/workflows/windows-packaging-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tooling-audit:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise isolated EXE installer and audit RAR availability
+        shell: pwsh
+        run: ./poc/windows-packaging-audit.ps1
