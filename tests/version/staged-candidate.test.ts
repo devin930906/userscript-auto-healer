@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {stageReviewedCandidateOnly} from '../../src/version/staged-candidate';
@@ -135,6 +135,33 @@ test('TEST-020: source hard link denies staged candidate publication',async()=>{
     });
     assert.equal(result.status,'BLOCKED');
     assert.deepEqual(await readdir(paths.backupDirectory),['alias.user.js']);
+    assert.equal(await readFile(paths.sourcePath,'utf8'),original);
+  });
+});
+
+
+test('TEST-020: staged candidate refuses a nested backup junction and preserves original',async t=>{
+  await fixture(async paths=>{
+    const root=join(paths.backupDirectory,'..');
+    const linkPath=join(root,'junction-to-root');
+    try{
+      await symlink(root,linkPath,process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Directory junction unavailable on this runner');
+        return;
+      }
+      throw error;
+    }
+    const redirected=join(linkPath,'backups');
+    assert.equal((await lstat(redirected)).isSymbolicLink(),false);
+    const result=await stageReviewedCandidateOnly(request,proposal,{
+      sourcePath:paths.sourcePath,backupDirectory:redirected,userApproved:true
+    });
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.automaticRollbackAllowed,false);
+    assert.deepEqual(await readdir(paths.backupDirectory),[]);
     assert.equal(await readFile(paths.sourcePath,'utf8'),original);
   });
 });
