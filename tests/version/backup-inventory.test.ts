@@ -158,3 +158,22 @@ test('TEST-020: empty or oversized source cannot enter read-only recovery invent
   });
  }
 });
+
+test('TEST-020: oversized directory inventory is refused even when entries are unrelated',async()=>{
+ await withFixture(async(source,backupDirectory)=>{
+   // The cap applies to all directory entries, not only matching backups.
+   // Streaming enumeration must stop at the bound without materializing the
+   // full untrusted directory into a single unbounded readdir result.
+   for(let i=0;i<513;i++){
+     await writeFile(join(backupDirectory,'unrelated-'+String(i).padStart(4,'0')), '');
+   }
+   const result=await inspectBackupInventoryReadOnly({
+     sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'TOO_MANY_ENTRIES');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.deepEqual(await readFile(source),fixtureBytes);
+ });
+});
