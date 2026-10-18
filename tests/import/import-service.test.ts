@@ -126,3 +126,36 @@ test('TEST-003: non-absolute root is never scanned', async () => {
   assert.equal(o.scripts.length, 0);
   assert.equal(o.errors[0].code, 'INVALID_PATH');
 });
+
+test('TEST-001: disk import accepts exact byte limit and rejects larger files without loading them', async t => {
+  const root = await workspace(t);
+  const exactPath = join(root, 'exact.user.js');
+  const tooLargePath = join(root, 'oversized.user.js');
+  const exact = Buffer.alloc(MAX_SCRIPT_BYTES, 0x61);
+  exact.write(script, 0, 'utf8');
+  await writeFile(exactPath, exact);
+  await writeFile(tooLargePath, Buffer.concat([exact, Buffer.from('!')]));
+  const imported = await importApprovedPaths([tooLargePath, exactPath]);
+  assert.equal(imported.scripts.length, 1);
+  assert.equal(imported.scripts[0].filename, 'exact.user.js');
+  assert.equal(imported.scripts[0].byteLength, MAX_SCRIPT_BYTES);
+  assert.equal(imported.scripts[0].sha256, createHash('sha256').update(exact).digest('hex'));
+  assert.ok(imported.errors.some(error =>
+    error.filename === 'oversized.user.js' && error.code === 'FILE_TOO_LARGE'));
+  assert.deepEqual(await readFile(exactPath), exact);
+});
+
+test('TEST-001: disk source is re-read and rehashed instead of accepting stale source bytes', async t => {
+  const root = await workspace(t);
+  const selected = join(root, 'updated.user.js');
+  const original = Buffer.from(script);
+  const changed = Buffer.from(script.replace('console.log(1)', 'console.log(2)'));
+  await writeFile(selected, original);
+  const first = await importApprovedPaths([selected]);
+  assert.equal(first.scripts.length, 1);
+  await writeFile(selected, changed);
+  const second = await importApprovedPaths([selected]);
+  assert.equal(second.scripts.length, 1);
+  assert.deepEqual(Buffer.from(second.scripts[0].bytes), changed);
+  assert.notEqual(first.scripts[0].sha256, second.scripts[0].sha256);
+});

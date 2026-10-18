@@ -5,7 +5,8 @@
  * function as arbitrary-path renderer IPC.
  */
 import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
+import { constants, type BigIntStats, type Dirent } from 'node:fs';
+import { lstat, opendir, open, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const MAX_SCRIPT_BYTES = 8 * 1024 * 1024;
@@ -17,7 +18,7 @@ export const MAX_TOTAL_IMPORTED_BYTES = 128 * 1024 * 1024;
 export type ImportFailureCode =
   'INVALID_PATH' | 'NOT_USER_SCRIPT' | 'SYMLINK_REJECTED' | 'NOT_REGULAR_FILE' |
   'FILE_TOO_LARGE' | 'INVALID_ENCODING' | 'EMPTY_FILE' | 'BINARY_CONTENT' |
-  'IO_FAILURE' | 'SCAN_LIMIT' | 'INVALID_DRAG_DATA';
+  'IO_FAILURE' | 'FILE_CHANGED' | 'SCAN_LIMIT' | 'INVALID_DRAG_DATA';
 
 export interface ImportFailure {
   readonly filename: string;
@@ -114,11 +115,66 @@ export function importDroppedBytes(name: unknown, bytes: unknown): ImportedScrip
   return fromBytes(name, bytes);
 }
 
+/** Compare native identities before and after a bounded disk read.
+ * A name/suffix check alone cannot protect a selected path from replacement
+ * with a link or different file while another program is editing the folder.
+ */
+function sameSelectedFile(a:BigIntStats,b:BigIntStats):boolean {
+  return a.dev===b.dev && a.ino===b.ino && a.size===b.size &&
+    a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs && a.mode===b.mode;
+}
+type DiskReadResult =
+  {ok:true;bytes:Uint8Array} |
+  {ok:false;code:ImportFailureCode};
+
+/** Never use readFile(path) for an untrusted selected script: the file can
+ * grow after lstat and a path can be swapped before opening. Read at most
+ * MAX_SCRIPT_BYTES + 1 bytes from one descriptor and compare its identity to
+ * the selected path at both ends. No script source leaves the main process.
+ */
+async function readBoundedSelectedFile(path:string,initial:BigIntStats):Promise<DiskReadResult> {
+  let handle;
+  try {
+    handle=await open(path,constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  }catch(error){
+    return {ok:false,code:(error as NodeJS.ErrnoException).code==='ELOOP'
+      ?'SYMLINK_REJECTED':'IO_FAILURE'};
+  }
+  try {
+    const opened=await handle.stat({bigint:true});
+    if(!opened.isFile()||!sameSelectedFile(initial,opened))
+      return {ok:false,code:'FILE_CHANGED'};
+    const chunks:Buffer[]=[];
+    const buffer=Buffer.allocUnsafe(64*1024);
+    let length=0;
+    while(true){
+      // One extra byte distinguishes an exact-size script from a growing file.
+      const limit=Math.min(buffer.length,MAX_SCRIPT_BYTES+1-length);
+      const {bytesRead}=await handle.read(buffer,0,limit,null);
+      if(bytesRead===0)break;
+      length+=bytesRead;
+      if(length>MAX_SCRIPT_BYTES)return {ok:false,code:'FILE_TOO_LARGE'};
+      chunks.push(Buffer.from(buffer.subarray(0,bytesRead)));
+    }
+    const after=await handle.stat({bigint:true});
+    const byPath=await lstat(path,{bigint:true});
+    if(byPath.isSymbolicLink()||!byPath.isFile()||
+       !sameSelectedFile(initial,after)||!sameSelectedFile(after,byPath)||
+       BigInt(length)!==after.size)
+      return {ok:false,code:'FILE_CHANGED'};
+    return {ok:true,bytes:Buffer.concat(chunks,length)};
+  }catch{
+    return {ok:false,code:'IO_FAILURE'};
+  }finally {
+    await handle.close().catch(()=>{});
+  }
+}
+
 export async function importApprovedPaths(paths: readonly string[]): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   const seen = new Set<string>();
   let totalBytes = 0;
-  if (paths.length > MAX_SELECTED_FILES) {
+  if (!Array.isArray(paths) || paths.length > MAX_SELECTED_FILES) {
     outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
     return outcome;
   }
@@ -133,16 +189,21 @@ export async function importApprovedPaths(paths: readonly string[]): Promise<Imp
     if (seen.has(key)) { outcome.duplicates++; continue; }
     seen.add(key);
     try {
-      const info = await lstat(normalized);
+      const info = await lstat(normalized,{bigint:true});
       if (info.isSymbolicLink()) { outcome.errors.push(failure(display, 'SYMLINK_REJECTED')); continue; }
       if (!info.isFile()) { outcome.errors.push(failure(display, 'NOT_REGULAR_FILE')); continue; }
-      if (info.size > MAX_SCRIPT_BYTES) { outcome.errors.push(failure(display, 'FILE_TOO_LARGE')); continue; }
-      if (totalBytes + info.size > MAX_TOTAL_IMPORTED_BYTES) {
+      if (info.size > BigInt(MAX_SCRIPT_BYTES)) { outcome.errors.push(failure(display, 'FILE_TOO_LARGE')); continue; }
+      if (BigInt(totalBytes) + info.size > BigInt(MAX_TOTAL_IMPORTED_BYTES)) {
         outcome.errors.push(failure(display, 'SCAN_LIMIT'));
         break;
       }
-      const bytes = await readFile(normalized);
-      const parsed = fromBytes(display, bytes);
+      const read = await readBoundedSelectedFile(normalized,info);
+      if (!read.ok) {outcome.errors.push(failure(display,read.code));continue;}
+      if (totalBytes + read.bytes.length > MAX_TOTAL_IMPORTED_BYTES) {
+        outcome.errors.push(failure(display, 'SCAN_LIMIT'));
+        break;
+      }
+      const parsed = fromBytes(display, read.bytes);
       if ('code' in parsed) outcome.errors.push(parsed);
       else {
         totalBytes += parsed.byteLength;
@@ -180,9 +241,20 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
   let budgetExceeded = false;
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (budgetExceeded) return;
-    let entries;
-    try { entries = await readdir(dir, { withFileTypes: true }); }
-    catch { outcome.errors.push(failure(basename(dir), 'IO_FAILURE')); return; }
+    const entries: Dirent[] = [];
+    try {
+      // Enforce the traversal budget during enumeration, not after an
+      // unbounded readdir allocation. Never follow symlink directory entries.
+      const opened = await opendir(dir);
+      for await (const entry of opened) {
+        if (visited + entries.length >= MAX_DIRECTORY_ENTRIES) {
+          budgetExceeded = true;
+          outcome.errors.push(failure(basename(dir), 'SCAN_LIMIT'));
+          return;
+        }
+        entries.push(entry);
+      }
+    } catch { outcome.errors.push(failure(basename(dir), 'IO_FAILURE')); return; }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       visited++;
