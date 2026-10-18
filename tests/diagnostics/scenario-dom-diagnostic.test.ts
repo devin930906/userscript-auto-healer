@@ -122,7 +122,7 @@ test('TEST-013: malformed iframe, shadow and blind-spot inventory fails closed',
  const validIframe={...base,iframeCount:1,
    blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED']};
  const bounded=summarizeReadOnlyScenarioDom(baseScenario,
-   {...sample(matched),summary:validIframe},true);
+   {...sample(matched),summary:validIframe} as ObservationResult,true);
  assert.equal(bounded.status,'LIMITED_DOM_SIGNAL_ONLY');
  assert.equal(bounded.tampermonkeyVerified,false);
 });
@@ -136,7 +136,7 @@ test('TEST-013: stable sampling rejects iframe, shadow and blind-spot drift',()=
    {...first.summary,blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']}
  ];
  for(const summary of changed){
-   const second={...sample(matched),summary};
+   const second={...sample(matched),summary} as Extract<ObservationResult,{ok:true}>;
    const series={
      ok:true as const,status:'LIMITED_DYNAMIC_OBSERVATION' as const,
      samples:[first,second],routeChangeDetected:false,
