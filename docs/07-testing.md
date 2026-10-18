@@ -23,9 +23,9 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-007 | REQ-007 | 端到端 | Chrome 136+ Windows | 准备专用目录 | 默认/在用/新 Profile | Chrome Profile 安全：分别检查并启动 | 默认和在用拒绝，新路径可验证 | 修改原 Profile | 真实 E2E | 已规划 |
 | TEST-008 | REQ-008 | 端到端 | Windows Chrome | 自管浏览器 | 9223 与占用端口 | CDP 启动端口：启动与监听检查 | 启动后可连接，冲突安全失败 | 误接管旧实例 | 真实 E2E | 已规划 |
 | TEST-009 | REQ-009 | 端到端 | Windows CDP | 可同时运行两个实例 | 伪 /json/version 与目标页 | CDP 会话归属：核对实例/目标 | 错误实例拒绝 | 只按端口判成功 | 真实 E2E | 已规划 |
-| TEST-010 | REQ-010 | 端到端 | 真实 Chrome | 测试 iframe/Shadow | 跨域 iframe/closed root | 受限 DOM 边界：快照并审查 blind spots | 可见性明确，不伪称完整 | 绕过隔离或误报 | 真实 E2E | 已规划 |
+| TEST-010 | REQ-010 | 端到端 | 真实 Chrome | 测试 iframe/Shadow | 跨域 iframe/closed root | 受限 DOM 边界：快照并审查 blind spots | 可见性明确，不伪称完整 | 绕过隔离或误报 | 真实 E2E | Windows 自管 Chrome 阶段自动化通过；用户环境及完整发布回归待验收 |
 | TEST-011 | REQ-011 | 单元/集成 | Node | 正常与动态 AST | 字面/拼接/封装/备用选择器 | AST 源码定位：分析行列作用域 | 动态待确认、字面来源正确 | 误报全覆盖 | 单元 | 静态单元阶段验证通过；待产品集成复核 |
-| TEST-012 | REQ-012 | 端到端 | Chrome 测试页 | 事件/路由夹具 | 路由与延迟渲染 | SPA 动态诊断：切换路由后监控 | 等待与时序证据正确 | 加载竞态错误归因 | 真实 E2E | 已规划 |
+| TEST-012 | REQ-012 | 端到端 | Chrome 测试页 | 事件/路由夹具 | 路由与延迟渲染 | SPA 动态诊断：切换路由后监控 | 等待与时序证据正确 | 加载竞态错误归因 | 真实 E2E | Windows 自管 Chrome 阶段自动化通过；用户环境及完整发布回归待验收 |
 | TEST-013 | REQ-013 | 单元/集成 | 诊断模拟器 | 受控错误夹具 | 网络、权限、异常、断言 | 故障根因分类：逐项分类 | 不将非 DOM 强行改选择器 | 误分类强改 | 单元+集成 | 已规划 |
 | TEST-014 | REQ-014 | 单元/集成 | Patch 夹具 | 可确认原意 | 坏定位器/不确定候选 | 本地修复规则：生成 diff | 只做最小变更 | 删功能或越权修改 | 单元 | 已规划 |
 | TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 已规划 |
@@ -86,3 +86,8 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 ## （7）TASK-001 Windows 实际 Electron 运行结果（2026-10-18）
 
 对应提交 `5f2830d52d349ab19583740dc177427e1652e355` 的 [Application Skeleton Checks run 39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) 通过：typecheck、11 项 Node 安全配置测试、Electron 下载及构建、隔离渲染进程加载、通过受限 preload 的真实 IPC、拒绝无效配置输入。测试在 GitHub Windows 2025 runner 运行，不构成 Windows 10/11 真实用户 Profile、任意网页脚本运行或完整 TEST-026 的证明。对应 TEST-026 的其他危险输入/完整权限边界将于 TASK-018 继续验证。
+
+
+## （7）TEST-010/012 阶段实测收据（2026-10-18）
+
+源 HEAD `824f9c89f673e0d05adbaf3084fd609f8e20eca0` 的 [Windows Application Checks 39110563542](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563542) 已完成真实签名 Chrome、自管隔离 Profile 和授权 CDP 页面上的 DOM、跨来源 iframe 可见性盲区、延迟元素、同源 `history.pushState` SPA 路由检测，另含主框架跨源/畸形输入的拒绝测试。58 项 Node 测试中 57 通过、0 失败、1 项独立便携 Chrome 测试由 [39110563531](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563531) 覆盖；相同 SHA 的 Electron sandbox smoke 和文档检查通过。早期 [39110333660](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110333660) 失败仍保留：页面导航初始化竞态导致 `CDP_FAILED`，测试夹具已修复并重新验证。该记录证明 TASK-006 阶段行为，不包含真实 Tampermonkey 的安装/GM API/业务恢复、用户 Windows 完整兼容或 Stable GATE。
