@@ -3,7 +3,7 @@
  * A positive result still requires executable version, process and endpoint
  * ownership to be verified by the later launch/session step.
  */
-import { lstat, readdir } from 'node:fs/promises';
+import { lstat, readdir, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 import { validateBrowserConfig, type BrowserConfig } from '../security/browser-config';
@@ -135,4 +135,51 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
     return {ok:false,code:'VERSION_UNAVAILABLE'};
   return {ok:true,status:'SIGNED_GOOGLE_CHROME_BINARY',
     version:data.version,publisher:'Google LLC',runtimeVerified:false};
+}
+
+/** TASK-005 / REQ-007: create ONLY an explicitly approved, empty, new
+ * isolated Profile. Existing directories, links, default profiles and implicit
+ * parent creation are deliberately not supported by this operation.
+ */
+export type ProfilePreparation =
+  | {readonly ok:true;readonly status:'EMPTY_PROFILE_CREATED';readonly userDataDir:string}
+  | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'UNSUPPORTED_PLATFORM'|
+      'INVALID_CONFIG'|'UNSAFE_PARENT'|'PARENT_UNAVAILABLE'|'PROFILE_EXISTS'|
+      'BINARY_NOT_VERIFIED'|'PROFILE_CREATE_FAILED'};
+export async function prepareApprovedIsolatedProfile(
+  input:unknown,userApproved:boolean
+):Promise<ProfilePreparation> {
+  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+  if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
+  const valid=validateBrowserConfig(input);
+  if(!valid.ok)return {ok:false,code:'INVALID_CONFIG'};
+  const cfg=valid.config;
+  if(isDefaultProfile(cfg.userDataDir))return {ok:false,code:'INVALID_CONFIG'};
+  const parent=win32.dirname(cfg.userDataDir);
+  try{
+    if(await hasLinkedComponent(parent))return {ok:false,code:'UNSAFE_PARENT'};
+    const stat=await lstat(parent);
+    if(!stat.isDirectory())return {ok:false,code:'PARENT_UNAVAILABLE'};
+  }catch{return {ok:false,code:'PARENT_UNAVAILABLE'};}
+  try{
+    await lstat(cfg.userDataDir);
+    return {ok:false,code:'PROFILE_EXISTS'};
+  }catch(e){
+    if((e as NodeJS.ErrnoException).code!=='ENOENT')
+      return {ok:false,code:'PROFILE_CREATE_FAILED'};
+  }
+  // Reject unsigned substitutions before writing anything to the selected disk.
+  const binary=await inspectWindowsChromeBinary(cfg);
+  if(!binary.ok)return {ok:false,code:'BINARY_NOT_VERIFIED'};
+  try {
+    await mkdir(cfg.userDataDir,{recursive:false});
+    const stat=await lstat(cfg.userDataDir);
+    if(!stat.isDirectory()||stat.isSymbolicLink())
+      return {ok:false,code:'PROFILE_CREATE_FAILED'};
+    return {ok:true,status:'EMPTY_PROFILE_CREATED',userDataDir:cfg.userDataDir};
+  }catch(e){
+    if((e as NodeJS.ErrnoException).code==='EEXIST')
+      return {ok:false,code:'PROFILE_EXISTS'};
+    return {ok:false,code:'PROFILE_CREATE_FAILED'};
+  }
 }

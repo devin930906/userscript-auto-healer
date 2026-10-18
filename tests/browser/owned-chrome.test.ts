@@ -6,6 +6,7 @@ import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
 import { openApprovedTarget } from '../../src/browser/cdp-target';
+import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
 
 function config(executablePath:string,userDataDir:string,port=9223) {
@@ -55,7 +56,6 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   if(!chrome){t.skip('No official Chrome binary on runner');return;}
   const root=await mkdtemp(join(tmpdir(),'uah-owned-chrome-test-'));
   const profile=join(root,'profile');
-  await mkdir(profile);
   let stop:()=>void=()=>{};
   t.after(async()=>{
     stop();
@@ -63,7 +63,14 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     await rm(root,{recursive:true,force:true}).catch(()=>undefined);
   });
   const port=await unusedLoopbackPort();
-  const result=await launchApprovedIsolatedChrome(config(chrome,profile,port),
+  const configForTest=config(chrome,profile,port);
+  assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,false),
+    {ok:false,code:'NOT_AUTHORIZED'});
+  const prepared=await prepareApprovedIsolatedProfile(configForTest,true);
+  assert.equal(prepared.ok,true,JSON.stringify(prepared));
+  assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
+    {ok:false,code:'PROFILE_EXISTS'});
+  const result=await launchApprovedIsolatedChrome(configForTest,
     {userApproved:true,testHeadless:true});
   assert.equal(result.ok,true,JSON.stringify(result));
   if(result.ok) {

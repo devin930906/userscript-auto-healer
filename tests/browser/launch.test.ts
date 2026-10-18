@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, lstat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { preflightChrome } from '../../src/browser/chrome-launcher';
+import { preflightChrome, prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 
 async function fixture(t:{after:(cb:()=>Promise<void>)=>void}){
   const root=await mkdtemp(join(tmpdir(),'uah-browser-preflight-'));
@@ -94,4 +94,21 @@ test('TEST-006: inspect actual official Chrome binary on Windows runner when ins
     assert.match(decision.version,/^\d+\.\d+\.\d+\.\d+$/);
     assert.equal(decision.runtimeVerified,false);
   }
+});
+
+test('TEST-007: missing Profile is never created without explicit approval',async t=>{
+  if(process.platform!=='win32')return;
+  const f=await fixture(t);
+  const missing=join(f.root,'new-approved-profile');
+  const cfg=config(f.executable,missing);
+  assert.deepEqual(await prepareApprovedIsolatedProfile(cfg,false),
+    {ok:false,code:'NOT_AUTHORIZED'});
+  await assert.rejects(lstat(missing),{code:'ENOENT'});
+  // An untrusted executable must never trigger a directory creation.
+  assert.deepEqual(await prepareApprovedIsolatedProfile(cfg,true),
+    {ok:false,code:'BINARY_NOT_VERIFIED'});
+  await assert.rejects(lstat(missing),{code:'ENOENT'});
+  assert.deepEqual(await prepareApprovedIsolatedProfile(
+    config(f.executable,join(f.root,'missing-parent','nested')),true),
+    {ok:false,code:'PARENT_UNAVAILABLE'});
 });
