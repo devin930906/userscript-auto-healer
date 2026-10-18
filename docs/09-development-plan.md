@@ -208,3 +208,8 @@ PR [#44](https://github.com/devin930906/userscript-auto-healer/pull/44) 在 `src
 ## （7）TASK-007 / TEST-017 独立测试脚本导入地址增量（2026-10-19）
 
 在现有 `startIsolatedTampermonkeyGmProbe` 的短时、本机回环测试服务上，增加具有独立随机 256-bit URL 令牌的 `installUrl`，仅向该地址以 GET 返回与 `source` 一致的临时测试 .user.js；对错误令牌、额外参数、非 GET、无关 Origin 和过期/已关闭会话拒绝提供脚本。Tampermonkey 可由获授权测试人员在**独立 Profile 中手动尝试“从 URL 导入”**；是否被真实 Tampermonkey 接受、安装与执行必须另行真实取证。URL 本身包含短时保密令牌，不得上传日志或分享；下载成功不能证明扩展真实安装、GM API 调用或业务恢复。测试代码位于 `tests/manager/tampermonkey-gm-probe.test.ts`。**TASK-007 依然开发中，TEST-017/018 与 GATE-004/005 不因此通过；不得将此接口暴露为自动安装脚本的 renderer IPC。**
+
+
+## （7）TASK-007 一次性脚本运行时到期门槛增量（2026-10-19）
+
+在既有 `src/manager/tampermonkey-gm-probe.ts` 生成的授权短期诊断脚本中增加 **客户端运行时到期拒绝**：服务过期不再是唯一停用机制，临时脚本即使遗留在测试管理器中，也会在正常系统时间达到已核实的绝对过期时间时，在 GM、DOM 与网络副作用之前直接退出。回归位于 `tests/manager/tampermonkey-gm-probe.test.ts`。先见 [测试先行红灯 CI #39158174162](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158174162)，再见代码提交 `46880b3ae2a1b72f260ef07bd5caaed32dcae619` 的 [Windows 绿灯 CI #39158298596](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158298596)。关联 PR [#58](https://github.com/devin930906/userscript-auto-healer/pull/58)，实际合并及后续 main 复核以 GitHub 记录为准。**TASK-007 继续开发中**：本项不证明 Tampermonkey 本体、GM_getValue 真实执行、真正业务恢复、产品自动修复/回滚或完整 TEST/GATE；原 TASK/REQ/TEST 编号和任务依赖保持不变。
