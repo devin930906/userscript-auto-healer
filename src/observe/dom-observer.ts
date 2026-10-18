@@ -76,6 +76,18 @@ export function summarizeDomTree(raw:unknown,frames:unknown,approvedOrigin:strin
   return {elementCount,iframeCount:iframes,
     visibleShadowRoots:shadow,blindSpots};
 }
+/** Enforce the approved top-level origin inside CDP, not only via /json/list.
+ * The page may navigate between tab discovery and DOM snapshot commands.
+ */
+export function isApprovedTopFrame(frameTree:unknown,approvedOrigin:string):boolean {
+  if(!record(frameTree)||!record(frameTree.frame)||
+     typeof frameTree.frame.url!=='string')return false;
+  try {
+    const current=new URL(frameTree.frame.url);
+    return (current.protocol==='https:'||current.protocol==='http:') &&
+      !current.username&&!current.password && current.origin===approvedOrigin;
+  }catch{return false;}
+}
 function validateSelectors(value:unknown):value is string[]{
   return Array.isArray(value)&&value.length<=8&&
     value.every(s=>typeof s==='string'&&s.length>=1&&s.length<=256&&
@@ -128,7 +140,8 @@ async function pageCdp(url:string,selectors:string[],approvedOrigin:string,
   try{
     const dom=await query('DOM.getDocument',{depth:-1,pierce:true});
     const frames=await query('Page.getFrameTree');
-    if(!dom||!record(dom.root)||!frames)return null;
+    if(!dom||!record(dom.root)||!frames ||
+       !isApprovedTopFrame(frames.frameTree,approvedOrigin))return null;
     const summary=summarizeDomTree(dom.root,frames.frameTree,approvedOrigin);
     if(!summary||typeof dom.root.nodeId!=='number')return null;
     const selectorCounts:Record<string,number>=Object.create(null);
@@ -139,6 +152,10 @@ async function pageCdp(url:string,selectors:string[],approvedOrigin:string,
          result.nodeIds.length>MAX_NODES||!result.nodeIds.every(Number.isInteger))return null;
       selectorCounts[selector]=result.nodeIds.length;
     }
+    // A route transition after the first DOM read must not turn observations
+    // of a different origin into apparently authorized evidence.
+    const finalFrames=await query('Page.getFrameTree');
+    if(!finalFrames||!isApprovedTopFrame(finalFrames.frameTree,approvedOrigin))return null;
     return {summary,selectorCounts};
   }finally{try{ws.close();}catch{/* closing untrusted endpoint */}}
 }
