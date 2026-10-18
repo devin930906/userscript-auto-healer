@@ -43,7 +43,7 @@ function stopOnlyGmProbe():void {
   gmProbeSession=null;
   if(active)void active.stop().catch(()=>undefined);
 }
-function liveGmProbe():GmProbeSession|null {
+function liveGmProbe():ManualTampermonkeyDiagnosticSession|null {
   if(gmProbeSession&&Date.now()>=gmProbeSession.expiresAt)
     stopOnlyGmProbe();
   return gmProbeSession;
