@@ -62,7 +62,7 @@ function blocked(code:TampermonkeyPreflightCode):TampermonkeyPreflightResult {
  return {ok:false,status:'BLOCKED',code,gmApiVerified:false,businessVerified:false};
 }
 /** Positive result authorizes NO installation, injection, file edit or network call. */
-export function inspectReportedTampermonkeyPreflight(
+function inspectReportedTampermonkeyPreflightUnchecked(
  runtime:ManagerPresenceResult,
  report:ReportedTampermonkeyState,
  metadata:MetadataResult,
@@ -83,9 +83,12 @@ export function inspectReportedTampermonkeyPreflight(
  if(report.scriptInstalled!==true||report.scriptEnabled!==true)
     return blocked('SCRIPT_NOT_REPORTED_ENABLED');
  if(!metadata||metadata.status!=='OK'||!metadata.tags||
+    !Array.isArray(metadata.unknownNames)||metadata.unknownNames.length!==0||
     !Array.isArray(metadata.tags.grant)||!Array.isArray(metadata.tags.match))
     return blocked('INVALID_SCRIPT_METADATA');
- if(!metadata.tags.grant.includes('GM_getValue')||metadata.tags.grant.includes('none'))
+ // The consented GM_getValue fixture has only one authorized GM capability.
+ // Other grants, including duplicated declarations, need a separate review.
+ if(metadata.tags.grant.length!==1||metadata.tags.grant[0]!=='GM_getValue')
     return blocked('GM_GRANT_NOT_DECLARED');
  // A missing @run-at uses the manager default, but an explicit unsupported,
  // empty or contradictory instruction cannot be inferred from static metadata.
@@ -99,7 +102,13 @@ export function inspectReportedTampermonkeyPreflight(
  // on a caller-supplied installation report.
  const requires=metadata.tags.require;
  const resources=metadata.tags.resource;
- if(requires!==undefined||resources!==undefined)
+ const connects=metadata.tags.connect;
+ const updateUrl=metadata.tags.updateurl;
+ const downloadUrl=metadata.tags.downloadurl;
+ // A reported successful @match does not authorize additional outbound
+ // contacts, remote code/resource loading or self-update supply chains.
+ if(requires!==undefined||resources!==undefined||connects!==undefined||
+    updateUrl!==undefined||downloadUrl!==undefined)
     return blocked('EXTERNAL_RESOURCES_UNVERIFIED');
  let target:URL;
  try{target=new URL(targetUrl);}catch{return blocked('INVALID_INPUT');}
@@ -107,7 +116,9 @@ export function inspectReportedTampermonkeyPreflight(
     target.username||target.password||target.hash)return blocked('INVALID_INPUT');
  // @exclude can overrule @match. Conservatively refuse it until a real
  // extension test evaluates manager-specific exclusion/precedence rules.
- if((metadata.tags.exclude?.length??0)>0||(metadata.tags['exclude-match']?.length??0)>0)
+ if(metadata.tags.include!==undefined||
+    (metadata.tags.exclude?.length??0)>0||
+    (metadata.tags['exclude-match']?.length??0)>0)
     return blocked('MATCH_NOT_CONFIRMED');
  const pattern=metadata.tags.match.find(value=>matchingExactOriginPattern(value,target));
  if(!pattern)return blocked('MATCH_NOT_CONFIRMED');
@@ -115,4 +126,20 @@ export function inspectReportedTampermonkeyPreflight(
    extensionId:TAMPERMONKEY_EXTENSION_ID,reportedVersion:report.version,
    scriptMatchPattern:pattern,extensionAuthenticityVerified:false,
    scriptInstallationVerified:false,gmApiVerified:false,businessVerified:false};
+}
+
+/** Fail closed on hostile accessors or revoked proxies passed through a
+ * serialized report boundary. A malformed report grants no browser action.
+ */
+export function inspectReportedTampermonkeyPreflight(
+ runtime:ManagerPresenceResult,
+ report:ReportedTampermonkeyState,
+ metadata:MetadataResult,
+ targetUrl:string,
+ userApproved:boolean
+):TampermonkeyPreflightResult {
+ if(userApproved!==true)return blocked('NOT_AUTHORIZED');
+ try{return inspectReportedTampermonkeyPreflightUnchecked(
+  runtime,report,metadata,targetUrl,true);
+ }catch{return blocked('INVALID_INPUT');}
 }
