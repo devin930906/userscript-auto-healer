@@ -101,3 +101,19 @@ test('TEST-017: malformed target URL, credentials and fragment fail closed',()=>
   if(!result.ok)assert.equal(result.code,'INVALID_INPUT');
  }
 });
+
+test('TEST-017: query string participates in conservative @match path matching',()=>{
+ const exact=metadata({grant:['GM_getValue'],match:['https://example.com/admin']});
+ assert.equal(inspect(report,exact,'https://example.com/admin').ok,true);
+ const queried=inspect(report,exact,'https://example.com/admin?mode=edit');
+ assert.equal(queried.ok,false);
+ if(!queried.ok)assert.equal(queried.code,'MATCH_NOT_CONFIRMED');
+ const queryPrefix=metadata({grant:['GM_getValue'],
+   match:['https://example.com/admin?mode=edit*']});
+ assert.equal(inspect(report,queryPrefix,'https://example.com/admin?mode=edit&tab=1').ok,true);
+ const differentQuery=inspect(report,queryPrefix,'https://example.com/admin?mode=view');
+ assert.equal(differentQuery.ok,false);
+ if(!differentQuery.ok)assert.equal(differentQuery.code,'MATCH_NOT_CONFIRMED');
+ const pathPrefix=metadata({grant:['GM_getValue'],match:['https://example.com/admin*']});
+ assert.equal(inspect(report,pathPrefix,'https://example.com/admin?mode=edit').ok,true);
+});
