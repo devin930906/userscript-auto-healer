@@ -30,3 +30,5 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 - **POC-03C 已通过（限于工具链）**：Windows Actions 使用原生 ZIP 压缩，验证文件头、相对路径、解压及 SHA-256 一致性（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797）；仍无正式产品 ZIP、真实运行或 Stable 验收。
 
 - **连接真实浏览器的只读预检**：用户 Chrome 155.0.8059.40、Tampermonkey/篡改猴 5.5.1（MV3）的 userScripts API/权限和注册查询已实际通过；未安装/改动现有油猴脚本，也未验证实际 Tampermonkey GM/业务执行。检查详情见 docs/13-predevelopment-admission.md。
+
+- **POC-02T-LIVE 一次性真实 Tampermonkey 功能实测已通过（2026-10-18）**：在用户连接的 Tampermonkey 5.5.1 中安装独立临时测试脚本，真实 `GM_getValue` 返回预期默认值，预设坏定位器 `missing-target`，人工改为有效定位器后业务动作为 `recovered/done`；脚本随后删除并验证不再注入。这不是 GitHub Actions 云端 POC-02T，也不是软件自动修复或完整 TEST/GATE，通过范围见 [实测记录](docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md)。

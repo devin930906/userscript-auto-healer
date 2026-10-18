@@ -75,3 +75,6 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 通过已连接的 Chrome Browser MCP，在用户真实 Chrome 155.0.8059.40 上仅执行**只读**扩展身份、API 和权限检查：Tampermonkey 5.5.1、MV3、userScripts API 调用成功、注册记录 2、含 userScripts 权限及示例站点原点访问许可。此为 `TEST-017` 中的一部分**先验条件**，不能把完整 TEST-017 或 TEST-018 标记通过。此会话没有安装临时脚本、访问已有脚本源码/私密存储或验证真实 GM 行为。
 
 剩余 `TEST-017/018` 的真实测试须在用户认可的独立 Profile/测试页面内：1) 明确测试脚本范围及所需 `@grant`、安装/启用与 `@match`；2) 在真实 Tampermonkey 注入并调用 GM API，记录真实业务动作和失败场景；3) 比较人为预设坏/好与**产品真正生成的补丁**，将用户数据和权限限制列为未达门槛；4) 在不影响已安装脚本的前提下保存最小化脱敏证据。若无授权或工具无法安全安装测试脚本，返回 `UNKNOWN/NOT_VERIFIED`，不得用纯 DOM 断言填补。参见 docs/13-predevelopment-admission.md。
+
+## 2026-10-18 实时浏览器 Tampermonkey 限定测试增量
+后续在**同一浏览器连接**执行了独立临时脚本安装、真实 `GM_getValue`、人工预设 broken/fixed 两阶段业务断言及删除后不再注入的验证；完整步骤与实际返回见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。此结果与上文更早的只读预检不同，标记为 `POC-02T-LIVE: LIMITED_POC_PASS`。不是独立 Windows GitHub Actions 的 POC-02T，也没有正式产品代码或测试套件，所以 **TEST-017、TEST-018 仍为“已规划/未正式执行”**。

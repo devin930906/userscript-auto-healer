@@ -84,3 +84,6 @@ POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2
 ### 用户连接 Chrome 上 Tampermonkey 实际预检（2026-10-18，只读）
 
 经用户主动提供的 Chrome Browser MCP，读到 Windows x64 Google Chrome `155.0.8059.40` 和运行中的 Tampermonkey/篡改猴 `5.5.1`（MV3、扩展 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`）。该 ID 仅用于本次扩展身份识别，不意味着未来所有 Profile 或重装场景的扩展 ID 保持不变。Tampermonkey 扩展 Service Worker 的 `chrome.userScripts.getScripts()` 实际调用成功，出现 2 条注册记录，包含 `USER_SCRIPT` world、`document_start` runAt。`chrome.permissions.getAll()` 包含 `userScripts`，示例原点读取权限成功。没有读取个人脚本源码、存储数据或改动扩展配置；未证实真实 Tampermonkey 的 GM/业务执行，也没有核实浏览器启动命令/独立 Profile/9223 端口。此次实测来自对话中的浏览器连接而非 CI，不能将本段冒充 Actions 测试证据。
+
+## POC-02T-LIVE — 真实连接浏览器上的 Tampermonkey 功能实测（2026-10-18）
+Chrome Browser MCP 在用户已连接的真实 Tampermonkey 5.5.1 上安装专名临时测试 `.user.js`，在 `https://example.net/` 页面实测 `GM_getValue` 默认值返回、预设旧选择器业务失败及**人工改动**为有效 `p` 选择器后业务动作成功。临时脚本与回收站副本已删除并经页面重载确认不再注入。完整脱敏记录：docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。这项实测消除了“真实 Tampermonkey 完全未经 GM/业务行为验证”的部分疑虑；但 **POC-02T（独立 GitHub Actions runner）仍未执行**，没有 CI 运行号，且未验证实际应用、不同注入模式、GM API 全集、真实业务脚本自动修复/回滚或发行软件。旧的只读预检段落仅对应当时较早的测试阶段，不能覆盖后续新实测。

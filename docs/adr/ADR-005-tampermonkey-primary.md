@@ -9,3 +9,6 @@
 - 正式产品验收：后续 TASK-007/TEST-017/018 检验真实应用适配器、真实管理器下的 GM API 与业务结果、安装到浏览器的脚本更新；GATE-004/005 必须对声明的 Windows/Chrome/便携版支持矩阵取得真实证据。不能用纯 CDP/DOM、Violentmonkey 或人工预先修改好的脚本证明产品自动修复。
 - 官方依据：https://www.tampermonkey.net/faq.php?q=Q406；https://www.tampermonkey.net/faq.php?q=Q209；https://www.tampermonkey.net/documentation.php?q=content_script_api；https://www.tampermonkey.net/changelog.php?locale=en；https://developer.chrome.com/docs/extensions/reference/api/userScripts；https://playwright.dev/docs/chrome-extensions。
 - 状态：**用户选择已确认；Tampermonkey 真实云端 PoC、产品兼容与 Stable 验收均未通过。**
+
+## 2026-10-18 后续真实浏览器限定实测
+`POC-02T-LIVE` 已在用户连接的 Chrome 中使用**真实 Tampermonkey 5.5.1** 创建、执行、人工改动和删除单独命名的临时测试脚本。真实 `GM_getValue`、预设 broken/fixed 业务动作均得到页面断言，停止注入也已验证。脱敏证据 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。此结果不等于本 ADR 早先所称需要在**隔离 GitHub Actions** 中实施的 POC-02T 已通过，亦不等于产品正式 TEST-017/018、受支持全部注入模式或 Stable 发布验证。状态更新：**真实用户浏览器上的限定 GM/业务 PoC 已通过；独立云端和完整正式产品验收仍待完成**。

@@ -75,3 +75,8 @@
 
 ## 2026-10-18 便携发行格式更新
 依据用户新决定 I-010 / ADR-004，正式 Stable 必需文件现为 EXE 安装版与 ZIP 便携版。旧 RAR5 试用 PoC 仅是历史记录，不再需要为正式 ZIP 购买 RAR 生产许可证。ZIP 工具链 POC-03C 已在云端有限通过，正式 TASK-020 / TEST-028 仍需执行；TASK-001 有条件准入状态不变。
+
+## POC-02T-LIVE — 已验证的真实 Tampermonkey 限定功能（2026-10-18）
+用户授权通过 Chrome Browser MCP 在现有连接 Chrome 的 Tampermonkey 5.5.1 内创建名为 `UAH-Tampermonkey-Temporary-QA-20261018` 的一次性脚本，在无登录的 HTTPS 示例页面实际注入、实际调用 `GM_getValue` 并读取 `gm-default-ok`；人工预置损坏 selector 返回 `missing-target/none`，随后人工替换为有效 `p` 选择器返回 `recovered/done` 且目标动作存在。该测试脚本已通过 Tampermonkey 正常删除及回收站永久删除，刷新页面后标记不存在。详见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。本段的“已通过”仅限真实用户浏览器的**一次性受控功能 PoC**；此前只读阶段的未验证说明不再代表所有 GM/业务行为都未经测试。
+
+**依然受阻的独立项目**：GitHub Actions 真 Tampermonkey POC-02T（没有 CI run）、正式产品 TASK-007/TEST-017/018、Windows 支持矩阵、独立 Profile/CDP 启动归属、复杂 GM API/SPA/iframe/登录、真实脚本自动修复与备份回滚、GATE-004/005、最终 Stable。TASK-001 的有条件准入不变。

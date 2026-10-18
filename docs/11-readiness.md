@@ -42,7 +42,7 @@ POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930
 
 **有限工程准入：TASK-001 安全骨架的开发前技术准备具备条件。** Chrome/CDP、真实 Violentmonkey 2.49.0 的 `GM_getValue` 调用以及两个独立 `broken/fixed` 已知选择器状态有真实 Windows 实测；后者是提前人工准备的脚本版本，并未开发自动诊断、自动修复或回滚。证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。工程架构仅将 Electron+TypeScript 有条件选作首项安全基础（ADR-001）。
 
-**全部开发前置仍未完成**：用户连接的真实 Chrome 155 和 Tampermonkey 5.5.1 已完成只读身份/API/权限预检，但 Windows 10/11 精确系统版本、真实 Chrome.exe/便携路径、CDP 端口/Profile 归属、Tampermonkey 的实际 .user.js 运行/GM 功能及真实失效脚本/登录条件与修复前后业务验证暂无充分证据。没有用户授权的真实环境不得声称已测试，后续 TASK-007、TEST-018、全量实机验收仍受阻。
+**全部开发前置仍未完成**：用户连接的真实 Chrome 155 和 Tampermonkey 5.5.1 已完成只读身份/API/权限预检，但 Windows 10/11 精确系统版本、真实 Chrome.exe/便携路径、CDP 端口/Profile 归属、Tampermonkey 的**一次性测试脚本 GM/人工 broken/fixed** 已有后续限定实证（见本文件末尾）；真实用户失效脚本、管理器适配器、复杂登录场景、正式自动修复/回滚与完整兼容性仍无充分证据。没有用户授权的真实环境不得声称已测试，后续 TASK-007、TEST-018、全量实机验收仍受阻。
 
 **Stable 发布门槛尚未达到**：产品源码/单元测试与 28 项 TEST、实际 Electron EXE、正式便携 ZIP 的安全解压与运行、真实安全/兼容/回滚测试与全部 GATE 尚未完成。试验性的 EXE/RAR 工具链不等于可发布产品；发布门槛不是初步安全骨架开发的先决全部条件。
 
@@ -67,3 +67,6 @@ Windows Actions https://github.com/devin930906/userscript-auto-healer/actions/ru
 Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.40**，并在真实 `Tampermonkey/篡改猴` **5.5.1（MV3）** Extension Service Worker 中只读调用 `chrome.userScripts.getScripts()` 成功（2 条 API 注册，非脚本数量）；`chrome.permissions.getAll()` 含 `userScripts`，测试用途的 `https://example.com/*` 和 `http://127.0.0.1/*` 原点均获权限。没有读取用户脚本或其持久化资料，亦没有安装/改写/删除脚本。当前会话插件回传为原始证据；详细范围见 docs/13-predevelopment-admission.md。
 
 **严守范围**：上文可以标记 `TampermonkeyPresenceAndPermission = CHECKED`，**不能**标记 `TampermonkeyInjection/GM/Business = VERIFIED`；亦不能证明用户 Chrome.exe、9223 端口、自管调试 Profile 或修复逻辑通过。现行 EXE+ZIP，POC-03C Windows ZIP 工具链已实测通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797），正式 ZIP 应用包仍未制作。
+
+## POC-02T-LIVE — 真 Tampermonkey 运行时补充（2026-10-18）
+用户连接的真实 Tampermonkey 5.5.1 经 Chrome Browser MCP 已完成**新增**限定实测：专名临时 `.user.js` 在 `https://example.net/` 注入，`GM_getValue` 返回 `gm-default-ok`，预设无效旧 selector 时 `missing-target/none`，人工改成 `p` 后 `recovered/done` 且目标节点确有动作标记；删掉专名临时脚本和回收站副本后，重新载入无脚本标记/动作。见 docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md。该结果可以证明**当前浏览器上的指定 GM 和业务动作**，不等于 GitHub Actions 云端 POC-02T、正式 TASK-007/TEST-017/018、真实失效脚本的自动修复/回滚，或 GATE-004/005。先前只读预检的 `GM/Business 未验证` 是早前阶段快照，已由本次**有限**功能 PoC 补充；未支持/未测环境仍受阻。TASK-001 有条件准入不变。
