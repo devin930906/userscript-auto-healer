@@ -11,6 +11,21 @@ import { createServer } from 'node:http';
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
 }
+/** Reserve an OS-assigned loopback port briefly so Windows parallel test files
+ * do not compete for the shared default 9223 listener.
+ */
+async function unusedLoopbackPort():Promise<number>{
+  const probe=createServer();
+  await new Promise<void>((resolve,reject)=>{
+    probe.once('error',reject);
+    probe.listen(0,'127.0.0.1',resolve);
+  });
+  const address=probe.address();
+  await new Promise<void>((resolve,reject)=>
+    probe.close(err=>err?reject(err):resolve()));
+  if(!address||typeof address==='string')throw Error('PORT_PROBE_FAILED');
+  return address.port;
+}
 test('TEST-007/008: never launch without approval or with bad config',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:false}),
@@ -25,7 +40,8 @@ test('TEST-006: executable masquerading as Chrome cannot be launched',async t=>{
   const executable=join(root,'chrome.exe'),profile=join(root,'profile');
   await writeFile(executable,'not a signed browser');
   await mkdir(profile);
-  assert.deepEqual(await launchApprovedIsolatedChrome(config(executable,profile),
+  const port=await unusedLoopbackPort();
+  assert.deepEqual(await launchApprovedIsolatedChrome(config(executable,profile,port),
     {userApproved:true}),{ok:false,code:'BINARY_NOT_VERIFIED'});
 });
 test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',async t=>{
@@ -46,7 +62,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     await delay(800);
     await rm(root,{recursive:true,force:true}).catch(()=>undefined);
   });
-  const result=await launchApprovedIsolatedChrome(config(chrome,profile),
+  const port=await unusedLoopbackPort();
+  const result=await launchApprovedIsolatedChrome(config(chrome,profile,port),
     {userApproved:true,testHeadless:true});
   assert.equal(result.ok,true,JSON.stringify(result));
   if(result.ok) {
