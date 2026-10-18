@@ -229,15 +229,36 @@ test('TEST-017: assessment validates its own input instead of trusting caller cl
 
 
 test('TEST-018 stage: HTTP claims and independent DOM evidence must agree, never become VERIFIED',()=>{
- const observedAt='2026-10-18T00:00:00.000Z';
+ const observedAtByMode={
+   broken:'2026-10-18T00:00:00.000Z',
+   fixed:'2026-10-18T00:00:01.000Z'
+ };
  const dom=(mode:'broken'|'fixed',actionCount:0|1)=>({
-   status:'LIMITED_FIXTURE_DOM_ONLY' as const,mode,observedAt,targetCount:1 as const,
+   status:'LIMITED_FIXTURE_DOM_ONLY' as const,mode,
+   observedAt:observedAtByMode[mode],targetCount:1 as const,
    actionCount,fixtureDomMatchesExpected:actionCount===(mode==='fixed'?1:0),
    extensionAuthenticityVerified:false as const,
    scriptInstallationVerified:false as const,gmApiVerified:false as const,
    businessVerified:false as const
  });
  const matched={broken:dom('broken',0),fixed:dom('fixed',1)};
+ // Two modes must be backed by independently timed CDP observations.
+ // A copied timestamp or non-canonical timestamp must never satisfy correlation.
+ assert.deepEqual(correlateManualFixtureEvidence(both,visited,{
+   broken:matched.broken,fixed:{...matched.fixed,observedAt:matched.broken.observedAt}
+ }),{
+   status:'INVALID_DOM_EVIDENCE',comparedModes:1,
+   extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+   gmApiVerified:false,businessVerified:false
+ });
+ for(const invalidTime of [
+   '2026-02-30T00:00:01.000Z','2026-10-18T00:00:01Z',
+   '2026-10-18T00:00:01.000+00:00','not-a-date'
+ ]){
+   assert.equal(correlateManualFixtureEvidence(both,visited,{
+     broken:matched.broken,fixed:{...matched.fixed,observedAt:invalidTime}
+   }).status,'INVALID_DOM_EVIDENCE');
+ }
  const consistent=correlateManualFixtureEvidence(both,visited,matched);
  assert.deepEqual(consistent,{
    status:'CONSISTENT_UNVERIFIED_FIXTURE_ONLY',comparedModes:2,
