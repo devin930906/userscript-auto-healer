@@ -50,9 +50,9 @@ function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  // other wildcards require true manager-based matching.
  const path=match[3];
  if(path==='/*')return true;
- if(path.indexOf('*')!==path.length-1||path.slice(0,-1).includes('*'))return false;
- const prefix=path.endsWith('*')?path.slice(0,-1):path;
- return target.pathname.startsWith(prefix);
+ if(path.includes('*')&&(!path.endsWith('*')||path.slice(0,-1).includes('*')))return false;
+ if(!path.endsWith('*'))return target.pathname===path;
+ return target.pathname.startsWith(path.slice(0,-1));
 }
 function blocked(code:TampermonkeyPreflightCode):TampermonkeyPreflightResult {
  return {ok:false,status:'BLOCKED',code,gmApiVerified:false,businessVerified:false};
