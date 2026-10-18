@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory } from '../../src/import/import-service';
 import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
@@ -85,6 +86,18 @@ async function createMainWindow(): Promise<void> {
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
+    // Fixture files live solely inside the disposable Windows Actions runner.
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'uah-task002-e2e-'));
+    writeFileSync(join(fixtureDir, 'approved.user.js'), '// ==UserScript==\\n// smoke\\n');
+    const nativeDialog = dialog.showOpenDialog;
+    Object.defineProperty(dialog, 'showOpenDialog', {
+      configurable: true, writable: true,
+      value: async (_window: unknown, options: {properties?: string[]}) => ({
+        canceled: false,
+        filePaths: options.properties?.includes('openDirectory')
+          ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
+      })
+    });
     // The test is run inside a real Electron renderer. A static source assertion
     // cannot prove that the sandbox preload or frame-checked IPC actually work.
     const probe = await win.webContents.executeJavaScript(
@@ -92,6 +105,7 @@ async function createMainWindow(): Promise<void> {
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
+      "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer})); " +
@@ -100,11 +114,15 @@ async function createMainWindow(): Promise<void> {
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
-      "bad.code === 'INVALID_SHAPE' && d.ok === true && rendered === true && d.script.filename === 'smoke.user.js' && " +
+      "bad.code === 'INVALID_SHAPE' && d.ok === true && rendered === true && " +
+      "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
+      "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
       "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
+    Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
+    rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !== 'chooseFiles,chooseFolder,getStatus,importDropped,security,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
