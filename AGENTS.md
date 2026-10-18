@@ -1,13 +1,13 @@
 # 开发代理约束
 
 ## 项目权威资料顺序
-用户本次明确批准的目标与 docs/00-intake.md → docs/02-requirements.md → docs/03-feasibility.md 和 docs/adr → docs/04-architecture.md → docs/06-security-risk.md → docs/07-testing.md → docs/08-release.md → docs/09-development-plan.md → docs/10-traceability.md → docs/11-readiness.md → docs/12-handoff.md。相互冲突时明确列出并核验，严禁编造批准。
+用户本次明确批准的目标与 docs/00-intake.md → docs/02-requirements.md → docs/03-feasibility.md 和 docs/adr → docs/04-architecture.md → docs/06-security-risk.md → docs/07-testing.md → docs/08-release.md → docs/09-development-plan.md → docs/10-traceability.md → docs/11-readiness.md → docs/12-handoff.md → docs/13-predevelopment-admission.md。相互冲突时明确列出并核验，严禁编造批准。
 
 ## 开发边界
-当前属于开发前准备；不得提前写产品功能、发布 Stable 或跨仓库混用代码。最小技术 PoC 必须明确入口、失败判据和临时性，不得当成正式功能合并。
+当前执行开发前准备阶段不得提前写产品功能；当后续明确启动正式开发、且满足 docs/11-readiness.md 和 docs/13-predevelopment-admission.md 的阶段准入时，允许按 TASK-001 安全骨架及其验证要求进行实际开发。**此条不得被用作永久禁止开发的理由**。无论阶段如何，禁止虚报 Stable、跨仓库混用代码或把临时 PoC 当正式功能。
 
 ## 代码规则
-确认 ADR 与兼容矩阵后再固定框架和依赖。按失败测试→最小实现→回归/安全测试→代码复审开发。所有安全敏感接口要求结构化输入、资源归属、限时/取消与不泄密错误；脚本源文件修改以最小范围并留版本。
+ADR-001 已有条件决定 TASK-001 可使用 Electron+TypeScript 作为首期技术骨架；未来扩大支持范围或更改框架时必须以兼容实证和新 ADR 复审。按失败测试→最小实现→回归/安全测试→代码复审开发。所有安全敏感接口要求结构化输入、资源归属、限时/取消与不泄密错误；脚本源文件修改以最小范围并留版本。
 
 ## 任务续接方式
 新会话先读取默认分支、相关开发分支、全部 Open PR、Issues、CI、最新 SHA、官方资料过时情况及 11-readiness；不得无条件重新造一套文档。优先解决真正阻断，不以任务/提交数量评价完成。
@@ -28,4 +28,4 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 不得将 ZIP/7z 改名为 RAR；不得伪造许可证、跑测记录、构建产物、下载链接或已通过的准入结论；不得扩展到无关产品或擅自自动发布。
 
 ## 交接更新规则
-任何批准的需求/架构变更同时更新 02/ADR/04/07/08/09/10/11/12；进度只依据实际提交和检查记录；最终 RELEASE 需所有 GATE 获验证。
+任何批准的需求/架构变更按影响范围同步更新 02/ADR/04/07/08/09/10/11/12/13；进度只依据实际提交和检查记录；最终 RELEASE 需所有 GATE 获验证。

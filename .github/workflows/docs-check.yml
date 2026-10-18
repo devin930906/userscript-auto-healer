@@ -6,6 +6,7 @@ on:
       - 'docs/**'
       - 'README.md'
       - 'AGENTS.md'
+      - '.github/scripts/verify-predevelopment.py'
       - '.github/workflows/docs-check.yml'
   pull_request:
     paths:
@@ -24,6 +25,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Verify document links, full traceability and staged admission
+        shell: bash
+        run: python3 .github/scripts/verify-predevelopment.py
       - name: Verify required documents and record numbering
         shell: bash
         run: |
