@@ -17,7 +17,7 @@ type RecoveryFailure=
   'BACKUP_DIRECTORY_INVALID'|'SYMLINK_REJECTED'|
   'BACKUP_ALIAS_REJECTED'|'BACKUP_SOURCE_MISMATCH'|
   'SIZE_LIMIT'|'HASH_MISMATCH'|
-  'FILE_CHANGED'|'IO_FAILURE';
+  'FILE_CHANGED'|'SOURCE_HARDLINK_REJECTED'|'IO_FAILURE';
 export type RecoverySourceVerificationResult=
   |Readonly<{status:'BLOCKED';reason:RecoveryFailure;
     automaticPatchAllowed:false;automaticRollbackAllowed:false;
@@ -104,6 +104,10 @@ export async function verifyBackupRecoverySource(
   const sourceBefore=await lstat(source,{bigint:true});
   if(sourceBefore.isSymbolicLink()||!sourceBefore.isFile())
     return deny('INVALID_PATH');
+  // A second filesystem name for the original defeats consent tied to the
+  // native-selected source path. The backup must not be considered ready for
+  // recovery while another alias can mutate that same source inode.
+  if(sourceBefore.nlink!==1n)return deny('SOURCE_HARDLINK_REJECTED');
   const before=await lstat(path,{bigint:true});
   if(before.isSymbolicLink())return deny('SYMLINK_REJECTED');
   if(!before.isFile())return deny('INVALID_PATH');
@@ -137,6 +141,7 @@ export async function verifyBackupRecoverySource(
     const dirAfter=await lstat(directory,{bigint:true});
     if(byPath.isSymbolicLink()||!byPath.isFile()||byPath.nlink!==1n||
        sourceAfter.isSymbolicLink()||!sourceAfter.isFile()||
+       sourceAfter.nlink!==1n||
        dirAfter.isSymbolicLink()||!dirAfter.isDirectory()||
        !same(before,after)||!same(after,byPath)||
        !same(sourceBefore,sourceAfter)||!sameDirectory(dirBefore,dirAfter)||
