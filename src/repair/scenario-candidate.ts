@@ -7,6 +7,8 @@
  * bridge issues only reviewable local CANDIDATE_ONLY data, never writes.
  */
 import type {DynamicObservation} from '../observe/dom-observer';
+import {parseUserscriptMetadata} from '../analyze/metadata-parser';
+import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
 import type {ScenarioInput} from '../scenarios/scenario-registry';
 import {summarizeReadOnlyScenarioDomSeries} from '../diagnostics/scenario-dom-diagnostic';
 import {
@@ -37,6 +39,28 @@ const blocked=(reason:DiagnosticCandidateBlockCode):DiagnosticCandidateResult=>O
 });
 const SHA=/^[a-f0-9]{64}$/;
 const ID=/^[A-Za-z0-9_-]{1,64}$/;
+
+/** Static @match eligibility is necessary, not proof that Tampermonkey
+ * injected this source. Unreviewed include/exclusion precedence fails closed.
+ * Reuse the manager preflight's narrow URL matcher to avoid drift. */
+function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
+  if(typeof targetUrl!=='string'||targetUrl.length>4096)return false;
+  let target:URL;
+  try{target=new URL(targetUrl);}catch{return false;}
+  if(!['http:','https:'].includes(target.protocol)||!target.hostname||
+     target.username||target.password||target.hash)return false;
+  const metadata=parseUserscriptMetadata({
+    bytes:Buffer.from(source,'utf8'),textEncoding:'utf-8'
+  });
+  if(metadata.status!=='OK'||
+     metadata.tags.include!==undefined||
+     metadata.tags.exclude!==undefined||
+     metadata.tags['exclude-match']!==undefined||
+     !Array.isArray(metadata.tags.match)||
+     metadata.tags.match.length===0)return false;
+  return metadata.tags.match.some(pattern=>
+    matchingExactOriginPattern(pattern,target));
+}
 
 /** A pair of explicit, distinct selector-present assertions is needed:
  * first the known broken selector; second an alternative observed in the
@@ -89,6 +113,8 @@ export function proposeFromReadOnlyDomDiagnostic(
 
     const candidate=proposeLiteralSelectorPatch(patch);
     if(candidate.status!=='CANDIDATE_ONLY')return blocked('PATCH_BLOCKED');
+    if(!sourceMatchesScenarioTarget(patch.source,s.targetUrl))
+      return blocked('INVALID_SCENARIO_LINK');
     return Object.freeze({
       ...candidate,
       diagnosticLevel:'LIMITED_READ_ONLY_DOM_ONLY' as const,
