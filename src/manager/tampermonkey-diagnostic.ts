@@ -62,21 +62,43 @@ const FIXTURE_SELECTORS=[
 export function summarizeFixtureDomEvidence(
  mode:GmProbeMode,observed:ObservationResult
 ):FixtureDomEvidenceResult{
- if(!observed.ok)return {ok:false,code:observed.code};
+ const invalid=():FixtureDomEvidenceResult=>({ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
+ // TypeScript types do not protect the boundary against runtime/serialized data.
+ if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
+ if(!observed||typeof observed!=='object'||Array.isArray(observed))return invalid();
+ if(observed.ok===false)return {ok:false,code:observed.code};
+ if(observed.ok!==true)return invalid();
  const counts=observed.selectorCounts;
+ if(!counts||typeof counts!=='object'||Array.isArray(counts))return invalid();
+ const keys=Object.keys(counts);
+ // Every count must originate from exactly the four authorized selectors.
+ if(keys.length!==FIXTURE_SELECTORS.length||
+    keys.some(key=>!FIXTURE_SELECTORS.some(expected=>expected===key)))return invalid();
+ const summary=observed.summary;
+ if(!summary||
+    !Number.isSafeInteger(summary.elementCount)||summary.elementCount<1||
+    !Number.isSafeInteger(summary.iframeCount)||summary.iframeCount<0||
+    summary.iframeCount>summary.elementCount||
+    !Number.isSafeInteger(summary.visibleShadowRoots)||summary.visibleShadowRoots<0||
+    summary.visibleShadowRoots>summary.elementCount||
+    !Array.isArray(summary.blindSpots))return invalid();
  const current=counts[FIXTURE_SELECTORS[0]];
  const obsolete=counts[FIXTURE_SELECTORS[1]];
  const acted=counts[FIXTURE_SELECTORS[2]];
  const actedOnTarget=counts[FIXTURE_SELECTORS[3]];
- if(observed.routeChanged||observed.originMatchesApproved!==true||
+ if(observed.routeChanged!==false||observed.originMatchesApproved!==true||
     observed.status!=='LIMITED_DOM_OBSERVATION'||
     observed.fullPageVerified!==false||observed.userscriptVerified!==false||
-    !Number.isInteger(current)||current!==1||
-    !Number.isInteger(obsolete)||obsolete!==0||
-    !Number.isInteger(acted)||(acted!==0&&acted!==1)||
-    !Number.isInteger(actedOnTarget)||actedOnTarget!==acted||
-    typeof observed.observedAt!=='string'||!Number.isFinite(Date.parse(observed.observedAt)))
-   return {ok:false,code:'INVALID_FIXTURE_OBSERVATION'};
+    !Number.isSafeInteger(current)||current!==1||
+    !Number.isSafeInteger(obsolete)||obsolete!==0||
+    !Number.isSafeInteger(acted)||(acted!==0&&acted!==1)||
+    !Number.isSafeInteger(actedOnTarget)||actedOnTarget!==acted||
+    acted>summary.elementCount||
+    typeof observed.observedAt!=='string'||
+    !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(observed.observedAt)||
+    !Number.isFinite(Date.parse(observed.observedAt))||
+    new Date(observed.observedAt).toISOString()!==observed.observedAt)
+   return invalid();
  return {ok:true,evidence:Object.freeze({
    status:'LIMITED_FIXTURE_DOM_ONLY',mode,observedAt:observed.observedAt,
    targetCount:1,actionCount:acted as 0|1,
