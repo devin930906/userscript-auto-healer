@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {importDroppedBytes} from '../../src/import/import-service';
-import {previewImportedScriptAnalysis} from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,previewImportedBatch} from '../../src/analyze/import-preview';
 
 const header='// ==UserScript==\n// @name preview-test\n// @match https://example.org/*\n// ==/UserScript==\n';
 function imported(code:string){
@@ -50,4 +50,13 @@ test('TEST-011: large imports remain readable but synchronous AST preview is bou
  assert.equal(analyzed.metadataStatus,'NOT_CHECKED');
  assert.deepEqual(analyzed.sites,[]);
  assert.equal(analyzed.automaticPatchAllowed,false);
+});
+
+test('TEST-011: batch AST work is bounded without dropping imported scripts',()=>{
+ const scripts=Array.from({length:24},()=>imported(header+'document.querySelector("#item");'));
+ const previews=previewImportedBatch(scripts);
+ assert.equal(previews.length,24);
+ assert.equal(previews.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,16);
+ assert.equal(previews.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,8);
+ assert.ok(previews.every(x=>x.automaticPatchAllowed===false));
 });
