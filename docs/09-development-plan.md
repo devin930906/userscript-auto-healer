@@ -11,7 +11,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 ## 任务清单
 | 编号 | 目标 | 关联需求 | 优先级 | 前置依赖 | 实施模块 | 预计文件范围 | 具体执行步骤 | 交付结果 | 测试编号 | 完成条件 | 状态 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| TASK-001 | 建立已确定技术骨架与安全入口 | REQ-001;REQ-026 | 最优先 | POC-01/02 与 ADR-001 可用 | app/main app/preload app/ui | 预计新增：app/main/index.ts；app/preload/index.ts；app/ui/index.tsx；tests/security/desktop-boundary.test.ts | 创建最小进程隔离与配置验证测试；运行类型与安全测试 | 可受控启动的开发壳 | TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已完成未整合 |
+| TASK-001 | 建立已确定技术骨架与安全入口 | REQ-001;REQ-026 | 最优先 | POC-01/02 与 ADR-001 可用 | app/main app/preload app/ui | 预计新增：app/main/index.ts；app/preload/index.ts；app/ui/index.tsx；tests/security/desktop-boundary.test.ts | 创建最小进程隔离与配置验证测试；运行类型与安全测试 | 可受控启动的开发壳 | TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已完成并整合 |
 | TASK-002 | 脚本导入与路径安全 | REQ-001..003 | 必须实现 | TASK-001 | src/import tests/import | 预计新增：src/import/import-service.ts；tests/import/import-service.test.ts | 写目录/编码/路径负例再实现批量导入 | 原字节保留与文件清单 | TEST-001..003 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-003 | 元数据与 AST 定位器 | REQ-004;REQ-011 | 必须实现 | TASK-002 | src/analyze tests/analyze | 预计新增：src/analyze/metadata-parser.ts；src/analyze/selector-analyzer.ts；tests/analyze/ast.test.ts | AST 夹具先行，提取匹配/作用域/动态标记 | 静态证据报告 | TEST-004;TEST-011 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-004 | 网站与验证场景登记 | REQ-005 | 必须实现 | TASK-003 | src/scenarios tests/scenarios | 预计新增：src/scenarios/scenario-registry.ts；tests/scenarios/registry.test.ts | 设计登录/操作/断言契约与缺失状态 | 可管理的测试场景 | TEST-005 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
@@ -82,3 +82,7 @@ Windows GitHub Actions 已通过原生 ZIP 临时文件头/解压/安全相对�
 ## （7）TASK-001 Windows 真正运行验证与 PR 待整合（2026-10-18）
 
 在提交 `5f2830d52d349ab19583740dc177427e1652e355` 上，Windows Actions https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800 成功完成锁定依赖安装、TypeScript 类型检查、11 项安全配置自动化测试、正式 Electron 运行文件下载、桌面进程实际启动、sandbox preload 的隔离状态读取以及白名单 IPC 正反输入检查。用户真实 Windows 设备、完整跨域/恶意 iframe 攻击、浏览器 Profile/CDP 和 Tampermonkey 产品验收不属于这次成功结论，完整 TEST-026/GATE-006 仍须后续安全审计。当前 TASK-001 实现与验证已达到其骨架交付条件，**PR #1 合并前仍标记已完成未整合**；后续需在核对 PR、Required Checks/审核后整合，再按依赖进入 TASK-002。不得将骨架测试算作 Stable 通过。
+
+## （7）TASK-001 实际合并完成（2026-10-18）
+
+PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1) 已实际合并至 main，GitHub 返回合并 SHA `083de9db209d00b52183794687f0bb97d04e1e8d`，其 HEAD `230354e67f9ed9833b1713baaf9600f32cf57de9` 的 Windows 应用完整验证 [39101063472](https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063472) 及文档检查 [39101063490](https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063490) 均为 success。TASK-001 现为 **已完成并整合**；此状态仅指安全桌面骨架，不能代替完整 TEST-026、其它 REQ/TEST 或 Stable GATE。下一个依赖满足且可有限开展的独立任务为 **TASK-002**，须按已确认计划先开发脚本导入、原字节保留和路径安全负例；Tampermonkey/真实 Chrome 条件尚未达到的功能继续受相关门槛限制。

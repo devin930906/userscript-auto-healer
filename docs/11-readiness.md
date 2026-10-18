@@ -80,3 +80,7 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 | （7）交接资料整理 | 已完成（提交后复核） | AGENTS.md、docs/09-development-plan.md、docs/12-handoff.md、docs/13-predevelopment-admission.md 指向 TASK-001；GitHub main 保存、无须重做（4） | 从最新 main/PR/CI 恢复，只在确认的任务边界开发，未取得实测证据不可标通过 |
 
 **准入原则**：本阶段技术依据与有限安全设计足以开始 TASK-001，不代表全部（4）潜在真实环境条件在现在已实现；非阻断的未来验收必须按分配的 TASK/TEST/GATE 执行，不得借“开发前尚有实测”无限延长（4）。**（4）阶段停止条件已达到：有条件准入并完成交接，下一步由用户明确启动（7）**。不自动开发或发布软件。
+
+## （7）已发生的工程进展（不改写（4）历史准入结论）
+
+在（4）的 TASK-001 有条件准入基础上，后续（7）已经实际提交并合并首项安全桌面骨架：PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1)，main 合并 SHA `083de9db209d00b52183794687f0bb97d04e1e8d`。TASK-001 不需要重做；按 docs/09-development-plan.md 的任务依赖继续安全且不依赖未决真实管理器条件的 TASK-002。先前（4）文档中“尚无正式产品源码”等描述是其历史截面，不得当成目前代码不存在。此项不会将原先“有条件准入”升级为“无条件准入”，也不解除 Tampermonkey/实机/正式 EXE+ZIP 的后续 GATE。

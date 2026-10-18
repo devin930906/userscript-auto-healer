@@ -78,3 +78,7 @@ POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，
 ## （7）TASK-001 最新验收、合并前交接（2026-10-18）
 
 Windows runner 测试在 `5f2830d52d349ab19583740dc177427e1652e355` 的 Actions [39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) **完整成功**：静态检查及 11 个 Node 安全测试、Electron 按需下载、编译、真实 renderer/preload IPC 沙箱验证与无效配置输入拒绝。文档 CI [39100881819](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881819) 成功。TASK-001 的安全骨架开发结果处于 **已完成未整合**，活跃唯一开发 PR 为 [#1](https://github.com/devin930906/userscript-auto-healer/pull/1)；合并之前不得称 main 具有这项功能。后续需核验最新 HEAD 和 PR/CI/审核，通过后整合；随后开始 `TASK-002`（脚本导入及路径安全）。完整 TEST-026、Chrome/Tampermonkey 与发布 GATE 仍未完成，正式 EXE/ZIP 尚未生成。
+
+## （7）TASK-001 合并收据与 TASK-002 续接（2026-10-18）
+
+PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1) 已合并，合并提交 `083de9db209d00b52183794687f0bb97d04e1e8d`，有效代码已进入 main，不再是“已完成未整合”。来源分支通过 Windows 真实 Electron smoke + 静态测试（https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063472）和 docs CI（https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063490）。TASK-001 的入口安全骨架已经完成，今后新会话不得重复从 TASK-001 搭建骨架；下一项按计划为 **TASK-002**（REQ-001..003 / TEST-001..003）：安全批量导入、字节哈希、目录递归边界、失败隔离。进行新任务前读取 main 最新 SHA、PR 和验证结果；不得假设自动修复、Tampermonkey 产品功能或 Windows EXE/ZIP 已实现。M1 尚未退出；所有 GATE 均尚未完成。
