@@ -106,7 +106,7 @@ export async function verifyWindowsLoopbackListenerPid(
   try {
     const result=await execFileAsync('powershell.exe',
       ['-NoLogo','-NoProfile','-NonInteractive','-Command',command],
-      {windowsHide:true,timeout:8000,maxBuffer:4096});
+      {windowsHide:true,timeout:20000,maxBuffer:4096});
     output=result.stdout;
   } catch {
     return {ok:false,code:'LISTENER_UNAVAILABLE'};

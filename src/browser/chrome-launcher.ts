@@ -122,22 +122,7 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
     }
     if(!output)throw Error('EMPTY_IDENTITY_PROBE');
     data=JSON.parse(output) as Record<string,unknown>;
-  }catch(error){
-    // Only emit non-sensitive error categories on GitHub's disposable runner.
-    if(process.env.GITHUB_ACTIONS==='true'){
-      const err=error as {code?:unknown;stderr?:unknown;stdout?:unknown};
-      const stderr=typeof err.stderr==='string'?err.stderr:'';
-      const stdout=typeof err.stdout==='string'?err.stdout:'';
-      const hints=['ParserError','Get-AuthenticodeSignature','Get-Item',
-        'ConvertTo-Json','NotSpecified','CommandNotFoundException',
-        'PathNotFound','Cannot find path','Unexpected token','Cannot bind',
-        'FullyQualifiedErrorId'].filter(token=>stderr.includes(token));
-      console.error('TASK-005 identity tool diagnostic',JSON.stringify({
-        exitCode:typeof err.code==='number'?err.code:typeof err.code==='string'?err.code:null,
-        stderrLength:stderr.length,stdoutLength:stdout.length,
-        errorXml:(stderr.split('<S S="Error">')[1]??'').split('</S>')[0].slice(0,300),hints
-      }));
-    }
+  }catch{
     return {ok:false,code:'IDENTITY_UNAVAILABLE'};
   }
   if(data.status!=='Valid' || typeof data.signer!=='string' ||
