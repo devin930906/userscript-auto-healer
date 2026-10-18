@@ -180,3 +180,9 @@ PR [#21](https://github.com/devin930906/userscript-auto-healer/pull/21) 已以�
 ## （7）TASK-011 / TEST-020 只读源文件身份阶段实现（2026-10-19）
 
 PR [#44](https://github.com/devin930906/userscript-auto-healer/pull/44) 在 `src/version/source-snapshot.ts` 中增加独立的只读原文件一致性预检：必须获得来自受信任原生文件选择器的明确路径与调用方初步同意，拒绝符号链接、非 `.user.js`、越限长度、过期 SHA-256、异常输入及采样前后文件身份变化。新增 `tests/version/source-snapshot.test.ts` 以临时文件验证原字节不修改、无路径泄露与负面安全用例，并接入既有 Windows CI。源 SHA `31a31f111a7e6dbd35dbe454305d99431c1ad954` 的 [Application Skeleton Checks #39147314079](https://github.com/devin930906/userscript-auto-healer/actions/runs/39147314079) 为 success：TypeScript、151 项 Node 用例（150 pass / 0 fail / 1 skip）、真实 Electron 沙箱与 IPC smoke 通过；[独立便携 Chrome 检查 #39147314150](https://github.com/devin930906/userscript-auto-healer/actions/runs/39147314150) success。文件名/审批旗标并非可信授权令牌，本模块也不锁定后续写操作；未来写入必须在受信任事务中重新核对身份、备份、验证与原子提交。**PR 合并状态必须独立复核；TASK-011 整体仍开发中，完整 TEST-020、TASK-010 真管理器/业务验收和 Stable GATE 仍未完成。**
+
+## （7）TASK-011 / TEST-020 备份-only 阶段增量（2026-10-19）
+
+[PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45) 在已整合的原脚本只读指纹检查之后新增 `src/version/verified-backup.ts` 与 `tests/version/verified-backup.test.ts`：仅对受信任原生选择与初步授权的 `.user.js`，重新读取并校验文件身份/字节 SHA-256，在用户选定的目录创建随机唯一名称的私有暂存副本、`fsync`、验证暂存哈希，再以无覆盖硬链接发布并复核内容；若文件系统不支持必要操作则保守拒绝。未知授权、过期源文件、超限脚本、符号链接与异常输入均拒绝，原脚本永不被此模块写入。Windows CI 结果须以 PR 当前 SHA 和 Actions 实际状态为准。
+
+**TASK-011 仍为开发中**：该阶段备份副本不代表崩溃恢复版本库、原子应用、回滚、独立确认的用户授权或 Tampermonkey/GM/业务验收；不向 renderer 暴露任意文件路径接口。TEST-020 的真正写入中断/冲突/文件锁/回滚、TEST-021、TASK-010 可信运行门槛、EXE/ZIP 与 Stable GATE 均未完成。
