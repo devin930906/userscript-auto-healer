@@ -57,6 +57,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   const root=await mkdtemp(join(tmpdir(),'uah-owned-chrome-test-'));
   const profile=join(root,'profile');
   let stop:()=>void=()=>{};
+  let unexpectedExits=0;
   t.after(async()=>{
     stop();
     await delay(800);
@@ -71,7 +72,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
     {ok:false,code:'PROFILE_EXISTS'});
   const result=await launchApprovedIsolatedChrome(configForTest,
-    {userApproved:true,testHeadless:true});
+    {userApproved:true,testHeadless:true,onUnexpectedExit:()=>{unexpectedExits++;}});
   assert.equal(result.ok,true,JSON.stringify(result));
   if(result.ok) {
     stop=result.stop;
@@ -103,11 +104,47 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     }
     stop();
     assert.equal(isLiveApprovedChromeSession(result),false);
+    await delay(350);
+    assert.equal(unexpectedExits,0,'Intentional stop must not invoke unexpected-exit cleanup');
     assert.deepEqual(await openApprovedTarget(result,site,true),
       {ok:false,code:'UNVERIFIED_BROWSER'});
   }
 });
 
+
+test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its owner exactly once',async t=>{
+  if(process.platform!=='win32')return;
+  let chrome:string|undefined;
+  for(const base of [process.env['PROGRAMFILES'],process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+    if(!base)continue;
+    const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+    try{await access(candidate);chrome=candidate;break;}catch{/* unavailable */}
+  }
+  if(!chrome){t.skip('No official Chrome binary on runner');return;}
+  const root=await mkdtemp(join(tmpdir(),'uah-chrome-exit-test-'));
+  const profile=join(root,'profile');
+  const port=await unusedLoopbackPort();
+  const cfg=config(chrome,profile,port);
+  t.after(async()=>{await delay(800);await rm(root,{recursive:true,force:true}).catch(()=>undefined);});
+  const ready=await prepareApprovedIsolatedProfile(cfg,true);
+  assert.equal(ready.ok,true,JSON.stringify(ready));
+  let notifications=0;
+  const browser=await launchApprovedIsolatedChrome(cfg,{
+    userApproved:true,testHeadless:true,
+    onUnexpectedExit:()=>{notifications++;}
+  });
+  assert.equal(browser.ok,true,JSON.stringify(browser));
+  if(!browser.ok)return;
+  t.after(()=>browser.stop());
+  assert.equal(isLiveApprovedChromeSession(browser),true);
+  // This PID belongs to the new test-only Chrome child, not an existing user browser.
+  process.kill(browser.pid);
+  for(let i=0;i<30&&notifications===0;i++)await delay(100);
+  assert.equal(notifications,1,'Unexpected browser termination must revoke dependent fixture consent');
+  assert.equal(isLiveApprovedChromeSession(browser),false);
+  await delay(150);
+  assert.equal(notifications,1,'Exit and error events must not double-notify');
+});
 
 import { verifyCdpBrowserWebSocket } from '../../src/browser/cdp-session';
 test('TEST-009: WebSocket handshake never connects to foreign origins',async()=>{
