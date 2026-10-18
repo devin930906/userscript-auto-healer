@@ -278,8 +278,11 @@ function registerSafeIpc(): void {
 
   // The only fixture is a bounded, local, independently consented manual
   // test. No caller-provided URL, extension path, source, token or GM code.
-  ipcMain.handle('gm-probe:start',async event=>{
+  ipcMain.handle('gm-probe:start',async (event,runAt:unknown)=>{
     authorizeSender(event);
+    if(runAt!==undefined&&runAt!=='document-start'&&runAt!=='document-idle')
+      return {ok:false,code:'INVALID_OPTIONS',...unverified};
+    const selectedRunAt=runAt??'document-idle';
     if(gmStartInProgress||liveGmProbe())return {ok:false,code:'PROBE_BUSY',...unverified};
     const owned=readOwnedBrowser();
     if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
@@ -295,6 +298,7 @@ function registerSafeIpc(): void {
         defaultId:1,cancelId:1,noLink:true,
         message:'允许启动独立 Tampermonkey 手动 GM 测试夹具？',
         detail:'仅开放一个最长五分钟的 127.0.0.1 测试网页和临时脚本地址。'+
+          '\\n本次脚本注入时机：'+selectedRunAt+'（仍需实际 Tampermonkey 验证）。'+
           '\\n您需要自行在本程序拥有的独立 Chrome Profile 中安装脚本、访问 broken/fixed 测试页。'+
           '\\n测试结束后必须手动卸载临时脚本；本程序不会读取或修改已有脚本。'+
           '\\n页面回执可能被伪造，不能据此确认真实 Tampermonkey、GM API 或业务恢复。'
@@ -305,7 +309,8 @@ function registerSafeIpc(): void {
       // Verify a runtime target hint inside this exact owned browser BEFORE
       // exposing the disposable fixture. The hint is never manager attestation.
       const created=await startApprovedTampermonkeyDiagnostic(owned,true,{
-        ttlMs:300000,signal:controller.signal
+        ttlMs:300000,signal:controller.signal,
+        runAt:selectedRunAt as 'document-start'|'document-idle'
       });
       if(!created.ok)return {ok:false,code:created.code,...unverified};
       if(epoch!==gmProbeEpoch||win!==mainWindow||win.isDestroyed()||
@@ -317,6 +322,7 @@ function registerSafeIpc(): void {
       // The only capability URL exposed is this one-time local address,
       // after native consent. Never send script source or receipt tokens.
       return {ok:true,status:'MANUAL_FIXTURE_READY_ONLY',
+        runAt:created.session.runAt,
         installUrl:created.session.installUrl,
         brokenUrl:created.session.origin+'/?mode=broken',
         fixedUrl:created.session.origin+'/?mode=fixed',
@@ -520,7 +526,8 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
-      "const noGmStart=await a.startGmProbe(); const noGmStatus=await a.gmProbeStatus(); " +
+      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end'); " +
+      "const noGmStatus=await a.gmProbeStatus(); " +
       "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
        "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +
       "const newProfileWithoutChrome=await a.createProfile(); " +
@@ -545,7 +552,7 @@ async function createMainWindow(): Promise<void> {
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
-      "noGmStart.code === 'BROWSER_NOT_RUNNING' && " +
+      "noGmStart.code === 'BROWSER_NOT_RUNNING' && invalidRunAt.code === 'INVALID_OPTIONS' && " +
       "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
        "noGmObserve.code === 'NO_ACTIVE_FIXTURE' && badMode.code === 'INVALID_MODE' && " +
        "noGmStop.ok === false && " +

@@ -155,6 +155,14 @@ test('TEST-018: malformed or mixed fixture DOM snapshots fail closed without thr
  assert.equal(summarizeFixtureDomEvidence('fixed',valid).ok,true);
 });
 
+test('TEST-017: manual diagnostic refuses unsupported injection timing before browser access',async()=>{
+ const unverified={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ for(const mode of ['document-end','document-body','unexpected',null] as const){
+   const result=await startApprovedTampermonkeyDiagnostic(
+     unverified,true,{runAt:mode as 'document-start'});
+   assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'});
+ }
+});
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
  const fake={ok:true as const,status:'OWNED_CDP_BROWSER_VERIFIED' as const,
    pid:123456,chromeVersion:'155.0.0.0',

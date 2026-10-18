@@ -95,6 +95,7 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /prepareApprovedIsolatedProfile\(config\.config,true\)/);
   assert.match(main, /randomUUID\(\)/);
   assert.match(main, /ipcMain\.handle\('gm-probe:start'/);
+  assert.match(main, /runAt!==undefined&&runAt!=='document-start'&&runAt!=='document-idle'/);
   assert.match(main, /ipcMain\.handle\('gm-probe:status'/);
   assert.match(main, /ipcMain\.handle\('gm-probe:stop'/);
   assert.match(main, /startApprovedTampermonkeyDiagnostic\(owned,true/);
@@ -114,7 +115,8 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.doesNotMatch(preload, /require\(['"]node:(fs|child_process)/);
   assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 16);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
-  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:start'\)/);
+  assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-idle'\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:start',runAt\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:status'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:stop'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:visit',mode\)/);

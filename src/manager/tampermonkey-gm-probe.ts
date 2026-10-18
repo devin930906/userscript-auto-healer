@@ -13,6 +13,8 @@ import type {AddressInfo} from 'node:net';
 import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
 export type GmProbeMode='broken'|'fixed';
+/** Explicit, fixed test modes; never derived from an arbitrary userscript. */
+export type GmProbeRunAt='document-start'|'document-idle';
 export interface GmProbeReceipt {
  readonly status:'SELF_REPORTED_FIXTURE_ONLY';
  readonly mode:GmProbeMode;
@@ -25,6 +27,7 @@ export interface GmProbeReceipt {
 }
 export interface GmProbeSession {
  readonly status:'ISOLATED_GM_TEST_READY';
+ readonly runAt:GmProbeRunAt;
  readonly origin:string;
  readonly source:string;
  /** Short-lived URL for explicit "Import from URL" in an isolated manager.
@@ -43,7 +46,7 @@ const PROBE_DEFAULT='UAH_GM_PROBE_DEFAULT';
 function isObject(value:unknown):value is Record<string,unknown>{
  return value!==null&&typeof value==='object'&&!Array.isArray(value);
 }
-function produceFixtureSource(origin:string,token:string,expiresAt:number):string {
+function produceFixtureSource(origin:string,token:string,expiresAt:number,runAt:GmProbeRunAt):string {
  // Userscript @match does not encode a port. The explicit origin check below
  // ensures the test script does nothing on another loopback port.
  const script=[
@@ -53,7 +56,7 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number):strin
  '// @version 0.0.1',
  '// @match http://127.0.0.1/*',
  '// @grant GM_getValue',
- '// @run-at document-idle',
+ '// @run-at '+runAt,
  '// @noframes',
  '// ==/UserScript==',
  '(function(){',
@@ -72,6 +75,10 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number):strin
  // A synchronous GM getter, DOM query or setter can cross the consent
  // deadline. Abort before every subsequent side effect, not only at entry.
  ' if(Date.now()>='+expiresAt+')return;',
+ // document-start can run before the target exists; GM is still called at
+ // the selected injection point, but DOM work waits for parsing to finish.
+ ' const checkDomAndReport=()=>{',
+ ' if(Date.now()>='+expiresAt+')return;',
  " const selector=mode==='broken'?'#obsolete-target':'#current-target';",
  ' const target=document.querySelector(selector);',
  ' if(Date.now()>='+expiresAt+')return;',
@@ -81,6 +88,14 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number):strin
  " {method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},",
  ' body:JSON.stringify({token:'+JSON.stringify(token)+',mode,',
  " gmDefaultMatched:gmMatched,businessAction:Boolean(target)})}).catch(()=>{});",
+ ' };',
+ ...(runAt==='document-start' ? [
+   " if(document.readyState==='loading'){",
+   "  document.addEventListener('DOMContentLoaded',checkDomAndReport,{once:true});",
+   '  return;',
+   ' }'
+ ] : []),
+ ' checkDomAndReport();',
  '})();'
  ];
  return script.join('\n')+'\n';
@@ -89,10 +104,11 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number):strin
  * Only use with explicit tester consent and a newly created isolated Profile.
  */
 export async function startIsolatedTampermonkeyGmProbe(
- userApproved:boolean,ttlMs=60000
+ userApproved:boolean,ttlMs=60000,runAt:GmProbeRunAt='document-idle'
 ):Promise<GmProbeStartResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
- if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000)
+ if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000||
+    (runAt!=='document-start'&&runAt!=='document-idle'))
    return {ok:false,code:'INVALID_OPTIONS'};
  const token=randomBytes(32).toString('hex');
  const installKey=randomBytes(32).toString('hex');
@@ -139,7 +155,7 @@ export async function startIsolatedTampermonkeyGmProbe(
      if(req.headers.origin===managerOrigin)
        headers['Access-Control-Allow-Origin']=managerOrigin;
      res.writeHead(200,headers);
-     res.end(produceFixtureSource('http://'+host,token,expiresAt));
+     res.end(produceFixtureSource('http://'+host,token,expiresAt,runAt));
      return;
    }
    // The fixture page's same-origin POST may supply Origin. Never treat a
@@ -226,8 +242,8 @@ export async function startIsolatedTampermonkeyGmProbe(
  expiryTimer=setTimeout(()=>{void stop();},ttlMs);
  expiryTimer.unref();
  return {ok:true,session:{
-   status:'ISOLATED_GM_TEST_READY',
-   origin,source:produceFixtureSource(origin,token,expiresAt),
+   status:'ISOLATED_GM_TEST_READY',runAt,
+   origin,source:produceFixtureSource(origin,token,expiresAt,runAt),
    installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
    receiptSnapshot:()=>Object.freeze({...receipts}),
    stop
