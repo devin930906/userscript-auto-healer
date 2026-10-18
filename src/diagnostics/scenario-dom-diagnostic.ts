@@ -53,7 +53,9 @@ function validDomSummary(summary:unknown):boolean{
  const elements=value.elementCount;
  const frames=value.iframeCount;
  const shadows=value.visibleShadowRoots;
- if(!Number.isSafeInteger(elements)||!Number.isSafeInteger(frames)||
+ if(typeof elements!=='number'||typeof frames!=='number'||
+    typeof shadows!=='number'||
+    !Number.isSafeInteger(elements)||!Number.isSafeInteger(frames)||
     !Number.isSafeInteger(shadows)||
     (elements as number)<0||(frames as number)<0||(shadows as number)<0||
     (frames as number)>(elements as number)||
