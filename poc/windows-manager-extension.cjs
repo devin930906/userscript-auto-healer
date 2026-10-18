@@ -62,8 +62,16 @@ async function main() {
     // Best-effort discovery of the authentic userscript installation journey.
     // This does NOT silently install anything into a user browser; only ephemeral profile.
     const page=await context.newPage();
-    await page.goto('http://127.0.0.1:'+port+'/fixture.user.js',{waitUntil:'domcontentloaded',timeout:20000});
-    await page.waitForTimeout(2500);
+    // Trigger authentic link-click installation; headless Chromium can instead download the JS.
+    // A browser-level download is a diagnostic limitation, not a defect in extension registration.
+    await page.goto('http://127.0.0.1:'+port+'/fixture',{waitUntil:'domcontentloaded',timeout:20000});
+    try {
+      await page.evaluate(()=>{const a=document.createElement('a');a.href='/fixture.user.js';a.textContent='Install fixture';a.id='install-fixture';document.body.appendChild(a)});
+      await page.locator('#install-fixture').click({timeout:8000});
+      await page.waitForTimeout(2000);
+    } catch (err) {
+      console.log('INCOMPLETE installer navigation: '+String(err.message).slice(0,240));
+    }
     console.log('Installation navigation destination: '+page.url());
     if (page.url().startsWith('chrome-extension://')) {
       const install=page.getByRole('button',{name:/install|安装|确定|confirm/i}).first();
