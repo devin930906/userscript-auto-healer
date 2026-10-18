@@ -48,10 +48,10 @@ I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批�
 以本表模块为唯一主要负责位置，输入/输出与异常边界见 docs/04-architecture.md；重大技术决定分别见 docs/adr/ADR-001-application-baseline.md、ADR-002-real-userscript-acceptance.md、ADR-003-windows-dual-package.md。
 
 ## 开发任务映射
-TASK-001..021 由 docs/09-development-plan.md 定义，编号不代表已经创建 GitHub Issue；所有预计源码路径在实际实施前均不存在。
+TASK-001..021 由 docs/09-development-plan.md 定义，编号不代表已经创建 GitHub Issue；TASK-001/002 的部分预计源码路径已实际创建，其余路径仍随对应任务实施。
 
 ## 测试映射
-REQ-001..028 对应 TEST-001..028；测试层级、前置与反例见 docs/07-testing.md。无真实运行证据。
+REQ-001..028 对应 TEST-001..028；测试层级、前置与反例见 docs/07-testing.md。TASK-001/002 的受限 Windows/Electron 自动化运行记录已存在；不能视作其它 TEST 或 Stable GATE 已通过。
 
 ## 发布门槛映射
 GATE-001..011 的证据和阻断等级以 docs/08-release.md 为权威；表内缩写仅表示关联类别，不是范围取代其逐项要求。

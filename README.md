@@ -1,6 +1,6 @@
 # Userscript Auto Healer
 
-> 状态：（7）正式开发中：已开始 TASK-001 安全骨架；**没有正式产品成品、没有经过完整桌面验收的发行构建、没有 Stable 发布**。
+> 状态：（7）正式开发中：TASK-001 安全骨架和 TASK-002 只读导入已合并；**没有正式产品成品、没有经过完整桌面验收的发行构建、没有 Stable 发布**。
 
 ## 项目用途
 针对目标网站 DOM、Selector 和页面运行机制变化导致的 `.user.js` 油猴脚本失效，设计 Windows 本地优先、CDP 诊断、保守自动修复与可验证回滚的工具。用户可指定 Chrome/便携版路径、专用调试 Profile、默认 9223 端口，批量导入脚本，必要时启用自定义 AI 服务。
@@ -40,3 +40,7 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 ## （7）正式开发首项成果（2026-10-18）
 
 TASK-001 安全桌面骨架已提交至 `feat/stable-development`，在 Windows runner 的 [Actions 39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) 通过完整应用工作流与实际 Electron/preload IPC smoke。此处只证明该隔离开发骨架在 CI 的运行及测试，不代表脚本导入、真正自动修复、用户 Tampermonkey 支持或 EXE/ZIP 发布完成。整合情况见 PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1)，任务与剩余缺口见 docs/09-development-plan.md。
+
+## （7）TASK-002 合并与继续开发（2026-10-18）
+
+已在 [PR #2](https://github.com/devin930906/userscript-auto-healer/pull/2) 合并只读文件/文件夹/拖放导入、字节哈希校验、编码和路径安全负例、重复识别、批次大小控制。Windows [Actions 39103414900](https://github.com/devin930906/userscript-auto-healer/actions/runs/39103414900) 在源 SHA `f238366` 上通过 Node/真实 Electron 自动化。main 合并提交 `0a8b8ff1033fc99a01cc0c24978c092a016e7c7a`。**不包含自动修复**；用户实机 GUI 交互、真实管理器/Chrome、备份回滚及正式 EXE+ZIP 仍未完整验收。下一任务为 TASK-003 的元数据与 AST 静态分析。

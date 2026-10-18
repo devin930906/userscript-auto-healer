@@ -82,3 +82,9 @@ Windows runner 测试在 `5f2830d52d349ab19583740dc177427e1652e355` 的 Actions 
 ## （7）TASK-001 合并收据与 TASK-002 续接（2026-10-18）
 
 PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1) 已合并，合并提交 `083de9db209d00b52183794687f0bb97d04e1e8d`，有效代码已进入 main，不再是“已完成未整合”。来源分支通过 Windows 真实 Electron smoke + 静态测试（https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063472）和 docs CI（https://github.com/devin930906/userscript-auto-healer/actions/runs/39101063490）。TASK-001 的入口安全骨架已经完成，今后新会话不得重复从 TASK-001 搭建骨架；下一项按计划为 **TASK-002**（REQ-001..003 / TEST-001..003）：安全批量导入、字节哈希、目录递归边界、失败隔离。进行新任务前读取 main 最新 SHA、PR 和验证结果；不得假设自动修复、Tampermonkey 产品功能或 Windows EXE/ZIP 已实现。M1 尚未退出；所有 GATE 均尚未完成。
+
+## （7）TASK-002 合并收据与 TASK-003 续接（2026-10-18）
+
+TASK-002（REQ-001..003 / TEST-001..003）的只读导入、字节/编码/哈希、路径安全与目录扫描、GUI 原生选择及拖放入口已通过 Windows 自动化限定范围验证：[Actions 39103414900](https://github.com/devin930906/userscript-auto-healer/actions/runs/39103414900)，源提交 `f238366e4d436a7d245e8ae609e8704b25b4b1fc`；PR [#2](https://github.com/devin930906/userscript-auto-healer/pull/2) 已合并，main 合并 SHA `0a8b8ff1033fc99a01cc0c24978c092a016e7c7a`。已确认的实测仅为 Windows runner 的 Node 回归与真实 Electron 加程序化拖放，非用户手动文件夹拖放或完整产品 GATE。
+
+下一项依赖满足的正式任务：**TASK-003（REQ-004/011、TEST-004/011）**，在现有 `main` 上基于用户脚本真实字节建立元数据/AST 静态证据并保持只读；TASK-005 作为 TASK-001 后可独立推进的安全浏览器入口。未完成 Tampermonkey 产品适配、真实坏脚本自动修复、备份回滚、完整 EXE+ZIP 和所有 GATE；不重做 TASK-001/002，也不从前期准备重新开始。
