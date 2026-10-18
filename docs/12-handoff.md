@@ -126,3 +126,9 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-007 CDP 元数据安全复核合并（2026-10-18）
 
 后续 [PR #10](https://github.com/devin930906/userscript-auto-healer/pull/10) 已在 [Windows Application Checks 39111684155](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111684155) 完成通过后，合并至 main SHA `16c7a62855d3e13f7f0c08ac90ca555578a54e6f`（源 HEAD `53f91afc70ba9ca15b0d1795e433c904e83ff485`）。变更限定为对所有 CDP 目标 ID（含无关网页目标）校验格式与重复、并在 WebSocket 连接延迟完成但请求已经取消时拒绝发送 `Target.getTargets`，补充 TEST-017 负例。该安全加固**仅说明该阶段测试通过**，不能推断 Tampermonkey 扩展、GM API、脚本实际执行或业务恢复已验收。继续 TASK-007 真实管理器前置条件、真实用户授权与业务断言；Stable EXE/ZIP 未完成。
+
+## （7）TASK-007 元数据拒绝门槛代码与验证（2026-10-18）
+
+复用 `feat/stable-development` 并提交 PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11)：`src/manager/tampermonkey-preflight.ts` 只在明确授权、已有运行线索、报告的 Tampermonkey 身份/版本及权限、已声明的 GM_getValue 和保守的 @match 检查满足时返回 `METADATA_ELIGIBLE_ONLY`；这一状态**不保证**报告真实、扩展已安装、脚本执行、GM API 或业务断言通过，必须由后续实际管理器实验独立验证。对禁用、错 ID、畸形版本、无 @grant、通配/排除规则等提供拒绝负例，测试文件加入 Windows `npm test`。
+
+源 SHA `ab250732165b8635c88e68a52ffee8d371aa1e7a` 的 [Windows Application Checks 39114195987](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195987) success（71 pass、0 fail、1 skip），[专用 Chrome 39114195971](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195971) success，Electron 沙箱运行 smoke success。修复了此前 PR #11 的 TypeScript 测试夹具类型错误；失败运行保留。以 PR #11 和 main 最新 SHA 重新核对是否整合。**下一任务继续 TASK-007 真实 Tampermonkey 授权 Profile / 版本与脚本安装状态 / GM API / 业务断言取证**，没有安全可信的实测证据时不能自动标记 TEST-017/018 通过；TASK-008..021 与 EXE+ZIP 仍未全部实现。

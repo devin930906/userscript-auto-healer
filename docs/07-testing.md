@@ -96,3 +96,7 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 ## （7）TEST-017 部分只读探测证据（2026-10-18）
 
 源 HEAD `f09e0e68fcb67c3dbdeb4b2b8fc48af250614bb0` 的 [Windows Application Checks 39111259895](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259895) 已实测产品适配器在独立 Windows Chrome 中只读调用浏览器 CDP `Target.getTargets`，并检验拒绝非目标管理器、网页冒充、畸形响应、伪造会话及未授权输入。64 项 Node 测试中 63 通过、0 失败、1 专用路径跳过；真实 Electron smoke 成功。返回仅能是 `RUNTIME_TARGET_HINT_ONLY` 或 `RUNTIME_NOT_OBSERVED` 等有限结果，**不是 Tampermonkey 产品 TEST-017 完整通过**。未实测真实 Tampermonkey 的该适配器安装/启用/版本/权限、GM 和业务断言，TEST-018 未执行；正式产品跨版本矩阵仍待独立证据。
+
+## （7）TEST-017 静态前置检查增量（2026-10-18）
+
+PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 新增 Tampermonkey 测试准备信息的失败关闭检查：未经授权、错误管理器、未声明 GM 授权、没有明确站点匹配、报告安装/启用状态不满足、通配或排除规则不可独立确认时拒绝；真实源元数据解析器参与回归。源 `ab250732165b8635c88e68a52ffee8d371aa1e7a` 的 [Application Checks 39114195987](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195987) 与 [Chrome 专项 39114195971](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195971) 已通过。这里只验证**对外部报告与静态元数据的保守检查逻辑**，报告数据本身未进行可信实时浏览器证明，也没有真实 Tampermonkey 安装、GM_getValue 或业务恢复测试。因此 TEST-017 仍部分执行、TEST-018 未完成，GATE-004/005 继续阻断。
