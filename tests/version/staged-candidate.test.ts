@@ -9,6 +9,7 @@ import {
   proposeLiteralSelectorPatch,type LiteralPatchRequest
 } from '../../src/repair/patch-planner';
 import {withNativeSourceLock} from '../../src/version/native-source-lock';
+import {verifyBackupRecoverySource} from '../../src/version/recovery-source';
 
 const original=[
   '// ==UserScript==',
@@ -61,6 +62,19 @@ test('TEST-019/020/021: stage a real candidate and verified backup, never rewrit
       proposal.candidateSource);
     assert.equal(await readFile(join(paths.backupDirectory,result.backupFileName),'utf8'),
       original);
+    // A successful staging receipt must still point to an independently
+    // readable recovery copy, not merely to a backup checked before staging.
+    const recovery=await verifyBackupRecoverySource({
+      sourcePath:paths.sourcePath,backupDirectory:paths.backupDirectory,
+      backupFileName:result.backupFileName,
+      expectedSha256:result.originalSha256,
+      expectedByteLength:Buffer.byteLength(original,'utf8'),
+      userApproved:true
+    });
+    assert.equal(recovery.status,'RECOVERY_SOURCE_VERIFIED_READ_ONLY',
+      JSON.stringify(recovery));
+    assert.equal(recovery.automaticPatchAllowed,false);
+    assert.equal(recovery.automaticRollbackAllowed,false);
     assert.equal(await readFile(paths.sourcePath,'utf8'),original);
     const serialized=JSON.stringify(result);
     assert.equal(serialized.includes(paths.sourcePath),false);
