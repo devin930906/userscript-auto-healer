@@ -8,6 +8,7 @@
  * automatically remove another process's or an abandoned lock.
  */
 import {createHash} from 'node:crypto';
+import type {BigIntStats} from 'node:fs';
 import {lstat,mkdir,rmdir} from 'node:fs/promises';
 import {dirname,join} from 'node:path';
 
@@ -45,8 +46,8 @@ export async function withNativeSourceLock<T>(
   if(typeof sourcePath!=='string'||typeof action!=='function')
     throw new NativeSourceLockError('INVALID_SOURCE');
   const parent=dirname(sourcePath);
-  let start:Awaited<ReturnType<typeof lstat>>;
-  let parentStart:Awaited<ReturnType<typeof lstat>>;
+  let start:BigIntStats;
+  let parentStart:BigIntStats;
   try{
     start=await lstat(sourcePath,{bigint:true});
     parentStart=await lstat(parent,{bigint:true});
@@ -67,7 +68,7 @@ export async function withNativeSourceLock<T>(
     throw failure(error);
   }
 
-  let acquired:Awaited<ReturnType<typeof lstat>>|undefined;
+  let acquired:BigIntStats|undefined;
   try{
     acquired=await lstat(lockPath,{bigint:true});
     if(acquired.isSymbolicLink()||!acquired.isDirectory())
