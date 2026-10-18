@@ -196,7 +196,21 @@ async function main() {
           const result=await installer.evaluate(async()=>{
             try{
               const area=await chrome.storage.local.get(null);
-              return {storageKeys:Object.keys(area).slice(0,24),availableUserScripts:Boolean(chrome.userScripts)};
+              const saved=area['scr:1'] || {};
+              const regs=chrome.userScripts?await chrome.userScripts.getScripts():[];
+              return {
+                storageKeys:Object.keys(area).slice(0,24),
+                testScript:{
+                  name:saved.meta?.name,
+                  match:saved.meta?.match,
+                  include:saved.meta?.include,
+                  config:saved.config,
+                  codePresent:Boolean(area['code:1']),
+                  id:saved.props?.id,
+                },
+                registration:regs.map(g=>({id:g.id,matches:g.matches,allFrames:g.allFrames,runAt:g.runAt})),
+                availableUserScripts:Boolean(chrome.userScripts),
+              };
             }catch(e){return {error:String(e).slice(0,180)}}
           });
           console.log('Manager installation storage/API diagnostic: '+JSON.stringify(result));
@@ -208,6 +222,8 @@ async function main() {
       }
     } else console.log('INCOMPLETE authentic installer: no manager confirmation tab observed');
     const probe=await context.newPage();
+    probe.on('console',m=>{if(m.type()==='error')console.log('FIXTURE_CONSOLE_ERROR: '+m.text().slice(0,380))});
+    probe.on('pageerror',e=>console.log('FIXTURE_PAGE_ERROR: '+String(e).slice(0,380)));
     await probe.goto('http://127.0.0.1:'+port+'/fixture',{waitUntil:'domcontentloaded'});
     let execution={installed:false};
     try {
