@@ -88,3 +88,7 @@ PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1) 已合并�
 TASK-002（REQ-001..003 / TEST-001..003）的只读导入、字节/编码/哈希、路径安全与目录扫描、GUI 原生选择及拖放入口已通过 Windows 自动化限定范围验证：[Actions 39103414900](https://github.com/devin930906/userscript-auto-healer/actions/runs/39103414900)，源提交 `f238366e4d436a7d245e8ae609e8704b25b4b1fc`；PR [#2](https://github.com/devin930906/userscript-auto-healer/pull/2) 已合并，main 合并 SHA `0a8b8ff1033fc99a01cc0c24978c092a016e7c7a`。已确认的实测仅为 Windows runner 的 Node 回归与真实 Electron 加程序化拖放，非用户手动文件夹拖放或完整产品 GATE。
 
 下一项依赖满足的正式任务：**TASK-003（REQ-004/011、TEST-004/011）**，在现有 `main` 上基于用户脚本真实字节建立元数据/AST 静态证据并保持只读；TASK-005 作为 TASK-001 后可独立推进的安全浏览器入口。未完成 Tampermonkey 产品适配、真实坏脚本自动修复、备份回滚、完整 EXE+ZIP 和所有 GATE；不重做 TASK-001/002，也不从前期准备重新开始。
+
+## （7）TASK-003 合并与 TASK-004 续接（2026-10-18）
+
+Acorn AST 与元数据只读分析（REQ-004/011，TEST-004/011 限阶段）已在 Windows CI 通过：[Actions 39104178253](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104178253)，HEAD `534f97b464384d18559d0c61127de7c6b3abc9c0`；[PR #3](https://github.com/devin930906/userscript-auto-healer/pull/3) 已合并至 main SHA `cc15da038ecf01c4c03001e7165b7698eecab4d5`。这不是浏览器动态 DOM/脚本业务/修复的完整验收。按已确认依赖，下一项可执行为 **TASK-004** 场景登记、真实 URL/登录前提和业务断言契约；**TASK-005** Chrome/Profile/CDP 也可独立开展。不得回到 TASK-001/002/003 重做已验证代码，必须先复查当前 main SHA/PR/Actions。

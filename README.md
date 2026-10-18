@@ -44,3 +44,7 @@ TASK-001 安全桌面骨架已提交至 `feat/stable-development`，在 Windows 
 ## （7）TASK-002 合并与继续开发（2026-10-18）
 
 已在 [PR #2](https://github.com/devin930906/userscript-auto-healer/pull/2) 合并只读文件/文件夹/拖放导入、字节哈希校验、编码和路径安全负例、重复识别、批次大小控制。Windows [Actions 39103414900](https://github.com/devin930906/userscript-auto-healer/actions/runs/39103414900) 在源 SHA `f238366` 上通过 Node/真实 Electron 自动化。main 合并提交 `0a8b8ff1033fc99a01cc0c24978c092a016e7c7a`。**不包含自动修复**；用户实机 GUI 交互、真实管理器/Chrome、备份回滚及正式 EXE+ZIP 仍未完整验收。下一任务为 TASK-003 的元数据与 AST 静态分析。
+
+## （7）TASK-003 静态分析入库（2026-10-18）
+
+[TASK-003 PR #3](https://github.com/devin930906/userscript-auto-healer/pull/3) 已合并（main `cc15da038ecf01c4c03001e7165b7698eecab4d5`）；[Windows Actions 39104178253](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104178253) 完成静态元数据/AST 单元和 Electron 安全回归。本阶段不运行导入脚本，不做自动补丁或覆盖；动态 DOM 与 Tampermonkey 实际恢复另行验收。下一开发任务为 TASK-004 场景契约。
