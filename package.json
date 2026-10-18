@@ -7,10 +7,12 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.cjs",
-    "test": "npm run build && node --test dist/tests/security/desktop-boundary.test.js",
+    "test": "npm run build && node --test dist/tests/security/desktop-boundary.test.js dist/tests/import/import-service.test.js",
     "start": "electron ."
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@types/node": "22.18.0",
     "electron": "44.9.0",
