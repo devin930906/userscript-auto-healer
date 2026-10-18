@@ -208,9 +208,12 @@ test('TEST-019: stale inputs and malformed or hostile receipts fail closed',()=>
   assert.equal(auditProposedLiteralSelectorPatch({
     ...req,source:source+'//changed'
   },generated).status,'BLOCKED');
-  assert.equal(auditProposedLiteralSelectorPatch({
+  assert.deepEqual(auditProposedLiteralSelectorPatch({
     ...req,expectedSourceSha256:'0'.repeat(64)
-  },generated).reason,'PLANNER_REJECTED');
+  },generated),{
+    status:'BLOCKED',reason:'PLANNER_REJECTED',automaticPatchAllowed:false,
+    tampermonkeyVerified:false,businessRecoveredVerified:false
+  });
   const contaminated=Object.create({status:'CANDIDATE_ONLY'});
   Object.assign(contaminated,generated);
   const throwingGetter={...generated};
