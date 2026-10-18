@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.cjs",
-    "test": "npm run build && node --test --test-concurrency=1 dist/tests/security/desktop-boundary.test.js dist/tests/import/import-service.test.js dist/tests/analyze/metadata.test.js dist/tests/analyze/selector.test.js dist/tests/scenarios/registry.test.js dist/tests/browser/launch.test.js dist/tests/browser/cdp-session.test.js dist/tests/browser/owned-chrome.test.js dist/tests/observe/dom-observer.test.js dist/tests/observe/observer-runtime.test.js dist/tests/manager/tampermonkey-adapter.test.js dist/tests/manager/tampermonkey-preflight.test.js dist/tests/manager/tampermonkey-gm-probe.test.js dist/tests/manager/tampermonkey-diagnostic.test.js",
+    "test": "npm run build && node --test --test-concurrency=1 dist/tests/security/desktop-boundary.test.js dist/tests/import/import-service.test.js dist/tests/analyze/metadata.test.js dist/tests/analyze/selector.test.js dist/tests/scenarios/registry.test.js dist/tests/browser/launch.test.js dist/tests/browser/cdp-session.test.js dist/tests/browser/owned-chrome.test.js dist/tests/observe/dom-observer.test.js dist/tests/observe/observer-runtime.test.js dist/tests/manager/tampermonkey-adapter.test.js dist/tests/manager/tampermonkey-preflight.test.js dist/tests/manager/tampermonkey-gm-probe.test.js dist/tests/manager/tampermonkey-diagnostic.test.js dist/tests/diagnostics/fault-classifier.test.js",
     "start": "electron ."
   },
   "engines": {

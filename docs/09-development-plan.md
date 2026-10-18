@@ -136,3 +136,8 @@ TASK-001/002 均已合并；后续优先开展 **TASK-003**（REQ-004、REQ-011�
 ## （7）TASK-007 目标元素动作归属校验（2026-10-18）
 
 在既有 PR #19 已合并后的 TASK-007 限定取证路径中，继续收紧 TEST-018 阶段性 DOM 证据：除了 `#current-target` 唯一存在及 `[data-uah-probe-action="done"]` 动作计数，还要求复合选择器 `#current-target[data-uah-probe-action="done"]` 与动作计数严格一致。防止其他 DOM 元素被设置动作属性时误将其归属到唯一目标。新增错误归属及畸形计数的拒绝测试，并在隔离 Windows Chrome 负例中实际查询复合选择器。该修改仍不证明 Tampermonkey 身份、脚本注入、真实 GM API 或自动修复；TEST-017/018 与 GATE-004/005 仍未通过，正式测试须以对应提交的 Actions 实测结果为准。
+
+
+## （7）TASK-008 故障分类与安全日志的独立阶段实现（2026-10-18）
+
+由于 TASK-007 的真实 Tampermonkey 专项验收仍缺少获授权隔离环境证据，仅开展 TASK-008 不依赖前置真扩展的可隔离部分：新增 `src/diagnostics/fault-classifier.ts` 与对应 TEST-013 单元测试，并纳入已有 Windows Application Skeleton Checks 的 npm 测试命令。分类输入仅允许安全的信号代码和短证据 ID；不同故障类型同时存在返回 UNKNOWN，网络/权限/脚本异常绝不自动转为 DOM 修复。日志只在内存中存放结构化白名单字段并限制容量，不能处理原始脚本、凭据或页面数据。分类结果永不授权自动补丁或宣称真实 Tampermonkey / 业务恢复。**TASK-008 保持开发中**，待 TASK-007 完整验证后，仍需接入真实可验证诊断源及完成 TEST-013 的集成验证；TASK-009 不能视为已获准自动修复。此处不声明 CI 测试已通过，以最终 Actions 的实际执行为准。
