@@ -162,3 +162,41 @@ test('TEST-009: a forged shape cannot authorize Chrome target creation',async()=
   assert.deepEqual(await openApprovedTarget(forged,'https://example.com/',true),
     {ok:false,code:'UNVERIFIED_BROWSER'});
 });
+
+/** Dedicated cloud job supplies a signed, independently extracted official
+ * Chrome for Testing. Standard app-check skips this optional matrix cell.
+ */
+test('TEST-006/007/008/009: independently extracted signed portable Chrome',async t=>{
+  const executable=process.env.UAH_TEST_PORTABLE_CHROME;
+  if(!executable){t.skip('Dedicated portable Chrome job supplies this fixture');return;}
+  assert.equal(process.platform,'win32');
+  await access(executable);
+  const root=await mkdtemp(join(tmpdir(),'uah-portable-product-'));
+  const profile=join(root,'profile');
+  let stop:()=>void=()=>{};
+  t.after(async()=>{stop();await delay(900);await rm(root,{force:true,recursive:true}).catch(()=>undefined);});
+  const port=await unusedLoopbackPort();
+  const cfg=config(executable,profile,port);
+  const prepared=await prepareApprovedIsolatedProfile(cfg,true);
+  assert.equal(prepared.ok,true,JSON.stringify(prepared));
+  const session=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+  assert.equal(session.ok,true,JSON.stringify(session));
+  if(!session.ok)return;
+  stop=session.stop;
+  assert.ok(session.pid>0);
+  assert.equal(session.websocketHandshakeVerified,true);
+  assert.equal(isLiveApprovedChromeSession(session),true);
+  const fixture=createServer((_req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end('<title>Portable product check</title>');});
+  await new Promise<void>((resolve,reject)=>{
+    fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
+  });
+  t.after(()=>new Promise<void>(resolve=>fixture.close(()=>resolve())));
+  const address=fixture.address();
+  if(!address||typeof address==='string')throw Error('MISSING_TEST_SITE');
+  const site='http://127.0.0.1:'+address.port+'/';
+  const page=await openApprovedTarget(session,site,true);
+  assert.equal(page.ok,true,JSON.stringify(page));
+  if(page.ok)assert.equal(page.businessVerified,false);
+  stop();
+  assert.equal(isLiveApprovedChromeSession(session),false);
+});

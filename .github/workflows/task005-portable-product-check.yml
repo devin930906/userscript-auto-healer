@@ -1,0 +1,65 @@
+name: TASK-005 Portable Chrome Product Validation
+
+on:
+  pull_request:
+    paths:
+      - 'src/browser/**'
+      - 'tests/browser/**'
+      - 'package.json'
+      - '.github/workflows/task005-portable-product-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-product-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-chrome:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked compiler without running install scripts
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile product browser tests
+        shell: pwsh
+        run: npm run build
+      - name: Verify pinned extracted Chrome for Testing with real product modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '154.0.8037.57'
+          $root = Join-Path $env:RUNNER_TEMP ("uah-portable-product-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path $root) { throw 'Refuse an existing test directory' }
+          New-Item -Path $root -ItemType Directory | Out-Null
+          $zip = Join-Path $root 'chrome-win64.zip'
+          $uri = "https://storage.googleapis.com/chrome-for-testing-public/$version/win64/chrome-win64.zip"
+          Invoke-WebRequest -Uri $uri -OutFile $zip -MaximumRedirection 4 -TimeoutSec 120
+          if ((Get-Item $zip).Length -lt 1000000) { throw 'Unexpectedly small official Chrome archive' }
+          Add-Type -AssemblyName System.IO.Compression
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            foreach ($entry in $archive.Entries) {
+              $name = $entry.FullName.Replace('/', '\')
+              if ($name.StartsWith('\') -or $name -match '(^|\\)\.\.(\\|$)' -or $name -match '^[A-Za-z]:') {
+                throw "Unsafe archive member: $name"
+              }
+            }
+          } finally { $archive.Dispose() }
+          Expand-Archive -LiteralPath $zip -DestinationPath $root
+          $binary = Join-Path $root 'chrome-win64\chrome.exe'
+          if (!(Test-Path -LiteralPath $binary)) { throw 'Portable Chrome binary absent' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $binary
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
+            throw 'Chrome for Testing executable signature untrusted'
+          }
+          $env:UAH_TEST_PORTABLE_CHROME = $binary
+          node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
