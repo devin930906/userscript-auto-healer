@@ -33,7 +33,7 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 仅运行目标探测与拒绝负例已阶段执行；真实 Tampermonkey 安装/授权/GM/业务验收仍未执行 |
 | TEST-018 | REQ-018 | 端到端 | Chrome+真实 Tampermonkey | 真实 Tampermonkey/测试脚本已安装并授权，场景已定义 | 失效/已修脚本、GM API、不同注入时机 | 在 Tampermonkey 中实际注入，调用 GM API、执行业务断言与回归，记录扩展和浏览器版本及运行证据 | 真实 Tampermonkey 的业务断言满足才 VERIFIED | Violentmonkey/原生 DOM/人工修正版冒充产品自动修复 | 独立 Tampermonkey E2E | 已规划 |
 | TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 部分实现并验证：TASK-009 的独立只读候选复核、元数据与伪造输入拒绝在 Windows Actions #39142638654 通过；完整端到端集成、自动应用门控与真实 Tampermonkey 业务验收未完成 |
-| TEST-020 | REQ-020 | 可靠性 | Windows NTFS | 可修改测试文件 | 成功/磁盘满/文件锁 | 版本备份回滚：应用、模拟中断、回滚 | 原字节 hash 恢复 | 原文件损坏 | 故障注入 | 已规划 |
+| TEST-020 | REQ-020 | 可靠性 | Windows NTFS | 可修改测试文件 | 成功/磁盘满/文件锁 | 版本备份回滚：应用、模拟中断、回滚 | 原字节 hash 恢复 | 原文件损坏 | 故障注入 | 局部验证（PR #44 的只读原文核验负例在 Windows Actions #39147314079 通过；完整备份/写入中断/回滚故障注入未执行） |
 | TEST-021 | REQ-021 | 单元/集成 | Windows FS | 候选+证据 | VERIFIED / UNKNOWN | 自动应用策略：分别执行门控 | UNKNOWN 原文件不变 | 无证据覆盖 | 单元+集成 | TEST-021 离线拒绝负例已在 Windows #39146248924 验证；真实 Tampermonkey/业务证据、受信任源哈希、备份与自动应用集成仍未执行 |
 | TEST-022 | REQ-022 | 集成 | Batch 测试环境 | 多份脚本 | 一成功、一失败、一取消 | 批量取消与恢复：执行/重启/重试 | 隔离终态、无重复应用 | 单错拖垮全部 | 集成 | 已规划 |
 | TEST-023 | REQ-023 | 端到端 | Chrome 管理器 | 本地修复产物 | 本地与已安装不同版本 | 导出与扩展更新：分别验证两个状态 | 保存与浏览器内更新不同步时显式显示 | 假称已安装 | 真实 E2E | 已规划 |
@@ -131,3 +131,8 @@ PR [#21](https://github.com/devin930906/userscript-auto-healer/pull/21) 已以�
 TEST-018 范围内的**临时夹具证据处理负例**：源 `e05933d3850761c337605d7a4321b90928596245`，[Actions #39132321986](https://github.com/devin930906/userscript-auto-healer/actions/runs/39132321986) 成功（108 个 Node case 中 107 pass、0 fail、1 skip，真实 Windows Electron smoke 通过），PR #25 已合并。覆盖缺失/混入选择器、畸形节点计数、无效路由与时间戳；结果只证明拒绝机制及有限 DOM 观察，不证明真实管理器、脚本执行、GM 或修复恢复。正式 TEST-017/018 继续未通过。
 
 TEST-013 范围内的**稳定观察诊断阶段集成**：源 `b68c528cee076bc89c0e7544dc0fc23c16fcf498`，[Actions #39132694315](https://github.com/devin930906/userscript-auto-healer/actions/runs/39132694315) 成功（110 个 Node case 中 109 pass、0 fail、1 skip，真实 Windows Chrome 只读多次采样与 Electron smoke 均通过），PR #26 已合并。数据在采样窗口内变化时保守阻断；结果始终不授权脚本修改。未来仍须把可信故障源、真实 Tampermonkey 运行、业务断言和根因联动纳入完整 TEST-013/017/018；全部 Stable GATE 继续独立验收。
+
+
+## （7）TEST-020 原文件只读核验阶段结果（2026-10-19）
+
+PR #44 增加三项只读源文件校验负例，源 SHA `31a31f111a7e6dbd35dbe454305d99431c1ad954` 的 [Windows 应用检查 #39147314079](https://github.com/devin930906/userscript-auto-healer/actions/runs/39147314079) 成功运行包含这三项在内的 151 项用例（150 pass、0 fail、1 条件 skip），另经 Electron 运行检查成功。该结果仅证明读取时的 SHA-256、文件类型与身份检查，**并未执行备份/原子写入/故障注入/回滚**，不能把 TEST-020 或 GATE-007 标为通过。
