@@ -37,19 +37,27 @@ function validPath(path:unknown):path is string {
 }
 
 
-// Windows filename components are limited to 255 UTF-16 units. A long but
-// valid .user.js filename needs room for the random UUID and backup suffix.
-// Iterate code points to avoid splitting surrogate pairs on truncation.
+// Windows filename components are limited to 255 UTF-16 units. Keep room
+// for a UUID and suffix. Truncation alone can bind two different long script
+// names to the same recovery prefix; include a digest of the ENTIRE stem.
+// Iterate Unicode code points to avoid splitting surrogate pairs.
 const MAX_BACKUP_PREFIX_UNITS=255-(1+36+'.backup.user.js'.length);
-/** Stable basename binding shared with read-only recovery verification. */
+const LONG_NAME_HASH_HEX_UNITS=24;
+/** Stable basename binding shared with read-only recovery verification.
+ * Legacy truncated-only names cannot prove which long source they came from:
+ * keep those files intact, but refuse to attest them as recovery sources.
+ */
 export function backupPrefix(sourcePath:string):string {
   const stem=basename(sourcePath).replace(/\.user\.js$/i,'');
+  if(stem.length<=MAX_BACKUP_PREFIX_UNITS)return stem;
+  const suffix='~'+createHash('sha256').update(stem,'utf8')
+    .digest('hex').slice(0,LONG_NAME_HASH_HEX_UNITS);
   let prefix='';
   for(const character of stem){
-    if(prefix.length+character.length>MAX_BACKUP_PREFIX_UNITS)break;
+    if(prefix.length+character.length>MAX_BACKUP_PREFIX_UNITS-suffix.length)break;
     prefix+=character;
   }
-  return prefix;
+  return prefix+suffix;
 }
 
 /** A caller consent boolean is NOT independent proof of native user selection.
