@@ -11,6 +11,7 @@ import {lstat,open} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
+import {hasUnsafePathLink} from './path-boundary';
 
 type RecoveryFailure=
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|
@@ -98,6 +99,8 @@ export async function verifyBackupRecoverySource(
   const path=join(directory,name);
   if(path===source)return deny('BACKUP_ALIAS_REJECTED');
 
+  if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
+  if(await hasUnsafePathLink(source))return deny('INVALID_PATH');
   const dirBefore=await lstat(directory,{bigint:true});
   if(dirBefore.isSymbolicLink()||!dirBefore.isDirectory())
     return deny('BACKUP_DIRECTORY_INVALID');
@@ -143,6 +146,8 @@ export async function verifyBackupRecoverySource(
     const byPath=await lstat(path,{bigint:true});
     const sourceAfter=await lstat(source,{bigint:true});
     const dirAfter=await lstat(directory,{bigint:true});
+    if(await hasUnsafePathLink(directory)||await hasUnsafePathLink(source))
+      return deny('FILE_CHANGED');
     if(byPath.isSymbolicLink()||!byPath.isFile()||byPath.nlink!==1n||
        sourceAfter.isSymbolicLink()||!sourceAfter.isFile()||
        sourceAfter.nlink!==1n||

@@ -194,3 +194,27 @@ test('TEST-020: distinct long script names cannot borrow each other\'s identical
     assert.deepEqual(await readFile(otherPath),script);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('TEST-020: backup-only refuses a nested junction ancestor without publishing a copy',async t=>{
+  await fixture(async(file,backupDir,root)=>{
+    const alias=join(root,'junction-to-root');
+    try{
+      await symlink(root,alias,process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Directory junction creation unavailable on this runner');return;
+      }
+      throw error;
+    }
+    const redirected=join(alias,'backups');
+    assert.equal((await lstat(redirected)).isSymbolicLink(),false);
+    const result=await createVerifiedBackupOnly({
+      sourcePath:file,backupDirectory:redirected,
+      expectedSha256:hash(script),userApproved:true
+    });
+    assert.equal(result.status,'BLOCKED');
+    if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_DIRECTORY_INVALID');
+    assert.deepEqual(await readdir(backupDir),[]);
+    assert.deepEqual(await readFile(file),script);
+  });
+});
