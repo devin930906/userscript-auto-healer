@@ -113,7 +113,7 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
   }catch{return {ok:false,code:'IDENTITY_UNAVAILABLE'};}
   if(data.status!=='Valid' || typeof data.signer!=='string' ||
      !/(?:^|,)\s*CN=Google LLC(?:,|$)/i.test(data.signer) ||
-     data.name!=='Google Chrome' || typeof data.fileName!=='string' ||
+     !['Google Chrome','Google Chrome for Testing'].includes(data.name as string) || typeof data.fileName!=='string' ||
      data.fileName.toLowerCase()!=='chrome.exe')
     return {ok:false,code:'UNTRUSTED_BINARY'};
   if(typeof data.version!=='string' ||

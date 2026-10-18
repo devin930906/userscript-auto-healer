@@ -73,3 +73,25 @@ test('TEST-006: a renamed executable fixture cannot pass signed Chrome identity'
   assert.deepEqual(await inspectWindowsChromeBinary(config(f.executable,f.profile,0)),
     {ok:false,code:'INVALID_CONFIG'});
 });
+
+
+test('TEST-006: inspect actual official Chrome binary on Windows runner when installed',async t=>{
+  if(process.platform!=='win32')return;
+  const { access }=await import('node:fs/promises');
+  const { win32 }=await import('node:path');
+  const bases=[process.env['PROGRAMFILES'],process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]
+    .filter((v):v is string=>typeof v==='string'&&v.length>0);
+  let chrome:string|undefined;
+  for(const base of bases){
+    const path=win32.join(base,'Google','Chrome','Application','chrome.exe');
+    try {await access(path);chrome=path;break;}catch { /* another location */ }
+  }
+  if(!chrome){t.skip('No installed Chrome on this Windows image');return;}
+  const decision=await inspectWindowsChromeBinary(config(chrome,
+    win32.join(process.env.TEMP??'C:\\Temp','uah-test-isolated-profile')));
+  assert.equal(decision.ok,true,JSON.stringify(decision));
+  if(decision.ok){
+    assert.match(decision.version,/^\d+\.\d+\.\d+\.\d+$/);
+    assert.equal(decision.runtimeVerified,false);
+  }
+});
