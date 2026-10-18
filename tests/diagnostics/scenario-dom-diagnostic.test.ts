@@ -84,7 +84,7 @@ test('TEST-013: CDP failures and same-origin SPA route change block diagnostic p
    sample(matched,true),
    {...sample(matched),routeChanged:undefined} as unknown as ObservationResult,
    {...sample(matched),selectorCounts:{...matched,'#unapproved':1}} as ObservationResult,
-   {...sample(matched),summary:{...sample(matched).summary,elementCount:0}} as ObservationResult,
+   {...sample(matched),summary:{elementCount:0,iframeCount:0,visibleShadowRoots:0,blindSpots:[]}} as ObservationResult,
    sample({'#current-target':1}),
    sample({'#current-target':1,'#obsolete-target':NaN}),
    sample({'#current-target':1,'#obsolete-target':-1}),
