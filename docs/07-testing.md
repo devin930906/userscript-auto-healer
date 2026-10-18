@@ -100,3 +100,6 @@ POC-02T 是尚未执行的 Tampermonkey 云端可行性实验，并非正式 TES
 ## （7）TEST-017 静态前置检查增量（2026-10-18）
 
 PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 新增 Tampermonkey 测试准备信息的失败关闭检查：未经授权、错误管理器、未声明 GM 授权、没有明确站点匹配、报告安装/启用状态不满足、通配或排除规则不可独立确认时拒绝；真实源元数据解析器参与回归。源 `ab250732165b8635c88e68a52ffee8d371aa1e7a` 的 [Application Checks 39114195987](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195987) 与 [Chrome 专项 39114195971](https://github.com/devin930906/userscript-auto-healer/actions/runs/39114195971) 已通过。这里只验证**对外部报告与静态元数据的保守检查逻辑**，报告数据本身未进行可信实时浏览器证明，也没有真实 Tampermonkey 安装、GM_getValue 或业务恢复测试。因此 TEST-017 仍部分执行、TEST-018 未完成，GATE-004/005 继续阻断。
+
+## （7）TASK-007 独立 DOM 对照取证接口（待运行验收）
+新增安全诊断会话的 `observe(mode, explicitUserApproved)` 与 `domSnapshot()`，在显式授权、自有 Chrome/CDP 会话、已确认的专用测试页目标和同源重核后，使用只读 `DOM.querySelectorAll` 比对 `#current-target` 与 `[data-uah-probe-action="done"]`。该证据仅为 `LIMITED_FIXTURE_DOM_ONLY`，不能证明脚本由 Tampermonkey 注入，也不能证明 `GM_getValue`、安装/权限、真实业务恢复或 TEST-018/GATE-004/005 通过。必要 E2E 仍依赖独立真实 Tampermonkey 及经许可的修复场景。任何失败/路由变化拒绝被当作通过；对应测试在实际 CI 执行前为未执行。

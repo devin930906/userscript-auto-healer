@@ -8,6 +8,7 @@
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {openApprovedTarget,type OpenTargetResult} from '../browser/cdp-target';
+import {observeApprovedDom,type ObservationResult} from '../observe/dom-observer';
 import {
  inspectApprovedTampermonkeyRuntime,type ManagerPresenceResult
 } from './tampermonkey-adapter';
@@ -27,6 +28,58 @@ export interface ManualDiagnosticAssessment {
  readonly gmApiVerified:false;
  readonly businessVerified:false;
 }
+/** Observation made by the application's read-only CDP DOM inspector, not a
+ * Tampermonkey provenance or GM API attestation. A matched fixture could
+ * still be modified by an unrelated extension or page code.
+ */
+export interface FixtureDomEvidence {
+ readonly status:'LIMITED_FIXTURE_DOM_ONLY';
+ readonly mode:GmProbeMode;
+ readonly observedAt:string;
+ readonly targetCount:1;
+ readonly actionCount:0|1;
+ readonly fixtureDomMatchesExpected:boolean;
+ readonly extensionAuthenticityVerified:false;
+ readonly scriptInstallationVerified:false;
+ readonly gmApiVerified:false;
+ readonly businessVerified:false;
+}
+export type FixtureDomEvidenceResult =
+ |{readonly ok:true;readonly evidence:FixtureDomEvidence}
+ |{readonly ok:false;readonly code:
+    'NOT_AUTHORIZED'|'INVALID_MODE'|'SESSION_NOT_ACTIVE'|
+    'MODE_NOT_VISITED'|'OBSERVATION_IN_PROGRESS'|'INVALID_FIXTURE_OBSERVATION'|
+    Extract<ObservationResult,{ok:false}>['code']};
+const FIXTURE_SELECTORS=[
+ '#current-target','#obsolete-target','[data-uah-probe-action="done"]'
+] as const;
+
+/** Pure, conservative mapping of a limited DOM sample into a diagnostic
+ * observation. Even a perfect result can NEVER set businessVerified=true.
+ */
+export function summarizeFixtureDomEvidence(
+ mode:GmProbeMode,observed:ObservationResult
+):FixtureDomEvidenceResult{
+ if(!observed.ok)return {ok:false,code:observed.code};
+ const counts=observed.selectorCounts;
+ const current=counts[FIXTURE_SELECTORS[0]];
+ const obsolete=counts[FIXTURE_SELECTORS[1]];
+ const acted=counts[FIXTURE_SELECTORS[2]];
+ if(observed.routeChanged||observed.originMatchesApproved!==true||
+    observed.status!=='LIMITED_DOM_OBSERVATION'||
+    observed.fullPageVerified!==false||observed.userscriptVerified!==false||
+    !Number.isInteger(current)||current!==1||
+    !Number.isInteger(obsolete)||obsolete!==0||
+    !Number.isInteger(acted)||(acted!==0&&acted!==1)||
+    typeof observed.observedAt!=='string'||!Number.isFinite(Date.parse(observed.observedAt)))
+   return {ok:false,code:'INVALID_FIXTURE_OBSERVATION'};
+ return {ok:true,evidence:Object.freeze({
+   status:'LIMITED_FIXTURE_DOM_ONLY',mode,observedAt:observed.observedAt,
+   targetCount:1,actionCount:acted as 0|1,
+   fixtureDomMatchesExpected:acted===(mode==='broken'?0:1),
+   ...emptyFlags
+ })};
+}
 type VisitStatus=
  |{readonly ok:true;readonly status:'TARGET_ID_AND_URL_MATCH_ONLY';
    readonly targetId:string;readonly mode:GmProbeMode;
@@ -43,6 +96,11 @@ export interface ManualTampermonkeyDiagnosticSession {
  readonly runtimeHint:Extract<ManagerPresenceResult,{ok:true}>;
  /** Only navigates a new tab in the already-owned isolated Chrome. */
  readonly visit:(mode:GmProbeMode,explicitUserApproved:boolean)=>Promise<VisitStatus>;
+ /** Browser-verified tab and actual DOM counts only; does NOT prove GM calls. */
+ readonly observe:(mode:GmProbeMode,explicitUserApproved:boolean,
+   signal?:AbortSignal)=>Promise<FixtureDomEvidenceResult>;
+ /** Snapshot of limited, non-attesting DOM observations, no script token. */
+ readonly domSnapshot:()=>Readonly<Partial<Record<GmProbeMode,FixtureDomEvidence>>>;
  /** Always marks authenticity, installation, GM and business verification false. */
  readonly snapshot:()=>ManualDiagnosticAssessment;
  /** Closes only the disposable fixture, NOT the separately owned Chrome. */
@@ -161,6 +219,9 @@ export async function startApprovedTampermonkeyDiagnostic(
  const probe=fixture.session;
  let stopped=false;
  const visits=createManualModeVisitLatch();
+ const modeTargets:Partial<Record<GmProbeMode,Extract<OpenTargetResult,{ok:true}>>>={};
+ const domEvidence:Partial<Record<GmProbeMode,FixtureDomEvidence>>={};
+ let observationInProgress=false;
  const ready=()=>!stopped&&Date.now()<probe.expiresAt&&
    !options.signal?.aborted&&isLiveApprovedChromeSession(browser);
  const stop=async()=>{stopped=true;await probe.stop();};
@@ -177,12 +238,32 @@ export async function startApprovedTampermonkeyDiagnostic(
      if(!result.ok)return {ok:false,code:result.code};
      if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
      confirmed=true;
+     modeTargets[mode]=result;
      return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
        targetId:result.targetId,mode,gmApiVerified:false,businessVerified:false};
    }finally{
      visits.finish(mode,confirmed);
    }
  };
+ const observe:ManualTampermonkeyDiagnosticSession['observe']=
+   async(mode,explicitUserApproved,signal)=>{
+     if(explicitUserApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+     if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
+     if(!ready()||signal?.aborted)return {ok:false,code:'SESSION_NOT_ACTIVE'};
+     const target=modeTargets[mode];
+     if(!target)return {ok:false,code:'MODE_NOT_VISITED'};
+     if(observationInProgress)return {ok:false,code:'OBSERVATION_IN_PROGRESS'};
+     observationInProgress=true;
+     try{
+       const sample=await observeApprovedDom(browser,target,
+         probe.origin+'/?mode='+mode,true,[...FIXTURE_SELECTORS],signal);
+       if(!ready()||signal?.aborted)return {ok:false,code:'SESSION_NOT_ACTIVE'};
+       const result=summarizeFixtureDomEvidence(mode,sample);
+       if(result.ok)domEvidence[mode]=result.evidence;
+       return result;
+     }finally{observationInProgress=false;}
+   };
+ const domSnapshot=()=>Object.freeze(ready()?{...domEvidence}:{});
  const snapshot=():ManualDiagnosticAssessment=>{
    if(!ready())return assessManualProbeObservations({}, {broken:false,fixed:false});
    return assessManualProbeObservations(probe.receiptSnapshot(),visits.snapshot());
@@ -190,6 +271,6 @@ export async function startApprovedTampermonkeyDiagnostic(
  return {ok:true,session:Object.freeze({
    status:'MANUAL_TEST_READY_NOT_VERIFIED',source:probe.source,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
-   visit,snapshot,stop
+   visit,observe,domSnapshot,snapshot,stop
  })};
 }

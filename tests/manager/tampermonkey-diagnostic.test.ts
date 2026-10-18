@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
- assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch
+ assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch,
+ summarizeFixtureDomEvidence
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -33,6 +34,61 @@ test('TEST-017: concurrent or duplicate manual visits are blocked before CDP nav
  // A late failure notification cannot roll back an already confirmed visit.
  visits.finish('broken',false);
  assert.deepEqual(visits.snapshot(),{broken:true,fixed:true});
+});
+
+test('TEST-018 stage: read-only DOM fixture marker is evidence, never a GM or manager attestation',()=>{
+ const sample=(actionCount:number,routeChanged=false)=>({
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged,
+   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
+   selectorCounts:{'#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':actionCount},
+   fullPageVerified:false as const,userscriptVerified:false as const
+ });
+ const broken=summarizeFixtureDomEvidence('broken',sample(0));
+ const fixed=summarizeFixtureDomEvidence('fixed',sample(1));
+ for(const [result,expected] of [[broken,true],[fixed,true]] as const){
+   assert.equal(result.ok,true);
+   if(result.ok){
+     assert.equal(result.evidence.fixtureDomMatchesExpected,expected);
+     assert.equal(result.evidence.extensionAuthenticityVerified,false);
+     assert.equal(result.evidence.scriptInstallationVerified,false);
+     assert.equal(result.evidence.gmApiVerified,false);
+     assert.equal(result.evidence.businessVerified,false);
+   }
+ }
+ const absent=summarizeFixtureDomEvidence('fixed',sample(0));
+ assert.equal(absent.ok,true);
+ if(absent.ok)assert.equal(absent.evidence.fixtureDomMatchesExpected,false);
+ const inappropriate=summarizeFixtureDomEvidence('broken',sample(1));
+ assert.equal(inappropriate.ok,true);
+ if(inappropriate.ok)assert.equal(inappropriate.evidence.fixtureDomMatchesExpected,false);
+});
+test('TEST-018: different URL, malformed DOM or failed CDP cannot become fixture evidence',()=>{
+ const base={
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged:false,
+   summary:{elementCount:3,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
+   selectorCounts:{'#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':1},
+   fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ for(const change of [
+   {routeChanged:true},{originMatchesApproved:false},
+   {selectorCounts:{...base.selectorCounts,'#current-target':0}},
+   {selectorCounts:{...base.selectorCounts,'#obsolete-target':1}},
+   {selectorCounts:{...base.selectorCounts,'[data-uah-probe-action="done"]':2}},
+   {observedAt:'not-a-timestamp'},
+   {fullPageVerified:true},
+   {userscriptVerified:true}
+ ]){
+   const result=summarizeFixtureDomEvidence('fixed',{...base,...change} as typeof base);
+   assert.deepEqual(result,{ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
+ }
+ assert.deepEqual(summarizeFixtureDomEvidence('fixed',{ok:false,code:'CDP_FAILED'}),
+   {ok:false,code:'CDP_FAILED'});
 });
 
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
