@@ -14,7 +14,7 @@ import {
 } from './tampermonkey-adapter';
 import {
  startIsolatedTampermonkeyGmProbe,type GmProbeReceipt,type GmProbeMode,
- type GmProbeRunAt
+ type GmProbeRunAt,isSupportedGmProbeRunAt
 } from './tampermonkey-gm-probe';
 
 export interface ManualDiagnosticAssessment {
@@ -298,8 +298,7 @@ export async function startApprovedTampermonkeyDiagnostic(
  if(options.signal?.aborted)return {ok:false,code:'CANCELLED'};
  const ttlMs=options.ttlMs??60000;
  if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000||
-    (options.runAt!==undefined&&options.runAt!=='document-start'&&
-     options.runAt!=='document-idle'))
+    (options.runAt!==undefined&&!isSupportedGmProbeRunAt(options.runAt)))
    return {ok:false,code:'INVALID_OPTIONS'};
  if(!browser?.ok||!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};

@@ -12,6 +12,7 @@ import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type Managed
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
 import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
+import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 
 let mainWindow: BrowserWindow | null = null;
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
@@ -280,7 +281,7 @@ function registerSafeIpc(): void {
   // test. No caller-provided URL, extension path, source, token or GM code.
   ipcMain.handle('gm-probe:start',async (event,runAt:unknown)=>{
     authorizeSender(event);
-    if(runAt!==undefined&&runAt!=='document-start'&&runAt!=='document-idle')
+    if(runAt!==undefined&&!isSupportedGmProbeRunAt(runAt))
       return {ok:false,code:'INVALID_OPTIONS',...unverified};
     const selectedRunAt=runAt??'document-idle';
     if(gmStartInProgress||liveGmProbe())return {ok:false,code:'PROBE_BUSY',...unverified};
@@ -310,7 +311,7 @@ function registerSafeIpc(): void {
       // exposing the disposable fixture. The hint is never manager attestation.
       const created=await startApprovedTampermonkeyDiagnostic(owned,true,{
         ttlMs:300000,signal:controller.signal,
-        runAt:selectedRunAt as 'document-start'|'document-idle'
+        runAt:selectedRunAt as 'document-start'|'document-body'|'document-end'|'document-idle'
       });
       if(!created.ok)return {ok:false,code:created.code,...unverified};
       if(epoch!==gmProbeEpoch||win!==mainWindow||win.isDestroyed()||
@@ -526,7 +527,7 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
-      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end'); " +
+      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
       "const noGmStatus=await a.gmProbeStatus(); " +
       "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
        "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +

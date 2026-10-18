@@ -157,7 +157,7 @@ test('TEST-018: malformed or mixed fixture DOM snapshots fail closed without thr
 
 test('TEST-017: manual diagnostic refuses unsupported injection timing before browser access',async()=>{
  const unverified={ok:false as const,code:'PREFLIGHT_FAILED' as const};
- for(const mode of ['document-end','document-body','unexpected',null] as const){
+ for(const mode of ['document-end;unsafe','unexpected',null] as const){
    const result=await startApprovedTampermonkeyDiagnostic(
      unverified,true,{runAt:mode as 'document-start'});
    assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'});

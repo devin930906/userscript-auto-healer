@@ -14,9 +14,38 @@ test('TEST-017: explicit consent and bounded lifetime required before binding pr
  }
 });
 test('TEST-017: only supported GM injection timing values can be requested',async()=>{
- for(const invalid of ['document-body','document-end','document-start;unsafe','',null,17]){
+ for(const invalid of ['document-end;unsafe','document-start;unsafe','',null,17]){
    assert.deepEqual(await startIsolatedTampermonkeyGmProbe(
      true,30000,invalid as 'document-start'),{ok:false,code:'INVALID_OPTIONS'});
+ }
+});
+test('TEST-017: document-body and document-end accept each explicit run-at and defer DOM when parsing',async t=>{
+ for(const runAt of ['document-body','document-end'] as const){
+  const result=await startIsolatedTampermonkeyGmProbe(true,30000,runAt);
+  assert.equal(result.ok,true);
+  if(!result.ok)continue;
+  const probe=result.session;
+  t.after(()=>probe.stop());
+  assert.equal(probe.runAt,runAt);
+  assert.equal(probe.source.split('\n').includes('// @run-at '+runAt),true);
+  let onReady:(()=>void)|undefined;
+  const count={gm:0,query:0,report:0};
+  runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   location:{origin:probe.origin,href:probe.origin+'/?mode=broken'},
+   document:{readyState:'loading',
+    addEventListener:(event:string,handler:()=>void)=>{
+     assert.equal(event,'DOMContentLoaded');onReady=handler;
+    },
+    querySelector:()=>{count.query++;return null;}
+   },
+   GM_getValue:(_key:string,fallback:string)=>{count.gm++;return fallback;},
+   fetch:()=>{count.report++;return Promise.resolve();}
+  });
+  assert.deepEqual(count,{gm:1,query:0,report:0},runAt);
+  assert.equal(typeof onReady,'function');
+  onReady?.();
+  assert.deepEqual(count,{gm:1,query:1,report:1},runAt);
  }
 });
 test('TEST-017: document-start invokes GM at injection and defers DOM until ready',async t=>{

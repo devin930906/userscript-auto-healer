@@ -14,7 +14,14 @@ import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
 export type GmProbeMode='broken'|'fixed';
 /** Explicit, fixed test modes; never derived from an arbitrary userscript. */
-export type GmProbeRunAt='document-start'|'document-idle';
+export type GmProbeRunAt=
+ 'document-start'|'document-body'|'document-end'|'document-idle';
+/** Exact enum: callers must not inject free-form metadata into a userscript. */
+export const SUPPORTED_GM_RUN_AT:readonly GmProbeRunAt[]=
+ Object.freeze(['document-start','document-body','document-end','document-idle']);
+export function isSupportedGmProbeRunAt(value:unknown):value is GmProbeRunAt{
+ return typeof value==='string'&&SUPPORTED_GM_RUN_AT.some(mode=>mode===value);
+}
 export interface GmProbeReceipt {
  readonly status:'SELF_REPORTED_FIXTURE_ONLY';
  readonly mode:GmProbeMode;
@@ -89,7 +96,7 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number,runAt:
  ' body:JSON.stringify({token:'+JSON.stringify(token)+',mode,',
  " gmDefaultMatched:gmMatched,businessAction:Boolean(target)})}).catch(()=>{});",
  ' };',
- ...(runAt==='document-start' ? [
+ ...(runAt!=='document-idle' ? [
    " if(document.readyState==='loading'){",
    "  document.addEventListener('DOMContentLoaded',checkDomAndReport,{once:true});",
    '  return;',
@@ -108,7 +115,7 @@ export async function startIsolatedTampermonkeyGmProbe(
 ):Promise<GmProbeStartResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
  if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000||
-    (runAt!=='document-start'&&runAt!=='document-idle'))
+    !isSupportedGmProbeRunAt(runAt))
    return {ok:false,code:'INVALID_OPTIONS'};
  const token=randomBytes(32).toString('hex');
  const installKey=randomBytes(32).toString('hex');
