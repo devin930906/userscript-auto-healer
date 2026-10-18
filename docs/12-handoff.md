@@ -73,4 +73,8 @@ POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，
 
 ## （7）TASK-001 产品代码起步（2026-10-18）
 
-正式开发已经启动，已创建单一集成开发分支 `feat/stable-development`；Windows 安全壳源码和负例测试已推送。初步验证证据为 https://github.com/devin930906/userscript-auto-healer/actions/runs/39100320005（对应 SHA `244f853fae7e5f7443f86a69b5804bc14b7883aa`），静态类型检查和 11 项测试成功。**不是**实际 Electron 桌面启动、Tampermonkey/Chrome 或产品 TEST/GATE 完整通过。当前 TASK-001 是开发中，首要未完成工作是 Windows Electron 桌面启动、preload IPC 运行时和权限/导航防护的可追溯实测；按 09/07 检查后才能整合进入 main。当前正式产品尚无稳定安装 EXE、便携 ZIP 或 Release；不要重做（4），不要创建并行堆积 PR。下一轮须读取远程 HEAD/PR/Actions 后续状态，不以本文中的历史 SHA 代替最新 SHA。
+正式开发已经启动，已创建单一集成开发分支 `feat/stable-development`；Windows 安全壳源码和负例测试已推送。初步验证证据为 https://github.com/devin930906/userscript-auto-healer/actions/runs/39100320005（对应 SHA `244f853fae7e5f7443f86a69b5804bc14b7883aa`），静态类型检查和 11 项测试成功。**不是**实际 Electron 桌面启动、Tampermonkey/Chrome 或产品 TEST/GATE 完整通过。这是 TASK-001 起步时的历史状态；后续 Windows Electron 真运行已成功，最新合并状态与下一任务按本文件追加证据及 PR 确认。当前正式产品尚无稳定安装 EXE、便携 ZIP 或 Release；不要重做（4），不要创建并行堆积 PR。下一轮须读取远程 HEAD/PR/Actions 后续状态，不以本文中的历史 SHA 代替最新 SHA。
+
+## （7）TASK-001 最新验收、合并前交接（2026-10-18）
+
+Windows runner 测试在 `5f2830d52d349ab19583740dc177427e1652e355` 的 Actions [39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) **完整成功**：静态检查及 11 个 Node 安全测试、Electron 按需下载、编译、真实 renderer/preload IPC 沙箱验证与无效配置输入拒绝。文档 CI [39100881819](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881819) 成功。TASK-001 的安全骨架开发结果处于 **已完成未整合**，活跃唯一开发 PR 为 [#1](https://github.com/devin930906/userscript-auto-healer/pull/1)；合并之前不得称 main 具有这项功能。后续需核验最新 HEAD 和 PR/CI/审核，通过后整合；随后开始 `TASK-002`（脚本导入及路径安全）。完整 TEST-026、Chrome/Tampermonkey 与发布 GATE 仍未完成，正式 EXE/ZIP 尚未生成。

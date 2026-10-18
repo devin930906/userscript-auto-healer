@@ -12,7 +12,7 @@
 见 [docs/00-intake.md](docs/00-intake.md)、[docs/11-readiness.md](docs/11-readiness.md)、[docs/12-handoff.md](docs/12-handoff.md)。需求权威来源为 `docs/00-intake.md` 与 `docs/02-requirements.md`；任务位于 `docs/09-development-plan.md`；架构与发布证据分别在 `docs/04-architecture.md`、`docs/08-release.md`。
 
 ## 运行与发布状态
-已有 Electron+TypeScript 开发入口及静态安全检查，但还没有经过 Windows 桌面实际启动验收的产品；尚无安装程序、便携包或正式 Release。不得将开发骨架当作已交付软件。
+已有 Electron+TypeScript 开发入口、11 项自动化安全配置测试，并在 Windows runner 完成真实 Electron 桌面启动及受限 IPC 验证（仍非完整功能验收）；尚无安装程序、便携包或正式 Release。不得将开发骨架当作已交付软件。
 
 ## 2026-10-18 开发前实测状态
 
@@ -36,3 +36,7 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 ## （4）末期准入及（7）直接交接（2026-10-18）
 
 已完成（4）的前期文档一致性审查、有限证据审查与正式交接，结论是**有条件准入 TASK-001**，而非全部产品 TEST/GATE 已通过。下一阶段开始前不需要从零生成文档，直接读取 docs/11-readiness.md、docs/12-handoff.md、docs/09-development-plan.md 和 AGENTS.md；首项实施 Electron+TypeScript 的安全骨架和对应负例。用户原脚本、真实 Profile 与已登录网站保持未授权不修改；GitHub Actions 真 Tampermonkey、完整 Chrome/便携版矩阵、正式 EXE+ZIP 等作为（7）的阶段门槛完成。
+
+## （7）正式开发首项成果（2026-10-18）
+
+TASK-001 安全桌面骨架已提交至 `feat/stable-development`，在 Windows runner 的 [Actions 39100881800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39100881800) 通过完整应用工作流与实际 Electron/preload IPC smoke。此处只证明该隔离开发骨架在 CI 的运行及测试，不代表脚本导入、真正自动修复、用户 Tampermonkey 支持或 EXE/ZIP 发布完成。整合情况见 PR [#1](https://github.com/devin930906/userscript-auto-healer/pull/1)，任务与剩余缺口见 docs/09-development-plan.md。
