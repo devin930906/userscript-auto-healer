@@ -95,7 +95,7 @@ test('TEST-009: listener netstat parsing excludes wildcard and connected remote 
     ' TCP    127.0.0.1:9223          127.0.0.1:49150        ESTABLISHED    1112',
     ' TCP    [::1]:9223              [::]:0                 LISTENING       1113',
     ' TCP    127.0.0.1:9333          0.0.0.0:0              LISTENING       1114'
-  ].join('\\r\\n');
+  ].join('\r\n');
   assert.deepEqual(parseWindowsLoopbackListeners(sample,9223),[1234]);
   assert.deepEqual(parseWindowsLoopbackListeners(sample,9333),[1114]);
   assert.deepEqual(parseWindowsLoopbackListeners(sample,9222),[]);
