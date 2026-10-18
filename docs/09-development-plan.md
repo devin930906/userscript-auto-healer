@@ -131,3 +131,8 @@ TASK-001/002 均已合并；后续优先开展 **TASK-003**（REQ-004、REQ-011�
 同次修复 `src/observe/dom-observer.ts` 原先仅按顶层网页来源确认 DOM 快照的缺口：先后读取的顶层 CDP URL 必须一致，若同源 SPA 导航发生于一个 DOM 采样窗口内则拒绝快照；只有稳定快照才能将实际最新 URL 与期望路由比较。分次观测的合法 SPA 路由变化仍可继续记录。测试包含假阳性自报、损坏样本、缺失样本与真实 Windows Chrome SPA 回归。
 
 最新源 SHA `3b4585b0e6ec802b64624b39badff5dba42a6457` 的 [Windows Application Checks 39127069957](https://github.com/devin930906/userscript-auto-healer/actions/runs/39127069957) 状态 `success`，TypeScript 类型检查成功，Node 测试 90 项中 89 通过、0 失败、1 项环境条件跳过，真实 Windows Electron sandbox/preload smoke 成功。首次路由加固源 `0fa4838` 的 CI 因 TypeScript 可空帧判断失败，已在此 SHA 修复并完整复测；历史失败如实保留。**PR #19 仍须核对审核与正式合并，不能提前算作 main 已整合。** 本阶段完全没有安装真 Tampermonkey、没有验证实际 GM 调用或自动修复；TASK-007、TEST-017/018、GATE-004/005 仍未完整通过，TASK-008..021、正式 EXE+ZIP 均尚待按门槛开发。
+
+
+## （7）TASK-007 目标元素动作归属校验（2026-10-18）
+
+在既有 PR #19 已合并后的 TASK-007 限定取证路径中，继续收紧 TEST-018 阶段性 DOM 证据：除了 `#current-target` 唯一存在及 `[data-uah-probe-action="done"]` 动作计数，还要求复合选择器 `#current-target[data-uah-probe-action="done"]` 与动作计数严格一致。防止其他 DOM 元素被设置动作属性时误将其归属到唯一目标。新增错误归属及畸形计数的拒绝测试，并在隔离 Windows Chrome 负例中实际查询复合选择器。该修改仍不证明 Tampermonkey 身份、脚本注入、真实 GM API 或自动修复；TEST-017/018 与 GATE-004/005 仍未通过，正式测试须以对应提交的 Actions 实测结果为准。

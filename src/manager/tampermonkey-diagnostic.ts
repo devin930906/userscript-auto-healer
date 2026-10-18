@@ -51,11 +51,13 @@ export type FixtureDomEvidenceResult =
     'MODE_NOT_VISITED'|'OBSERVATION_IN_PROGRESS'|'INVALID_FIXTURE_OBSERVATION'|
     Extract<ObservationResult,{ok:false}>['code']};
 const FIXTURE_SELECTORS=[
- '#current-target','#obsolete-target','[data-uah-probe-action="done"]'
+ '#current-target','#obsolete-target','[data-uah-probe-action="done"]',
+ '#current-target[data-uah-probe-action="done"]'
 ] as const;
 
 /** Pure, conservative mapping of a limited DOM sample into a diagnostic
- * observation. Even a perfect result can NEVER set businessVerified=true.
+ * observation. Require the action attribute on the one approved target,
+ * not merely anywhere else in the page. Even a perfect result can NEVER set businessVerified=true.
  */
 export function summarizeFixtureDomEvidence(
  mode:GmProbeMode,observed:ObservationResult
@@ -65,12 +67,14 @@ export function summarizeFixtureDomEvidence(
  const current=counts[FIXTURE_SELECTORS[0]];
  const obsolete=counts[FIXTURE_SELECTORS[1]];
  const acted=counts[FIXTURE_SELECTORS[2]];
+ const actedOnTarget=counts[FIXTURE_SELECTORS[3]];
  if(observed.routeChanged||observed.originMatchesApproved!==true||
     observed.status!=='LIMITED_DOM_OBSERVATION'||
     observed.fullPageVerified!==false||observed.userscriptVerified!==false||
     !Number.isInteger(current)||current!==1||
     !Number.isInteger(obsolete)||obsolete!==0||
     !Number.isInteger(acted)||(acted!==0&&acted!==1)||
+    !Number.isInteger(actedOnTarget)||actedOnTarget!==acted||
     typeof observed.observedAt!=='string'||!Number.isFinite(Date.parse(observed.observedAt)))
    return {ok:false,code:'INVALID_FIXTURE_OBSERVATION'};
  return {ok:true,evidence:Object.freeze({

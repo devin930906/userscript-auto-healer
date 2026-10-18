@@ -53,7 +53,8 @@ test('TEST-018 stage: read-only DOM fixture marker is evidence, never a GM or ma
    originMatchesApproved:true as const,routeChanged,
    summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
    selectorCounts:{'#current-target':1,'#obsolete-target':0,
-     '[data-uah-probe-action="done"]':actionCount},
+     '[data-uah-probe-action="done"]':actionCount,
+     '#current-target[data-uah-probe-action="done"]':actionCount},
    fullPageVerified:false as const,userscriptVerified:false as const
  });
  const broken=summarizeFixtureDomEvidence('broken',sample(0));
@@ -82,7 +83,8 @@ test('TEST-018: different URL, malformed DOM or failed CDP cannot become fixture
    originMatchesApproved:true as const,routeChanged:false,
    summary:{elementCount:3,iframeCount:0,visibleShadowRoots:0,blindSpots:[] as const},
    selectorCounts:{'#current-target':1,'#obsolete-target':0,
-     '[data-uah-probe-action="done"]':1},
+     '[data-uah-probe-action="done"]':1,
+     '#current-target[data-uah-probe-action="done"]':1},
    fullPageVerified:false as const,userscriptVerified:false as const
  };
  for(const change of [
@@ -90,6 +92,13 @@ test('TEST-018: different URL, malformed DOM or failed CDP cannot become fixture
    {selectorCounts:{...base.selectorCounts,'#current-target':0}},
    {selectorCounts:{...base.selectorCounts,'#obsolete-target':1}},
    {selectorCounts:{...base.selectorCounts,'[data-uah-probe-action="done"]':2}},
+   // A marker on another element does not prove that the target was acted on.
+   {selectorCounts:{...base.selectorCounts,
+     '#current-target[data-uah-probe-action="done"]':0}},
+   {selectorCounts:{...base.selectorCounts,
+     '#current-target[data-uah-probe-action="done"]':2}},
+   {selectorCounts:{...base.selectorCounts,
+     '[data-uah-probe-action="done"]':0}},
    {observedAt:'not-a-timestamp'},
    {fullPageVerified:true},
    {userscriptVerified:true}
@@ -259,7 +268,8 @@ test('TEST-018 stage: real isolated Windows Chrome never reports a repair withou
  let observed:Awaited<ReturnType<typeof observeApprovedDom>>={ok:false,code:'CDP_FAILED'};
  for(let tries=0;tries<25;tries++){
    observed=await observeApprovedDom(opened,tab,expectedUrl,true,
-     ['#current-target','#obsolete-target','[data-uah-probe-action="done"]']);
+     ['#current-target','#obsolete-target','[data-uah-probe-action="done"]',
+      '#current-target[data-uah-probe-action="done"]']);
    if(observed.ok&&observed.selectorCounts['#current-target']===1)break;
    await delay(160);
  }
