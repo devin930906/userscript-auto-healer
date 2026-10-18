@@ -125,3 +125,9 @@ PR [#21](https://github.com/devin930906/userscript-auto-healer/pull/21) 已以�
 ## （7）TASK-008 / TEST-013 场景合约与自管 CDP 故障诊断接入（2026-10-18）
 
 新增 `src/diagnostics/scenario-dom-diagnostic.ts`：沿用 TASK-004 的已授权场景预检、TASK-005/006 自管 Chrome/CDP 目标归属与只读观察、TASK-008 故障信号分类器；仅接受无需登录/主动步骤、最多 8 个唯一顶层 CSS `selector-present` 断言的场景。真实观察的选择器缺失只能生成 `SELECTOR_ASSERTION` 限定信号，全部存在只代表当前 DOM 未观察到缺失，不能证明油猴脚本成功。浏览器/CDP 失败、SPA 路由变化、输入异常、权限不符均返回 BLOCKED/UNKNOWN；不执行脚本、点击、持久化或自动改文件，不传出 URL/DOM/脚本 Hash。新增 Windows 真 Chrome+无扩展的独立负例，并加入 npm 测试。**此为待 CI 核验的部分诊断集成**，不满足完整 TEST-013、TEST-017/018 和 GATE；真实 Tampermonkey 与业务断言仍受阻。
+
+## （7）2026-10-18 TEST-013 与 TEST-018 阶段性 Windows 验证补充
+
+TEST-018 范围内的**临时夹具证据处理负例**：源 `e05933d3850761c337605d7a4321b90928596245`，[Actions #39132321986](https://github.com/devin930906/userscript-auto-healer/actions/runs/39132321986) 成功（108 个 Node case 中 107 pass、0 fail、1 skip，真实 Windows Electron smoke 通过），PR #25 已合并。覆盖缺失/混入选择器、畸形节点计数、无效路由与时间戳；结果只证明拒绝机制及有限 DOM 观察，不证明真实管理器、脚本执行、GM 或修复恢复。正式 TEST-017/018 继续未通过。
+
+TEST-013 范围内的**稳定观察诊断阶段集成**：源 `b68c528cee076bc89c0e7544dc0fc23c16fcf498`，[Actions #39132694315](https://github.com/devin930906/userscript-auto-healer/actions/runs/39132694315) 成功（110 个 Node case 中 109 pass、0 fail、1 skip，真实 Windows Chrome 只读多次采样与 Electron smoke 均通过），PR #26 已合并。数据在采样窗口内变化时保守阻断；结果始终不授权脚本修改。未来仍须把可信故障源、真实 Tampermonkey 运行、业务断言和根因联动纳入完整 TEST-013/017/018；全部 Stable GATE 继续独立验收。
