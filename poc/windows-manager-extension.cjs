@@ -52,14 +52,46 @@ async function main() {
       p.on('pageerror', e=>console.log('MANAGER_PAGE_ERROR: '+String(e).slice(0,450)));
     });
     let workers = context.serviceWorkers();
-    if (!workers.length) {
-      try { workers = [await context.waitForEvent('serviceworker',{timeout:30000})]; }
-      catch(e) { throw new Error('Published userscript manager did not start a service worker: '+e.message); }
+    if (!workers.some(w=>w.url().startsWith('chrome-extension://'))) {
+      // A MV3 service worker may be idle before an extension page is used.
+      // Confirm installation from Chromium's native extension UI, then wake it
+      // by opening its own options page. Never claim success based on the UI alone.
+      const settings = await context.newPage();
+      try {
+        await settings.goto('chrome://extensions/',{waitUntil:'domcontentloaded',timeout:12000});
+        await settings.waitForTimeout(1400);
+        const cards=await settings.evaluate(()=>{
+          const found=[];
+          function walk(root) {
+            for (const el of root.querySelectorAll('*')){
+              if(el.tagName.toLowerCase()==='extensions-item'){
+                found.push({id:el.id||el.data?.id||'',name:el.shadowRoot?.querySelector('#name')?.textContent?.trim()||el.data?.name||''});
+              }
+              if(el.shadowRoot)walk(el.shadowRoot);
+            }
+          }
+          walk(document);return found;
+        });
+        console.log('Extension items when worker is idle: '+JSON.stringify(cards.slice(0,8)));
+        const item=cards.find(x=>/violentmonkey/i.test(x.name)&&/^[a-p]{32}$/.test(x.id));
+        if(item) {
+          const activation=await context.newPage();
+          try{await activation.goto('chrome-extension://'+item.id+'/options/index.html',{waitUntil:'domcontentloaded',timeout:12000});await activation.waitForTimeout(1500);}
+          catch(err){console.log('Extension wake-up attempt: '+String(err.message).slice(0,180));}
+          await activation.close();
+        }
+      } catch(err){console.log('Extension inspection unavailable: '+String(err.message).slice(0,220));}
+      await settings.close();
+      workers = context.serviceWorkers();
+      if (!workers.some(w=>w.url().startsWith('chrome-extension://'))) {
+        try {workers=[await context.waitForEvent('serviceworker',{timeout:8000})]}
+        catch(err){throw new Error('Extension worker still unavailable after safe native UI check: '+String(err.message).slice(0,200))}
+      }
     }
     const worker = workers.find(w => w.url().startsWith('chrome-extension://'));
     assert.ok(worker,'No actual Chrome extension worker was registered');
-    // Playwright may evaluate a service-worker utility world without the extension's chrome API.
-    // The registered chrome-extension:// worker is the reproducible minimum proof, not a GM proof.
+    // Playwright can evaluate service-worker scripts in an isolated utility world
+    // without the extension chrome API. Registered origin is a loading proof only.
     const info = {id:new URL(worker.url()).host,version:manifest.version};
     assert.match(info.id,/^[a-p]{32}$/);
     console.log('PASS POC-02A: published Violentmonkey MV3 extension worker registered; ID='+info.id+'; pinned version='+info.version+'; worker='+worker.url());
