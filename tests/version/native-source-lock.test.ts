@@ -134,3 +134,35 @@ test('TEST-020: abandoned mutex must block until explicit privileged reconciliat
     assert.deepEqual(await readdir(backups),[]);
   });
 });
+
+test('TEST-020: nested symlink or junction ancestor cannot bypass a native source lock',async t=>{
+  await fixture(async(_source,backups,root)=>{
+    const nested=join(root,'canonical','nested');
+    await mkdir(nested,{recursive:true});
+    const canonical=join(nested,'nested.user.js');
+    await writeFile(canonical,bytes);
+    const alias=join(root,'alias');
+    try{
+      await symlink(join(root,'canonical'),alias,
+        process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Directory symlink creation unavailable on this runner');
+        return;
+      }
+      throw error;
+    }
+    const redirected=join(alias,'nested','nested.user.js');
+    // The immediate parent is an ordinary directory reached THROUGH the
+    // junction: checking only lstat(dirname(path)) would incorrectly pass.
+    assert.equal((await lstat(join(alias,'nested'))).isSymbolicLink(),false);
+    let executed=false;
+    await assert.rejects(withNativeSourceLock(redirected,async()=>{
+      executed=true;return true;
+    }),lockError('INVALID_SOURCE'));
+    assert.equal(executed,false);
+    assert.equal(await withNativeSourceLock(canonical,async()=>true),true);
+    assert.deepEqual(await readFile(canonical),bytes);
+    assert.deepEqual(await readdir(backups),[]);
+  });
+});

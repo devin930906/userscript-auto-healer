@@ -9,8 +9,8 @@
  */
 import {createHash} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
-import {lstat,mkdir,rmdir} from 'node:fs/promises';
-import {dirname,isAbsolute,join} from 'node:path';
+import {lstat,mkdir,realpath,rmdir} from 'node:fs/promises';
+import {dirname,isAbsolute,join,resolve} from 'node:path';
 
 export type NativeSourceLockFailure=
   'INVALID_SOURCE'|'SOURCE_LOCKED'|'SOURCE_CHANGED'|'IO_FAILURE';
@@ -51,6 +51,18 @@ export async function withNativeSourceLock<T>(
   let start:BigIntStats;
   let parentStart:BigIntStats;
   try{
+    // Reject redirected ancestor directories, not just a final symlink or
+    // the immediate parent. Otherwise /alias/nested/script.user.js could
+    // evade a source mutex acquired via /real/nested/script.user.js.
+    // Windows casing is immaterial; alternate junction/short-path spellings
+    // are intentionally not trusted for this native-only operation.
+    const actual=await realpath(sourcePath);
+    const actualParent=await realpath(parent);
+    const matches=(a:string,b:string)=>process.platform==='win32'?
+      a.toLowerCase()===b.toLowerCase():a===b;
+    if(!matches(actual,resolve(sourcePath))||
+       !matches(actualParent,resolve(parent)))
+      throw new NativeSourceLockError('INVALID_SOURCE');
     start=await lstat(sourcePath,{bigint:true});
     parentStart=await lstat(parent,{bigint:true});
     if(start.isSymbolicLink()||!start.isFile()||start.nlink!==1n||
