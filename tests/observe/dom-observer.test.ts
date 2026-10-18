@@ -11,6 +11,7 @@ test('TEST-010: iframe and shadow scope remain limited, not full-page coverage',
   const frames={frame:{url:'https://example.com/'},
     childFrames:[{frame:{url:'https://other.example/page'}}]};
   const summary=summarizeDomTree(node,frames,'https://example.com');
+  assert.equal(summary?.elementCount,3,'Document and shadow-root containers are not elements');
   assert.equal(summary?.iframeCount,1);
   assert.equal(summary?.visibleShadowRoots,1);
   assert.ok(summary?.blindSpots.includes('IFRAME_CONTENT_UNVERIFIED'));

@@ -30,14 +30,15 @@ function record(value:unknown):value is Record<string,unknown>{
 }
 export function summarizeDomTree(raw:unknown,frames:unknown,approvedOrigin:string):DomSummary|null {
   if(!record(raw))return null;
-  let count=0,iframes=0,shadow=0,cross=false;
+  let elementCount=0,visited=0,iframes=0,shadow=0,cross=false;
   const stack:Array<{node:unknown;depth:number}>=[{node:raw,depth:0}];
   while(stack.length){
     const item=stack.pop()!;
-    if(item.depth>90||++count>MAX_NODES)return null;
+    if(item.depth>90||++visited>MAX_NODES)return null;
     if(!record(item.node))return null;
     const node=item.node as CdpNode;
     if(node.nodeType===1){
+      elementCount++;
       if(String(node.nodeName).toUpperCase()==='IFRAME')iframes++;
     }
     for(const key of ['children','shadowRoots','contentDocument'] as const){
@@ -72,7 +73,7 @@ export function summarizeDomTree(raw:unknown,frames:unknown,approvedOrigin:strin
   const blindSpots:DomSummary['blindSpots'][number][]=['CLOSED_SHADOW_ROOT_UNKNOWN'];
   if(iframes>0)blindSpots.push('IFRAME_CONTENT_UNVERIFIED');
   if(cross)blindSpots.push('CROSS_ORIGIN_FRAME_UNVERIFIED');
-  return {elementCount:count,iframeCount:iframes,
+  return {elementCount,iframeCount:iframes,
     visibleShadowRoots:shadow,blindSpots};
 }
 function validateSelectors(value:unknown):value is string[]{
