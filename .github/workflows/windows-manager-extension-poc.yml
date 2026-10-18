@@ -41,6 +41,7 @@ jobs:
           & (Join-Path $pkg 'node_modules\.bin\playwright.cmd') install chromium
           if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }
           $env:NODE_PATH = Join-Path $pkg 'node_modules'
+          $env:USERSCRIPT_POC_GUI = 'true' # hosted Windows interactive feasibility only
           $env:USERSCRIPT_TEST_EXTENSION_DIR = $dir
           $env:USERSCRIPT_TEST_PROFILE_DIR = Join-Path $base 'profile'
           node ./poc/windows-manager-extension.cjs
