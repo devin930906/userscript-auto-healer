@@ -110,6 +110,51 @@ test('TEST-018: different URL, malformed DOM or failed CDP cannot become fixture
    {ok:false,code:'CDP_FAILED'});
 });
 
+test('TEST-018: malformed or mixed fixture DOM snapshots fail closed without throwing',()=>{
+ const valid={
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged:false,
+   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,
+     blindSpots:[] as const},
+   selectorCounts:{
+     '#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':1,
+     '#current-target[data-uah-probe-action="done"]':1
+   },
+   fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ const asSample=(value:unknown):Parameters<typeof summarizeFixtureDomEvidence>[1]=>
+   value as Parameters<typeof summarizeFixtureDomEvidence>[1];
+ const malformed=[
+   null,42,[],{ok:true},
+   {...valid,routeChanged:undefined},
+   {...valid,selectorCounts:undefined},
+   {...valid,selectorCounts:[]},
+   {...valid,selectorCounts:{
+     ...valid.selectorCounts,'#unapproved-private-selector':1
+   }},
+   {...valid,selectorCounts:{
+     '#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':1
+   }},
+   {...valid,summary:undefined},
+   {...valid,summary:{...valid.summary,elementCount:0}},
+   {...valid,summary:{...valid.summary,iframeCount:-1}},
+   {...valid,summary:{...valid.summary,visibleShadowRoots:100}},
+   {...valid,observedAt:'2026-02-30T00:00:00.000Z'},
+   {...valid,observedAt:'2026-10-18T00:00:00Z'}
+ ];
+ for(const sample of malformed){
+   assert.doesNotThrow(()=>summarizeFixtureDomEvidence('fixed',asSample(sample)));
+   assert.deepEqual(summarizeFixtureDomEvidence('fixed',asSample(sample)),
+     {ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
+ }
+ assert.deepEqual(summarizeFixtureDomEvidence(
+   'unknown' as 'fixed',asSample(valid)),{ok:false,code:'INVALID_MODE'});
+ assert.equal(summarizeFixtureDomEvidence('fixed',valid).ok,true);
+});
+
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
  const fake={ok:true as const,status:'OWNED_CDP_BROWSER_VERIFIED' as const,
    pid:123456,chromeVersion:'155.0.0.0',
