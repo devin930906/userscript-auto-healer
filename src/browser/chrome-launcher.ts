@@ -111,7 +111,23 @@ export async function inspectWindowsChromeBinary(input:unknown):Promise<ChromeBi
       ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
       {windowsHide:true,timeout:15000,maxBuffer:8192});
     data=JSON.parse(result.stdout) as Record<string,unknown>;
-  }catch{return {ok:false,code:'IDENTITY_UNAVAILABLE'};}
+  }catch(error){
+    // Only emit non-sensitive error categories on GitHub's disposable runner.
+    if(process.env.GITHUB_ACTIONS==='true'){
+      const err=error as {code?:unknown;stderr?:unknown;stdout?:unknown};
+      const stderr=typeof err.stderr==='string'?err.stderr:'';
+      const stdout=typeof err.stdout==='string'?err.stdout:'';
+      const hints=['ParserError','Get-AuthenticodeSignature','Get-Item',
+        'ConvertTo-Json','NotSpecified','CommandNotFoundException',
+        'PathNotFound','Cannot find path','Unexpected token','Cannot bind',
+        'FullyQualifiedErrorId'].filter(token=>stderr.includes(token));
+      console.error('TASK-005 identity tool diagnostic',JSON.stringify({
+        exitCode:typeof err.code==='number'?err.code:typeof err.code==='string'?err.code:null,
+        stderrLength:stderr.length,stdoutLength:stdout.length,hints
+      }));
+    }
+    return {ok:false,code:'IDENTITY_UNAVAILABLE'};
+  }
   if(data.status!=='Valid' || typeof data.signer!=='string' ||
      !/(?:^|,)\s*CN=Google LLC(?:,|$)/i.test(data.signer) ||
      !['Google Chrome','Google Chrome for Testing'].includes(data.name as string) || typeof data.fileName!=='string' ||
