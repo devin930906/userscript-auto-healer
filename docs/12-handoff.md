@@ -121,3 +121,8 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 只读 Tampermonkey 运行目标查询已合并 [PR #9](https://github.com/devin930906/userscript-auto-healer/pull/9)，main merge SHA `ca573cfc6a83d934b10d1de349d83311267ed642`，源 HEAD `f09e0e68fcb67c3dbdeb4b2b8fc48af250614bb0`。产品代码仅在真正的自管理 Chrome/CDP 及用户明确授权下查询扩展运行目标；只返回未验证线索，**不能据此得出脚本已安装、执行、GM API 工作或业务恢复**。Windows [39111259895](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259895) 在 64 项 Node 测试中 63 通过、0 失败、1 由独立 Chrome 工作流覆盖，真实 Electron smoke 通过；[39111259835](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111259835) Chrome 专项成功。
 
 下一仍为 **TASK-007**：基于独立合法可信的 Tampermonkey 测试环境，把扩展身份与版本、安装/站点/userScripts 权限、实际脚本注入/GM 调用和真实业务断言联成不可跳过的可审计证据链；没有对应授权或环境就保留阻断，禁止借 CDP DOM 或 Violentmonkey 顶替。TASK-007 未正式完成，后续 TASK-008..021 均不可提前标记完成；EXE+ZIP 产品尚未构建，全部 Stable GATE 尚未通过。需按当前 main SHA 重新读 CI/PR，不将历史源 SHA 当作当前基准。
+
+
+## （7）TASK-007 CDP 元数据安全复核合并（2026-10-18）
+
+后续 [PR #10](https://github.com/devin930906/userscript-auto-healer/pull/10) 已在 [Windows Application Checks 39111684155](https://github.com/devin930906/userscript-auto-healer/actions/runs/39111684155) 完成通过后，合并至 main SHA `16c7a62855d3e13f7f0c08ac90ca555578a54e6f`（源 HEAD `53f91afc70ba9ca15b0d1795e433c904e83ff485`）。变更限定为对所有 CDP 目标 ID（含无关网页目标）校验格式与重复、并在 WebSocket 连接延迟完成但请求已经取消时拒绝发送 `Target.getTargets`，补充 TEST-017 负例。该安全加固**仅说明该阶段测试通过**，不能推断 Tampermonkey 扩展、GM API、脚本实际执行或业务恢复已验收。继续 TASK-007 真实管理器前置条件、真实用户授权与业务断言；Stable EXE/ZIP 未完成。
