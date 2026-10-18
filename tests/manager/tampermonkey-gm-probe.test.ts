@@ -106,3 +106,55 @@ test('TEST-017 stage: stopped isolated probe closes its listener',async()=>{
  await result.session.stop();
  await assert.rejects(fetch(url+'/'));
 });
+
+test('TEST-017: disposable import URL serves only the authorized, expiring userscript source',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const url=new URL(probe.installUrl);
+ const trustedOrigin='chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo';
+ assert.equal(url.origin,probe.origin);
+ assert.equal(url.pathname,'/install.user.js');
+ assert.match(url.search,/^\?key=[0-9a-f]{64}$/);
+ assert.notEqual(url.searchParams.get('key'),probe.source.match(/token:"([0-9a-f]{64})"/)?.[1]);
+ assert.deepEqual(probe.receiptSnapshot(),{});
+
+ const native=await fetch(probe.installUrl);
+ assert.equal(native.status,200);
+ assert.match(native.headers.get('content-type')??'',/text\/javascript/);
+ assert.equal(native.headers.get('access-control-allow-origin'),null);
+ assert.equal(await native.text(),probe.source);
+
+ const manager=await fetch(probe.installUrl,{headers:{Origin:trustedOrigin}});
+ assert.equal(manager.status,200);
+ assert.equal(manager.headers.get('access-control-allow-origin'),trustedOrigin);
+ assert.equal(await manager.text(),probe.source);
+
+ const forbidden=[
+   probe.origin+'/install.user.js',
+   probe.origin+'/install.user.js?key=bad',
+   probe.installUrl+'&extra=true',
+   probe.origin+'/install.user.js?key='+url.searchParams.get('key')?.toUpperCase()
+ ];
+ for(const input of forbidden){
+   const response=await fetch(input);
+   assert.equal(response.status,403);
+   assert.doesNotMatch(await response.text(),/@grant|GM_getValue/);
+ }
+ for(const options of [
+   {method:'POST',headers:{'Content-Type':'text/plain'},body:'test'},
+   {method:'HEAD'}
+ ]){
+   assert.equal((await fetch(probe.installUrl,options)).status,403);
+ }
+ const foreign=await fetch(probe.installUrl,{headers:{Origin:'https://example.com'}});
+ assert.equal(foreign.status,403);
+ assert.equal(foreign.headers.get('access-control-allow-origin'),null);
+ // Neither downloading the script nor a forged cross-origin request is a
+ // Chrome extension installation, GM execution, or business recovery.
+ assert.deepEqual(probe.receiptSnapshot(),{});
+ await probe.stop();
+ await assert.rejects(fetch(probe.installUrl));
+});
