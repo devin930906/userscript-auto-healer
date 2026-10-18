@@ -39,6 +39,17 @@ function response(
 }
 const blocked=(code:ScenarioDomTriageCode)=>
  response('BLOCKED',code,0,unknownSignals());
+const knownObserverFailures=new Set<ScenarioDomTriageCode>([
+ 'NOT_AUTHORIZED','UNVERIFIED_BROWSER','UNVERIFIED_TARGET',
+ 'INVALID_OPTIONS','CDP_FAILED','DOM_TOO_COMPLEX','CANCELLED'
+]);
+// Runtime samples can come from serialized or external callers: a truthy
+// non-boolean "ok" or fabricated error code is not a valid CDP receipt.
+function failedObservation(value:ObservationResult|DynamicObservation):ScenarioDomTriage{
+ if(value.ok===false&&knownObserverFailures.has(value.code))
+   return blocked(value.code);
+ return blocked('INVALID_OBSERVATION');
+}
 
 // DOM.querySelectorAll only inspects a bounded subset of the page. Do not
 // treat an incomplete or changing iframe/shadow-root inventory as stable
@@ -119,8 +130,9 @@ export function summarizeReadOnlyScenarioDom(
 ):ScenarioDomTriage {
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
- if(!observed||typeof observed!=='object')return blocked('INVALID_OBSERVATION');
- if(!observed.ok)return blocked(observed.code);
+ if(!observed||typeof observed!=='object'||Array.isArray(observed))
+   return blocked('INVALID_OBSERVATION');
+ if(observed.ok!==true)return failedObservation(observed);
  if(observed.status!=='LIMITED_DOM_OBSERVATION'||
    observed.originMatchesApproved!==true||
    observed.fullPageVerified!==false||observed.userscriptVerified!==false)
@@ -182,8 +194,9 @@ export function summarizeReadOnlyScenarioDomSeries(
 ):ScenarioDomTriage{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
- if(!observed||typeof observed!=='object')return blocked('INVALID_OBSERVATION');
- if(!observed.ok)return blocked(observed.code);
+ if(!observed||typeof observed!=='object'||Array.isArray(observed))
+   return blocked('INVALID_OBSERVATION');
+ if(observed.ok!==true)return failedObservation(observed);
  if(observed.status!=='LIMITED_DYNAMIC_OBSERVATION'||
     observed.userscriptVerified!==false||
     !Array.isArray(observed.samples)||observed.samples.length<2||
@@ -201,7 +214,7 @@ export function summarizeReadOnlyScenarioDomSeries(
    const result=summarizeReadOnlyScenarioDom(scenario,sample,true);
    if(result.status!=='LIMITED_DOM_SIGNAL_ONLY')
      return blocked(result.code);
-   if(!sample.ok)return blocked('INVALID_OBSERVATION');
+   if(sample.ok!==true)return blocked('INVALID_OBSERVATION');
    const time=typeof sample.observedAt==='string'?Date.parse(sample.observedAt):NaN;
    if(!Number.isFinite(time))return blocked('INVALID_OBSERVATION');
    // Equal timestamps can be the same replayed snapshot, not two samples.
