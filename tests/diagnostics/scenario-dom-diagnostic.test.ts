@@ -109,6 +109,38 @@ test('TEST-013: CDP failures and same-origin SPA route change block diagnostic p
    assert.equal(result.automaticPatchAllowed,false);
  }
 });
+test('TEST-013: invalid or non-UTC CDP observation times cannot produce fault evidence',()=>{
+ const valid={...sample(matched),observedAt:'2026-10-18T00:00:00.123Z'};
+ assert.equal(summarizeReadOnlyScenarioDom(baseScenario,valid,true).status,
+   'LIMITED_DOM_SIGNAL_ONLY');
+ const series=(second:unknown)=>({
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
+   samples:[sample(matched),{...sample(matched),observedAt:second}],
+   routeChangeDetected:false,selectorCountChanged:false,
+   domCountChanged:false,userscriptVerified:false
+ }) as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1];
+ assert.equal(summarizeReadOnlyScenarioDomSeries(
+   baseScenario,series('2026-10-18T00:00:01.001Z'),true).status,
+   'LIMITED_DOM_SIGNAL_ONLY');
+ for(const invalid of [
+   undefined,null,17,'','not-a-date',
+   '2026-02-30T00:00:01Z','2026-13-18T00:00:01Z',
+   '2026-10-18T00:00:01+00:00','2026-10-18T00:00:01',
+   '2026-10-18T00:00:01.0000Z','2026-10-18T00:00:01Z extra'
+ ]){
+   const single=summarizeReadOnlyScenarioDom(baseScenario,
+     {...sample(matched),observedAt:invalid} as ObservationResult,true);
+   const multi=summarizeReadOnlyScenarioDomSeries(baseScenario,series(invalid),true);
+   for(const result of [single,multi]){
+     assert.equal(result.status,'BLOCKED',JSON.stringify(invalid));
+     assert.equal(result.code,'INVALID_OBSERVATION',JSON.stringify(invalid));
+     assert.equal(result.automaticPatchAllowed,false);
+     assert.equal(result.tampermonkeyVerified,false);
+     assert.equal(result.businessVerified,false);
+   }
+ }
+});
+
 test('TEST-013: malformed truthy success and forged CDP error codes fail closed',()=>{
  const valid=sample(matched);
  for(const ok of [1,'true',{},[]]){
