@@ -30,7 +30,7 @@
 初始化提交 1205776e91ede1cbb122e699acb7fb7805be23cb；需求研究 32830ad793b48ccfa59bdb03eb97699a00635bee；架构风险 dc79b66671f6c888ce21e55967918414f7ed3ec0；测试及计划 df82a2c50b4cdec2faaae676d0141939b9479664；追踪矩阵 e69fe9e115ecc68d6af42a9c86bd6c07be2e0a2d。发布结论必须再读取 main HEAD。
 
 ## 发现问题
-BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 已加载 Violentmonkey MV3 Worker 与确认页面，但未证实脚本注入/GM API/业务断言；Chrome 138+ 的 Allow User Scripts 需用户许可；BLOCK-03 真 RAR5 技术创建/解压已通过限期评估，正式生产许可证及应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式构建/依赖许可证和配额缺证据。
+BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 已加载 Violentmonkey MV3 Worker 与确认页面，且在临时 Profile 中真实开启 Allow User Scripts（false→true），但仍未证实脚本注入/GM API/业务断言；不能把开关已开启等同脚本测试通过；BLOCK-03 真 RAR5 技术创建/解压已通过限期评估，正式生产许可证及应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式构建/依赖许可证和配额缺证据。
 
 ## 修复记录
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；将 RAR 许可与真格式设为发布阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
