@@ -162,3 +162,52 @@ test('TEST-020: symlinked destination directory is not a trusted recovery source
     assert.deepEqual(await readFile(source),original);
   });
 });
+
+test('TEST-020: identical script names and bytes in different directories cannot share recovery backups',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'uah-path-binding-'));
+  const firstDir=join(root,'first');
+  const secondDir=join(root,'second');
+  const backups=join(root,'backups');
+  const firstPath=join(firstDir,'same.user.js');
+  const secondPath=join(secondDir,'same.user.js');
+  try{
+    await mkdir(firstDir);
+    await mkdir(secondDir);
+    await mkdir(backups);
+    await writeFile(firstPath,original);
+    await writeFile(secondPath,original);
+    const first=await createVerifiedBackupOnly({
+      sourcePath:firstPath,backupDirectory:backups,
+      expectedSha256:sha(original),userApproved:true
+    });
+    const second=await createVerifiedBackupOnly({
+      sourcePath:secondPath,backupDirectory:backups,
+      expectedSha256:sha(original),userApproved:true
+    });
+    assert.equal(first.status,'BACKUP_ONLY',JSON.stringify(first));
+    assert.equal(second.status,'BACKUP_ONLY',JSON.stringify(second));
+    if(first.status!=='BACKUP_ONLY'||second.status!=='BACKUP_ONLY')return;
+    assert.notEqual(
+      first.backupFileName.slice(0,-(1+36+'.backup.user.js'.length)),
+      second.backupFileName.slice(0,-(1+36+'.backup.user.js'.length))
+    );
+    const own=await verifyBackupRecoverySource({
+      sourcePath:firstPath,backupDirectory:backups,
+      backupFileName:first.backupFileName,expectedSha256:first.sha256,
+      expectedByteLength:first.byteLength,userApproved:true
+    });
+    assert.equal(own.status,'RECOVERY_SOURCE_VERIFIED_READ_ONLY',JSON.stringify(own));
+    const substituted=await verifyBackupRecoverySource({
+      sourcePath:secondPath,backupDirectory:backups,
+      backupFileName:first.backupFileName,expectedSha256:first.sha256,
+      expectedByteLength:first.byteLength,userApproved:true
+    });
+    assert.equal(substituted.status,'BLOCKED');
+    if(substituted.status==='BLOCKED')
+      assert.equal(substituted.reason,'BACKUP_SOURCE_MISMATCH');
+    assert.equal(substituted.automaticRollbackAllowed,false);
+    assert.deepEqual(await readFile(firstPath),original);
+    assert.deepEqual(await readFile(secondPath),original);
+    assert.deepEqual(await readFile(join(backups,first.backupFileName)),original);
+  }finally{await rm(root,{recursive:true,force:true});}
+});

@@ -37,21 +37,23 @@ function validPath(path:unknown):path is string {
 }
 
 
-// Windows filename components are limited to 255 UTF-16 units. Keep room
-// for a UUID and suffix. Truncation alone can bind two different long script
-// names to the same recovery prefix; include a digest of the ENTIRE stem.
-// Iterate Unicode code points to avoid splitting surrogate pairs.
+// Windows filename components are limited to 255 UTF-16 units. A script
+// basename alone cannot bind a backup to its source: another directory may
+// contain the same name and identical bytes. Bind the complete native-selected
+// absolute path to the name, using a bounded SHA-256 prefix; refuse alternate
+// path spellings rather than inferring an unproven source identity.
+// Truncate on Unicode code-point boundaries to avoid lone surrogates.
 const MAX_BACKUP_PREFIX_UNITS=255-(1+36+'.backup.user.js'.length);
-const LONG_NAME_HASH_HEX_UNITS=24;
-/** Stable basename binding shared with read-only recovery verification.
- * Legacy truncated-only names cannot prove which long source they came from:
- * keep those files intact, but refuse to attest them as recovery sources.
+const SOURCE_PATH_HASH_HEX_UNITS=24;
+/** Shared source identity binding for backup creation and recovery inspection.
+ * Existing pre-Stable name-only backups are never deleted here, but cannot
+ * be independently attested after the stronger path binding is introduced.
+ * A future restore must still recheck ownership under a transaction lock.
  */
 export function backupPrefix(sourcePath:string):string {
   const stem=basename(sourcePath).replace(/\.user\.js$/i,'');
-  if(stem.length<=MAX_BACKUP_PREFIX_UNITS)return stem;
-  const suffix='~'+createHash('sha256').update(stem,'utf8')
-    .digest('hex').slice(0,LONG_NAME_HASH_HEX_UNITS);
+  const suffix='~'+createHash('sha256').update(sourcePath,'utf8')
+    .digest('hex').slice(0,SOURCE_PATH_HASH_HEX_UNITS);
   let prefix='';
   for(const character of stem){
     if(prefix.length+character.length>MAX_BACKUP_PREFIX_UNITS-suffix.length)break;
