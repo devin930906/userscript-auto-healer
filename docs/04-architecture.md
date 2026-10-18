@@ -18,7 +18,7 @@ Windows 用户界面/受限配置入口 → BatchCoordinator → Import/Metadata
 | DiagnosticService | classify(static,dynamic,logs,assertions)→根因与证据 | 不强制转换成 Selector 问题 | 网络/权限/业务失败 |
 | RepairService | propose(rootCause)→最小 diff 与风险标志 | 不直接覆盖原文件 | 无可信候选转待确认 |
 | AIGateway | propose(consent,redactedData,model)→不可信候选 | 不默认联网、不验证候选 | 限额/超时/模型发现缺失 |
-| AcceptanceGate | check(candidate,managerEvidence,assertions)→VERIFIED/DETECTED_ONLY/FAILED/UNKNOWN | 不允许空断言返回 VERIFIED | 缺扩展/缺运行/缺登录 |
+| AcceptanceGate | check(candidate,managerEvidence,assertions)→VERIFIED/DETECTED_ONLY/FAILED/UNKNOWN | 不允许空断言返回 VERIFIED | 缺扩展/缺运行/缺登录/Chrome 138+ 扩展级 Allow User Scripts 未授权 |
 | VersionStore | backup、hash、stage、apply、rollback | 只改授权文件，需互斥锁 | 中断恢复、回滚校验 |
 | BatchCoordinator | 任务排队、取消、有限重试、恢复与错误隔离 | 不无限并发 | 重复执行幂等性 |
 | HealthHistory | 存诊断/修复/监测及证据 | 历史成功不代表现在成功 | 记录校验与隐私脱敏 |
