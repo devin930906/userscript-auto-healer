@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,lstat,mkdir,mkdtemp,readdir,readFile,rm,symlink,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readdir,readFile,rm,rmdir,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {NativeSourceLockError,withNativeSourceLock} from '../../src/version/native-source-lock';
@@ -129,7 +129,7 @@ test('TEST-020: abandoned mutex must block until explicit privileged reconciliat
     assert.ok((await lstat(lock)).isDirectory());
     assert.deepEqual(await readFile(source),bytes);
     // Test fixture cleanup only. Product code never steals a previous lock.
-    await rm(lock,{recursive:false});
+    await rmdir(lock);
     assert.equal(await withNativeSourceLock(source,async()=>true),true);
     assert.deepEqual(await readdir(backups),[]);
   });
