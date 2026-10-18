@@ -43,4 +43,4 @@ ADR-001：条件性技术基线 Electron+TypeScript + CDP + AST（核心设计�
 - POC-02（开发前关键）：用户授权的真实 Chrome+目标油猴管理器，在测试 Profile 导入测试脚本、确认 @match/@grant/@run-at/GM API、真实执行/回归；无法自动装载则固定受支持的初始化/人工授权步骤。
 - POC-03（发布链关键）：Windows Actions runner 用有合法授权的 rar.exe 创建、RAR 校验、解压及 EXE 安装；许可证供应、安装权限和工件保持待核实。
 - POC-04（开发早期）：AST 解析静态/动态/函数封装与源码位置、脚本沙箱隔离的验证。
-四项均**已规划，未执行**。POC-01/02 阻断对最终架构的无条件确认；POC-03 阻断声称 Windows 双包路径已可执行，但不阻断单纯产品需求分析。
+POC-01 **部分已执行并通过**：2026-10-18 Windows GitHub runner windows-2025 中，Chrome/155.0.8059.40（C:\Program Files\Google\Chrome\Application\chrome.exe）使用临时非默认 Profile、127.0.0.1:9223 成功启动，/json/version 握手、WebSocket 浏览器端点、监听进程可执行文件/命令行 Profile 归属及 /json/list（1 个目标）均通过；证据：https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685。**仅验证托管运行器内的 Chrome 实例，不代表用户任选便携 Chrome、Profile 迁移、错误场景或油猴管理器成功。** POC-02、POC-03、POC-04 未执行。核心用户脚本兼容性仍阻断无条件架构确认；RAR 工具许可和打包/实测仍阻断 Stable。
