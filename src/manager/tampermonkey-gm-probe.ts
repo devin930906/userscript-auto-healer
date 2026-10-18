@@ -209,17 +209,22 @@ export async function startIsolatedTampermonkeyGmProbe(
  }catch{try{server.close();}catch{}return {ok:false,code:'BIND_FAILED'};}
  const address=server.address() as AddressInfo;
  const origin='http://127.0.0.1:'+address.port;
- const expiryTimer=setTimeout(()=>server.close(),ttlMs);
- expiryTimer.unref();
- let closed=false;
- const stop=async()=>{
-   if(closed)return;
-   closed=true;clearTimeout(expiryTimer);
-   await new Promise<void>(resolve=>{
+ // Expiration revokes the entire temporary listener, including active
+ // keep-alive and incomplete POST connections. server.close() alone only
+ // stops new accepts and can leave an already-connected peer hanging.
+ let expiryTimer:NodeJS.Timeout;
+ let stopping:Promise<void>|undefined;
+ const stop=():Promise<void>=>{
+   if(stopping)return stopping;
+   clearTimeout(expiryTimer);
+   stopping=new Promise<void>(resolve=>{
      server.close(()=>resolve());
      server.closeAllConnections();
    });
+   return stopping;
  };
+ expiryTimer=setTimeout(()=>{void stop();},ttlMs);
+ expiryTimer.unref();
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',
    origin,source:produceFixtureSource(origin,token,expiresAt),

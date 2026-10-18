@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import {request} from 'node:http';
+import {createConnection} from 'node:net';
 import {runInNewContext} from 'node:vm';
 import {strict as assert} from 'node:assert';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
@@ -106,6 +107,39 @@ test('TEST-017 stage: stopped isolated probe closes its listener',async()=>{
  await result.session.stop();
  await result.session.stop();
  await assert.rejects(fetch(url+'/'));
+});
+
+test('TEST-017: automatic expiry closes stalled loopback HTTP connections',async()=>{
+ const result=await startIsolatedTampermonkeyGmProbe(true,1000);
+ assert.equal(result.ok,true);
+ if(!result.ok)return;
+ const probe=result.session;
+ const port=Number(new URL(probe.origin).port);
+ const socket=createConnection({host:'127.0.0.1',port});
+ // A forced server close may reset the client rather than gracefully end it.
+ socket.on('error',()=>{});
+ try{
+   await new Promise<void>((resolve,reject)=>{
+     socket.once('connect',resolve);
+     socket.once('error',reject);
+   });
+   const closed=new Promise<void>((resolve,reject)=>{
+     const timeout=setTimeout(()=>reject(new Error('EXPIRED_SOCKET_REMAINED_OPEN')),6000);
+     socket.once('close',()=>{clearTimeout(timeout);resolve();});
+   });
+   // The HTTP parser has received complete headers but NOT the claimed body.
+   // A plain server.close() can leave this live request open after the TTL.
+   socket.write('POST /receipt HTTP/1.1\r\nHost: 127.0.0.1:'+port+
+     '\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{');
+   await new Promise(resolve=>setTimeout(resolve,100));
+   await closed;
+   await Promise.all([probe.stop(),probe.stop()]);
+   await assert.rejects(fetch(probe.origin+'/'));
+   assert.deepEqual(probe.receiptSnapshot(),{});
+ }finally{
+   socket.destroy();
+   await probe.stop();
+ }
 });
 
 test('TEST-017: disposable import URL serves only the authorized, expiring userscript source',async t=>{
