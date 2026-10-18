@@ -53,5 +53,26 @@ jobs:
               expected = {f"{i:03d}" for i in range(1,n+1)}
               if not expected.issubset(found):
                   raise SystemExit(f"{filename} missing {prefix}: {sorted(expected - found)}")
-          print("Documentation structure and numbering checks passed.")
+          # Verify the authoritative record table itself is complete, ordered and
+          # has a fixed number of fields; incidental citations elsewhere do not count.
+          widths = {"REQ":14, "NFR":8, "RISK":10, "TEST":11, "GATE":8, "TASK":12}
+          for filename, prefix, n in checks:
+              rows = [line for line in Path(filename).read_text(encoding="utf-8").splitlines()
+                      if line.startswith(f"| {prefix}-")]
+              ids = []
+              for line in rows:
+                  match = re.match(r"\\| "+prefix+r"-(\\d{3}) \\|", line)
+                  if not match:
+                      raise SystemExit(f"Bad record prefix in {filename}: {line[:80]}")
+                  ids.append(int(match.group(1)))
+                  actual_width = len(line.split("|")) - 2
+                  if actual_width != widths[prefix]:
+                      raise SystemExit(f"{prefix}-{match.group(1)} has {actual_width} columns, expected {widths[prefix]}")
+                  if prefix == "TEST":
+                      fields = [field.strip() for field in line.strip("|").split("|")]
+                      if fields[1] != f"REQ-{match.group(1)}":
+                          raise SystemExit(f"Broken TEST->REQ mapping in {filename}: {fields[:2]}")
+              if ids != list(range(1, n+1)):
+                  raise SystemExit(f"{prefix} rows must be consecutive and unique: {ids}")
+          print("Documentation structure, fields, one-to-one tests and numbering checks passed.")
           PY
