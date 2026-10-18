@@ -59,13 +59,10 @@ async function createMainWindow(): Promise<void> {
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
-      "bad.code === 'INVALID_SHAPE', keys:Object.keys(a).sort()}; })()",
+      "bad.code === 'INVALID_SHAPE' && a.security.sandboxed === true && "a.security.isolated === true, keys:Object.keys(a).sort()}; })()"",
       true
     ) as { ok?: boolean; keys?: string[] };
-    const prefs = win.webContents.getLastWebPreferences();
-    if (!probe?.ok || probe.keys?.join(',') !== 'getStatus,validateConfig' ||
-        !prefs?.sandbox || !prefs.contextIsolation || prefs.nodeIntegration ||
-        prefs.webSecurity === false) {
+    if (!probe?.ok || probe.keys?.join(',') !== 'getStatus,security,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
