@@ -1,12 +1,12 @@
 # 正式开发实施计划
 
-> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE/RAR5 工具链均有实证。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
+> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE 与历史 RAR5 工具链已有技术实证；现行便携格式改为 ZIP（ZIP 验证尚待执行）。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
 
 ## 开发阶段
 M0：证实 Chrome/管理器/交付可行性；M1：可运行安全入口+导入+静态分析；M2：动态诊断与真实管理器验收；M3：修复/版本/批处理/AI/监控/共享层；M4：风险/性能/集成与 Windows 双包装；M5：全部 Stable 门槛和 Release。未人为指定发布日期。
 
 ## 里程碑
-M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D 在隔离 Windows Chromium/Violentmonkey 2.49.0 对标准 HTTPS 页实测 .user.js 注入及 GM_getValue 实际调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。在准入 TASK-001 前仍须定案首选管理器、可承诺 Windows/Chrome 版本矩阵、至少一个真实故障/功能断言样本、条件性 ADR-001。POC-03A/B 证明临时 EXE 与真 RAR5 格式可行，但生产 RAR 许可证、正式应用包安装/直启属于发布门槛（可晚于初始代码，不得晚于发布）；M1 退出：TEST-001..005/011/026 的可重复结果；M2：CDP+管理器 TEST-006..013/017/018 的真实证据；M3：TEST-014..025；M4：安全恢复及 EXE/RAR 测试；M5：所有 GATE 实证通过。
+M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D 在隔离 Windows Chromium/Violentmonkey 2.49.0 对标准 HTTPS 页实测 .user.js 注入及 GM_getValue 实际调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。在准入 TASK-001 前仍须定案首选管理器、可承诺 Windows/Chrome 版本矩阵、至少一个真实故障/功能断言样本、条件性 ADR-001。POC-03A 与历史 POC-03B 仅证明相应临时工具链可行；现行 ZIP 格式需验证，正式 EXE 与 ZIP 应用包安装/直启属于发布门槛（可晚于初始代码，不得晚于发布）；M1 退出：TEST-001..005/011/026 的可重复结果；M2：CDP+管理器 TEST-006..013/017/018 的真实证据；M3：TEST-014..025；M4：安全恢复及 EXE/RAR 测试；M5：所有 GATE 实证通过。
 
 ## 任务清单
 | 编号 | 目标 | 关联需求 | 优先级 | 前置依赖 | 实施模块 | 预计文件范围 | 具体执行步骤 | 交付结果 | 测试编号 | 完成条件 | 状态 |
@@ -30,7 +30,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 | TASK-017 | 完整 UI 与批量用户旅程 | REQ-001..025 | 必须实现 | TASK-013..016 | app/ui tests/e2e | 预计新增：app/ui/task-screen.tsx；tests/e2e/main-flow.test.ts | 先主流程/异常/取消验收，再连接实际模块 | 可用交互入口 | TEST-002;TEST-022 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-018 | 安全审计与端到端回归 | REQ-001..026 | 必须实现 | TASK-017 | tests/security tests/e2e | 预计新增：tests/security/permissions.test.ts；tests/e2e/browser-userscript.test.ts | 覆盖严重风险、真实扩展及资源负例 | 安全/回归证据 | TEST-007;TEST-018;TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-019 | Windows EXE 安装版 | REQ-027 | 必须实现 | TASK-018;POC-03 | packaging/windows .github/workflows | 预计新增：packaging/windows/installer.iss；.github/workflows/build-windows.yml（预计新增；Inno Setup 候选） | 锁定安装工具/权限/升级测试，Windows 构建验收 | 真实 EXE 安装包 | TEST-027 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
-| TASK-020 | 真 RAR 便携发行 | REQ-028 | 必须实现 | TASK-018;POC-03 | packaging/portable .github/workflows | 预计新增：packaging/portable/create-rar.ps1；.github/workflows/build-windows.yml | 合法 RAR 创建与魔数/解压/直启验证 | 真实 RAR 包 | TEST-028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
+| TASK-020 | 真实 ZIP 便携发行 | REQ-028 | 必须实现 | TASK-018;ZIP 工具可用性验证 | packaging/portable .github/workflows | 预计新增：packaging/portable/create-zip.ps1；.github/workflows/build-windows.yml | 创建真实 ZIP，校验文件头/路径安全/文件哈希/解压/干净 Windows 直启 | 真实 ZIP 包 | TEST-028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 | TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
 
 ## 任务依赖
@@ -40,7 +40,7 @@ POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/
 影响用户安全和核心真实验收的路径优先；功能完整性与产品交付形式都属 Stable 必要项。不得因额外可选功能拖延最终验收。
 
 ## 实施范围
-从单用户 Windows 本地处理、可选 AI 网关到真实 .rar 双包，非必要 Web 服务/云同步/其他 OS 不纳入。每项开发采用先失败测试→最小实现→复测→独立评审与符合仓库策略的整合。
+从单用户 Windows 本地处理、可选 AI 网关到EXE+ZIP 双包，非必要 Web 服务/云同步/其他 OS 不纳入。每项开发采用先失败测试→最小实现→复测→独立评审与符合仓库策略的整合。
 
 ## 验证条件
 测试指令将随 Node lockfile、脚手架与 Windows runner 落地；当前没有 npm test、build 或实际运行输出，禁止复制拟定命令伪称已验证。
@@ -52,7 +52,7 @@ POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/
 
 在当前有限工程准入下，下一首要任务为 **TASK-001：最小安全桌面骨架及其安全负例**。按 ADR-001 的 Electron/TypeScript 条件基线实现 renderer sandbox/contextIsolation/无 Node Integration、白名单 preload IPC、路径/配置验证与错误处理，真正运行适用测试并提交可追溯源码；**本准备阶段没有实际开发这些产品功能**。
 
-后续 TASK-007/018 的 Tampermonkey 与用户实际便携 Chrome、真正损坏脚本、授权登录与完整业务断言尚须单独验证；本轮 POC-04A 的两组 `broken/fixed` 由人手预设，仅证明验收方法可重复（https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851），绝不代表自动修复或回滚已开发。RAR 生产许可、真实应用双包与稳定发布留给 TASK-019..021 的硬门槛，不能无期限拖延也不能假装已解决。详细见 docs/13-predevelopment-admission.md。
+后续 TASK-007/018 的 Tampermonkey 与用户实际便携 Chrome、真正损坏脚本、授权登录与完整业务断言尚须单独验证；本轮 POC-04A 的两组 `broken/fixed` 由人手预设，仅证明验收方法可重复（https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851），绝不代表自动修复或回滚已开发。正式 ZIP 构建与解压验证、真实应用双包与稳定发布留给 TASK-019..021 的硬门槛，不能无期限拖延也不能假装已解决。详细见 docs/13-predevelopment-admission.md。
 
 ## 开发前 AST 技术验证（POC-04B）
 

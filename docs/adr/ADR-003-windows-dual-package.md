@@ -10,3 +10,7 @@
 - 主要影响：WinRAR/RAR 试用后商业授权是明确成本与授权阻断，不能擅自捆绑试用工具；清洁 Windows 上真实解压启动与只读路径逻辑必须验证。
 - 替代方案：合规可用的其他 RAR 创建器，经独立许可/构建验证后作为 ADR 变更；禁止用 ZIP 冒充。
 - 状态：POC-03A 临时 EXE 编译/安装/卸载通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574）；POC-03B 试用真 RAR5 创建/解压/校验通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。RAR 正式生产授权、产品实际打包、签名和 Windows 直启测试仍未完成。
+
+
+## 后续决策（2026-10-18）
+**本 ADR 的 RAR 发行决定已被 ADR-004 取代。** 本文件保留当时的候选方案、许可证分析和 POC-03B 历史结果以便追溯；现行正式发行采用 EXE 安装版 + ZIP 便携版，不再要求 RAR 创建器或 RAR 生产许可证，所有现行 REQ-028、TEST-028、TASK-020、GATE-009/011 以 ADR-004 为准。

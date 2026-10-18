@@ -3,7 +3,7 @@
 > 状态：准备阶段的设计映射，代码及测试未运行。
 
 ## 原始要求映射
-I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批量；I-004=AST/动态诊断/自愈；I-005=验收/备份回滚/监控；I-006=共享兼容层；I-007=AI；I-008=补充安全和管理器行为约束；I-009=本次开发前指令中 Windows EXE+RAR 发行约束。源原文 docs/00-intake.md，正式需求 docs/02-requirements.md。
+I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批量；I-004=AST/动态诊断/自愈；I-005=验收/备份回滚/监控；I-006=共享兼容层；I-007=AI；I-008=补充安全和管理器行为约束；I-009=开发前原始 Windows EXE+RAR 历史约束；I-010=用户 2026-10-18 明确将便携格式变更为 ZIP（覆盖 I-009 的 RAR 部分，保留 EXE）。源原文 docs/00-intake.md，正式需求 docs/02-requirements.md。
 
 ## 功能需求映射
 | 来源 | 功能需求 | 负责架构模块 | 开发任务 | 测试映射 | 发布门槛 |
@@ -35,7 +35,7 @@ I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批�
 | I-006 | REQ-025 | CompatibilityLayer | TASK-016 | TEST-025 | GATE-001..007 |
 | I-008 | REQ-026 | SecurityBoundary | TASK-001, TASK-018 | TEST-026 | GATE-001..007 |
 | I-009 | REQ-027 | WindowsPackaging | TASK-019 | TEST-027 | GATE-008 |
-| I-009 | REQ-028 | WindowsPackaging | TASK-020 | TEST-028 | GATE-009 |
+| I-010 | REQ-028 | WindowsPackaging | TASK-020 | TEST-028 | GATE-009 |
 
 ## 非功能需求映射
 | 编号 | 技术依据 | 任务与测试 | 发布门槛 |
@@ -57,4 +57,4 @@ REQ-001..028 对应 TEST-001..028；测试层级、前置与反例见 docs/07-te
 GATE-001..011 的证据和阻断等级以 docs/08-release.md 为权威；表内缩写仅表示关联类别，不是范围取代其逐项要求。
 
 ## 覆盖缺口
-Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_getValue（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno Setup 临时安装器与真实 RAR5 格式已获得开发前技术 PoC 证据；仍缺首选 Tampermonkey 与正式 Chrome/便携版的支持矩阵、真实损坏脚本修复/业务回归、RAR 正式生产许可、真实产品 EXE/RAR 安装直启和应用 LICENSE 定案。原始用户输入中的各项核心功能已进入 REQ-001..026，双 Windows 包为 REQ-027/028；仍须逐字复查 00 与需求编号以确定完整覆盖。
+Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_getValue（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno Setup 临时安装器与历史真实 RAR5 格式已有开发前技术 PoC 证据（不是现行 ZIP 产品验收）；仍缺首选 Tampermonkey 与正式 Chrome/便携版的支持矩阵、真实损坏脚本修复/业务回归、现行 ZIP 应用完整性及便携测试、真实产品 EXE/ZIP 安装直启和应用 LICENSE 定案。原始用户输入中的各项核心功能已进入 REQ-001..026，双 Windows 包为 REQ-027/028；仍须逐字复查 00 与需求编号以确定完整覆盖。
