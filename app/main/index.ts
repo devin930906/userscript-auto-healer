@@ -526,7 +526,8 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
-      "const noGmStart=await a.startGmProbe(); const noGmStatus=await a.gmProbeStatus(); " +
+      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end'); " +
+      "const noGmStatus=await a.gmProbeStatus(); " +
       "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
        "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +
       "const newProfileWithoutChrome=await a.createProfile(); " +
@@ -551,7 +552,7 @@ async function createMainWindow(): Promise<void> {
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
-      "noGmStart.code === 'BROWSER_NOT_RUNNING' && " +
+      "noGmStart.code === 'BROWSER_NOT_RUNNING' && invalidRunAt.code === 'INVALID_OPTIONS' && " +
       "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
        "noGmObserve.code === 'NO_ACTIVE_FIXTURE' && badMode.code === 'INVALID_MODE' && " +
        "noGmStop.ok === false && " +
