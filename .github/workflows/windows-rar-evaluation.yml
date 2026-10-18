@@ -1,0 +1,21 @@
+name: Official RAR trial archive feasibility
+
+on:
+  push:
+    paths:
+      - 'poc/windows-rar-evaluation.ps1'
+      - '.github/workflows/windows-rar-evaluation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rar-evaluation:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Evaluate authentic RAR format in temporary licensed trial scope
+        shell: pwsh
+        run: ./poc/windows-rar-evaluation.ps1
