@@ -80,12 +80,20 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  // Target.createTarget can register a tab before its first navigation commits.
  // Establish a genuine CDP DOM receipt before releasing the fixture's SPA timer.
  let ready=false;
- for(let attempt=0;attempt<16;attempt++){
+ let lastObservation='NOT_STARTED';
+ // On overloaded Windows runners the first CDP tab can remain mid-navigation
+ // after Target.createTarget reports it. Give the real DOM receipt a bounded
+ // startup window, without relaxing ownership/origin or selector assertions.
+ for(let attempt=0;attempt<32;attempt++){
    const baseline=await observeApprovedDom(session,tab,site,true,['#initial']);
+   lastObservation=baseline.ok
+     ? 'initial-count='+baseline.selectorCounts['#initial']
+     : baseline.code;
    if(baseline.ok&&baseline.selectorCounts['#initial']===1){ready=true;break;}
    await delay(150);
  }
- assert.equal(ready,true,'Approved top frame did not finish initial navigation');
+ assert.equal(ready,true,
+   'Approved top frame did not finish initial navigation; last='+lastObservation);
  signalDynamicChange=true;
  const observed=await observeApprovedDomSeries(session,tab,site,true,
    ['#initial','#async-target'],8,300);
