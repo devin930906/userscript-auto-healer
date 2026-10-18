@@ -250,3 +250,25 @@ test('TEST-020: sound backup does not authorize inspecting an empty or oversized
   });
  }
 });
+
+test('TEST-020: recovery receipt rejects junction in backup directory ancestry',async t=>{
+  await fixture(async(req,backup,source,root)=>{
+    const alias=join(root,'junction-to-root');
+    try{
+      await symlink(root,alias,process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Directory junction creation unavailable on this runner');return;
+      }
+      throw error;
+    }
+    const redirected=join(alias,'backups');
+    assert.equal((await lstat(redirected)).isSymbolicLink(),false);
+    const result=await verifyBackupRecoverySource({...req,backupDirectory:redirected});
+    assert.equal(result.status,'BLOCKED');
+    if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_DIRECTORY_INVALID');
+    assert.equal(result.automaticRollbackAllowed,false);
+    assert.deepEqual(await readFile(backup),original);
+    assert.deepEqual(await readFile(source),original);
+  });
+});

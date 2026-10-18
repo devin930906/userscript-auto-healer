@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,mkdtemp,readFile,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdtemp,readFile,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
@@ -87,5 +87,27 @@ test('TEST-020: hard-linked source cannot receive a trusted fingerprint receipt'
     const recovered=await verifyApprovedSourceFingerprint(request);
     assert.equal(recovered.status,'MATCHED_READ_ONLY');
     assert.equal(recovered.automaticPatchAllowed,false);
+  });
+});
+
+test('TEST-020: read-only fingerprint refuses nested junction ancestor',async t=>{
+  await fixture(async(file,root)=>{
+    const alias=join(root,'junction-to-root');
+    try{
+      await symlink(root,alias,process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Directory junction creation unavailable on this runner');return;
+      }
+      throw error;
+    }
+    const redirected=join(alias,'approved.user.js');
+    assert.equal((await lstat(redirected)).isSymbolicLink(),false);
+    const result=await verifyApprovedSourceFingerprint({
+      sourcePath:redirected,expectedSha256:sha(text),userApproved:true
+    });
+    assert.equal(result.status,'BLOCKED');
+    if(result.status==='BLOCKED')assert.equal(result.reason,'SYMLINK_REJECTED');
+    assert.deepEqual(await readFile(file),Buffer.from(text));
   });
 });
