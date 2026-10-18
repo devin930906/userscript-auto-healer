@@ -11,10 +11,12 @@ import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 import {
  inspectApprovedScenarioDom,summarizeReadOnlyScenarioDom,
- inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries
+ inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries,
+ inspectAndLogApprovedScenarioDomSeries
 } from '../../src/diagnostics/scenario-dom-diagnostic';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import type {ObservationResult} from '../../src/observe/dom-observer';
+import {BoundedFaultLog} from '../../src/diagnostics/fault-classifier';
 
 const baseScenario:ScenarioInput={
  id:'owned_cdp_fixture',scriptSha256:'a'.repeat(64),userApproved:true,
@@ -323,6 +325,25 @@ test('TEST-013: executable owned-browser entry refuses forged, unowned or cancel
    AbortSignal.abort())).code,'CANCELLED');
 });
 
+test('TEST-013: blocked scenario attempts write only sanitized unknown entries',async()=>{
+  const log=new BoundedFaultLog(2);
+  const browser={ok:false,code:'PREFLIGHT_FAILED'} as const;
+  const target={ok:false,code:'UNVERIFIED_BROWSER'} as const;
+  const sensitive={...baseScenario,targetUrl:'https://example.org/?cookie=PRIVATE_TOKEN'};
+  const result=await inspectAndLogApprovedScenarioDomSeries(
+    browser,target,sensitive,false,log);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'NOT_AUTHORIZED');
+  assert.equal(log.list().length,1);
+  assert.equal(log.list()[0].status,'INSUFFICIENT_EVIDENCE');
+  assert.equal(log.list()[0].category,'UNKNOWN');
+  assert.deepEqual(log.list()[0].evidenceIds,['scenario_observation_unverified']);
+  assert.equal(JSON.stringify(log.list()).includes('PRIVATE_TOKEN'),false);
+  assert.equal(log.list()[0].automaticPatchAllowed,false);
+  assert.equal(log.list()[0].tampermonkeyVerified,false);
+  assert.equal(log.list()[0].businessRecoveredVerified,false);
+});
+
 test('TEST-013: Windows owned Chrome yields limited selector triage without a script',async t=>{
  if(process.platform!=='win32'){t.skip('Requires actual signed Chrome on Windows');return;}
  let chrome:string|undefined;
@@ -378,5 +399,16 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  assert.equal(series.triage.category,'SELECTOR_ASSERTION');
  assert.equal(series.automaticPatchAllowed,false);
  assert.equal(series.tampermonkeyVerified,false);
+ const journal=new BoundedFaultLog(2);
+ const logged=await inspectAndLogApprovedScenarioDomSeries(
+   opened,tab,scenario,true,journal,2,150);
+ assert.equal(logged.status,'LIMITED_DOM_SIGNAL_ONLY',JSON.stringify(logged));
+ assert.equal(journal.list().length,1);
+ assert.equal(journal.list()[0].category,'SELECTOR_ASSERTION');
+ assert.deepEqual(journal.list()[0].evidenceIds,['scenario_assertion_2']);
+ assert.equal(journal.list()[0].automaticPatchAllowed,false);
+ assert.equal(journal.list()[0].tampermonkeyVerified,false);
+ assert.equal(journal.list()[0].businessRecoveredVerified,false);
+ assert.equal(JSON.stringify(journal.list()).includes(probe.session.origin),false);
  assert.deepEqual(probe.session.receiptSnapshot(),{});
 });
