@@ -143,6 +143,24 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       if(saved.length!==bytes.length||
          createHash('sha256').update(saved).digest('hex')!==digest)
         return deny('IO_FAILURE');
+
+      // The published backup and staging name initially refer to the same
+      // inode. Do not report a standalone recovery copy while this temporary
+      // hard link still exists: recovery-source rejects multiply linked files.
+      // If cleanup fails, report failure and keep the potential backup.
+      await unlink(pending);
+      tempCreated=false;
+      const independent=await lstat(final,{bigint:true});
+      const verifiedDir=await lstat(directory,{bigint:true});
+      if(independent.isSymbolicLink()||!independent.isFile()||
+         independent.nlink!==1n||verifiedDir.isSymbolicLink()||
+         !verifiedDir.isDirectory()||!sameDirectory(backupDir,verifiedDir))
+        return deny('IO_FAILURE');
+      const finalBytes=await readFile(final);
+      if(finalBytes.length!==bytes.length||
+         createHash('sha256').update(finalBytes).digest('hex')!==digest)
+        return deny('IO_FAILURE');
+
       return Object.freeze({status:'BACKUP_ONLY' as const,
         backupFileName:name,sha256:digest,byteLength:bytes.length,
         automaticPatchAllowed:false as const});

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,writeFile} from 'node:fs/promises';
+import {lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
@@ -38,6 +38,9 @@ test('TEST-020: explicit backup-only creates independently verified immutable-na
       assert.equal(result.byteLength,before.length);
       assert.equal(result.automaticPatchAllowed,false);
       assert.deepEqual(await readFile(join(backupDir,result.backupFileName)),before);
+      // No staged hard-link may remain when BACKUP_ONLY is reported.
+      const backupStat=await lstat(join(backupDir,result.backupFileName),{bigint:true});
+      assert.equal(backupStat.nlink,1n);
       assert.equal(JSON.stringify(result).includes(file),false);
     }
     assert.deepEqual((await readdir(backupDir)).sort(),
