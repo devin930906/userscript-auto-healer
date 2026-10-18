@@ -104,6 +104,10 @@ export async function verifyBackupRecoverySource(
   const sourceBefore=await lstat(source,{bigint:true});
   if(sourceBefore.isSymbolicLink()||!sourceBefore.isFile())
     return deny('INVALID_PATH');
+  // A valid old backup must not make an empty or oversized current source
+  // eligible for recovery preflight. No writes or restore rights follow.
+  if(sourceBefore.size<=0n||sourceBefore.size>BigInt(MAX_SCRIPT_BYTES))
+    return deny('SIZE_LIMIT');
   const before=await lstat(path,{bigint:true});
   if(before.isSymbolicLink())return deny('SYMLINK_REJECTED');
   if(!before.isFile())return deny('INVALID_PATH');

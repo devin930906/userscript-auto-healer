@@ -1,11 +1,12 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,lstat,mkdir,mkdtemp,readFile,rm,symlink,unlink,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readFile,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {verifyBackupRecoverySource} from '../../src/version/recovery-source';
+import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 
 const original=Buffer.from('// ==UserScript==\n// @name recovery-fixture\n// ==/UserScript==\nconst answer=42;\n');
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
@@ -232,4 +233,20 @@ test('TEST-020: identical script names and bytes in different directories cannot
     assert.deepEqual(await readFile(secondPath),original);
     assert.deepEqual(await readFile(join(backups,first.backupFileName)),original);
   }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('TEST-020: sound backup does not authorize inspecting an empty or oversized source',async()=>{
+ for(const size of [0,MAX_SCRIPT_BYTES+1]){
+  await fixture(async(req,backup,source)=>{
+   await truncate(source,size);
+   const result=await verifyBackupRecoverySource(req);
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'SIZE_LIMIT');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(JSON.stringify(result).includes(source),false);
+   assert.deepEqual(await readFile(backup),original);
+  });
+ }
 });
