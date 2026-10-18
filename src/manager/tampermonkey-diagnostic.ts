@@ -312,6 +312,8 @@ export async function startApprovedTampermonkeyDiagnostic(
      if(!target)return {ok:false,code:'MODE_NOT_VISITED'};
      if(observationInProgress)return {ok:false,code:'OBSERVATION_IN_PROGRESS'};
      observationInProgress=true;
+     // A failed recheck must never leave a previous matching DOM snapshot active.
+     delete domEvidence[mode];
      try{
        const sample=await observeApprovedDom(browser,target,
          probe.origin+'/?mode='+mode,true,[...FIXTURE_SELECTORS],signal);
