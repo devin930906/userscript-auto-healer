@@ -221,3 +221,9 @@ PR [#44](https://github.com/devin930906/userscript-auto-healer/pull/44) 在 `src
 Windows 源 SHA `14c51715435da5ec02ff07347f37d772f0bf70b6` 的 [应用工作流 #39161618594](https://github.com/devin930906/userscript-auto-healer/actions/runs/39161618594) 在第二次、仅失败 Job 的复测成功（Node 187 项、186 pass、0 fail、1 条件 skip；真实 Electron smoke 通过）；[独立便携 Chrome #39161618348](https://github.com/devin930906/userscript-auto-healer/actions/runs/39161618348) success。第一次应用工作流因新测试初始路由时序未稳定失败，增加保守起始帧就绪预检；第二次首次执行又遭原有 TEST-018 Chrome/CDP DOM 负例瞬时失败，复测正常，该失败仍保留在 Actions 历史。[合并后 main 工作流 #39161972219](https://github.com/devin930906/userscript-auto-healer/actions/runs/39161972219) success，验证对象为上述合并 SHA。
 
 **TASK-008 继续开发中，TEST-013 仅为有限网页异常诊断的阶段性实证**：异常来自被授权观察的网站页面，无法独立归因 Tampermonkey 或油猴脚本；未建立真正管理器安装、GM API、业务断言、自动修复或回滚可信证据。TASK-007/008/010、TEST-017/018 与 GATE-004/005 等正式门槛仍受阻；EXE/ZIP 正式产物未形成。
+
+## （7）TASK-009 / TEST-019 外部元数据候选拒绝（2026-10-19）
+
+[PR #69](https://github.com/devin930906/userscript-auto-healer/pull/69) 已合并至 `main`，合并 SHA `13d02d544f8779732df02160115ca14abbe9dd46`。修复 `src/repair/scenario-candidate.ts`：即使 @match 与授权场景一致，携带未核实的 `@require`、`@resource`、`@connect`、`@updateURL`、`@downloadURL` 或未识别元数据的脚本，也不能仅凭只读 DOM 样本生成修复候选；无源码、私密页面内容或自动操作写入。
+
+先行测试提交 `3b56e1d93aed2401975e161a48889219cbb44ec7` 的 [Windows CI #39167672723](https://github.com/devin930906/userscript-auto-healer/actions/runs/39167672723) 因真实复现 `@require` 不当返回 `CANDIDATE_ONLY` 而失败；修复提交 `5a645676176f815a45d1e599778be43386e8ba49` 的 [Windows CI #39167770757](https://github.com/devin930906/userscript-auto-healer/actions/runs/39167770757) 已完成成功：TypeScript、195 项 Node（194 pass、0 fail、1 条件 skip）、真实 Electron sandbox/preload IPC smoke。合并后主干 CI 需要按最终 SHA 重新复核。本修复仅推进 TEST-019 安全负例，不代表 TASK-009 完结；可信 Tampermonkey/GM/业务验收、自动补丁应用与回滚、TASK-019/020 EXE+ZIP 以及全部 Stable GATE 仍未完成。
