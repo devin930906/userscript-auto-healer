@@ -1,0 +1,59 @@
+name: Application Skeleton Checks
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/app-check.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/app-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  boundary:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Prepare dependency lock for first scaffold
+        shell: pwsh
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install pinned toolchain without Electron binary execution
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Type check
+        shell: pwsh
+        run: npm run typecheck
+      - name: Security and configuration regression tests
+        shell: pwsh
+        run: npm test
+      - name: Export generated dependency lock for source-control follow-up
+        shell: pwsh
+        run: |
+          Write-Output 'UAH_LOCK_BEGIN'
+          [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'package-lock.json')))
+          Write-Output 'UAH_LOCK_END'
