@@ -133,6 +133,10 @@ test('TEST-019: shadowed or reassigned document never yields a DOM patch candida
     "const {document} = globalThis; document.querySelector('#old');",
     "const [document] = []; document.querySelector('#old');",
     "document = anotherDocument; document.querySelector('#old');",
+    "for (document of [fakeDocument]) { document.querySelector('#old'); }",
+    "for (document in {key:1}) { document.querySelector('#old'); }",
+    "for ([document] of [[fakeDocument]]) { document.querySelector('#old'); }",
+    "for ({document} of [{document:fakeDocument}]) { document.querySelector('#old'); }",
     "with (window) { document.querySelector('#old'); }",
     "eval('var document = null'); document.querySelector('#old');"
   ]){
