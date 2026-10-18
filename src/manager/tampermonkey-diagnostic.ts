@@ -235,7 +235,7 @@ export function correlateManualFixtureEvidence(
    ].sort().join(',')||
      e.status!=='LIMITED_FIXTURE_DOM_ONLY'||e.mode!==mode||
      typeof e.observedAt!=='string'||
-     !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(e.observedAt)||
+     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e.observedAt)||
      !Number.isFinite(Date.parse(e.observedAt))||
      new Date(e.observedAt).toISOString()!==e.observedAt||
      observedTimes.has(e.observedAt)||
