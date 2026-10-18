@@ -104,16 +104,16 @@ export async function verifyBackupRecoverySource(
   const sourceBefore=await lstat(source,{bigint:true});
   if(sourceBefore.isSymbolicLink()||!sourceBefore.isFile())
     return deny('INVALID_PATH');
-  // A second filesystem name for the original defeats consent tied to the
-  // native-selected source path. The backup must not be considered ready for
-  // recovery while another alias can mutate that same source inode.
-  if(sourceBefore.nlink!==1n)return deny('SOURCE_HARDLINK_REJECTED');
   const before=await lstat(path,{bigint:true});
   if(before.isSymbolicLink())return deny('SYMLINK_REJECTED');
   if(!before.isFile())return deny('INVALID_PATH');
   if(before.nlink!==1n||
     (before.dev===sourceBefore.dev&&before.ino===sourceBefore.ino))
     return deny('BACKUP_ALIAS_REJECTED');
+  // Preserve the more specific backup-as-source alias diagnosis above.
+  // An additional independent path to the source inode also defeats the
+  // native-selected source's authorization and lock identity boundary.
+  if(sourceBefore.nlink!==1n)return deny('SOURCE_HARDLINK_REJECTED');
   if(before.size<=0n||before.size>BigInt(MAX_SCRIPT_BYTES))return deny('SIZE_LIMIT');
 
   // O_NOFOLLOW is supplementary (some operating systems lack it).
