@@ -92,9 +92,18 @@ export function summarizeReadOnlyScenarioDom(
    observed.originMatchesApproved!==true||
    observed.fullPageVerified!==false||observed.userscriptVerified!==false)
    return blocked('INVALID_OBSERVATION');
- if(observed.routeChanged)return blocked('ROUTE_CHANGED');
+ if(observed.routeChanged===true)return blocked('ROUTE_CHANGED');
+ if(observed.routeChanged!==false)return blocked('INVALID_OBSERVATION');
  if(!observed.selectorCounts||typeof observed.selectorCounts!=='object'||
-   Array.isArray(observed.selectorCounts))
+   Array.isArray(observed.selectorCounts)||
+   !observed.summary||!Number.isSafeInteger(observed.summary.elementCount)||
+   observed.summary.elementCount<0)
+   return blocked('INVALID_OBSERVATION');
+ // A snapshot of unapproved selectors cannot be treated as the requested
+ // scenario's observation, even if it contains all expected keys.
+ const actualSelectors=Object.keys(observed.selectorCounts);
+ if(actualSelectors.length!==checked.selectors.length||
+   actualSelectors.some(key=>!checked.selectors.includes(key)))
    return blocked('INVALID_OBSERVATION');
  const signals:FaultSignal[]=[];
  for(let i=0;i<checked.selectors.length;i++){
@@ -102,7 +111,8 @@ export function summarizeReadOnlyScenarioDom(
    if(!Object.prototype.hasOwnProperty.call(observed.selectorCounts,selector))
      return blocked('INVALID_OBSERVATION');
    const count=observed.selectorCounts[selector];
-   if(!Number.isSafeInteger(count)||count<0)
+   if(!Number.isSafeInteger(count)||count<0||
+     count>observed.summary.elementCount)
      return blocked('INVALID_OBSERVATION');
    if(count===0)signals.push({
      id:'scenario_assertion_'+(i+1),code:'SELECTOR_NOT_FOUND'
