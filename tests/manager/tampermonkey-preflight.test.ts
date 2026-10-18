@@ -42,6 +42,39 @@ test('TEST-017: read-only parser metadata integrates with preflight without clai
    assert.equal(result.scriptInstallationVerified,false);
  }
 });
+test('TEST-017: supported run-at metadata is eligible but never attests injection timing',()=>{
+ for(const timing of ['document-start','document-body','document-end','document-idle']){
+   const result=inspect(report,metadata({grant:['GM_getValue'],
+     match:['https://example.com/*'],'run-at':[timing]}));
+   assert.equal(result.ok,true,timing);
+   if(result.ok)assert.equal(result.gmApiVerified,false);
+ }
+ // Without @run-at the manager determines timing; no business claim follows.
+ assert.equal(inspect().ok,true);
+ for(const runAt of [['context-menu'],['future-mode'],[''],
+   ['document-start','document-end']]){
+   const result=inspect(report,metadata({grant:['GM_getValue'],
+     match:['https://example.com/*'],'run-at':runAt}));
+   assert.equal(result.ok,false,runAt.join(','));
+   if(!result.ok)assert.equal(result.code,'RUN_AT_NOT_CONFIRMED');
+ }
+});
+test('TEST-017: remote dependencies and contradictory grants cannot pass metadata preflight',()=>{
+ const baseline={grant:['GM_getValue'],match:['https://example.com/*']};
+ for(const tags of [
+   {...baseline,require:['https://cdn.example.com/library.js']},
+   {...baseline,require:['']},
+   {...baseline,resource:['icon https://cdn.example.com/image.svg']}
+ ]){
+   const result=inspect(report,metadata(tags));
+   assert.equal(result.ok,false);
+   if(!result.ok)assert.equal(result.code,'EXTERNAL_RESOURCES_UNVERIFIED');
+ }
+ const contradictory=inspect(report,metadata({...baseline,grant:['none','GM_getValue']}));
+ assert.equal(contradictory.ok,false);
+ if(!contradictory.ok)assert.equal(contradictory.code,'GM_GRANT_NOT_DECLARED');
+});
+
 test('TEST-017: consent and real owned-target hint stage cannot be bypassed',()=>{
  assert.deepEqual(inspect(report,normal,'https://example.com/',false),
    {ok:false,status:'BLOCKED',code:'NOT_AUTHORIZED',gmApiVerified:false,businessVerified:false});
