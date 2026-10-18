@@ -193,3 +193,41 @@ test('TEST-017: installed temporary fixture stops all DOM/GM/network effects aft
    });
  }
 });
+
+
+test('TEST-017: mid-run consent expiry prevents later GM fixture side effects',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ for(const expiresDuring of ['gm','query','attribute'] as const){
+   let now=probe.expiresAt-1;
+   const effects={gm:0,query:0,attribute:0,network:0};
+   const clock=class extends Date {static now(){return now;}};
+   runInNewContext(probe.source,{
+     Date:clock,URL,
+     location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+     GM_getValue:(_key:string,defaultValue:string)=>{
+       effects.gm++;
+       if(expiresDuring==='gm')now=probe.expiresAt;
+       return defaultValue;
+     },
+     document:{querySelector:()=>{
+       effects.query++;
+       if(expiresDuring==='query')now=probe.expiresAt;
+       return {setAttribute:()=>{
+         effects.attribute++;
+         if(expiresDuring==='attribute')now=probe.expiresAt;
+       }};
+     }},
+     fetch:()=>{effects.network++;return Promise.resolve();}
+   });
+   assert.deepEqual(effects,{
+     gm:1,
+     query:expiresDuring==='gm'?0:1,
+     attribute:expiresDuring==='attribute'?1:0,
+     network:0
+   },'Expired fixture must not advance to another side effect after '+expiresDuring);
+ }
+});

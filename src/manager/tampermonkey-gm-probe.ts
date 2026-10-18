@@ -69,9 +69,14 @@ function produceFixtureSource(origin:string,token:string,expiresAt:number):strin
  ' try{gmMatched=GM_getValue('+JSON.stringify('uah-gm-probe-'+token)+','+
     JSON.stringify(PROBE_DEFAULT)+')==='+JSON.stringify(PROBE_DEFAULT)+';}',
  ' catch{gmMatched=false;}',
+ // A synchronous GM getter, DOM query or setter can cross the consent
+ // deadline. Abort before every subsequent side effect, not only at entry.
+ ' if(Date.now()>='+expiresAt+')return;',
  " const selector=mode==='broken'?'#obsolete-target':'#current-target';",
  ' const target=document.querySelector(selector);',
+ ' if(Date.now()>='+expiresAt+')return;',
  " if(target)target.setAttribute('data-uah-probe-action','done');",
+ ' if(Date.now()>='+expiresAt+')return;',
  ' void fetch('+JSON.stringify(origin+'/receipt')+',',
  " {method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},",
  ' body:JSON.stringify({token:'+JSON.stringify(token)+',mode,',
