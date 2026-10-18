@@ -337,7 +337,8 @@ stopButton?.addEventListener('click',()=>{
 
 gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
  const runAt=gmRunAtSelect?.value;
- if(!['document-start','document-body','document-end','document-idle'].includes(runAt??'')){
+ if(runAt!=='document-start'&&runAt!=='document-body'&&
+    runAt!=='document-end'&&runAt!=='document-idle'){
   if(gmResult)gmResult.textContent='注入时机无效；本机测试未启动。';
   return;
  }
