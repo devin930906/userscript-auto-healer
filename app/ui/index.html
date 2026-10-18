@@ -17,6 +17,19 @@
       <input id="select-files" type="file" multiple accept=".user.js">
       <ul id="import-list" aria-live="polite"></ul>
     </section>
+    <section aria-labelledby="browser-heading">
+      <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
+      <p>先通过系统文件选择器选取 chrome.exe 和已有的独立调试 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
+      <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>
+      <button id="choose-profile" type="button">选择独立 Profile</button>
+      <label for="chrome-port">本机 CDP 端口：</label>
+      <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
+      <button id="launch-chrome" type="button">授权启动独立 Chrome</button>
+      <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
+      <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
+      <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
+      <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
+    </section>
     <p id="status" role="status">正在检查本地应用边界…</p>
   </main>
   <script src="./index.js"></script>
