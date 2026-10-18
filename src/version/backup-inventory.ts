@@ -19,7 +19,7 @@ const MAX_DIRECTORY_ENTRIES=512;
 const MAX_CANDIDATES=64;
 const UUID_V4=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.backup\.user\.js$/;
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|
-  'SOURCE_CHANGED'|'BACKUP_DIRECTORY_INVALID'|'TOO_MANY_ENTRIES'|
+  'SOURCE_CHANGED'|'SOURCE_SIZE_LIMIT'|'BACKUP_DIRECTORY_INVALID'|'TOO_MANY_ENTRIES'|
   'UNSAFE_BACKUP'|'IO_FAILURE';
 const readonlyFlags={
   automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const,
@@ -85,6 +85,10 @@ export async function inspectBackupInventoryReadOnly(
    const sourceStart=await lstat(sourcePath,{bigint:true});
    if(sourceStart.isSymbolicLink()||!sourceStart.isFile()||
       sourceStart.nlink!==1n)return blocked('INVALID_PATH');
+   // Recovery inventory must not bless sources that the native fingerprint
+   // and backup-only stages would refuse as empty or unbounded.
+   if(sourceStart.size<=0n||sourceStart.size>BigInt(MAX_SCRIPT_BYTES))
+     return blocked('SOURCE_SIZE_LIMIT');
    const directoryStart=await lstat(backupDirectory,{bigint:true});
    if(directoryStart.isSymbolicLink()||!directoryStart.isDirectory())
      return blocked('BACKUP_DIRECTORY_INVALID');
