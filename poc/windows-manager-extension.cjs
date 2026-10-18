@@ -21,7 +21,11 @@ const payload = [
   '// @run-at      document-idle',
   '// ==/UserScript==',
   'document.documentElement.dataset.userscriptFixture = "executed";',
-  'document.documentElement.dataset.gmApiPresent = String(typeof GM_getValue === "function");',
+  // Invoke the GM API, not merely detect a function reference.
+  // The fixture key is ephemeral and read-only, so no user script data is touched.
+  'let gmPocRead = false;',
+  'try { gmPocRead = typeof GM_getValue === "function" && GM_getValue("__poc_fixture_unset__", "poc-default") === "poc-default"; } catch (e) {}',
+  'document.documentElement.dataset.gmApiPresent = String(gmPocRead);',
 ].join('\n');
 
 async function main() {
@@ -297,7 +301,7 @@ async function main() {
       execution={installed:true,gm:await probe.evaluate(()=>document.documentElement.dataset.gmApiPresent)};
     } catch(e){}
     if (execution.installed && execution.gm==='true')
-      console.log('PASS POC-02B: .user.js really executed under extension context, GM_getValue available.');
+      console.log('PASS POC-02B: .user.js actually injected via Violentmonkey, GM_getValue invoked successfully with a default-value assertion.');
     else {console.log('INCOMPLETE POC-02B: no verified userscript injection/GM API; installation/real assertions still blocked; observed='+JSON.stringify(execution));process.exitCode=2;}
     await page.close(); await probe.close(); await optionsProbe.close();
   } finally {
