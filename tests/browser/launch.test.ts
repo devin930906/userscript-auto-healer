@@ -15,7 +15,7 @@ async function fixture(t:{after:(cb:()=>Promise<void>)=>void}){
   await mkdir(profile);
   return {root,executable,profile};
 }
-function config(executablePath:string,userDataDir:string,remoteDebuggingPort=49887){
+function config(executablePath:string,userDataDir:string,remoteDebuggingPort=9223){
   return {executablePath,userDataDir,remoteDebuggingPort,bindAddress:'127.0.0.1'};
 }
 test('TEST-006/007: preflight only verifies paths, never launches a browser',async t=>{
