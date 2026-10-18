@@ -21,5 +21,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop'),
   startGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:start'),
   gmProbeStatus: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:status'),
+  visitGmFixture: (mode: 'broken' | 'fixed'): Promise<unknown> => ipcRenderer.invoke('gm-probe:visit',mode),
+  observeGmFixture: (mode: 'broken' | 'fixed'): Promise<unknown> => ipcRenderer.invoke('gm-probe:observe',mode),
   stopGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:stop')
 }));

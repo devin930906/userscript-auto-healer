@@ -33,9 +33,15 @@
       <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
       <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
       测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
-      结束后必须自行删除临时脚本；任何 HTTP 回执都不能独立证明扩展真实性、GM API 或产品恢复。</p>
+      然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
+      必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
+      HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
       <button id="gm-probe-start" type="button">授权开始本机 GM 测试</button>
-      <button id="gm-probe-status" type="button">查看测试页回执（不等于验证）</button>
+      <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
+      <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
+      <button id="gm-probe-visit-fixed" type="button">授权打开 fixed 测试页</button>
+      <button id="gm-probe-observe-fixed" type="button">授权对照 fixed DOM</button>
+      <button id="gm-probe-status" type="button">查看回执与 DOM 对照（未经认证）</button>
       <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
       <p id="gm-probe-links" aria-live="polite"></p>
       <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
