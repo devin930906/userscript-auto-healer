@@ -26,3 +26,55 @@ export function inspectCdpVersion(payload:unknown,expectedPort:number):CdpEnvelo
   return {ok:true,status:'STRUCTURE_ONLY',browser:data.Browser,
     websocketUrl:data.webSocketDebuggerUrl,path:ws.pathname,owned:false};
 }
+
+
+/** Structure-only tab evidence; never equate a supplied CDP target with ownership.
+ * The caller must separately verify the self-launched PID, listener owner and profile
+ * before any browser connection, script activity or business verification.
+ */
+export type CdpTargetEnvelope =
+  | {readonly ok:true; readonly status:'TARGET_STRUCTURE_ONLY';
+     readonly targetId:string; readonly websocketUrl:string; readonly owned:false}
+  | {readonly ok:false; readonly code:'INVALID_TARGET_INPUT'|'INVALID_TARGET_LIST'|
+      'TARGET_NOT_FOUND'|'TARGET_AMBIGUOUS'|'UNSAFE_TARGET_WEBSOCKET'};
+export function inspectCdpTargetList(
+  payload:unknown, expectedPort:number, expectedUrl:string
+):CdpTargetEnvelope {
+  if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535 ||
+     typeof expectedUrl!=='string' || expectedUrl.length>4096)
+    return {ok:false,code:'INVALID_TARGET_INPUT'};
+  let wanted:URL;
+  try {wanted=new URL(expectedUrl);}
+  catch {return {ok:false,code:'INVALID_TARGET_INPUT'};}
+  if(!['http:','https:'].includes(wanted.protocol) || !wanted.hostname ||
+     wanted.username || wanted.password)
+    return {ok:false,code:'INVALID_TARGET_INPUT'};
+  if(!Array.isArray(payload) || payload.length>1000)
+    return {ok:false,code:'INVALID_TARGET_LIST'};
+  const matches: Array<{id:string;websocketUrl:string}> = [];
+  for(const candidate of payload) {
+    if(!candidate || typeof candidate!=='object'||Array.isArray(candidate))
+      return {ok:false,code:'INVALID_TARGET_LIST'};
+    const target=candidate as Record<string,unknown>;
+    if(target.type!=='page'||typeof target.url!=='string')continue;
+    let actual:URL;
+    try {actual=new URL(target.url);}
+    catch {continue;}
+    if(actual.href!==wanted.href)continue;
+    if(typeof target.id!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(target.id) ||
+       typeof target.webSocketDebuggerUrl!=='string')
+      return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};
+    let ws:URL;
+    try {ws=new URL(target.webSocketDebuggerUrl);}
+    catch {return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};}
+    if(ws.protocol!=='ws:'||ws.hostname!=='127.0.0.1' ||
+       Number(ws.port)!==expectedPort || ws.username||ws.password ||
+       ws.search||ws.hash || ws.pathname!=="/devtools/page/"+target.id)
+      return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};
+    matches.push({id:target.id,websocketUrl:target.webSocketDebuggerUrl});
+    if(matches.length>1)return {ok:false,code:'TARGET_AMBIGUOUS'};
+  }
+  if(matches.length===0)return {ok:false,code:'TARGET_NOT_FOUND'};
+  return {ok:true,status:'TARGET_STRUCTURE_ONLY',targetId:matches[0].id,
+    websocketUrl:matches[0].websocketUrl,owned:false};
+}
