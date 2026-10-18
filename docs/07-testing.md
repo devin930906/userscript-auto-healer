@@ -136,3 +136,7 @@ TEST-013 范围内的**稳定观察诊断阶段集成**：源 `b68c528cee076bc89
 ## （7）TEST-020 原文件只读核验阶段结果（2026-10-19）
 
 PR #44 增加三项只读源文件校验负例，源 SHA `31a31f111a7e6dbd35dbe454305d99431c1ad954` 的 [Windows 应用检查 #39147314079](https://github.com/devin930906/userscript-auto-healer/actions/runs/39147314079) 成功运行包含这三项在内的 151 项用例（150 pass、0 fail、1 条件 skip），另经 Electron 运行检查成功。该结果仅证明读取时的 SHA-256、文件类型与身份检查，**并未执行备份/原子写入/故障注入/回滚**，不能把 TEST-020 或 GATE-007 标为通过。
+
+## （7）TEST-020 安全备份副本阶段用例（2026-10-19）
+
+[PR #45](https://github.com/devin930906/userscript-auto-healer/pull/45) 在先前只读原文件身份检查基础上增加三类备份-only Windows Node 用例：副本字节哈希/唯一名称/原脚本不变；未授权、过期源哈希、恶意配置安全拒绝；超大/重定向文件与备份目录符号链接拒绝。模块限定在受信任原生调用，不对外开放用户路径 IPC；CI 结果以当前 PR SHA 的 Windows Actions 为准。**TEST-020 仍为局部验证**：文件锁、断电、原子应用、恢复日志和实际回滚验证未执行，GATE-007 未通过。
