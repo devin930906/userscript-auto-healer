@@ -19,6 +19,7 @@ import {verifyBackupRecoverySource} from './recovery-source';
 import {backupPrefix} from './verified-backup';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
+import {hasUnsafePathLink} from './path-boundary';
 
 type Failure='INVALID_REQUEST'|'NOT_AUTHORIZED'|'CANDIDATE_REJECTED'|
   'BACKUP_NOT_PREPARED'|'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|
@@ -117,6 +118,10 @@ export async function stageReviewedCandidateOnly(
     });
     if(validBackup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
       return block('BACKUP_UNVERIFIED');
+    // Reject intermediate junctions too: lstat on the final directory alone
+    // follows them. The earlier backup preflight is not a lasting capability.
+    if(await hasUnsafePathLink(options.backupDirectory))
+      return block('UNSAFE_DESTINATION');
     const dirBefore=await lstat(options.backupDirectory,{bigint:true});
     if(!dirBefore.isDirectory()||dirBefore.isSymbolicLink())
       return block('UNSAFE_DESTINATION');
@@ -137,6 +142,8 @@ export async function stageReviewedCandidateOnly(
       const sourceAgain=await verifyApprovedSourceFingerprint({
         sourcePath:options.sourcePath,expectedSha256:backup.sourceSha256,userApproved:true
       });
+      if(await hasUnsafePathLink(options.backupDirectory))
+        return block('UNSAFE_DESTINATION');
       const dirAfter=await lstat(options.backupDirectory,{bigint:true});
       if(sourceAgain.status!=='MATCHED_READ_ONLY')
         return block('SOURCE_UNVERIFIED');
@@ -154,6 +161,13 @@ export async function stageReviewedCandidateOnly(
          published.nlink!==1n||published.size!==BigInt(bytes.length)||
          sha(roundtrip)!==rebuilt.candidateSha256)
         return block('STAGING_FAILED');
+      // A redirect after publication must never produce a successful receipt.
+      if(await hasUnsafePathLink(options.backupDirectory))
+        return block('UNSAFE_DESTINATION');
+      const dirPublished=await lstat(options.backupDirectory,{bigint:true});
+      if(!dirPublished.isDirectory()||dirPublished.isSymbolicLink()||
+         !sameDir(dirBefore,dirPublished))
+        return block('UNSAFE_DESTINATION');
       const finalSource=await verifyApprovedSourceFingerprint({
         sourcePath:options.sourcePath,expectedSha256:backup.sourceSha256,userApproved:true
       });
