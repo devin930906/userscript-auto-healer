@@ -220,6 +220,9 @@ export function correlateManualFixtureEvidence(
  const dom=object(domEvidence)?domEvidence:{};
  const r=object(receipts)?receipts:{};
  let compared:0|1|2=0;
+ // A replayed DOM sample is not an independent observation of both modes.
+ // These timestamps are local CDP metadata, not extension authenticity proof.
+ const observedTimes=new Set<string>();
  for(const mode of ['broken','fixed'] as const){
    if(!Object.prototype.hasOwnProperty.call(dom,mode))
      return result('AWAITING_DOM_OBSERVATIONS',compared);
@@ -231,13 +234,18 @@ export function correlateManualFixtureEvidence(
      'scriptInstallationVerified','gmApiVerified','businessVerified'
    ].sort().join(',')||
      e.status!=='LIMITED_FIXTURE_DOM_ONLY'||e.mode!==mode||
-     typeof e.observedAt!=='string'||!Number.isFinite(Date.parse(e.observedAt))||
+     typeof e.observedAt!=='string'||
+     !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(e.observedAt)||
+     !Number.isFinite(Date.parse(e.observedAt))||
+     new Date(e.observedAt).toISOString()!==e.observedAt||
+     observedTimes.has(e.observedAt)||
      e.targetCount!==1||(e.actionCount!==0&&e.actionCount!==1)||
      typeof e.fixtureDomMatchesExpected!=='boolean'||
      e.extensionAuthenticityVerified!==false||
      e.scriptInstallationVerified!==false||
      e.gmApiVerified!==false||e.businessVerified!==false)
      return result('INVALID_DOM_EVIDENCE',compared);
+   observedTimes.add(e.observedAt);
    const report=r[mode] as GmProbeReceipt;
    if(e.actionCount!==Number(report.reportedBusinessAction)||
       e.fixtureDomMatchesExpected!==(e.actionCount===expected))
