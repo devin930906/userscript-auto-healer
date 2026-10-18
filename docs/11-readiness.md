@@ -30,13 +30,13 @@
 初始化提交 1205776e91ede1cbb122e699acb7fb7805be23cb；需求研究 32830ad793b48ccfa59bdb03eb97699a00635bee；架构风险 dc79b66671f6c888ce21e55967918414f7ed3ec0；测试及计划 df82a2c50b4cdec2faaae676d0141939b9479664；追踪矩阵 e69fe9e115ecc68d6af42a9c86bd6c07be2e0a2d。发布结论必须再读取 main HEAD。
 
 ## 发现问题
-BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 已加载 Violentmonkey MV3 Worker 与确认页面，且在临时 Profile 中真实开启 Allow User Scripts（false→true），但仍未证实脚本注入/GM API/业务断言；不能把开关已开启等同脚本测试通过；BLOCK-03 真 RAR5 技术创建/解压已通过限期评估，正式生产许可证及应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式构建/依赖许可证和配额缺证据。
+BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/进程归属及部分负例已通过，其他用户便携版待验证；BLOCK-02 已实际注册 Violentmonkey MV3 Worker、在临时 Profile 中开启 Allow User Scripts（false→true），完整浏览器重启后 userScripts API 返回一个 loader 注册；测试脚本存在于管理器存储、enabled=1 且 @match 正确，**但真实注入/GM API/业务断言仍未通过**（Actions run 39091275121），当前应调查站点访问权限、注册注入与真实 Chrome 测试环境，不能自动判通过；BLOCK-03 真 RAR5 技术创建/解压已通过限期评估，正式生产许可证及应用便携直启未验证；BLOCK-04 GUI 形态、最低系统/Chrome/管理器支持矩阵、业务测试脚本尚未确认；BLOCK-05 Ubuntu 文档 CI 和 Windows CDP PoC 已成功，但正式构建/依赖许可证和配额缺证据。
 
 ## 修复记录
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；将 RAR 许可与真格式设为发布阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
 
 ## 未解决事项
-POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认通过，POC-02B GM/脚本实际执行尚未通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089315021）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。文档检查工作流 https://github.com/devin930906/userscript-auto-healer/actions/runs/39082363404 已成功，仅核对 Markdown 文件与编号。尚无产品源码、目标油猴管理器真实功能测试日志、正式 Windows 构建安装与许可证实测结果，也没有经过用户选择的应用 LICENSE。
+POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认通过，POC-02C 的 userScripts API、loader 注册、脚本存储与启用有实证，但 POC-02B 的真实注入与 GM/业务断言尚未通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。文档检查工作流 https://github.com/devin930906/userscript-auto-healer/actions/runs/39082363404 已成功，仅核对 Markdown 文件与编号。尚无产品源码、目标油猴管理器真实功能测试日志、正式 Windows 构建安装与许可证实测结果，也没有经过用户选择的应用 LICENSE。
 
 ## 准入结果
 暂缓准入：真实管理器 GM API/业务行为尚未得到通过证据，正式产品双包与 RAR 长期生产许可也仍是发布阻断，不能宣称完整工程准备通过。

@@ -23,7 +23,7 @@ BLOCK-01/02/03/04/05 的完整条件见 11-readiness；Windows runner 的 Chrome
 - POC-02A 实际加载 Violentmonkey MV3 2.49.0 Service Worker，脚本安装确认页面出现并完成确认；进一步在临时 Profile 中实测 Allow User Scripts `false→true`（https://github.com/devin930906/userscript-auto-healer/actions/runs/39090258155），**仍不能证明脚本注入/GM_getValue**，真实功能测试未完成。Chrome 138+ 扩展详情页的 Allow User Scripts 授权需要用户主动同意。日志：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089315021；Chrome 官方：https://developer.chrome.com/docs/extensions/reference/api/userScripts。
 - POC-03A 通过 Inno Setup 6 临时测试安装器制作/安装/卸载，不是正式产品 EXE：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574。
 - POC-03B 经 WinRAR 7.23 官方签名有效的限期评估创建真 RAR5、测试、解压与 SHA-256 核对成功；生产/正式 CI 长期许可证**仍未提供**，禁止自动反复试用或把测试归档当便携软件：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242。
-- 下一准备阶段重点：获授权 Chrome+真实目标管理器启用用户脚本开关并检测实际 GM/注入行为；确认用户支持矩阵、真实场景、便携 Chrome 类型与 RAR 合规长期生产途径；依照 11 准入重新核对，不允许提前执行 TASK-001 产品开发。
+- POC-02C 最新复核：完整重启临时 Chromium 后，扩展 userScripts API available=true、registrations=1；管理器存储测试脚本 enabled=1 且 @match 对应本地测试页，仍未真实注入/运行 GM_getValue。工作流已明确失败，不再误将扩展加载或安装成功等同脚本功能成功：https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121。须继续查站点授权、注册注入、管理器真实运行日志与用户所选正式 Chrome 的差异，不能无条件准入。\n- 下一准备阶段重点：获授权 Chrome+真实目标管理器启用用户脚本开关并检测实际 GM/注入行为；确认用户支持矩阵、真实场景、便携 Chrome 类型与 RAR 合规长期生产途径；依照 11 准入重新核对，不允许提前执行 TASK-001 产品开发。
 
 ## 开发起点
 当前**受阻**，Windows runner POC-01A/B 已通过系统与独立目录 Chrome 的限定验证，但 POC-02B 脚本实际注入与 GM API 尚未通过，需先完成获授权的真实管理器验证并经需求/架构复核，再从 TASK-001 开始正式产品代码。POC-03 独立地阻断 Windows 双格式打包/Stable，但不必将其假定为已经测试成功。
