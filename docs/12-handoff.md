@@ -27,7 +27,7 @@ M0：POC-01/02，RAR 合规供应调查/POC-03；M1：TASK-001..004；M2：TASK-
 暂无 package.json、lockfile、真正可运行产品功能或 npm test/build 命令，当前“不适用”。后续创建技术骨架后须把真实 test/lint/build/Windows E2E 指令和退出码更新到 07/09/本文件；未运行不能写通过。
 
 ## 云端限制
-GitHub 连接账户有该仓库写入权限，但 GitHub Actions 使用权限、Secrets、Windows runner 运行、计费/配额、分支保护设置不能从授权信息直接推断。网页会话不等于用户 Windows 的实际浏览器登录环境；依赖实机用户授权的 GM 测试不能只用普通 DOM/模拟测试替代。
+GitHub 连接账户有该仓库写入权限；只读 Ubuntu 文档 CI 于 https://github.com/devin930906/userscript-auto-healer/actions/runs/39082363404 成功。Windows runner、Secrets、RAR 创建工具、配额和正式构建仍未验证；截至 2026-10-18 查询 main 的 protected=false，不代表可忽略将来的规则变动。网页会话不等于用户 Windows 的实际浏览器登录环境；依赖实机用户授权的 GM 测试不能只用普通 DOM/模拟测试替代。
 
 ## 续接规则
 读取 main、所有相关开发分支、Open PR/Issues、历史提交与 CI；按 11 把准入阻断优先处理；按 09 选择最高优先级可执行任务；先写测试/证据再实施最小代码并留痕；更新 REQ↔TEST↔TASK↔GATE、ADR、安全风险和本文。禁止重复生成新准备体系、无限新建 PR、静默覆盖用户脚本、绕过 Chrome 安全限制或在准入前正式开发。
