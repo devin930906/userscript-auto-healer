@@ -29,7 +29,7 @@ function record(value:unknown):value is Record<string,unknown>{
   return !!value&&typeof value==='object'&&!Array.isArray(value);
 }
 export function summarizeDomTree(raw:unknown,frames:unknown,approvedOrigin:string):DomSummary|null {
-  if(!record(raw))return null;
+  if(!record(raw)||!isApprovedTopFrame(frames,approvedOrigin))return null;
   let elementCount=0,visited=0,iframes=0,shadow=0,cross=false;
   const stack:Array<{node:unknown;depth:number}>=[{node:raw,depth:0}];
   while(stack.length){
@@ -37,6 +37,7 @@ export function summarizeDomTree(raw:unknown,frames:unknown,approvedOrigin:strin
     if(item.depth>90||++visited>MAX_NODES)return null;
     if(!record(item.node))return null;
     const node=item.node as CdpNode;
+    if(!Number.isInteger(node.nodeType)||typeof node.nodeName!=='string')return null;
     if(node.nodeType===1){
       elementCount++;
       if(String(node.nodeName).toUpperCase()==='IFRAME')iframes++;
@@ -138,6 +139,10 @@ async function pageCdp(url:string,selectors:string[],approvedOrigin:string,
     });
   };
   try{
+    // Verify the live frame origin before asking CDP for any DOM content.
+    // Revalidate after the DOM read: navigation may race either command.
+    const initialFrames=await query('Page.getFrameTree');
+    if(!initialFrames||!isApprovedTopFrame(initialFrames.frameTree,approvedOrigin))return null;
     const dom=await query('DOM.getDocument',{depth:-1,pierce:true});
     const frames=await query('Page.getFrameTree');
     if(!dom||!record(dom.root)||!frames ||
