@@ -30,6 +30,15 @@
       <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
       <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
       <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
+      <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
+      <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
+      测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
+      结束后必须自行删除临时脚本；任何 HTTP 回执都不能独立证明扩展真实性、GM API 或产品恢复。</p>
+      <button id="gm-probe-start" type="button">授权开始本机 GM 测试</button>
+      <button id="gm-probe-status" type="button">查看测试页回执（不等于验证）</button>
+      <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
+      <p id="gm-probe-links" aria-live="polite"></p>
+      <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
     </section>
     <p id="status" role="status">正在检查本地应用边界…</p>
   </main>

@@ -88,12 +88,17 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
   assert.match(main, /on\('will-navigate', \(event\) => event\.preventDefault\(\)\)/);
   assert.match(main, /setPermissionRequestHandler/);
-  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 11);
+  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 14);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
   assert.match(main, /dialog\.showMessageBox/);
   assert.match(main, /stopOnlyOwnedBrowser\(\)/);
   assert.match(main, /prepareApprovedIsolatedProfile\(config\.config,true\)/);
   assert.match(main, /randomUUID\(\)/);
+  assert.match(main, /ipcMain\.handle\('gm-probe:start'/);
+  assert.match(main, /ipcMain\.handle\('gm-probe:status'/);
+  assert.match(main, /ipcMain\.handle\('gm-probe:stop'/);
+  assert.match(main, /startIsolatedTampermonkeyGmProbe\(true/);
+  assert.match(main, /stopOnlyGmProbe\(\)/);
 });
 
 test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer', () => {
@@ -101,6 +106,9 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /contextBridge\.exposeInMainWorld/);
   assert.doesNotMatch(preload, /ipcRenderer\.(send|on|sendSync)\b/);
   assert.doesNotMatch(preload, /require\(['"]node:(fs|child_process)/);
-  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 11);
+  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 14);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
+  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:start'\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:status'\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:stop'\)/);
 });

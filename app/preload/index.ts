@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   createProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:create-profile'),
   startBrowser: (port: number): Promise<unknown> => ipcRenderer.invoke('browser:start', port),
   inspectTampermonkey: (): Promise<unknown> => ipcRenderer.invoke('browser:tampermonkey-hint'),
-  stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop')
+  stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop'),
+  startGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:start'),
+  gmProbeStatus: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:status'),
+  stopGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:stop')
 }));
