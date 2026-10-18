@@ -78,3 +78,45 @@ export function inspectCdpTargetList(
   return {ok:true,status:'TARGET_STRUCTURE_ONLY',targetId:matches[0].id,
     websocketUrl:matches[0].websocketUrl,owned:false};
 }
+
+
+/** Windows-only loopback listener PID query. This does not contact the CDP endpoint,
+ * start a browser, nor by itself authenticate the executable or its Profile.
+ */
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync=promisify(execFileCallback);
+export type ListenerOwnerResult =
+  | {readonly ok:true; readonly status:'LISTENER_PID_MATCH_ONLY'; readonly pid:number;
+     readonly executableVerified:false}
+  | {readonly ok:false; readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
+      'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'|'LISTENER_PID_MISMATCH'};
+export async function verifyWindowsLoopbackListenerPid(
+  port:number, expectedPid:number
+):Promise<ListenerOwnerResult> {
+  if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
+  if(!Number.isInteger(port)||port<1024||port>65535 ||
+     !Number.isSafeInteger(expectedPid)||expectedPid<1)
+    return {ok:false,code:'INVALID_ARGUMENTS'};
+  // Both dynamic values are validated integers, never interpolated paths/input.
+  const command='$ErrorActionPreference="Stop";'+
+    ' @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort '+port+
+    ' -State Listen -ErrorAction Stop) | ForEach-Object { $_.OwningProcess }';
+  let output:string;
+  try {
+    const result=await execFileAsync('powershell.exe',
+      ['-NoLogo','-NoProfile','-NonInteractive','-Command',command],
+      {windowsHide:true,timeout:8000,maxBuffer:4096});
+    output=result.stdout;
+  } catch {
+    return {ok:false,code:'LISTENER_UNAVAILABLE'};
+  }
+  const lines=output.trim().split(/\r?\n/).filter(Boolean);
+  if(lines.length===0)return {ok:false,code:'LISTENER_UNAVAILABLE'};
+  if(lines.length!==1 || !/^[0-9]+$/.test(lines[0].trim()))
+    return {ok:false,code:'LISTENER_AMBIGUOUS'};
+  const pid=Number(lines[0].trim());
+  if(!Number.isSafeInteger(pid)||pid<1)return {ok:false,code:'LISTENER_AMBIGUOUS'};
+  if(pid!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
+  return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid,executableVerified:false};
+}

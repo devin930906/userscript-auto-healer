@@ -60,3 +60,29 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
   assert.deepEqual(inspectCdpTargetList([testPage],9223,'https://user:secret@example.com/'),
     {ok:false,code:'INVALID_TARGET_INPUT'});
 });
+
+
+import { createServer } from 'node:net';
+import { verifyWindowsLoopbackListenerPid } from '../../src/browser/cdp-session';
+test('TEST-009: OS loopback listener must belong to the expected process PID',async t=>{
+  if(process.platform!=='win32')return;
+  const server=createServer();
+  await new Promise<void>((resolve,reject)=>{
+    server.once('error',reject);
+    server.listen({host:'127.0.0.1',port:0},resolve);
+  });
+  t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+  const addr=server.address();
+  if(!addr || typeof addr==='string')throw Error('MISSING_LISTENER_PORT');
+  const actual=await verifyWindowsLoopbackListenerPid(addr.port,process.pid);
+  assert.equal(actual.ok,true,JSON.stringify(actual));
+  if(actual.ok){
+    assert.equal(actual.pid,process.pid);
+    assert.equal(actual.executableVerified,false);
+  }
+  assert.deepEqual(await verifyWindowsLoopbackListenerPid(addr.port,process.pid+1),
+    {ok:false,code:'LISTENER_PID_MISMATCH'});
+  assert.deepEqual(await verifyWindowsLoopbackListenerPid(0,process.pid),
+    {ok:false,code:'INVALID_ARGUMENTS'});
+  assert.equal(server.listening,true);
+});
