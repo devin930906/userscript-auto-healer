@@ -63,7 +63,7 @@ test('TASK-001: reject executable path injection and non-Chrome binaries', () =>
 test('TASK-001: reject daily Chrome User Data, drive roots and traversal', () => {
   for (const path of [String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data`,
     String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data\Default`,
-    String.raw`D:\`, String.raw`D:\Authorized\..\Unsafe`,
+    'D:\\', String.raw`D:\Authorized\..\Unsafe`,
     String.raw`C:\Portable Apps\Chrome`, String.raw`C:\Portable Apps`]) {
     assert.equal(validateBrowserConfig({...allowed, userDataDir: path}).ok, false);
   }
