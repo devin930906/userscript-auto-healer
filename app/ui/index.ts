@@ -30,7 +30,7 @@ interface Window {
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
-    startGmProbe(): Promise<{ok:boolean;code?:string;status?:string;
+    startGmProbe(runAt?:'document-start'|'document-idle'): Promise<{ok:boolean;code?:string;status?:string;runAt?:string;
       installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
     gmProbeStatus(): Promise<{ok:boolean;code?:string;status?:string;
       observedModes?:number;reportedGmDefaultMatched?:boolean;
@@ -222,6 +222,7 @@ let profileSelected=false;
 let browserConnected=false;
 let gmProbeActive=false;
 const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
+const gmRunAtSelect=document.getElementById('gm-run-at') as HTMLSelectElement|null;
 const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
 const gmStopButton=document.getElementById('gm-probe-stop') as HTMLButtonElement|null;
 const gmVisitButtons={
@@ -253,6 +254,7 @@ function browserControls():void{
  if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
+ if(gmRunAtSelect)gmRunAtSelect.disabled=browserBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
  for(const button of Object.values(gmVisitButtons))
   if(button)button.disabled=browserBusy||!gmProbeActive;
@@ -334,7 +336,12 @@ stopButton?.addEventListener('click',()=>{
 });
 
 gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
- const result=await window.healer.startGmProbe();
+ const runAt=gmRunAtSelect?.value;
+ if(runAt!=='document-start'&&runAt!=='document-idle'){
+  if(gmResult)gmResult.textContent='注入时机无效；本机测试未启动。';
+  return;
+ }
+ const result=await window.healer.startGmProbe(runAt);
  if(!result.ok||result.status!=='MANUAL_FIXTURE_READY_ONLY'||
     !result.installUrl||!result.brokenUrl||!result.fixedUrl||
     !result.expiresAt){
@@ -346,7 +353,8 @@ gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
  if(gmLinks)gmLinks.textContent='在独立 Tampermonkey 中手动从 URL 导入：'+
    result.installUrl+' ｜ 失败测试页：'+result.brokenUrl+
    ' ｜ 预设修正测试页：'+result.fixedUrl;
- if(gmResult)gmResult.textContent='测试服务已开启，至 '+new Date(result.expiresAt).toLocaleTimeString()+
+ if(gmResult)gmResult.textContent='测试服务已开启（'+(result.runAt??runAt)+
+   '），至 '+new Date(result.expiresAt).toLocaleTimeString()+
    ' 到期；先安装临时脚本，再分别通过按钮打开并只读检查 broken / fixed。'+
    '扩展运行目标仅是提示，测试结果不是 GM 或业务恢复证明。';
 }));
