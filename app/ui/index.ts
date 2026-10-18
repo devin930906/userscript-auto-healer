@@ -5,7 +5,7 @@ interface Imported {
   textEncoding: string;
   analysis: {
     status: 'STATIC_ANALYSIS_ONLY' | 'SKIPPED_TOO_LARGE' | 'INVALID_ENCODING' |
-      'INVALID_METADATA' | 'PARSE_ERROR';
+      'INVALID_METADATA' | 'PARSE_ERROR' | 'SKIPPED_BATCH_BUDGET';
     totalSites: number;
     literalSites: number;
     runtimeConfirmationSites: number;
