@@ -32,7 +32,7 @@ type VisitStatus=
    readonly targetId:string;readonly mode:GmProbeMode;
    readonly gmApiVerified:false;readonly businessVerified:false}
  |{readonly ok:false;readonly code:'NOT_AUTHORIZED'|'INVALID_MODE'|
-   'SESSION_NOT_ACTIVE'|'MODE_ALREADY_OPENED'|
+   'SESSION_NOT_ACTIVE'|'MODE_ALREADY_OPENED'|'MODE_VISIT_IN_PROGRESS'|
    Extract<OpenTargetResult,{ok:false}>['code']};
 export interface ManualTampermonkeyDiagnosticSession {
  readonly status:'MANUAL_TEST_READY_NOT_VERIFIED';
@@ -105,6 +105,32 @@ export function assessManualProbeObservations(
    ...emptyFlags};
 }
 
+/** Reserve browser visits synchronously before the first asynchronous CDP call.
+ * A second click must never create duplicate tabs, and two different test
+ * modes must not overlap. Failed navigation remains retryable, successful
+ * navigation is recorded only AFTER the owned target was confirmed.
+ */
+export function createManualModeVisitLatch() {
+ const visited:Record<GmProbeMode,boolean>={broken:false,fixed:false};
+ let pending:GmProbeMode|null=null;
+ return Object.freeze({
+   reserve(mode:GmProbeMode):'RESERVED'|'IN_PROGRESS'|'ALREADY_VISITED'{
+     if(visited[mode])return 'ALREADY_VISITED';
+     if(pending!==null)return 'IN_PROGRESS';
+     pending=mode;
+     return 'RESERVED';
+   },
+   finish(mode:GmProbeMode,confirmed:boolean):void{
+     if(pending!==mode)return;
+     pending=null;
+     if(confirmed)visited[mode]=true;
+   },
+   snapshot():Readonly<Record<GmProbeMode,boolean>>{
+     return Object.freeze({...visited});
+   }
+ });
+}
+
 /** Requires a live owned Chrome and a real CDP runtime hint before listening.
  * This API cannot be used to attach a preexisting Chrome, spoof a manager,
  * or install a userscript without the tester's separate manual action.
@@ -134,7 +160,7 @@ export async function startApprovedTampermonkeyDiagnostic(
  }
  const probe=fixture.session;
  let stopped=false;
- const visits:Record<GmProbeMode,boolean>={broken:false,fixed:false};
+ const visits=createManualModeVisitLatch();
  const ready=()=>!stopped&&Date.now()<probe.expiresAt&&
    !options.signal?.aborted&&isLiveApprovedChromeSession(browser);
  const stop=async()=>{stopped=true;await probe.stop();};
@@ -142,17 +168,24 @@ export async function startApprovedTampermonkeyDiagnostic(
    if(explicitUserApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
    if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
    if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
-   if(visits[mode])return {ok:false,code:'MODE_ALREADY_OPENED'};
-   const result=await openApprovedTarget(browser,probe.origin+'/?mode='+mode,true);
-   if(!result.ok)return {ok:false,code:result.code};
-   if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
-   visits[mode]=true;
-   return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
-     targetId:result.targetId,mode,gmApiVerified:false,businessVerified:false};
+   const reservation=visits.reserve(mode);
+   if(reservation!=='RESERVED')return {ok:false,
+     code:reservation==='IN_PROGRESS'?'MODE_VISIT_IN_PROGRESS':'MODE_ALREADY_OPENED'};
+   let confirmed=false;
+   try{
+     const result=await openApprovedTarget(browser,probe.origin+'/?mode='+mode,true);
+     if(!result.ok)return {ok:false,code:result.code};
+     if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
+     confirmed=true;
+     return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
+       targetId:result.targetId,mode,gmApiVerified:false,businessVerified:false};
+   }finally{
+     visits.finish(mode,confirmed);
+   }
  };
  const snapshot=():ManualDiagnosticAssessment=>{
    if(!ready())return assessManualProbeObservations({}, {broken:false,fixed:false});
-   return assessManualProbeObservations(probe.receiptSnapshot(),visits);
+   return assessManualProbeObservations(probe.receiptSnapshot(),visits.snapshot());
  };
  return {ok:true,session:Object.freeze({
    status:'MANUAL_TEST_READY_NOT_VERIFIED',source:probe.source,
