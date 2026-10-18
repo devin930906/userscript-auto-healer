@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {verifyBackupRecoverySource} from '../../src/version/recovery-source';
 
 const script=Buffer.from('// ==UserScript==\n// @name safe backup\n// ==/UserScript==\n', 'utf8');
 const hash=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
@@ -109,4 +110,35 @@ test('TEST-020: changed, oversized or redirected files block with original untou
     assert.deepEqual(await readdir(backupDir),[]);
     assert.deepEqual(await readFile(file),script);
   });
+});
+
+
+test('TEST-020: long ASCII and surrogate-pair filenames remain recoverable on Windows',async()=>{
+  for(const stem of ['x'.repeat(210),'🌐'.repeat(120)]){
+    const dir=await mkdtemp(join(tmpdir(),'uah-long-backup-'));
+    const source=join(dir,stem+'.user.js');
+    const backupDirectory=join(dir,'backups');
+    try{
+      await mkdir(backupDirectory);
+      await writeFile(source,script);
+      const result=await createVerifiedBackupOnly({
+        sourcePath:source,backupDirectory,expectedSha256:hash(script),
+        userApproved:true
+      });
+      assert.equal(result.status,'BACKUP_ONLY',JSON.stringify(result));
+      if(result.status!=='BACKUP_ONLY')continue;
+      // NTFS filename components are bounded by UTF-16 units, not code points.
+      assert.ok(result.backupFileName.length<=255);
+      assert.equal(result.backupFileName.includes('\uFFFD'),false);
+      assert.equal(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result.backupFileName),false);
+      assert.deepEqual(await readFile(join(backupDirectory,result.backupFileName)),script);
+      const receipt=await verifyBackupRecoverySource({
+        sourcePath:source,backupDirectory,backupFileName:result.backupFileName,
+        expectedSha256:result.sha256,expectedByteLength:result.byteLength,
+        userApproved:true
+      });
+      assert.equal(receipt.status,'RECOVERY_SOURCE_VERIFIED_READ_ONLY',JSON.stringify(receipt));
+      assert.deepEqual(await readFile(source),script);
+    }finally{await rm(dir,{recursive:true,force:true});}
+  }
 });

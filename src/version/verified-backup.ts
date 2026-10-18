@@ -36,6 +36,21 @@ function validPath(path:unknown):path is string {
     !path.includes('\0')&&isAbsolute(path);
 }
 
+
+// Windows filename components are limited to 255 UTF-16 units. A long but
+// valid .user.js filename needs room for the random UUID and backup suffix.
+// Iterate code points to avoid splitting surrogate pairs on truncation.
+const MAX_BACKUP_PREFIX_UNITS=255-(1+36+'.backup.user.js'.length);
+function backupPrefix(sourcePath:string):string {
+  const stem=basename(sourcePath).replace(/\.user\.js$/i,'');
+  let prefix='';
+  for(const character of stem){
+    if(prefix.length+character.length>MAX_BACKUP_PREFIX_UNITS)break;
+    prefix+=character;
+  }
+  return prefix;
+}
+
 /** A caller consent boolean is NOT independent proof of native user selection.
  * The privileged caller must confirm ownership and authorization separately.
  * A successful backup is NOT a locked version, restore capability, or TEST-020
@@ -97,8 +112,7 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     const digest=createHash('sha256').update(bytes).digest('hex');
     if(digest!==expected)return deny('HASH_MISMATCH');
 
-    const name=basename(path).replace(/\.user\.js$/i,'')+
-      '.'+randomUUID()+'.backup.user.js';
+    const name=backupPrefix(path)+'.'+randomUUID()+'.backup.user.js';
     const final=join(directory,name);
     const pending=join(directory,'.'+randomUUID()+'.pending');
     let tempCreated=false;
