@@ -1,11 +1,12 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,unlink,writeFile} from 'node:fs/promises';
+import {lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {inspectBackupInventoryReadOnly} from '../../src/version/backup-inventory';
 import {backupPrefix,createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 
 const fixtureBytes=Buffer.from('// ==UserScript==\n// @name history-test\n// ==/UserScript==\n','utf8');
 const sha=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -139,4 +140,21 @@ test('TEST-020 stage: version candidate bound prevents unbounded directory enume
    if(observed.status==='BLOCKED')assert.equal(observed.reason,'TOO_MANY_ENTRIES');
    assert.deepEqual(await readFile(source),fixtureBytes);
  });
+});
+
+
+test('TEST-020: empty or oversized source cannot enter read-only recovery inventory',async()=>{
+ for(const size of [0,MAX_SCRIPT_BYTES+1]){
+  await withFixture(async(source,backupDirectory)=>{
+   await truncate(source,size);
+   const result=await inspectBackupInventoryReadOnly({
+     sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'SOURCE_SIZE_LIMIT');
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(JSON.stringify(result).includes(source),false);
+  });
+ }
 });
