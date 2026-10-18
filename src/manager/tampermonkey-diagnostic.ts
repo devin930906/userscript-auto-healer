@@ -130,6 +130,8 @@ export interface ManualTampermonkeyDiagnosticSession {
  readonly status:'MANUAL_TEST_READY_NOT_VERIFIED';
  /** Contains a single-run token. Never log or put this in arbitrary renderer content. */
  readonly source:string;
+ /** Sensitive, temporary URL; native diagnostic tester must import explicitly. */
+ readonly installUrl:string;
  readonly origin:string;
  readonly expiresAt:number;
  readonly runtimeHint:Extract<ManagerPresenceResult,{ok:true}>;
@@ -389,6 +391,7 @@ export async function startApprovedTampermonkeyDiagnostic(
  };
  return {ok:true,session:Object.freeze({
    status:'MANUAL_TEST_READY_NOT_VERIFIED',source:probe.source,
+   installUrl:probe.installUrl,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
    visit,observe,domSnapshot,
    consistencySnapshot:()=>correlateManualFixtureEvidence(
