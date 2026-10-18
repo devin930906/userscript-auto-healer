@@ -165,6 +165,8 @@ test('TEST-017: orchestration rejects missing authorization and forged browser i
  assert.deepEqual(await startApprovedTampermonkeyDiagnostic(fake,true),
    {ok:false,code:'UNVERIFIED_BROWSER'});
  const signal=AbortSignal.abort();
+ assert.deepEqual(await openApprovedTarget(fake,'http://127.0.0.1:9081/?mode=fixed',
+   true,signal),{ok:false,code:'CANCELLED'});
  assert.deepEqual(await startApprovedTampermonkeyDiagnostic(fake,true,{signal}),
    {ok:false,code:'CANCELLED'});
  assert.deepEqual(await startApprovedTampermonkeyDiagnostic(
@@ -306,6 +308,14 @@ test('TEST-018 stage: real isolated Windows Chrome never reports a repair withou
  if(!probe.ok)return;
  t.after(()=>probe.session.stop());
  const expectedUrl=probe.session.origin+'/?mode=fixed';
+ // Even on a live, verified application-owned Windows Chrome, a cancelled
+ // request must never send a new tab command or be treated as confirmed.
+ assert.deepEqual(await openApprovedTarget(opened,expectedUrl,true,
+   AbortSignal.abort()),{ok:false,code:'CANCELLED'});
+ const revoke=new AbortController();
+ const interrupted=openApprovedTarget(opened,expectedUrl,true,revoke.signal);
+ revoke.abort();
+ assert.deepEqual(await interrupted,{ok:false,code:'CANCELLED'});
  const tab=await openApprovedTarget(opened,expectedUrl,true);
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;

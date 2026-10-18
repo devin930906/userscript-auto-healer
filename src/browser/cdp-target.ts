@@ -10,7 +10,7 @@ export type OpenTargetResult =
   | {readonly ok:true;readonly status:'TARGET_ID_AND_URL_MATCH_ONLY';
      readonly targetId:string;readonly businessVerified:false}
   | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'UNVERIFIED_BROWSER'|
-      'INVALID_TARGET_URL'|'UNOWNED_LISTENER'|'CDP_COMMAND_FAILED'|'TARGET_NOT_CONFIRMED'};
+      'INVALID_TARGET_URL'|'UNOWNED_LISTENER'|'CDP_COMMAND_FAILED'|'TARGET_NOT_CONFIRMED'|'CANCELLED'};
 function validTarget(raw:string):boolean {
   if(raw.length>4096||raw.trim()!==raw)return false;
   try{
@@ -19,24 +19,36 @@ function validTarget(raw:string):boolean {
       !url.username&&!url.password&&!url.hash;
   }catch{return false;}
 }
-async function requestNewTab(wsUrl:string,targetUrl:string):Promise<string|null>{
+/** Do not send Target.createTarget after cancellation or a stopped session.
+ * Closing the socket cannot undo a command already accepted by Chrome; any
+ * cancelled in-flight result remains unverified and is never retained.
+ */
+async function requestNewTab(
+  wsUrl:string,targetUrl:string,signal?:AbortSignal
+):Promise<string|null>{
   return new Promise(resolve=>{
-    let ws:WebSocket,finished=false;
+    let ws:WebSocket|undefined,finished=false;
+    const onAbort=()=>finish(null);
     const finish=(value:string|null)=>{
       if(finished)return;
       finished=true;clearTimeout(timer);
-      try{ws.close();}catch{ /* socket already closed */ }
+      signal?.removeEventListener('abort',onAbort);
+      try{ws?.close();}catch{ /* socket already closed */ }
       resolve(value);
     };
     const timer=setTimeout(()=>finish(null),5000);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    if(signal?.aborted){finish(null);return;}
     try{
       ws=new WebSocket(wsUrl);
       ws.addEventListener('open',()=>{
-        try{ws.send(JSON.stringify({id:2,method:'Target.createTarget',
+        if(finished||signal?.aborted){finish(null);return;}
+        try{ws?.send(JSON.stringify({id:2,method:'Target.createTarget',
           params:{url:targetUrl}}));}
         catch{finish(null);}
       });
       ws.addEventListener('message',event=>{
+        if(finished||signal?.aborted){finish(null);return;}
         try{
           const data=JSON.parse(String(event.data)) as {
             id?:number;result?:{targetId?:unknown};error?:unknown
@@ -54,9 +66,11 @@ async function requestNewTab(wsUrl:string,targetUrl:string):Promise<string|null>
 }
 /** Never accept a raw third-party CDP socket or an unapproved website. */
 export async function openApprovedTarget(
-  session:ManagedLaunchResult,targetUrl:string,userApproved:boolean
+  session:ManagedLaunchResult,targetUrl:string,userApproved:boolean,
+  signal?:AbortSignal
 ):Promise<OpenTargetResult>{
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!session || !session.ok||session.status!=='OWNED_CDP_BROWSER_VERIFIED'||
      session.websocketHandshakeVerified!==true || !isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
@@ -71,28 +85,38 @@ export async function openApprovedTarget(
      !Number.isInteger(port)||port<1024||port>65535)
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const owns=await verifyWindowsLoopbackListenerPid(port,session.pid);
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!owns.ok)return {ok:false,code:'UNOWNED_LISTENER'};
   if(!isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
-  const created=await requestNewTab(session.browserWebsocket,targetUrl);
+  const created=await requestNewTab(session.browserWebsocket,targetUrl,signal);
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!created)return {ok:false,code:'CDP_COMMAND_FAILED'};
   const began=Date.now();
   while(Date.now()-began<9000){
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     try{
       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
-        redirect:'error',signal:AbortSignal.timeout(1500)});
+        redirect:'error',signal:signal?
+          AbortSignal.any([signal,AbortSignal.timeout(1500)]):
+          AbortSignal.timeout(1500)});
       const json=await readBoundedCdpJson(response);
+      if(signal?.aborted)return {ok:false,code:'CANCELLED'};
       const inspected=inspectCdpTargetList(json,port,targetUrl);
       if(inspected.ok&&inspected.targetId===created) {
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+        if(signal?.aborted)return {ok:false,code:'CANCELLED'};
         if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
       }
-    }catch{ /* navigation is still pending */ }
-    await delay(250);
+    }catch{ /* navigation is still pending; cancellation checked below */ }
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+    try{await delay(250,undefined,{signal});}
+    catch{return {ok:false,code:'CANCELLED'};}
   }
-  return {ok:false,code:'TARGET_NOT_CONFIRMED'};
+  return signal?.aborted?{ok:false,code:'CANCELLED'}:
+    {ok:false,code:'TARGET_NOT_CONFIRMED'};
 }
