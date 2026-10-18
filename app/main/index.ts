@@ -91,9 +91,11 @@ async function createMainWindow(): Promise<void> {
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
+      "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
-      "bad.code === 'INVALID_SHAPE' && a.security.sandboxed === true && " +
+      "bad.code === 'INVALID_SHAPE' && d.ok === true && d.script.filename === 'smoke.user.js' && " +
+      "a.security.sandboxed === true && " +
       "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
