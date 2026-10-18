@@ -3,7 +3,7 @@
  */
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ManagedLaunchResult } from './owned-chrome';
-import { readBoundedCdpJson } from './owned-chrome';
+import { readBoundedCdpJson, isLiveApprovedChromeSession } from './owned-chrome';
 import { inspectCdpTargetList, verifyWindowsLoopbackListenerPid } from './cdp-session';
 
 export type OpenTargetResult =
@@ -57,8 +57,8 @@ export async function openApprovedTarget(
   session:ManagedLaunchResult,targetUrl:string,userApproved:boolean
 ):Promise<OpenTargetResult>{
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
-  if(!session.ok||session.status!=='OWNED_CDP_BROWSER_VERIFIED'||
-     session.websocketHandshakeVerified!==true)
+  if(!session || !session.ok||session.status!=='OWNED_CDP_BROWSER_VERIFIED'||
+     session.websocketHandshakeVerified!==true || !isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   if(typeof targetUrl!=='string'||!validTarget(targetUrl))
     return {ok:false,code:'INVALID_TARGET_URL'};
@@ -72,6 +72,8 @@ export async function openApprovedTarget(
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const owns=await verifyWindowsLoopbackListenerPid(port,session.pid);
   if(!owns.ok)return {ok:false,code:'UNOWNED_LISTENER'};
+  if(!isLiveApprovedChromeSession(session))
+    return {ok:false,code:'UNVERIFIED_BROWSER'};
   const created=await requestNewTab(session.browserWebsocket,targetUrl);
   if(!created)return {ok:false,code:'CDP_COMMAND_FAILED'};
   const began=Date.now();
@@ -81,9 +83,14 @@ export async function openApprovedTarget(
         redirect:'error',signal:AbortSignal.timeout(1500)});
       const json=await readBoundedCdpJson(response);
       const inspected=inspectCdpTargetList(json,port,targetUrl);
-      if(inspected.ok&&inspected.targetId===created)
+      if(inspected.ok&&inspected.targetId===created) {
+        if(!isLiveApprovedChromeSession(session))
+          return {ok:false,code:'UNVERIFIED_BROWSER'};
+        const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+        if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
+      }
     }catch{ /* navigation is still pending */ }
     await delay(250);
   }

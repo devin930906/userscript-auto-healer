@@ -57,6 +57,16 @@ export interface ChromeLaunchOptions {
   readonly testHeadless?:boolean;
   readonly signal?:AbortSignal;
 }
+/** Only references actually issued by this process can open CDP targets.
+ * A serialized/forged success-shaped result is not an authorized session.
+ */
+const liveSessions=new WeakMap<object,ChildProcess>();
+export function isLiveApprovedChromeSession(session:ManagedLaunchResult):boolean {
+  if(!session || session.ok!==true || session.status!=='OWNED_CDP_BROWSER_VERIFIED')return false;
+  const child=liveSessions.get(session);
+  return Boolean(child && child.pid===session.pid && child.exitCode===null &&
+    !child.killed && child.signalCode===null);
+}
 function stopOwnChild(child:ChildProcess):void {
   if(child.pid && child.exitCode===null && !child.killed)child.kill();
 }
@@ -111,11 +121,19 @@ export async function launchApprovedIsolatedChrome(
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version);
               if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
-              retained=true;
-              return {ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
+              if(errored||exited||child.killed||child.exitCode!==null)
+                return {ok:false,code:'LAUNCH_FAILED'};
+              const verified:Extract<ManagedLaunchResult,{ok:true}>=Object.freeze({
+                ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
                 websocketHandshakeVerified:true,targetVerified:false,
-                stop:()=>stopOwnChild(child)};
+                stop:()=>{liveSessions.delete(verified);stopOwnChild(child);}
+              });
+              liveSessions.set(verified,child);
+              child.once('exit',()=>liveSessions.delete(verified));
+              child.once('error',()=>liveSessions.delete(verified));
+              retained=true;
+              return verified;
             }
         }
       }catch{ /* Chrome has not presented an acceptable endpoint yet. */ }

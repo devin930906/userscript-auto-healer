@@ -4,7 +4,7 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchApprovedIsolatedChrome, readBoundedCdpJson } from '../../src/browser/owned-chrome';
+import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
 import { openApprovedTarget } from '../../src/browser/cdp-target';
 import { createServer } from 'node:http';
 
@@ -71,6 +71,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     assert.equal(result.status,'OWNED_CDP_BROWSER_VERIFIED');
     assert.equal(result.websocketHandshakeVerified,true);
     assert.equal(result.targetVerified,false);
+    assert.equal(isLiveApprovedChromeSession(result),true);
+    assert.ok(Object.isFrozen(result));
     assert.ok(result.pid>0);
     assert.match(result.chromeVersion,/^\d+\.\d+\.\d+\.\d+$/);
     const fixture=createServer((_req,res)=>{
@@ -92,6 +94,10 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       assert.equal(target.status,'TARGET_ID_AND_URL_MATCH_ONLY');
       assert.equal(target.businessVerified,false);
     }
+    stop();
+    assert.equal(isLiveApprovedChromeSession(result),false);
+    assert.deepEqual(await openApprovedTarget(result,site,true),
+      {ok:false,code:'UNVERIFIED_BROWSER'});
   }
 });
 
@@ -136,4 +142,16 @@ test('TEST-009: target creation is rejected without an authenticated owned sessi
     {ok:false,code:'UNVERIFIED_BROWSER'});
   assert.deepEqual(await openApprovedTarget(missing,'file:///C:/secret',false),
     {ok:false,code:'NOT_AUTHORIZED'});
+});
+
+test('TEST-009: a forged shape cannot authorize Chrome target creation',async()=>{
+  const forged:Extract<Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>,{ok:true}>={
+    ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',
+    pid:process.pid,chromeVersion:'155.0.1.1',
+    browserWebsocket:'ws://127.0.0.1:9223/devtools/browser/12345678',
+    websocketHandshakeVerified:true,targetVerified:false,stop:()=>{}
+  };
+  assert.equal(isLiveApprovedChromeSession(forged),false);
+  assert.deepEqual(await openApprovedTarget(forged,'https://example.com/',true),
+    {ok:false,code:'UNVERIFIED_BROWSER'});
 });
