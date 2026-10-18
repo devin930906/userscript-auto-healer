@@ -68,7 +68,7 @@ jobs:
           docnames = ("intake","product","requirements","feasibility","architecture","experience","security-risk","testing","release","development-plan","traceability","readiness","handoff")
           required = [Path(f"docs/{i:02d}-{n}.md") for i,n in enumerate(docnames)]
           required += [Path("README.md"), Path("AGENTS.md")]
-          required += [Path(f"docs/adr/ADR-{i:03d}-{n}.md") for i,n in ((1,"application-baseline"),(2,"real-userscript-acceptance"),(3,"windows-dual-package"),(4,"portable-zip"))]
+          required += [Path(f"docs/adr/ADR-{i:03d}-{n}.md") for i,n in ((1,"application-baseline"),(2,"real-userscript-acceptance"),(3,"windows-dual-package"),(4,"portable-zip"),(5,"tampermonkey-primary"))]
           for path in required:
               if not path.exists():
                   raise SystemExit(f"Missing file: {path}")

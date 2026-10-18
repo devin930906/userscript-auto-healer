@@ -81,6 +81,7 @@ def check_stage_contract():
             "有条件工程决策", "TASK-001", "Electron", "TypeScript",
         ],
         "docs/adr/ADR-004-portable-zip.md": ["ADR-004", "REQ-028", "ZIP"],
+        "docs/adr/ADR-005-tampermonkey-primary.md": ["ADR-005", "Tampermonkey", "Violentmonkey", "POC-02T"],
     }
     for path, markers in required.items():
         content = read(path)
@@ -102,6 +103,27 @@ def check_stage_contract():
     for line in release.splitlines():
         if line.startswith("| GATE-009 |") or line.startswith("| GATE-011 |"):
             assert "RAR" not in line and "ZIP" in line, "Old RAR contract remains in release gate"
+    # Ensure the primary Tampermonkey gate is not erased by future PoC edits.
+    req = read("docs/02-requirements.md")
+    tests = read("docs/07-testing.md")
+    plan = read("docs/09-development-plan.md")
+    release = read("docs/08-release.md")
+    matrix = read("docs/10-traceability.md")
+    assert "I-011" in read("docs/00-intake.md")
+    assert "| REQ-017 | 脚本管理器环境预检 | I-011 |" in req
+    assert "| REQ-018 | 真实油猴功能验收 | I-011 |" in req
+    assert "| I-011 | REQ-017 |" in matrix and "| I-011 | REQ-018 |" in matrix
+    assert "POC-02T" in plan and "POC-02T" in read("docs/adr/ADR-005-tampermonkey-primary.md")
+    for path, prefix in [
+        ("docs/07-testing.md", "| TEST-017 |"),
+        ("docs/07-testing.md", "| TEST-018 |"),
+        ("docs/09-development-plan.md", "| TASK-007 |"),
+        ("docs/08-release.md", "| GATE-004 |"),
+        ("docs/08-release.md", "| GATE-005 |"),
+    ]:
+        line = next((x for x in read(path).splitlines() if x.startswith(prefix)), "")
+        assert "Tampermonkey" in line, f"Primary-manager validation missing: {path}/{prefix}"
+    assert "not Tampermonkey" in read(".github/workflows/windows-manager-extension-poc.yml")
     handoff = read("docs/12-handoff.md")
     assert "仍是候选技术基线，不是实测最终决定" not in handoff, (
         "Handoff incorrectly contradicts conditional ADR-001 decision"
@@ -118,6 +140,7 @@ def main():
         "docs/adr/ADR-002-real-userscript-acceptance.md",
         "docs/adr/ADR-003-windows-dual-package.md",
         "docs/adr/ADR-004-portable-zip.md",
+        "docs/adr/ADR-005-tampermonkey-primary.md",
     ]
     for item in required:
         assert (ROOT / item).is_file(), f"Missing required authority: {item}"

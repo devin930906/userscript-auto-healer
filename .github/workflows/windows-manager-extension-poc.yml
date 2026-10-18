@@ -1,5 +1,7 @@
-name: Windows userscript manager extension feasibility
+name: Reference Violentmonkey extension feasibility (not Tampermonkey)
 
+# Reference-only historical PoC. It does NOT verify Tampermonkey or satisfy
+# TEST-017/TEST-018/TASK-007/GATE-004/GATE-005.
 on:
   push:
     paths:
