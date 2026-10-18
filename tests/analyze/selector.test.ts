@@ -42,3 +42,21 @@ test('TEST-011: source is parsed but never executed, malformed syntax fails',()=
   assert.equal((globalThis as Record<string,unknown>).__uAstExecuted,undefined);
   assert.deepEqual(analyzeSelectors('function broken('),{status:'PARSE_ERROR',sites:[]});
 });
+
+
+test('TEST-011: assigned function expressions and callbacks retain accurate scope',()=>{
+  const source=[
+    'const first=function(){return document.querySelector("#first");};',
+    'const second=()=>document.querySelector("#second");',
+    'function outer(){const third=function(){return document.querySelector("#third");};}',
+    'document.addEventListener("load",()=>document.querySelector("#callback"));'
+  ].join('\n');
+  const result=analyzeSelectors(source);
+  assert.equal(result.status,'OK');
+  assert.deepEqual(result.sites.map(s=>({selector:s.selector,scope:s.scope})),[
+    {selector:'#first',scope:'first'},
+    {selector:'#second',scope:'second'},
+    {selector:'#third',scope:'outer/third'},
+    {selector:'#callback',scope:'<arrow>'}
+  ]);
+});
