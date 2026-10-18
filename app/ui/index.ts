@@ -203,6 +203,7 @@ const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|nul
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
 let browserBusy=false;
+let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
 let browserConnected=false;
@@ -216,7 +217,7 @@ function browserControls():void{
  if(launchButton)launchButton.disabled=browserBusy||browserConnected||
    !chromeSelected||!profileSelected;
  if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
- if(stopButton)stopButton.disabled=!browserConnected&&!browserBusy;
+ if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
 }
 async function browserAction(fn:()=>Promise<void>):Promise<void>{
  if(browserBusy)return;
@@ -263,10 +264,18 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
   setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
 }));
-stopButton?.addEventListener('click',()=>void browserAction(async()=>{
- const result=await window.healer.stopBrowser();
- if(result.ok||result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
- setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
-   '停止操作：'+(result.code??'UNKNOWN'));
-}));
+// Stop is intentionally NOT gated by browserAction's busy mutex. It must
+// abort a pending 20-second Chrome handshake or native-consent interaction,
+// and can stop only the exact child tracked by the privileged main process.
+stopButton?.addEventListener('click',()=>{
+ if(stopInProgress||(!browserBusy&&!browserConnected))return;
+ stopInProgress=true;browserControls();
+ void window.healer.stopBrowser().then(result=>{
+  if(result.ok||result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+  setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
+    '停止操作：'+(result.code??'UNKNOWN'));
+ }).catch(()=>{
+  setBrowserStatus('停止操作受阻；仍需确认独立 Chrome 状态。');
+ }).finally(()=>{stopInProgress=false;browserControls();});
+});
 browserControls();
