@@ -36,6 +36,12 @@
       然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
       必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
       HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
+      <label for="gm-run-at">临时脚本注入时机：</label>
+      <select id="gm-run-at">
+        <option value="document-idle">document-idle（页面空闲后）</option>
+        <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
+      </select>
+      <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
       <button id="gm-probe-start" type="button">授权开始本机 GM 测试</button>
       <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
       <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
