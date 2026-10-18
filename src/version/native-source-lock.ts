@@ -10,7 +10,7 @@
 import {createHash} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import {lstat,mkdir,rmdir} from 'node:fs/promises';
-import {dirname,isAbsolute,join} from 'node:path';
+import {dirname,isAbsolute,join,parse,resolve,sep} from 'node:path';
 
 export type NativeSourceLockFailure=
   'INVALID_SOURCE'|'SOURCE_LOCKED'|'SOURCE_CHANGED'|'IO_FAILURE';
@@ -51,6 +51,20 @@ export async function withNativeSourceLock<T>(
   let start:BigIntStats;
   let parentStart:BigIntStats;
   try{
+    // Resolve only lexical . / .. components, then inspect EACH existing
+    // native path component with lstat. A nested ancestor junction may
+    // redirect the source even when the immediate parent is not a link.
+    // Comparing realpath strings would reject valid Windows namespaced paths
+    // (\\\\?\\ drive notation), so do not use that as an identity test.
+    if(sourcePath!==resolve(sourcePath))
+      throw new NativeSourceLockError('INVALID_SOURCE');
+    const root=parse(sourcePath).root;
+    let cursor=root;
+    for(const component of sourcePath.slice(root.length).split(sep).filter(Boolean)){
+      cursor=join(cursor,component);
+      if((await lstat(cursor,{bigint:true})).isSymbolicLink())
+        throw new NativeSourceLockError('INVALID_SOURCE');
+    }
     start=await lstat(sourcePath,{bigint:true});
     parentStart=await lstat(parent,{bigint:true});
     if(start.isSymbolicLink()||!start.isFile()||start.nlink!==1n||
