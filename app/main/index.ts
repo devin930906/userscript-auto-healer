@@ -526,7 +526,7 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
-      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end'); " +
+      "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
       "const noGmStatus=await a.gmProbeStatus(); " +
       "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
        "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +
