@@ -7,6 +7,41 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
 import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket } from './cdp-session';
 
+
+/** Reject oversized or invalid CDP JSON based on bytes actually streamed.
+ * A missing or dishonest Content-Length must not bypass this limit.
+ */
+export async function readBoundedCdpJson(response:Response):Promise<unknown|null> {
+  const limit=16384;
+  if(response.status!==200)return null;
+  const length=response.headers.get('content-length');
+  if(length!==null &&
+     (!/^[0-9]+$/.test(length) || !Number.isSafeInteger(Number(length)) ||
+      Number(length)>limit))return null;
+  if(!response.body)return null;
+  const reader=response.body.getReader();
+  const decoder=new TextDecoder('utf-8',{fatal:true});
+  let bytes=0,body='';
+  try {
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      bytes+=value.byteLength;
+      if(bytes>limit){
+        await reader.cancel();
+        return null;
+      }
+      body+=decoder.decode(value,{stream:true});
+    }
+    body+=decoder.decode();
+    return bytes>0?JSON.parse(body) as unknown:null;
+  }catch{
+    return null;
+  }finally{
+    reader.releaseLock();
+  }
+}
+
 export type LaunchFailure = 'NOT_AUTHORIZED'|'ABORTED'|'PREFLIGHT_FAILED'|
   'BINARY_NOT_VERIFIED'|'LAUNCH_FAILED'|'CDP_TIMEOUT'|'OWNER_MISMATCH'|'VERSION_MISMATCH'|'WEBSOCKET_VERIFICATION_FAILED';
 export type ManagedLaunchResult =
@@ -63,11 +98,9 @@ export async function launchApprovedIsolatedChrome(
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
       try{
         const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(1500)});
-        const indicatedSize=Number(response.headers.get('content-length')??0);
-        if(response.status===200 && Number.isFinite(indicatedSize) && indicatedSize<16384){
-          const body=await response.text();
-          if(body.length<16384){
-            const inspected=inspectCdpVersion(JSON.parse(body),cfg.remoteDebuggingPort);
+        const payload=await readBoundedCdpJson(response);
+        if(payload!==null){
+            const inspected=inspectCdpVersion(payload,cfg.remoteDebuggingPort);
             if(inspected.ok){
               if(inspected.browser!=='Chrome/'+binary.version &&
                  inspected.browser!=='HeadlessChrome/'+binary.version)
@@ -84,7 +117,6 @@ export async function launchApprovedIsolatedChrome(
                 websocketHandshakeVerified:true,targetVerified:false,
                 stop:()=>stopOwnChild(child)};
             }
-          }
         }
       }catch{ /* Chrome has not presented an acceptable endpoint yet. */ }
       await delay(250);

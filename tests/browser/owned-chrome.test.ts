@@ -4,7 +4,7 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchApprovedIsolatedChrome } from '../../src/browser/owned-chrome';
+import { launchApprovedIsolatedChrome, readBoundedCdpJson } from '../../src/browser/owned-chrome';
 
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
@@ -64,4 +64,29 @@ test('TEST-009: WebSocket handshake never connects to foreign origins',async()=>
     'ws://outside.example:9223/devtools/browser/aabbccdd',9223,'155.0.1.1'),false);
   assert.equal(await verifyCdpBrowserWebSocket(
     'ws://127.0.0.1:9223/devtools/browser/aabbccdd',9223,'not-a-version'),false);
+});
+
+test('TEST-009: CDP response enforces actual streamed byte limit without Content-Length',async()=>{
+  const valid=new Response(JSON.stringify({Browser:'Chrome/155.0.1.1'}));
+  assert.deepEqual(await readBoundedCdpJson(valid),{Browser:'Chrome/155.0.1.1'});
+  const oversized=new Response(new ReadableStream<Uint8Array>({
+    start(controller){controller.enqueue(new Uint8Array(17000));controller.close();}
+  }),{status:200});
+  assert.equal(await readBoundedCdpJson(oversized),null);
+  assert.equal(await readBoundedCdpJson(new Response('{}',{
+    headers:{'content-length':'17000'}})),null);
+  assert.equal(await readBoundedCdpJson(new Response('{}',{status:403})),null);
+});
+test('TEST-009: CDP JSON accepts split chunks but rejects malformed UTF-8',async()=>{
+  const encoded=new TextEncoder().encode('{"Browser":"Chrome/155.0.1.1"}');
+  const split=new Response(new ReadableStream<Uint8Array>({
+    start(controller){
+      controller.enqueue(encoded.subarray(0,12));
+      controller.enqueue(encoded.subarray(12));
+      controller.close();
+    }
+  }));
+  assert.deepEqual(await readBoundedCdpJson(split),{Browser:'Chrome/155.0.1.1'});
+  assert.equal(await readBoundedCdpJson(new Response(
+    new Uint8Array([0x7b,0xff,0x7d]))),null);
 });
