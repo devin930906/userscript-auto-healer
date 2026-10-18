@@ -1,5 +1,11 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
+import {access,mkdtemp,rm} from 'node:fs/promises';
+import {createServer} from 'node:net';
+import {join,win32} from 'node:path';
+import {tmpdir} from 'node:os';
+import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
+import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 
@@ -53,4 +59,44 @@ test('TEST-017 stage: user authorization and owned session are mandatory, no CDP
    websocketHandshakeVerified:true as const,targetVerified:false as const,stop:()=>{}};
  assert.deepEqual(await inspectApprovedTampermonkeyRuntime(fake,true),
    {ok:false,code:'UNVERIFIED_BROWSER'});
+});
+
+/** A real Windows Chrome/CDP roundtrip is not a Tampermonkey GM test.
+ * The expected isolated profile has no extensions; any detected runtime is a hint only.
+ */
+test('TEST-017 stage: real owned Chrome target query remains non-verified',async t=>{
+ if(process.platform!=='win32'){t.skip('Requires Windows signed Chrome');return;}
+ let chrome:string|undefined;
+ for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+   if(!base)continue;
+   const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+   try{await access(candidate);chrome=candidate;break;}catch{/* no Chrome at this location */}
+ }
+ assert.ok(chrome,'Windows runner must provide signed Chrome');
+ const listener=createServer();
+ await new Promise<void>((resolve,reject)=>{
+   listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);
+ });
+ const address=listener.address();
+ await new Promise<void>(resolve=>listener.close(()=>resolve()));
+ if(!address||typeof address==='string')throw Error('NO_FREE_TEST_PORT');
+ const root=await mkdtemp(join(tmpdir(),'uah-manager-presence-'));
+ let stop=()=>{};
+ t.after(async()=>{stop();await rm(root,{recursive:true,force:true}).catch(()=>undefined);});
+ const config={executablePath:chrome!,userDataDir:join(root,'profile'),
+   remoteDebuggingPort:address.port,bindAddress:'127.0.0.1' as const};
+ const profile=await prepareApprovedIsolatedProfile(config,true);
+ assert.equal(profile.ok,true,JSON.stringify(profile));
+ const session=await launchApprovedIsolatedChrome(config,{userApproved:true,testHeadless:true});
+ assert.equal(session.ok,true,JSON.stringify(session));
+ if(!session.ok)return;
+ stop=session.stop;
+ const probe=await inspectApprovedTampermonkeyRuntime(session,true);
+ assert.ok(probe.ok?probe.status==='RUNTIME_TARGET_HINT_ONLY':
+   probe.code==='RUNTIME_NOT_OBSERVED',JSON.stringify(probe));
+ if(probe.ok){
+   assert.equal(probe.gmApiVerified,false);
+   assert.equal(probe.scriptInjectionVerified,false);
+   assert.equal(probe.extensionAuthenticityVerified,false);
+ }
 });
