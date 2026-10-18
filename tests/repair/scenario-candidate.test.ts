@@ -120,3 +120,55 @@ test('TEST-019: malformed candidate and hostile getters never expose source or e
     assert.equal(result.automaticPatchAllowed,false);
   }
 });
+
+
+test('TEST-019: proposed source must actually match the approved scenario URL',()=>{
+  // Even a perfectly shaped (caller-controlled) DOM receipt says nothing
+  // about a userscript on an origin or path outside its own @match.
+  for(const targetUrl of [
+    'https://unrelated.example/', 'http://example.com/',
+    'https://example.com:8443/', 'https://example.com/#fragment'
+  ]){
+    const result=proposeFromReadOnlyDomDiagnostic(
+      patch,{...scenario,targetUrl},series(),true);
+    assert.equal(result.status,'BLOCKED',targetUrl);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  const scopedSource=source.replace(
+    '@match https://example.com/*','@match https://example.com/approved/*'
+  );
+  const scopedPatch={
+    ...patch,source:scopedSource,
+    expectedSourceSha256:createHash('sha256').update(scopedSource).digest('hex'),
+    callOffset:scopedSource.indexOf('document.querySelector')
+  };
+  assert.equal(proposeFromReadOnlyDomDiagnostic(scopedPatch,{
+    ...scenario,scriptSha256:scopedPatch.expectedSourceSha256,
+    targetUrl:'https://example.com/outside'
+  },series(),true).status,'BLOCKED');
+  assert.equal(proposeFromReadOnlyDomDiagnostic(scopedPatch,{
+    ...scenario,scriptSha256:scopedPatch.expectedSourceSha256,
+    targetUrl:'https://example.com/approved/page?mode=1'
+  },series(),true).status,'CANDIDATE_ONLY');
+});
+
+test('TEST-019: @include and @exclude precedence cannot silently authorize a candidate',()=>{
+  for(const extra of [
+    '// @exclude https://example.com/*\n',
+    '// @exclude-match https://example.com/*\n',
+    '// @include https://example.com/*\n'
+  ]){
+    const changed=source.replace('// @grant none',extra+'// @grant none');
+    const edited={
+      ...patch,source:changed,
+      expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
+      callOffset:changed.indexOf('document.querySelector')
+    };
+    const linked={...scenario,scriptSha256:edited.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(edited,linked,series(),true);
+    assert.equal(result.status,'BLOCKED',extra);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+});
