@@ -83,7 +83,9 @@ function preflightReadOnlyScenario(
    return {ok:false,code:'INVALID_SCENARIO'};
  const value=input as ScenarioInput;
  if(value.userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
- if(!Array.isArray(value.steps)||!Array.isArray(value.assertions))
+ // Missing login intent must not silently become "no login needed".
+ if(typeof value.requiresLogin!=='boolean'||
+    !Array.isArray(value.steps)||!Array.isArray(value.assertions))
    return {ok:false,code:'INVALID_SCENARIO'};
  const preflight=preflightScenario(value);
  if(preflight.state!=='READY_TO_TEST'||!preflight.input.targetUrl)
@@ -202,7 +204,8 @@ export function summarizeReadOnlyScenarioDomSeries(
    if(!sample.ok)return blocked('INVALID_OBSERVATION');
    const time=typeof sample.observedAt==='string'?Date.parse(sample.observedAt):NaN;
    if(!Number.isFinite(time))return blocked('INVALID_OBSERVATION');
-   if(time<lastTime)return blocked('UNSTABLE_OBSERVATION');
+   // Equal timestamps can be the same replayed snapshot, not two samples.
+   if(time<=lastTime)return blocked('UNSTABLE_OBSERVATION');
    lastTime=time;
    if(first){
      if(sample.summary.elementCount!==first.summary.elementCount||
