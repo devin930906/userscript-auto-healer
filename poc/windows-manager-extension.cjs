@@ -59,6 +59,26 @@ async function main() {
     console.log('PASS POC-02A: published Violentmonkey MV3 extension worker registered; ID='+info.id+'; pinned version='+info.version+'; worker='+worker.url());
     console.log('NOTE: This uses bundled Chromium, not the selected installed Google Chrome or a user Profile.');
 
+    // Chrome 138+ requires explicit per-extension Allow User Scripts opt-in.
+    // The following UI interaction is restricted to THIS disposable profile and THIS
+    // just-loaded manager extension, never a user's existing browser.
+    const permissionPage=await context.newPage();
+    try {
+      await permissionPage.goto('chrome://extensions/?id='+info.id,{waitUntil:'domcontentloaded',timeout:12000});
+      await permissionPage.waitForTimeout(1500);
+      const label=permissionPage.getByText('Allow User Scripts',{exact:true});
+      const count=await label.count();
+      console.log('Chrome extensions detail Allow User Scripts label count='+count);
+      if(count===1){
+        try {
+          await label.click({timeout:5000});
+          await permissionPage.waitForTimeout(1000);
+          console.log('Disposable test profile: attempted explicit Allow User Scripts UI opt-in.');
+        }catch(err){console.log('INCOMPLETE userScripts opt-in: '+String(err.message).slice(0,180));}
+      } else console.log('INCOMPLETE userScripts opt-in: extension detail toggle not discoverable.');
+    } catch(err){console.log('INCOMPLETE extension details UI: '+String(err.message).slice(0,200));}
+    await permissionPage.close();
+    
     // Best-effort discovery of the authentic userscript installation journey.
     // This does NOT silently install anything into a user browser; only ephemeral profile.
     const page=await context.newPage();
