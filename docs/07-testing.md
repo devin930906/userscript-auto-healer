@@ -32,7 +32,7 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 已规划 |
 | TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 仅运行目标探测与拒绝负例已阶段执行；真实 Tampermonkey 安装/授权/GM/业务验收仍未执行 |
 | TEST-018 | REQ-018 | 端到端 | Chrome+真实 Tampermonkey | 真实 Tampermonkey/测试脚本已安装并授权，场景已定义 | 失效/已修脚本、GM API、不同注入时机 | 在 Tampermonkey 中实际注入，调用 GM API、执行业务断言与回归，记录扩展和浏览器版本及运行证据 | 真实 Tampermonkey 的业务断言满足才 VERIFIED | Violentmonkey/原生 DOM/人工修正版冒充产品自动修复 | 独立 Tampermonkey E2E | 已规划 |
-| TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 已规划 |
+| TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 部分实现并验证：TASK-009 的独立只读候选复核、元数据与伪造输入拒绝在 Windows Actions #39142638654 通过；完整端到端集成、自动应用门控与真实 Tampermonkey 业务验收未完成 |
 | TEST-020 | REQ-020 | 可靠性 | Windows NTFS | 可修改测试文件 | 成功/磁盘满/文件锁 | 版本备份回滚：应用、模拟中断、回滚 | 原字节 hash 恢复 | 原文件损坏 | 故障注入 | 已规划 |
 | TEST-021 | REQ-021 | 单元/集成 | Windows FS | 候选+证据 | VERIFIED / UNKNOWN | 自动应用策略：分别执行门控 | UNKNOWN 原文件不变 | 无证据覆盖 | 单元+集成 | 已规划 |
 | TEST-022 | REQ-022 | 集成 | Batch 测试环境 | 多份脚本 | 一成功、一失败、一取消 | 批量取消与恢复：执行/重启/重试 | 隔离终态、无重复应用 | 单错拖垮全部 | 集成 | 已规划 |
