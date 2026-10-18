@@ -1,6 +1,6 @@
 # Userscript Auto Healer
 
-> 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007 真 Tampermonkey 产品级验收、TASK-008 完整诊断联动仍在开发中（最新阶段增量见 PR #25/#26）；**没有正式产品成品（完整自动修复尚未交付）、没有经过完整桌面验收的发行构建、没有 Stable 发布**。
+> 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007..011 有独立阶段代码成果，但真实 Tampermonkey 产品级业务验收、完整自动应用和恢复事务仍未闭环。TASK-011 的备份-only、恢复来源身份检查及原生协作式文件互斥已通过 Windows 局部测试（PR #44–53，详见 docs/07-testing.md、docs/09-development-plan.md）。**没有正式产品成品（完整自动修复尚未交付），尚无正式 Windows EXE 安装版或 ZIP 便携版，也没有 Stable Release**。
 
 ## 项目用途
 针对目标网站 DOM、Selector 和页面运行机制变化导致的 `.user.js` 油猴脚本失效，设计 Windows 本地优先、CDP 诊断、保守自动修复与可验证回滚的工具。用户可指定 Chrome/便携版路径、专用调试 Profile、默认 9223 端口，批量导入脚本，必要时启用自定义 AI 服务。
