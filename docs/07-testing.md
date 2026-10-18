@@ -156,3 +156,7 @@ PR #44 增加三项只读源文件校验负例，源 SHA `31a31f111a7e6dbd35dbe4
 PR [#53](https://github.com/devin930906/userscript-auto-healer/pull/53) 增加六项互斥与来源身份回归：同脚本并发拒绝且不产生备份、回调失败清理锁、执行中源变化阻断、硬链接与符号链接拒绝、独立来源并行互不影响、遗留锁保持拒绝直至专人处理。连同 PR #51/#52 的长名称与同名跨目录身份拒绝，均由提交 `3694c9529475ff0ccf015ad65ee347ed781ee005` 的 [Windows Application Checks #39154527043](https://github.com/devin930906/userscript-auto-healer/actions/runs/39154527043) 实际执行：173 cases，172 pass、0 fail、1 skip，TypeScript 与真实 Electron smoke 成功。主干合并 SHA `b53350ad64773a732b3625a5dfc7651fa24e7637` 的单独验证应以其工作流结果为准。
 
 **TEST-020 依旧未完整通过**：现有锁只协调本产品原生流程，不能阻止外部程序编辑脚本；没有持久崩溃恢复日志、事务性候选写入、故障注入后恢复原字节及正式回滚成功证据。TEST-021 的独立运行来源、真实 Tampermonkey GM/业务与 GATE-007 仍保持发布阻断。
+
+## TASK-007 / TEST-017 一次性 URL 导入测试边界（2026-10-19）
+
+`src/manager/tampermonkey-gm-probe.ts` 的隔离回环服务现支持短时 `/install.user.js?key=<随机令牌>`，用于**真实 Tampermonkey 中由测试者主动尝试的手动 URL 导入**。自动化负例覆盖错误/缺失令牌、额外参数、非 GET、非授权跨来源、关闭后的监听拒绝及 GET 不产生运行回执；仍需真实扩展安装授权、版本、GM_getValue、脚本执行业务前后断言与产品修复验证。此测试不是 Tampermonkey 云端 PoC 成功证据，不能提升 TEST-017/018 或 GATE-004/005 状态。
