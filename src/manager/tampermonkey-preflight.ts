@@ -49,10 +49,13 @@ function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  // A wildcard at the end of the path is a conservative, literal prefix;
  // other wildcards require true manager-based matching.
  const path=match[3];
+ // Chrome content-script match paths include the URL query. Ignoring it
+ // would incorrectly accept exact @match paths on queried pages.
+ const pathAndQuery=target.pathname+target.search;
  if(path==='/*')return true;
  if(path.includes('*')&&(!path.endsWith('*')||path.slice(0,-1).includes('*')))return false;
- if(!path.endsWith('*'))return target.pathname===path;
- return target.pathname.startsWith(path.slice(0,-1));
+ if(!path.endsWith('*'))return pathAndQuery===path;
+ return pathAndQuery.startsWith(path.slice(0,-1));
 }
 function blocked(code:TampermonkeyPreflightCode):TampermonkeyPreflightResult {
  return {ok:false,status:'BLOCKED',code,gmApiVerified:false,businessVerified:false};
