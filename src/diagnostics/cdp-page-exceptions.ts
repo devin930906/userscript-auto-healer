@@ -135,8 +135,20 @@ async function capture(
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     if(!open||broken)return {ok:false,code:'CDP_FAILED'};
     if(await command('Page.enable')===null)return {ok:false,code:'CDP_FAILED'};
-    const first=await command('Page.getFrameTree');
+    // Target discovery can succeed before the newly created page has
+    // finished replacing about:blank. Settle only frame identity BEFORE
+    // enabling Runtime. Once sampling starts, any navigation still blocks.
+    const settleUntil=Date.now()+2400;
+    let first=await command('Page.getFrameTree');
+    while(!exactMainFrame(first,expectedUrl)&&!broken&&!signal?.aborted&&
+          Date.now()<settleUntil){
+      await new Promise<void>(resolve=>setTimeout(resolve,100));
+      first=await command('Page.getFrameTree');
+    }
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+    if(broken||first===null)return {ok:false,code:'CDP_FAILED'};
     if(!exactMainFrame(first,expectedUrl))return {ok:false,code:'ROUTE_CHANGED'};
+    navigated=false;
     listening=true;
     if(await command('Runtime.enable')===null)return {ok:false,code:'CDP_FAILED'};
     await new Promise<void>(resolve=>{
