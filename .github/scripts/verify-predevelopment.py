@@ -102,7 +102,7 @@ def check_stage_contract():
     assert "（7）交接资料整理" in current_ready
     assert "有条件准入" in current_ready and "Stable 发布门槛尚未达到" in current_ready
     assert "## （4）终局交接收据" in current_handoff, "No future-session handoff"
-    assert "TASK-001" in current_handoff and "正式产品源码尚未" in current_handoff
+    assert "TASK-001" in current_handoff and ("当前尚无正式产品代码" in current_handoff or "正式产品源码尚未" in current_handoff or "产品源码仍未开始" in current_handoff), "Handoff must disclose absent product source"
     assert "POC-02T-LIVE" in current_admission and "POC-02T-LIVE" in current_handoff
     assert "GM_getValue" in live_tm and "temporaryScriptMarkerAbsent" in live_tm
     assert "不是 GitHub Actions" in live_tm, "Real-browser evidence overstated as cloud PoC"
