@@ -52,9 +52,9 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
    res.end('<!doctype html><html><body><div id="initial">ready</div>'+
      '<iframe src="'+subUrl+'"></iframe>'+
      '<script>async function poll(){try{const r=await fetch("/trigger",{cache:"no-store"});'+
-     'if((await r.text())==="go"){const el=document.createElement("div");'+
+     'if((await r.text())==="go"){setTimeout(()=>{const el=document.createElement("div");'+
      'el.id="async-target";document.body.appendChild(el);'+
-     'history.pushState({},"","/route-next");return}}catch(e){}'+
+     'history.pushState({},"","/route-next");},850);return}}catch(e){}'+
      'setTimeout(poll,120)}poll()</script>'+
      '</body></html>');
  });
