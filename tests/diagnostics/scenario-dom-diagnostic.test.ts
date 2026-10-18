@@ -99,7 +99,9 @@ test('TEST-013: CDP failures and same-origin SPA route change block diagnostic p
  }
 });
 test('TEST-013: malformed iframe, shadow and blind-spot inventory fails closed',()=>{
- const base=sample(matched).summary;
+ const baseSample=sample(matched);
+ if(!baseSample.ok)throw new Error('EXPECTED_VALID_OBSERVATION');
+ const base=baseSample.summary;
  for(const summary of [
    {...base,iframeCount:-1},
    {...base,iframeCount:NaN},
@@ -129,6 +131,7 @@ test('TEST-013: malformed iframe, shadow and blind-spot inventory fails closed',
 
 test('TEST-013: stable sampling rejects iframe, shadow and blind-spot drift',()=>{
  const first=sample(matched);
+ if(!first.ok)throw new Error('EXPECTED_VALID_OBSERVATION');
  const changed=[
    {...first.summary,iframeCount:1,
      blindSpots:['IFRAME_CONTENT_UNVERIFIED']},
