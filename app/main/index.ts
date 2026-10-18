@@ -25,6 +25,9 @@ let launchInProgress = false;
 let profilePreparationInProgress = false;
 let launchAbort: AbortController | null = null;
 let probeInProgress = false;
+// Serialize native Chrome/Profile selection: IPC dialogs must not race each other
+// or a consented browser launch. This flag is not proof of user authorization.
+let nativeSelectionInProgress = false;
 const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as const,
   businessVerified:false as const,automaticPatchAllowed:false as const};
 
@@ -74,9 +77,11 @@ function registerSafeIpc(): void {
   // request an action, but cannot pass paths, PIDs, Chromium switches or CDP.
   ipcMain.handle('browser:choose-chrome',async event=>{
     authorizeSender(event);
-    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    nativeSelectionInProgress=true;
+    try{
     const choice=await dialog.showOpenDialog(win,{
       title:'选择独立 Chrome 或便携版 chrome.exe',
       properties:['openFile'],filters:[{name:'Google Chrome',extensions:['exe']}]
@@ -89,12 +94,15 @@ function registerSafeIpc(): void {
     selectedChrome=path;
     return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',filename:'chrome.exe',
       verifiedOnDisk:false};
+    }finally{nativeSelectionInProgress=false;}
   });
   ipcMain.handle('browser:choose-profile',async event=>{
     authorizeSender(event);
-    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    nativeSelectionInProgress=true;
+    try{
     const choice=await dialog.showOpenDialog(win,{
       title:'选择已有的独立调试 Profile 文件夹（不要选日常 Chrome 用户目录）',
       properties:['openDirectory']
@@ -104,10 +112,11 @@ function registerSafeIpc(): void {
     selectedProfile=choice.filePaths[0];
     return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',
       directoryName:win32.basename(selectedProfile),verifiedOnDisk:false};
+    }finally{nativeSelectionInProgress=false;}
   });
   ipcMain.handle('browser:create-profile',async event=>{
     authorizeSender(event);
-    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())
+    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())
       return {ok:false,code:'BROWSER_BUSY'};
     if(!selectedChrome)return {ok:false,code:'CONFIG_NOT_SELECTED'};
     const win=mainWindow;
@@ -152,7 +161,7 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:start',async (event,port:unknown)=>{
     authorizeSender(event);
-    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
+    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
     if(!selectedChrome||!selectedProfile)
       return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
     const win=mainWindow;
@@ -300,7 +309,13 @@ async function createMainWindow(): Promise<void> {
     const nativeConsent = dialog.showMessageBox;
     Object.defineProperty(dialog, 'showOpenDialog', {
       configurable: true, writable: true,
-      value: async (_window: unknown, options: {properties?: string[];title?:string}) => ({
+      value: async (_window: unknown, options: {properties?: string[];title?:string}) => {
+        // Keep the first native picker pending while a second IPC tries to open.
+        // This is a real Electron IPC concurrency regression, not static text matching.
+        if(options.title?.startsWith('选择独立 Chrome') ||
+           options.title?.startsWith('选择已有的独立调试'))
+          await new Promise(resolve=>setTimeout(resolve,60));
+        return ({
         canceled: false,
         filePaths: options.title?.startsWith('选择独立 Chrome')
           ? [join(fixtureDir,'chrome.exe')]
@@ -308,7 +323,8 @@ async function createMainWindow(): Promise<void> {
             ? [disposableProfile]
             : options.properties?.includes('openDirectory')
               ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
-      })
+        });
+      }
     });
     // Deny browser startup at a trusted OS dialog: Electron smoke must never
     // launch a real browser or re-use an existing Chrome/Profile.
@@ -327,6 +343,9 @@ async function createMainWindow(): Promise<void> {
       "const noStop=await a.stopBrowser(); " +
       "const newProfileWithoutChrome=await a.createProfile(); " +
       "const selectedExe=await a.chooseChrome(); const selectedProfile=await a.chooseProfile(); " +
+      "const race=await Promise.all([a.chooseChrome(),a.chooseProfile()]); " +
+      "const raceSerialized=race.filter(x=>x.ok===true).length===1 && " +
+      "race.filter(x=>x.code==='BROWSER_BUSY').length===1; " +
       "const declinedProfile=await a.createProfile(); const blockedLaunch=await a.startBrowser(9223); " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
@@ -345,7 +364,7 @@ async function createMainWindow(): Promise<void> {
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
       "newProfileWithoutChrome.code === 'CONFIG_NOT_SELECTED' && " +
-      "selectedExe.ok === true && selectedProfile.ok === true && " +
+      "selectedExe.ok === true && selectedProfile.ok === true && raceSerialized && " +
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && rendered === true && " +
