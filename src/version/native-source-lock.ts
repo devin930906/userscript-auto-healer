@@ -10,7 +10,7 @@
 import {createHash} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import {lstat,mkdir,rmdir} from 'node:fs/promises';
-import {dirname,join} from 'node:path';
+import {dirname,isAbsolute,join} from 'node:path';
 
 export type NativeSourceLockFailure=
   'INVALID_SOURCE'|'SOURCE_LOCKED'|'SOURCE_CHANGED'|'IO_FAILURE';
@@ -43,7 +43,9 @@ function failure(error:unknown):NativeSourceLockError{
 export async function withNativeSourceLock<T>(
  sourcePath:string, action:()=>Promise<T>
 ):Promise<T>{
-  if(typeof sourcePath!=='string'||typeof action!=='function')
+  if(typeof sourcePath!=='string'||sourcePath.length>4096||
+     sourcePath.includes('\0')||!isAbsolute(sourcePath)||
+     typeof action!=='function')
     throw new NativeSourceLockError('INVALID_SOURCE');
   const parent=dirname(sourcePath);
   let start:BigIntStats;
