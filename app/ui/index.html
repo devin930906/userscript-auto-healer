@@ -40,6 +40,8 @@
       <select id="gm-run-at">
         <option value="document-idle">document-idle（页面空闲后）</option>
         <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
+        <option value="document-body">document-body（页面正文开始加载，必要时等待 DOM 就绪后检查）</option>
+        <option value="document-end">document-end（文档结构加载后，必要时等待 DOM 就绪后检查）</option>
       </select>
       <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
       <button id="gm-probe-start" type="button">授权开始本机 GM 测试</button>
