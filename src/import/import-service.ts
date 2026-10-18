@@ -12,6 +12,7 @@ export const MAX_SCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_SELECTED_FILES = 1000;
 export const MAX_DIRECTORY_DEPTH = 8;
 export const MAX_DIRECTORY_ENTRIES = 10000;
+export const MAX_TOTAL_IMPORTED_BYTES = 128 * 1024 * 1024;
 
 export type ImportFailureCode =
   'INVALID_PATH' | 'NOT_USER_SCRIPT' | 'SYMLINK_REJECTED' | 'NOT_REGULAR_FILE' |
@@ -116,6 +117,7 @@ export function importDroppedBytes(name: unknown, bytes: unknown): ImportedScrip
 export async function importApprovedPaths(paths: readonly string[]): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   const seen = new Set<string>();
+  let totalBytes = 0;
   if (paths.length > MAX_SELECTED_FILES) {
     outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
     return outcome;
@@ -135,10 +137,17 @@ export async function importApprovedPaths(paths: readonly string[]): Promise<Imp
       if (info.isSymbolicLink()) { outcome.errors.push(failure(display, 'SYMLINK_REJECTED')); continue; }
       if (!info.isFile()) { outcome.errors.push(failure(display, 'NOT_REGULAR_FILE')); continue; }
       if (info.size > MAX_SCRIPT_BYTES) { outcome.errors.push(failure(display, 'FILE_TOO_LARGE')); continue; }
+      if (totalBytes + info.size > MAX_TOTAL_IMPORTED_BYTES) {
+        outcome.errors.push(failure(display, 'SCAN_LIMIT'));
+        break;
+      }
       const bytes = await readFile(normalized);
       const parsed = fromBytes(display, bytes);
       if ('code' in parsed) outcome.errors.push(parsed);
-      else outcome.scripts.push({ ...parsed, sourcePath: normalized });
+      else {
+        totalBytes += parsed.byteLength;
+        outcome.scripts.push({ ...parsed, sourcePath: normalized });
+      }
     } catch {
       outcome.errors.push(failure(display, 'IO_FAILURE'));
     }
@@ -168,7 +177,9 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
   }
   const approved: string[] = [];
   let visited = 0;
+  let budgetExceeded = false;
   const walk = async (dir: string, depth: number): Promise<void> => {
+    if (budgetExceeded) return;
     let entries;
     try { entries = await readdir(dir, { withFileTypes: true }); }
     catch { outcome.errors.push(failure(basename(dir), 'IO_FAILURE')); return; }
@@ -176,6 +187,7 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
     for (const entry of entries) {
       visited++;
       if (visited > MAX_DIRECTORY_ENTRIES || approved.length >= MAX_SELECTED_FILES) {
+        budgetExceeded = true;
         outcome.errors.push(failure(basename(dir), 'SCAN_LIMIT'));
         return;
       }
@@ -192,6 +204,7 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
           outcome.errors.push(failure(entry.name, 'SCAN_LIMIT')); continue;
         }
         await walk(child, depth + 1);
+        if (budgetExceeded) return;
       } else if (entry.isFile() && validName(entry.name)) {
         approved.push(child);
       }
