@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   chooseChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-chrome'),
   chooseProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-profile'),
+  createProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:create-profile'),
   startBrowser: (port: number): Promise<unknown> => ipcRenderer.invoke('browser:start', port),
   inspectTampermonkey: (): Promise<unknown> => ipcRenderer.invoke('browser:tampermonkey-hint'),
   stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop')
