@@ -80,6 +80,19 @@ export function summarizeFixtureDomEvidence(
    ...emptyFlags
  })};
 }
+/** Two independently limited observations can contradict each other, but even
+ * matching reports and DOM never authenticate Tampermonkey, GM or a repair.
+ */
+export interface ManualFixtureConsistency {
+ readonly status:'AWAITING_BROWSER_VISITS'|'AWAITING_REPORTS'|'REPORTED_MISMATCH'|
+  'AWAITING_DOM_OBSERVATIONS'|'INVALID_DOM_EVIDENCE'|'DOM_REPORT_CONFLICT'|
+  'CONSISTENT_UNVERIFIED_FIXTURE_ONLY';
+ readonly comparedModes:0|1|2;
+ readonly extensionAuthenticityVerified:false;
+ readonly scriptInstallationVerified:false;
+ readonly gmApiVerified:false;
+ readonly businessVerified:false;
+}
 type VisitStatus=
  |{readonly ok:true;readonly status:'TARGET_ID_AND_URL_MATCH_ONLY';
    readonly targetId:string;readonly mode:GmProbeMode;
@@ -101,6 +114,8 @@ export interface ManualTampermonkeyDiagnosticSession {
    signal?:AbortSignal)=>Promise<FixtureDomEvidenceResult>;
  /** Snapshot of limited, non-attesting DOM observations, no script token. */
  readonly domSnapshot:()=>Readonly<Partial<Record<GmProbeMode,FixtureDomEvidence>>>;
+ /** Cross-check independent, non-attesting HTTP and DOM evidence. */
+ readonly consistencySnapshot:()=>ManualFixtureConsistency;
  /** Always marks authenticity, installation, GM and business verification false. */
  readonly snapshot:()=>ManualDiagnosticAssessment;
  /** Closes only the disposable fixture, NOT the separately owned Chrome. */
@@ -161,6 +176,49 @@ export function assessManualProbeObservations(
    reportedBrokenFailed:Boolean(reportedBrokenFailed),
    reportedFixedRecovered:Boolean(reportedFixedRecovered),
    ...emptyFlags};
+}
+
+
+/** Reject a plausible self-report when the independently observed fixture DOM
+ * disagrees. Never turn consistency into manager, GM, or business verification.
+ * Missing evidence stays pending; malformed evidence fails closed.
+ */
+export function correlateManualFixtureEvidence(
+ receipts:unknown,visits:unknown,domEvidence:unknown
+):ManualFixtureConsistency {
+ const assessment=assessManualProbeObservations(receipts,visits);
+ const result=(status:ManualFixtureConsistency['status'],comparedModes:0|1|2):
+   ManualFixtureConsistency=>Object.freeze({status,comparedModes,...emptyFlags});
+ if(assessment.status!=='SELF_REPORTED_EXPECTATIONS_MATCH')
+   return result(assessment.status,0);
+ const dom=object(domEvidence)?domEvidence:{};
+ const r=object(receipts)?receipts:{};
+ let compared:0|1|2=0;
+ for(const mode of ['broken','fixed'] as const){
+   if(!Object.prototype.hasOwnProperty.call(dom,mode))
+     return result('AWAITING_DOM_OBSERVATIONS',compared);
+   const e=dom[mode];
+   const expected=mode==='fixed'?1:0;
+   if(!object(e)||Object.keys(e).sort().join(',')!==[
+     'status','mode','observedAt','targetCount','actionCount',
+     'fixtureDomMatchesExpected','extensionAuthenticityVerified',
+     'scriptInstallationVerified','gmApiVerified','businessVerified'
+   ].sort().join(',')||
+     e.status!=='LIMITED_FIXTURE_DOM_ONLY'||e.mode!==mode||
+     typeof e.observedAt!=='string'||!Number.isFinite(Date.parse(e.observedAt))||
+     e.targetCount!==1||(e.actionCount!==0&&e.actionCount!==1)||
+     typeof e.fixtureDomMatchesExpected!=='boolean'||
+     e.extensionAuthenticityVerified!==false||
+     e.scriptInstallationVerified!==false||
+     e.gmApiVerified!==false||e.businessVerified!==false)
+     return result('INVALID_DOM_EVIDENCE',compared);
+   const report=r[mode] as GmProbeReceipt;
+   if(e.actionCount!==Number(report.reportedBusinessAction)||
+      e.fixtureDomMatchesExpected!==(e.actionCount===expected))
+     return result('DOM_REPORT_CONFLICT',compared);
+   compared=(compared+1) as 1|2;
+ }
+ return result('CONSISTENT_UNVERIFIED_FIXTURE_ONLY',compared);
 }
 
 /** Reserve browser visits synchronously before the first asynchronous CDP call.
@@ -271,6 +329,9 @@ export async function startApprovedTampermonkeyDiagnostic(
  return {ok:true,session:Object.freeze({
    status:'MANUAL_TEST_READY_NOT_VERIFIED',source:probe.source,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
-   visit,observe,domSnapshot,snapshot,stop
+   visit,observe,domSnapshot,
+   consistencySnapshot:()=>correlateManualFixtureEvidence(
+     ready()?probe.receiptSnapshot():{},visits.snapshot(),
+     ready()?domEvidence:{}),snapshot,stop
  })};
 }
