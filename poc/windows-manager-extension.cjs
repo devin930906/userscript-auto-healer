@@ -82,19 +82,26 @@ async function main() {
         walk(document);return hits;
       });
       console.log('Chrome extension details toggle inventory: '+JSON.stringify(controls.slice(0,25)));
-      const chosen=controls.find(x=>/user scripts/i.test(x.title+" "+x.id+" "+x.parentId));
-      if(chosen){
-        const toggle=permissionPage.locator('cr-toggle#'+chosen.id);
-        const exact=chosen.id?toggle:permissionPage.getByRole('switch',{name:/allow user scripts/i});
-        const found=await exact.count();
-        if(found===1){
-          const before=await exact.evaluate(el=>Boolean(el.checked||el.getAttribute('aria-checked')==='true'));
-          if(!before)await exact.click({timeout:7000});
-          await permissionPage.waitForTimeout(1000);
-          const after=await exact.evaluate(el=>Boolean(el.checked||el.getAttribute('aria-checked')==='true'));
-          console.log('Explicit userScripts consent in disposable profile: before='+before+', after='+after);
-        } else console.log('INCOMPLETE userScripts opt-in: ambiguous matching toggle count='+found);
-      } else console.log('INCOMPLETE userScripts opt-in: toggle not found.');
+      const label=permissionPage.getByText('Allow User Scripts',{exact:true});
+      if(await label.count()!==1){
+        console.log('INCOMPLETE userScripts opt-in: label count='+await label.count());
+      } else {
+        const action=await label.evaluate(el=>{
+          let node=el, row=null;
+          while(node&&!row){
+            if(node.matches?.('extensions-toggle-row'))row=node;
+            else if(node.parentElement)node=node.parentElement;
+            else node=node.getRootNode()?.host||null;
+          }
+          if(!row)return {foundRow:false};
+          const t=row.shadowRoot?.querySelector('cr-toggle')||row.querySelector('cr-toggle');
+          if(!t)return {foundRow:true,foundToggle:false,rowId:row.id};
+          const before=Boolean(t.checked);
+          if(!before)t.click();
+          return {foundRow:true,foundToggle:true,rowId:row.id,before,after:Boolean(t.checked)};
+        });
+        console.log('Explicit opt-in control result on disposable profile: '+JSON.stringify(action));
+      }
     } catch(err){console.log('INCOMPLETE extension details UI: '+String(err.message).slice(0,200));}
     await permissionPage.close();
     
