@@ -188,8 +188,23 @@ async function main() {
         } catch(e) {return {available:false,error:String(e).slice(0,220)}}
       });
       console.log('UserScripts API and localhost direct-control diagnostic after browser restart: '+JSON.stringify(api));
+      // Separate positive control for the webRequest event that Violentmonkey
+      // uses to prepare page-specific registered script data.
+      try {
+        const observation=await optionsProbe.evaluate(()=>{
+          window.__pocWebRequests=[];
+          chrome.webRequest.onSendHeaders.addListener(details=>{
+            if(details.url.startsWith('http://127.0.0.1:'))
+              window.__pocWebRequests.push({url:details.url,tabId:details.tabId,type:details.type});
+          },{urls:['<all_urls>']});
+          return {listenerRegistered:chrome.webRequest.onSendHeaders.hasListeners()};
+        });
+        console.log('WebRequest event positive-control registration: '+JSON.stringify(observation));
+      } catch(err){
+        console.log('INCOMPLETE webRequest event positive-control setup: '+String(err.message).slice(0,190));
+      }
     } catch(err) {console.log('INCOMPLETE extension API check after browser restart: '+String(err.message).slice(0,200));}
-    await optionsProbe.close();
+    // Retain this extension-origin page to observe local HTTP requests after the test navigation.
 
     // Best-effort discovery of the authentic userscript installation journey.
     // This does NOT silently install anything into a user browser; only ephemeral profile.
@@ -222,6 +237,14 @@ async function main() {
               const regs=chrome.userScripts?await chrome.userScripts.getScripts():[];
               return {
                 storageKeys:Object.keys(area).slice(0,24),
+                runtimeOptions:{
+                  isApplied:area.options?.isApplied,
+                  injectInto:area.options?.defaultInjectInto,
+                  ffInject:area.options?.ffInject,
+                  xhrInject:area.options?.xhrInject,
+                  blacklist:area.options?.blacklist,
+                  blacklistNet:area.options?.blacklistNet,
+                },
                 testScript:{
                   name:saved.meta?.name,
                   match:saved.meta?.match,
@@ -253,6 +276,12 @@ async function main() {
       control.directApi=true;
     } catch(e) {}
     console.log('Isolated Chrome userScripts direct injection positive-control: '+JSON.stringify(control));
+    try {
+      const webRequests=await optionsProbe.evaluate(()=>window.__pocWebRequests||[]);
+      console.log('Observed localhost webRequest onSendHeaders calls: '+JSON.stringify(webRequests.slice(-12)));
+    } catch(err) {
+      console.log('INCOMPLETE webRequest observed events: '+String(err.message).slice(0,180));
+    }
     let execution={installed:false};
     try {
       await probe.waitForFunction(()=>document.documentElement.dataset.userscriptFixture==='executed',{timeout:7000});
@@ -261,7 +290,7 @@ async function main() {
     if (execution.installed && execution.gm==='true')
       console.log('PASS POC-02B: .user.js really executed under extension context, GM_getValue available.');
     else {console.log('INCOMPLETE POC-02B: no verified userscript injection/GM API; installation/real assertions still blocked; observed='+JSON.stringify(execution));process.exitCode=2;}
-    await page.close(); await probe.close();
+    await page.close(); await probe.close(); await optionsProbe.close();
   } finally {
     if (context) await context.close().catch(()=>{});
     await new Promise(resolve=>server.close(resolve));
