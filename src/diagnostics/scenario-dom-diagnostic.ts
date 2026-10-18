@@ -82,6 +82,20 @@ function validDomSummary(summary:unknown):boolean{
  return true;
 }
 
+/** Only actual observer-style UTC instants are accepted. Date.parse alone
+ * normalizes impossible calendar days and accepts local/offset timestamps.
+ * The timestamp is metadata for correlation, never proof of provenance.
+ */
+function validObservationTimestamp(value:unknown):value is string{
+ if(typeof value!=='string'||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value))
+   return false;
+ const time=Date.parse(value);
+ if(!Number.isFinite(time))return false;
+ const canonical=new Date(time).toISOString();
+ return value===canonical||value===canonical.replace('.000Z','Z');
+}
+
 /** A static READY_TO_TEST signal does not authorize a browser action.
  * Only top-level selector-present assertions without login or active steps
  * can be handled; business, text and click assertions require another gate.
@@ -133,7 +147,8 @@ export function summarizeReadOnlyScenarioDom(
  if(!observed||typeof observed!=='object'||Array.isArray(observed))
    return blocked('INVALID_OBSERVATION');
  if(observed.ok!==true)return failedObservation(observed);
- if(observed.status!=='LIMITED_DOM_OBSERVATION'||
+ if(!validObservationTimestamp(observed.observedAt)||
+   observed.status!=='LIMITED_DOM_OBSERVATION'||
    observed.originMatchesApproved!==true||
    observed.fullPageVerified!==false||observed.userscriptVerified!==false)
    return blocked('INVALID_OBSERVATION');
@@ -215,8 +230,9 @@ export function summarizeReadOnlyScenarioDomSeries(
    if(result.status!=='LIMITED_DOM_SIGNAL_ONLY')
      return blocked(result.code);
    if(sample.ok!==true)return blocked('INVALID_OBSERVATION');
-   const time=typeof sample.observedAt==='string'?Date.parse(sample.observedAt):NaN;
-   if(!Number.isFinite(time))return blocked('INVALID_OBSERVATION');
+   if(!validObservationTimestamp(sample.observedAt))
+     return blocked('INVALID_OBSERVATION');
+   const time=Date.parse(sample.observedAt);
    // Equal timestamps can be the same replayed snapshot, not two samples.
    if(time<=lastTime)return blocked('UNSTABLE_OBSERVATION');
    lastTime=time;
