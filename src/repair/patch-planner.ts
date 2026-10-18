@@ -5,6 +5,7 @@
 import {createHash} from 'node:crypto';
 import {parse} from 'acorn';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
+import {parseUserscriptMetadata} from '../analyze/metadata-parser';
 
 const SHA256=/^[a-f0-9]{64}$/;
 const EVIDENCE_ID=/^[A-Za-z0-9_-]{1,64}$/;
@@ -176,6 +177,14 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
        !SIMPLE_SELECTOR.test(input.replacementSelector)||
        input.originalSelector===input.replacementSelector)
       return blocked('INVALID_CANDIDATE');
+    // A loose search for header markers anywhere in the file can accept
+    // ordinary JavaScript with an embedded, non-installable userscript header.
+    // Use TASK-003's canonical metadata parser to require a genuine leading
+    // userscript metadata block before proposing even a review-only diff.
+    const metadata=parseUserscriptMetadata({
+      bytes:Buffer.from(input.source,'utf8'),textEncoding:'utf-8'
+    });
+    if(metadata.status!=='OK')return blocked('INVALID_METADATA');
     // A text match on a shadowed document could patch an unrelated object.
     if(ambiguousDocumentBinding(input.source))return blocked('UNSUPPORTED_TARGET');
     const boundary=headerEnd(input.source);
