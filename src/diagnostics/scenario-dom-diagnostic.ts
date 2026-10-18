@@ -100,7 +100,7 @@ function validObservationTimestamp(value:unknown):value is string{
  * Only top-level selector-present assertions without login or active steps
  * can be handled; business, text and click assertions require another gate.
  */
-function preflightReadOnlyScenario(
+function preflightReadOnlyScenarioUnchecked(
  input:unknown,userApproved:boolean
 ):{ok:true;url:string;selectors:string[]}|{ok:false;code:ScenarioDomTriageCode}{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
@@ -135,6 +135,16 @@ function preflightReadOnlyScenario(
  }catch{return {ok:false,code:'INVALID_SCENARIO'};}
  return {ok:true,url:approvedUrl,selectors};
 }
+/** Runtime scenario input can be a hostile object with throwing accessors or
+ * proxy traps. Reject it before it reaches the browser observation pipeline;
+ * no caller should need to catch an exception to maintain the consent gate.
+ */
+function preflightReadOnlyScenario(
+ input:unknown,userApproved:boolean
+):{ok:true;url:string;selectors:string[]}|{ok:false;code:ScenarioDomTriageCode}{
+ try{return preflightReadOnlyScenarioUnchecked(input,userApproved);}
+ catch{return {ok:false,code:'INVALID_SCENARIO'};}
+}
 /** Pure mapping for regression tests. Synthetic samples are NEVER evidence of
  * real Chrome/Tampermonkey execution; the live API below obtains its own CDP
  * sample and makes the same limited, explicitly non-attesting classification.
@@ -142,6 +152,7 @@ function preflightReadOnlyScenario(
 export function summarizeReadOnlyScenarioDom(
  scenario:unknown,observed:ObservationResult,userApproved:boolean
 ):ScenarioDomTriage {
+ try{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
  if(!observed||typeof observed!=='object'||Array.isArray(observed))
@@ -182,6 +193,7 @@ export function summarizeReadOnlyScenarioDom(
  });
  return response('LIMITED_DOM_SIGNAL_ONLY','NONE',checked.selectors.length,
    classifyFaultSignals(signals));
+ }catch{return blocked('INVALID_OBSERVATION');}
 }
 /** Real, owned, user-authorized browser observation; any CDP or routing error
  * fails closed. Caller must separately verify actual manager/script business.
@@ -207,6 +219,7 @@ export async function inspectApprovedScenarioDom(
 export function summarizeReadOnlyScenarioDomSeries(
  scenario:unknown,observed:DynamicObservation,userApproved:boolean
 ):ScenarioDomTriage{
+ try{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
  if(!observed||typeof observed!=='object'||Array.isArray(observed))
@@ -249,6 +262,7 @@ export function summarizeReadOnlyScenarioDomSeries(
    }
  }
  return response('LIMITED_DOM_SIGNAL_ONLY','NONE',checked.selectors.length,firstTriage!);
+ }catch{return blocked('INVALID_OBSERVATION');}
 }
 
 /** Actually sample the application-owned, authorized Chrome page multiple
