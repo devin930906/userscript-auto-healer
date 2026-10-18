@@ -3,6 +3,14 @@ interface Imported {
   byteLength: number;
   sha256: string;
   textEncoding: string;
+  analysis: {
+    status: 'STATIC_ANALYSIS_ONLY' | 'SKIPPED_TOO_LARGE' | 'INVALID_ENCODING' |
+      'INVALID_METADATA' | 'PARSE_ERROR';
+    totalSites: number;
+    literalSites: number;
+    runtimeConfirmationSites: number;
+    automaticPatchAllowed: false;
+  };
 }
 interface ImportResponse {
   canceled: boolean;
@@ -48,7 +56,13 @@ function show(result: ImportResponse): void {
     const key = JSON.stringify([item.filename.toLowerCase(), item.sha256]);
     if (seenScripts.has(key)) { duplicates++; continue; }
     seenScripts.add(key);
-    logLine(item.filename + ': ' + item.byteLength + ' bytes / ' + item.textEncoding + ' / SHA-256 ' + item.sha256);
+    const a = item.analysis;
+    const preview = a?.status === 'STATIC_ANALYSIS_ONLY'
+      ? '静态定位器 ' + a.totalSites + '（字面值 ' + a.literalSites +
+        ' / 需运行确认 ' + a.runtimeConfirmationSites + '；未验证真实网页）'
+      : '静态分析：' + (a?.status ?? 'NOT_AVAILABLE');
+    logLine(item.filename + ': ' + item.byteLength + ' bytes / ' +
+      item.textEncoding + ' / SHA-256 ' + item.sha256 + ' / ' + preview);
   }
   for (const error of result.errors) logLine(error.filename + ': ' + error.code);
   if (duplicates) logLine('忽略重复脚本：' + duplicates);
