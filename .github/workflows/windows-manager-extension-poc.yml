@@ -1,0 +1,47 @@
+name: Windows userscript manager extension feasibility
+
+on:
+  push:
+    paths:
+      - 'poc/windows-manager-extension.cjs'
+      - '.github/workflows/windows-manager-extension-poc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extension-manager:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Obtain pinned public manager release and isolated Playwright Chromium
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $base = Join-Path $env:RUNNER_TEMP "userscript-manager-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path $base) { throw 'Ephemeral directory exists' }
+          New-Item -ItemType Directory -Path $base | Out-Null
+          $archive = Join-Path $base 'violentmonkey-v2.49.0-mv3.zip'
+          $extension = Join-Path $base 'extension'
+          $url = 'https://github.com/violentmonkey/violentmonkey/releases/download/v2.49.0/Violentmonkey-mv3-v2.49.0.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRedirection 5 -TimeoutSec 120
+          Write-Output "Official pinned Violentmonkey MV3 zip SHA256: $((Get-FileHash $archive -Algorithm SHA256).Hash)"
+          Expand-Archive -Path $archive -DestinationPath $extension
+          $manifest = Get-ChildItem -Path $extension -Filter manifest.json -Recurse | Select-Object -First 1
+          if (-not $manifest) { throw 'No unpacked manifest.json in official ZIP' }
+          $dir = $manifest.Directory.FullName
+          $pkg = Join-Path $base 'tooling'
+          New-Item -ItemType Directory -Path $pkg | Out-Null
+          npm install --prefix $pkg --no-audit --no-fund --ignore-scripts playwright@1.56.0
+          if ($LASTEXITCODE -ne 0) { throw 'PoC Playwright installation failed' }
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $base 'browsers'
+          & (Join-Path $pkg 'node_modules\.bin\playwright.cmd') install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }
+          $env:NODE_PATH = Join-Path $pkg 'node_modules'
+          $env:USERSCRIPT_TEST_EXTENSION_DIR = $dir
+          $env:USERSCRIPT_TEST_PROFILE_DIR = Join-Path $base 'profile'
+          node ./poc/windows-manager-extension.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Real extension feasibility test failed' }
