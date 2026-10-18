@@ -24,6 +24,11 @@ interface Window {
     chooseFiles(): Promise<ImportResponse>;
     chooseFolder(): Promise<ImportResponse>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
+    chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
+    chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
+    startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
+    inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
+    stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
   };
 }
 
@@ -185,3 +190,83 @@ void window.healer.getStatus().then(s => {
   if (chooseFolder) chooseFolder.disabled = true;
   if (chooser) chooser.disabled = true;
 });
+
+
+// Native browser actions never expose arbitrary executable/Profile paths to
+// renderer IPC. Every connect and manager inspection asks through an Electron
+// native dialog; status alone never attests an installed or working userscript.
+const chooseChromeButton=document.getElementById('choose-chrome') as HTMLButtonElement|null;
+const chooseProfileButton=document.getElementById('choose-profile') as HTMLButtonElement|null;
+const launchButton=document.getElementById('launch-chrome') as HTMLButtonElement|null;
+const inspectButton=document.getElementById('inspect-tampermonkey') as HTMLButtonElement|null;
+const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|null;
+const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
+const browserStatus=document.getElementById('browser-status');
+let browserBusy=false;
+let chromeSelected=false;
+let profileSelected=false;
+let browserConnected=false;
+function setBrowserStatus(value:string):void{
+ if(browserStatus)browserStatus.textContent=value;
+}
+function browserControls():void{
+ if(chooseChromeButton)chooseChromeButton.disabled=browserBusy||browserConnected;
+ if(chooseProfileButton)chooseProfileButton.disabled=browserBusy||browserConnected;
+ if(portInput)portInput.disabled=browserBusy||browserConnected;
+ if(launchButton)launchButton.disabled=browserBusy||browserConnected||
+   !chromeSelected||!profileSelected;
+ if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
+ if(stopButton)stopButton.disabled=!browserConnected&&!browserBusy;
+}
+async function browserAction(fn:()=>Promise<void>):Promise<void>{
+ if(browserBusy)return;
+ browserBusy=true;browserControls();
+ try{await fn();}
+ catch{setBrowserStatus('浏览器操作受阻；没有获得验证成功的结果。');}
+ finally{browserBusy=false;browserControls();}
+}
+chooseChromeButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.chooseChrome();
+ if(result.ok){
+  chromeSelected=true;
+  setBrowserStatus('已通过系统窗口选择 Chrome；尚未启动或验证。');
+ }else setBrowserStatus('Chrome 选择未完成：'+(result.code??'UNKNOWN'));
+}));
+chooseProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.chooseProfile();
+ if(result.ok){
+  profileSelected=true;
+  setBrowserStatus('已通过系统窗口选择独立 Profile；尚未启动或验证。');
+ }else setBrowserStatus('Profile 选择未完成：'+(result.code??'UNKNOWN'));
+}));
+launchButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const value=portInput?.value??'';
+ const port=Number(value);
+ if(!/^\d{4,5}$/.test(value)||!Number.isInteger(port)||port<1024||port>65535){
+  setBrowserStatus('CDP 端口必须是 1024 至 65535 的整数。');return;
+ }
+ setBrowserStatus('检查独立 Chrome 配置与进程归属中；请在系统确认窗口授权。');
+ const result=await window.healer.startBrowser(port);
+ browserConnected=result.ok&&result.status==='OWNED_CDP_BROWSER_VERIFIED';
+ setBrowserStatus(browserConnected
+   ? '已确认本程序启动的 Chrome CDP 连接（'+(result.chromeVersion??'unknown')+
+     '）；Tampermonkey、脚本注入和业务结果仍未验证。'
+   : '独立 Chrome 启动未通过：'+(result.code??'UNKNOWN'));
+}));
+inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.inspectTampermonkey();
+ if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
+  setBrowserStatus('发现 '+result.matchedRuntimeTargets+
+    ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
+ else if(result.code==='BROWSER_NOT_RUNNING'){
+  browserConnected=false;
+  setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
+ }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
+}));
+stopButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.stopBrowser();
+ if(result.ok||result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+ setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
+   '停止操作：'+(result.code??'UNKNOWN'));
+}));
+browserControls();
