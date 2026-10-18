@@ -10,6 +10,7 @@ import {link,lstat,open,readFile,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
+import {hasUnsafePathLink} from './path-boundary';
 
 type Failure =
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SOURCE_CHANGED'|
@@ -93,6 +94,8 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     const original=await lstat(path,{bigint:true});
     if(original.isSymbolicLink()||!original.isFile())return deny('INVALID_PATH');
     if(original.size===0n||original.size>BigInt(MAX_SCRIPT_BYTES))return deny('SIZE_LIMIT');
+    // lstat(directory) alone follows a junction in an ancestor directory.
+    if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
     const backupDir=await lstat(directory,{bigint:true});
     if(backupDir.isSymbolicLink()||!backupDir.isDirectory())
       return deny('BACKUP_DIRECTORY_INVALID');
@@ -141,6 +144,7 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
 
       // Abort if source or destination directory changed before publish.
       const latest=await lstat(path,{bigint:true});
+      if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
       const currentDir=await lstat(directory,{bigint:true});
       if(latest.isSymbolicLink()||!latest.isFile()||!same(original,latest))
         return deny('SOURCE_CHANGED');
@@ -163,6 +167,7 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       await unlink(pending);
       tempCreated=false;
       const independent=await lstat(final,{bigint:true});
+      if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
       const verifiedDir=await lstat(directory,{bigint:true});
       if(independent.isSymbolicLink()||!independent.isFile()||
          independent.nlink!==1n||verifiedDir.isSymbolicLink()||

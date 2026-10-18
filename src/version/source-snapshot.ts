@@ -10,6 +10,7 @@ import {constants} from 'node:fs';
 import {lstat, open} from 'node:fs/promises';
 import {basename, isAbsolute} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
+import {hasUnsafePathLink} from './path-boundary';
 
 type FingerprintFailure=
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SYMLINK_REJECTED'|
@@ -57,6 +58,7 @@ export async function verifyApprovedSourceFingerprint(input:unknown):Promise<Sou
     if(typeof expectedSha256!=='string'||!SHA256.test(expectedSha256))
       return blocked('INVALID_REQUEST');
 
+    if(await hasUnsafePathLink(sourcePath))return blocked('SYMLINK_REJECTED');
     const initial=await lstat(sourcePath,{bigint:true});
     if(initial.isSymbolicLink())return blocked('SYMLINK_REJECTED');
     if(!initial.isFile())return blocked('NOT_REGULAR_FILE');
@@ -85,6 +87,7 @@ export async function verifyApprovedSourceFingerprint(input:unknown):Promise<Sou
       }
       const after=await handle.stat({bigint:true});
       const onPath=await lstat(sourcePath,{bigint:true});
+      if(await hasUnsafePathLink(sourcePath))return blocked('FILE_CHANGED');
       if(onPath.isSymbolicLink()||!onPath.isFile()||onPath.nlink!==1n||
          !sameIdentity(initial,after)||!sameIdentity(after,onPath)||
          BigInt(count)!==after.size)
