@@ -142,43 +142,33 @@ async function main() {
         console.log('Explicit opt-in control result on disposable profile: '+JSON.stringify(action));
       }
     } catch(err){console.log('INCOMPLETE extension details UI: '+String(err.message).slice(0,200));}
-    // Violentmonkey's own MV3 instructions recommend reloading its extension
-    // after the userScripts toggle is granted, because SW initialized before consent.
-    try{
-      const reload=permissionPage.getByRole('button',{name:/reload/i});
-      const n=await reload.count();
-      console.log('Extension reload button count='+n);
-      if(n===1){
-        await reload.click({timeout:6000});
-        await permissionPage.waitForTimeout(2500);
-        console.log('Explicitly reloaded manager after consent in disposable profile.');
-      }else{
-        const buttons=await permissionPage.evaluate(()=>{
-          const all=[];function walk(root){for(const el of root.querySelectorAll('button,cr-button,cr-icon-button')){
-            all.push({id:el.id||'',aria:el.getAttribute('aria-label'),title:el.title||'',text:el.textContent?.trim().slice(0,45)});
-            if(el.shadowRoot)walk(el.shadowRoot);
-          }} walk(document);return all;
-        });
-        console.log('Extension details button inventory: '+JSON.stringify(buttons.slice(0,35)));
-      }
-    }catch(err){console.log('INCOMPLETE extension reload UI: '+String(err.message).slice(0,210));}
-    // Check the extension's own chrome.userScripts capability, not ordinary DOM.
+    // Distinct POC: a full browser restart, rather than native extension Reload,
+    // allows userScripts consent to persist while starting a fresh MV3 worker.
+    // This only restarts the disposable Chromium process created in this job.
+    await permissionPage.close();
+    await context.close();
+    context=await chromium.launchPersistentContext(profileDir, {
+      headless:process.env.USERSCRIPT_POC_GUI !== 'true',
+      channel:'chromium',
+      args:['--disable-extensions-except='+extensionDir,'--load-extension='+extensionDir],
+    });
+    console.log('Reopened the same disposable profile after explicit userScripts consent.');
+    // Query the extension origin after restart. getScripts() should be callable
+    // if the authorized userScripts API is actually available to this extension.
     const optionsProbe=await context.newPage();
-    try{
-      await optionsProbe.goto('chrome-extension://'+info.id+'/options/index.html',{waitUntil:'domcontentloaded',timeout:12000});
-      await optionsProbe.waitForTimeout(1000);
+    try {
+      await optionsProbe.goto('chrome-extension://'+info.id+'/options/index.html',{waitUntil:'domcontentloaded',timeout:15000});
       const api=await optionsProbe.evaluate(async()=>{
-        try{
+        try {
           if(typeof chrome==='undefined'||!chrome.userScripts)return {available:false};
           const scripts=await chrome.userScripts.getScripts();
           return {available:true,registrations:scripts.length};
-        }catch(e){return {available:false,error:String(e).slice(0,170)}}
+        } catch(e) {return {available:false,error:String(e).slice(0,180)}}
       });
-      console.log('Actual userscript API check from extension origin: '+JSON.stringify(api));
-    }catch(e){console.log('INCOMPLETE extension-origin API probe: '+String(e.message).slice(0,190));}
+      console.log('UserScripts API after browser restart: '+JSON.stringify(api));
+    } catch(err) {console.log('INCOMPLETE extension API check after browser restart: '+String(err.message).slice(0,200));}
     await optionsProbe.close();
-    await permissionPage.close();
-    
+
     // Best-effort discovery of the authentic userscript installation journey.
     // This does NOT silently install anything into a user browser; only ephemeral profile.
     const page=await context.newPage();
@@ -226,7 +216,7 @@ async function main() {
     } catch(e){}
     if (execution.installed && execution.gm==='true')
       console.log('PASS POC-02B: .user.js really executed under extension context, GM_getValue available.');
-    else console.log('INCOMPLETE POC-02B: no verified userscript injection/GM API; installation/real assertions still blocked; observed='+JSON.stringify(execution));
+    else {console.log('INCOMPLETE POC-02B: no verified userscript injection/GM API; installation/real assertions still blocked; observed='+JSON.stringify(execution));process.exitCode=2;}
     await page.close(); await probe.close();
   } finally {
     if (context) await context.close().catch(()=>{});
