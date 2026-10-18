@@ -23,7 +23,7 @@
 | Userscript Auto Healer | 工程追踪一致 | 待确认 | docs/10-traceability.md | 结构编号检查已通过，但跨文件语义与引用尚未自动全检 | 扩展引用验证并人工复核 |
 | Userscript Auto Healer | 云端工程可用 | 待确认 | docs/08-release.md；Actions runs 39082363404、39082627685 | Ubuntu 文档、CDP（含独立目录 Chrome）、Inno 临时安装与真 RAR5 归档 PoC 成功；正式应用包、生产授权/配额仍未验证 | 执行 Windows 打包/发行 PoC |
 | Userscript Auto Healer | 外部依赖可用合法 | 受阻 | docs/03-feasibility.md | RAR 商业许可、npm 锁定包未核验 | 合法许可与依赖审核 |
-| Userscript Auto Healer | 下一正式开发起点 | 已确认 | docs/09-development-plan.md | 必须先完成 POC-01/02 | 完成 PoC 后开始 TASK-001 |
+| Userscript Auto Healer | 下一正式开发起点 | 已确认 | docs/09-development-plan.md | POC-01A/B 与限定 POC-02D 已有正向证据；仍须定案首选管理器/Windows/Chrome 版本矩阵、实际业务断言及 ADR-001 | 核心支持范围和架构复核通过后开始 TASK-001 |
 | Userscript Auto Healer | 正式成果存储 | 已完成 | main 的 docs/ 和 AGENTS.md | 新交接文件提交后的 HEAD 需复核 | 读取 main 确认全部路径 |
 
 ## 证据
@@ -36,7 +36,7 @@ BLOCK-01 Windows 托管 Chrome 155 与独立解压 Chrome for Testing 154 CDP/�
 已按官方 Chrome 136+ 限制规定非默认独立 Profile；将页面 DOM 与真实管理器验收区分；将 AI 答案视为候选并默认阻止静默覆盖；将 RAR 许可与真格式设为发布阻断；已追踪 REQ-001..028 与对应 TEST。均为准备阶段的设计修复，不是实际软件已修复或风险已通过测试。
 
 ## 未解决事项
-POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认已验证，POC-02C 随机端口测试曾失败（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-02D 的标准 HTTPS 目标已实际通过 .user.js 注入和 GM_getValue 调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。文档检查工作流 https://github.com/devin930906/userscript-auto-healer/actions/runs/39082363404 已成功，仅核对 Markdown 文件与编号。尚无产品源码、真实损坏脚本修复前后回归与选定 Tampermonkey 兼容矩阵、正式 Windows 产品包和长期 RAR 许可实测结果，也没有经过用户选择的应用 LICENSE。
+POC-01A/B 已在 Windows runner 通过限定场景（https://github.com/devin930906/userscript-auto-healer/actions/runs/39082627685；https://github.com/devin930906/userscript-auto-healer/actions/runs/39088772310）；POC-02A 扩展加载与确认已验证，POC-02C 随机端口测试曾失败（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121）；POC-02D 的标准 HTTPS 目标已实际通过 .user.js 注入和 GM_getValue 调用（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）；POC-03A Inno 临时 EXE 与 POC-03B 试用真 RAR5 归档测试通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574；https://github.com/devin930906/userscript-auto-healer/actions/runs/39089224242）。最新文档完整性工作流对关键 Markdown 文件、编号、记录字段宽度和需求测试对应关系已成功（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797）；不是产品运行测试。尚无产品源码、真实损坏脚本修复前后回归与选定 Tampermonkey 兼容矩阵、正式 Windows 产品包和长期 RAR 许可实测结果，也没有经过用户选择的应用 LICENSE。
 
 ## 准入结果
 暂缓准入（适用于全范围、无条件正式开发）：已有一个真实 Violentmonkey+Chromium+标准 HTTPS 的 .user.js 注入和 GM API 实际调用成功的工程证据，**核心技术可行性疑虑部分消除**；但是受支持的目标管理器/Chrome/Windows 矩阵、实际损坏脚本业务场景、条件性技术选型及部分发布依赖仍未最终定案。真实 EXE/RAR 产品双包和 RAR 长期生产授权是 Stable 发布硬门槛，不能冒充已经交付。
