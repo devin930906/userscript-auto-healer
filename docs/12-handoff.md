@@ -107,3 +107,10 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 阶段验证：源 HEAD `1a2709f59b024f4cc4d7a961b55e889146967864` 的 [Application Skeleton Checks 39109205421](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205421) 两项工作成功（Node 52/53 通过、0 失败，1 项专用独立路径检查由单独工作流覆盖）；[独立路径 Chrome 产品测试 39109205450](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205450) 9/9 成功且 0 跳过；[文档完整性 39109205434](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109205434) 成功。独立路径测试复制 runner 上受信任签名 Chrome 的全部应用目录再使用实际产品模块，并非全部第三方免安装 Chrome 的兼容担保。先前官方但无可验证 Authenticode 签名的 Chrome for Testing 测试 [39109021075](https://github.com/devin930906/userscript-auto-healer/actions/runs/39109021075) 按产品安全规则**拒绝**；其独立信任模型没有批准，不能降低校验标准。合并的 `main` CI 仍需对应主干最新提交单独核实。
 
 **TASK-005 阶段成果已整合**；这不是 GATE-004/005、全部真实系统支持矩阵、Tampermonkey 产品注入/GM/业务断言或 Stable 发布通过。按照已批准依赖，下一任务为 **TASK-006（REQ-010/012；TEST-010/012）DOM/SPA 动态观测与可见性盲区**，继续以真实授权的自管 Chrome CDP 安全 API 开发；其余任务/发行仍需各自测试和验收。
+
+
+## （7）TASK-006 合并、云端实证与 TASK-007 恢复位置（2026-10-18）
+
+[PR #7](https://github.com/devin930906/userscript-auto-healer/pull/7) 已按当前源 SHA `824f9c89f673e0d05adbaf3084fd609f8e20eca0` 的成功检查合并至 main：`ee360dbdd936b92cc44609e7680d551fe364289d`。合并代码包括只读 `src/observe/dom-observer.ts`（自管 CDP/来源保护/iframe 与 shadow 限制、选择器计数、SPA 定时采样与跨源导航双次核对）及 `tests/observe/`。Windows [App Checks 39110563542](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563542) 57 通过、0 失败、1 项专项跳过、真实 Electron 进程运行测试成功；[Chrome 39110563531](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563531) 与 [docs 39110563515](https://github.com/devin930906/userscript-auto-healer/actions/runs/39110563515) 通过。旧的初始化竞态失败 run 39110333660 有历史记录，不得篡改。该证据为源提交验证，合并后的 main SHA 和后续 CI 需按实时检查确认。
+
+**下一正式任务 TASK-007（REQ-017/018；TEST-017/018）**：在既有受控浏览器会话与测试场景上，构建真实 Tampermonkey 管理器适配，保守检测扩展身份/版本/授权、脚本安装启用、站点和 GM API 权限及真业务断言；缺任一必要实证都不能声称 VERIFIED。不得复制/接管用户现有 Chrome Profile，不得以纯 CDP DOM 或 Violentmonkey PoC 充当 Tampermonkey 产品通过。随后按依赖推进 008..021，正式 EXE/ZIP 尚未生成且所有 Stable GATE 尚待验收。
