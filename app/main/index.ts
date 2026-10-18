@@ -4,10 +4,12 @@ import { previewImportedScriptAnalysis, previewImportedBatch, type ImportAnalysi
 import { join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
 import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
+import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
 
 let mainWindow: BrowserWindow | null = null;
@@ -20,6 +22,7 @@ let selectedChrome: string | null = null;
 let selectedProfile: string | null = null;
 let ownedBrowser: Extract<ManagedLaunchResult,{ok:true}> | null = null;
 let launchInProgress = false;
+let profilePreparationInProgress = false;
 let launchAbort: AbortController | null = null;
 let probeInProgress = false;
 const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as const,
@@ -71,7 +74,7 @@ function registerSafeIpc(): void {
   // request an action, but cannot pass paths, PIDs, Chromium switches or CDP.
   ipcMain.handle('browser:choose-chrome',async event=>{
     authorizeSender(event);
-    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     const choice=await dialog.showOpenDialog(win,{
@@ -89,7 +92,7 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:choose-profile',async event=>{
     authorizeSender(event);
-    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     const choice=await dialog.showOpenDialog(win,{
@@ -102,9 +105,54 @@ function registerSafeIpc(): void {
     return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',
       directoryName:win32.basename(selectedProfile),verifiedOnDisk:false};
   });
+  ipcMain.handle('browser:create-profile',async event=>{
+    authorizeSender(event);
+    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())
+      return {ok:false,code:'BROWSER_BUSY'};
+    if(!selectedChrome)return {ok:false,code:'CONFIG_NOT_SELECTED'};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    profilePreparationInProgress=true;
+    try{
+      // Only a user-selected existing parent is accepted; the child is a
+      // new unpredictable application-specific name, never renderer input.
+      const picked=await dialog.showOpenDialog(win,{
+        title:'选择用于创建全新独立 Chrome Profile 的父文件夹',
+        properties:['openDirectory']
+      });
+      if(picked.canceled||picked.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED'};
+      if(win!==mainWindow||win.isDestroyed())
+        return {ok:false,code:'NO_WINDOW'};
+      const candidate=win32.join(picked.filePaths[0],'uah-profile-'+randomUUID());
+      const config=validateBrowserConfig({
+        executablePath:selectedChrome,userDataDir:candidate,
+        remoteDebuggingPort:9223,bindAddress:'127.0.0.1'
+      });
+      if(!config.ok)return {ok:false,code:config.code};
+      const consent=await dialog.showMessageBox(win,{
+        type:'question',buttons:['创建全新空目录','取消'],defaultId:1,cancelId:1,
+        noLink:true,message:'创建新的独立 Chrome 调试 Profile？',
+        detail:'只在所选父目录中新建一个随机命名的空目录。'+
+          '\\n不会复制、迁移、覆盖或删除任何现有 Chrome Profile。'+
+          '\\n目标目录: '+candidate
+      });
+      if(consent.response!==0||win!==mainWindow||win.isDestroyed())
+        return {ok:false,code:'NOT_AUTHORIZED'};
+      const prepared=await prepareApprovedIsolatedProfile(config.config,true);
+      if(!prepared.ok)return {ok:false,code:prepared.code};
+      if(win!==mainWindow||win.isDestroyed())
+        return {ok:false,code:'WINDOW_CLOSED_PROFILE_PRESERVED'};
+      selectedProfile=prepared.userDataDir;
+      return {ok:true,status:'EMPTY_PROFILE_CREATED',directoryName:win32.basename(selectedProfile),
+        verifiedOnDisk:true};
+    }catch{
+      return {ok:false,code:'PROFILE_CREATE_FAILED'};
+    }finally{profilePreparationInProgress=false;}
+  });
   ipcMain.handle('browser:start',async (event,port:unknown)=>{
     authorizeSender(event);
-    if(launchInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
+    if(launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
     if(!selectedChrome||!selectedProfile)
       return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
     const win=mainWindow;
@@ -277,8 +325,9 @@ async function createMainWindow(): Promise<void> {
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
+      "const newProfileWithoutChrome=await a.createProfile(); " +
       "const selectedExe=await a.chooseChrome(); const selectedProfile=await a.chooseProfile(); " +
-      "const blockedLaunch=await a.startBrowser(9223); " +
+      "const declinedProfile=await a.createProfile(); const blockedLaunch=await a.startBrowser(9223); " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -295,7 +344,9 @@ async function createMainWindow(): Promise<void> {
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
+      "newProfileWithoutChrome.code === 'CONFIG_NOT_SELECTED' && " +
       "selectedExe.ok === true && selectedProfile.ok === true && " +
+      "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && rendered === true && " +
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
@@ -308,7 +359,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,getStatus,importDropped,inspectTampermonkey,security,startBrowser,stopBrowser,validateConfig') {
+        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,importDropped,inspectTampermonkey,security,startBrowser,stopBrowser,validateConfig') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;

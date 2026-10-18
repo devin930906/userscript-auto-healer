@@ -172,3 +172,9 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 本轮复用已有 `feat/task007-isolated-tampermonkey-install-url` 分支，处理短期授权诊断服务器关闭后脚本仍可能留存运行的安全缺口。TEST-017 测试提交 `0c2e0065ad4ca14baa9e17a420f047abebb9ea38` 在 [Actions #39158174162](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158174162) 确认旧行为失败；修复提交 `46880b3ae2a1b72f260ef07bd5caaed32dcae619` 在 [Actions #39158298596](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158298596) 已通过 Windows TypeScript、177 项 Node 回归（176 pass/0 fail/1 skip）与真实 Electron smoke。PR [#58](https://github.com/devin930906/userscript-auto-healer/pull/58) 的实际合并及 main 复核需以当前 GitHub 状态确认；不重复开发此前已合并 #57 的原脚本硬链接拒绝。
 
 到期拒绝只在本应用**生成的临时测试脚本**内生效，不能撤销已安装扩展权限，用户仍需自行清理测试脚本；没有真实 Tampermonkey 产品级 GM 与业务恢复验收。后续优先 TASK-007 的授权实际 Tampermonkey 支持矩阵和可靠验收证据，在可信运行条件不具备时推进不依赖真实扩展且已有规格的独立功能；任务 TASK-008..021、完整 TEST-017/018 与 Stable GATE、正式 EXE/ZIP 均不可标完成。
+
+## （7）TASK-007 产品界面 Chrome 安全连接及独立 Profile 新建阶段（2026-10-19）
+
+[PR #66](https://github.com/devin930906/userscript-auto-healer/pull/66) 已合并至 main，提交 78e3a86d4ededc5ec125ff14eeb611c527561f3f；合并后 Windows [应用检查 #39165441788](https://github.com/devin930906/userscript-auto-healer/actions/runs/39165441788) 成功。产品界面现通过系统路径选择器和单独的原生授权确认接入现有签名 Chrome/CDP 所属进程检查；停止仅针对本程序启动的 Chrome，Tampermonkey 探测只提供运行目标提示，扩展真实性、脚本安装、GM API 和业务恢复仍未得到产品级证明。
+
+后续在另一条可安全快进的历史 TASK-007 分支中，复用 prepareApprovedIsolatedProfile 实现“选取已有父目录→原生明确授权→随机生成子目录→签名 Chrome 校验→仅创建全新空 Profile”。本阶段不能覆盖、迁移或清理用户既有 Profile；代码与 Windows CI 的整合状态须根据当次 PR 重新核验。TEST-017/018、GATE-004/005 和正式 EXE/ZIP 均未完成。
