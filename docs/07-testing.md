@@ -26,7 +26,7 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-010 | REQ-010 | 端到端 | 真实 Chrome | 测试 iframe/Shadow | 跨域 iframe/closed root | 受限 DOM 边界：快照并审查 blind spots | 可见性明确，不伪称完整 | 绕过隔离或误报 | 真实 E2E | Windows 自管 Chrome 阶段自动化通过；用户环境及完整发布回归待验收 |
 | TEST-011 | REQ-011 | 单元/集成 | Node | 正常与动态 AST | 字面/拼接/封装/备用选择器 | AST 源码定位：分析行列作用域 | 动态待确认、字面来源正确 | 误报全覆盖 | 单元 | 静态单元阶段验证通过；待产品集成复核 |
 | TEST-012 | REQ-012 | 端到端 | Chrome 测试页 | 事件/路由夹具 | 路由与延迟渲染 | SPA 动态诊断：切换路由后监控 | 等待与时序证据正确 | 加载竞态错误归因 | 真实 E2E | Windows 自管 Chrome 阶段自动化通过；用户环境及完整发布回归待验收 |
-| TEST-013 | REQ-013 | 单元/集成 | 诊断模拟器 | 受控错误夹具 | 网络、权限、异常、断言 | 故障根因分类：逐项分类 | 不将非 DOM 强行改选择器 | 误分类强改 | 单元+集成 | 已规划 |
+| TEST-013 | REQ-013 | 单元/集成 | 诊断模拟器 | 受控错误夹具 | 网络、权限、异常、断言 | 故障根因分类：逐项分类 | 不将非 DOM 强行改选择器 | 误分类强改 | 单元+集成 | 阶段单元测试通过（9 项；真实数据接入及集成验收未完成） |
 | TEST-014 | REQ-014 | 单元/集成 | Patch 夹具 | 可确认原意 | 坏定位器/不确定候选 | 本地修复规则：生成 diff | 只做最小变更 | 删功能或越权修改 | 单元 | 已规划 |
 | TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 已规划 |
 | TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 已规划 |
@@ -115,3 +115,8 @@ PR [#11](https://github.com/devin930906/userscript-auto-healer/pull/11) 新增 T
 ## （7）TEST-013 阶段性独立故障信号分类（2026-10-18）
 
 TASK-007 的真实 Tampermonkey 专项前提仍未满足，本阶段仅在 TASK-008 的**不依赖真实扩展**的纯本地部分落实 REQ-013：以严格白名单和有限证据 ID 接收结构化事件，将权限、网络、JavaScript 异常、选择器缺失与业务断言失败分开。多个不同故障类别、未知状态或畸形信息均不得确认单一根因；即使只有一种失败，也只返回信号类别，不给出自动修复许可、Tampermonkey 验证或业务恢复证明。内存日志仅保留类别、状态、合规证据 ID 与时间/序号，拒绝携带原始错误文本、URL、脚本、DOM 和秘密的额外字段，设置固定最大容量。新增 TEST-013 单元负例覆盖冲突信号、网络/权限误归 DOM、数据脱敏与容量界限。此为待关联 GitHub Actions 真实执行记录的阶段实现，不是完整日志中心、真实根因确认、TEST-013 集成/正式验收通过，也不意味着 TASK-007 或 TASK-008 完成。
+
+
+### TASK-008 阶段实现已整合的真实验证记录（2026-10-18）
+
+PR [#21](https://github.com/devin930906/userscript-auto-healer/pull/21) 已以合并 SHA `5832953a2980f65512bbac233dd67f218d896bac` 进入 main；分支源 SHA `fe1a4760017cdac22de5963852136e4ee36214d2` 的 [Application Skeleton Checks #39128955413](https://github.com/devin930906/userscript-auto-healer/actions/runs/39128955413) 为 success：TypeScript 类型检查、99 项 Node 测试（98 pass、0 fail、1 平台条件 skip；新增 9 项 TEST-013 单元负例全部 pass）、Windows Electron smoke 均通过；[Documentation Integrity #39128955367](https://github.com/devin930906/userscript-auto-healer/actions/runs/39128955367) 与 [TASK-005 便携 Chrome 专项 #39128955370](https://github.com/devin930906/userscript-auto-healer/actions/runs/39128955370) 同为 success。该结果仅证明离线故障信号分类与安全内存日志实现的代码测试，不能作为真实 Tampermonkey 运行时、TEST-013 集成验收、自动修复或 Stable GATE 完成证据。
