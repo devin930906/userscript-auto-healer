@@ -30,6 +30,12 @@ interface Window {
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
+    startGmProbe(): Promise<{ok:boolean;code?:string;status?:string;
+      installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
+    gmProbeStatus(): Promise<{ok:boolean;code?:string;status?:string;
+      broken?:{gmReported:boolean;actionReported:boolean}|null;
+      fixed?:{gmReported:boolean;actionReported:boolean}|null}>;
+    stopGmProbe(): Promise<{ok:boolean;status?:string}>;
   };
 }
 
@@ -209,6 +215,18 @@ let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
 let browserConnected=false;
+let gmProbeActive=false;
+const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
+const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
+const gmStopButton=document.getElementById('gm-probe-stop') as HTMLButtonElement|null;
+const gmLinks=document.getElementById('gm-probe-links');
+const gmResult=document.getElementById('gm-probe-result');
+function clearGmDisplay(message:string):void{
+ gmProbeActive=false;
+ if(gmLinks)gmLinks.textContent='';
+ if(gmResult)gmResult.textContent=message;
+}
+
 function setBrowserStatus(value:string):void{
  if(browserStatus)browserStatus.textContent=value;
 }
@@ -221,6 +239,9 @@ function browserControls():void{
    !chromeSelected||!profileSelected;
  if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
+ if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
+ if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
+ if(gmStopButton)gmStopButton.disabled=browserBusy||!gmProbeActive;
 }
 async function browserAction(fn:()=>Promise<void>):Promise<void>{
  if(browserBusy)return;
@@ -271,6 +292,7 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
   setBrowserStatus('发现 '+result.matchedRuntimeTargets+
     ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
  else if(result.code==='BROWSER_NOT_RUNNING'){
+  clearGmDisplay('独立 Chrome 已退出；本机测试会话无法继续。');
   browserConnected=false;
   setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
@@ -282,11 +304,52 @@ stopButton?.addEventListener('click',()=>{
  if(stopInProgress||(!browserBusy&&!browserConnected))return;
  stopInProgress=true;browserControls();
  void window.healer.stopBrowser().then(result=>{
-  if(result.ok||result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+  if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
+   browserConnected=false;
+   clearGmDisplay('独立 Chrome 已停止；本机测试会话结束。如曾安装临时脚本，请自行从 Tampermonkey 删除。');
+  }
   setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
     '停止操作：'+(result.code??'UNKNOWN'));
  }).catch(()=>{
   setBrowserStatus('停止操作受阻；仍需确认独立 Chrome 状态。');
  }).finally(()=>{stopInProgress=false;browserControls();});
 });
+
+gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.startGmProbe();
+ if(!result.ok||result.status!=='MANUAL_FIXTURE_READY_ONLY'||
+    !result.installUrl||!result.brokenUrl||!result.fixedUrl||
+    !result.expiresAt){
+  if(gmResult)gmResult.textContent='临时 GM 测试未启动：'+(result.code??'UNKNOWN');
+  return;
+ }
+ gmProbeActive=true;
+ // Only visible in the trusted local renderer, never written to logs.
+ if(gmLinks)gmLinks.textContent='在独立 Tampermonkey 中手动从 URL 导入：'+
+   result.installUrl+' ｜ 失败测试页：'+result.brokenUrl+
+   ' ｜ 预设修正测试页：'+result.fixedUrl;
+ if(gmResult)gmResult.textContent='测试服务已开启，至 '+new Date(result.expiresAt).toLocaleTimeString()+
+   ' 到期；脚本需要手动安装和清理。此状态不是 GM API 或业务恢复证明。';
+}));
+gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.gmProbeStatus();
+ if(!result.ok){
+  clearGmDisplay('没有有效的测试会话：'+(result.code??'UNKNOWN')+
+    '。如已安装临时脚本，请自行清理。');
+  return;
+ }
+ const reported=(value:typeof result.broken)=>
+   value===null||value===undefined?'无回执':
+     '自报 GM 默认值 '+(value.gmReported?'true':'false')+
+     ' / 自报页面动作 '+(value.actionReported?'true':'false');
+ if(gmResult)gmResult.textContent='失败预设：'+reported(result.broken)+
+   '；修正预设：'+reported(result.fixed)+
+   '。数据未经扩展独立认证，不等于 Tampermonkey、GM 或业务验收通过。';
+}));
+gmStopButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.stopGmProbe();
+ clearGmDisplay(result.ok
+  ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
+  :'没有活动的本机测试服务。');
+}));
 browserControls();
