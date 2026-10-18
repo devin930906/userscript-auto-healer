@@ -58,6 +58,8 @@ function preflightReadOnlyScenario(
  if(preflight.state!=='READY_TO_TEST'||!preflight.input.targetUrl)
    return {ok:false,code:'INVALID_SCENARIO'};
  const normalized=preflight.input;
+ const approvedUrl=normalized.targetUrl;
+ if(typeof approvedUrl!=='string')return {ok:false,code:'INVALID_SCENARIO'};
  // No login, navigation, clicks, text reads, JS evaluation or user script code.
  if(normalized.requiresLogin||normalized.steps.length!==0||
    normalized.assertions.length===0||normalized.assertions.length>8||
@@ -70,10 +72,10 @@ function preflightReadOnlyScenario(
  if(new Set(selectors).size!==selectors.length)
    return {ok:false,code:'UNSUPPORTED_SCENARIO'};
  try{
-   const url=new URL(normalized.targetUrl);
+   const url=new URL(approvedUrl);
    if(url.hash)return {ok:false,code:'UNSUPPORTED_SCENARIO'};
  }catch{return {ok:false,code:'INVALID_SCENARIO'};}
- return {ok:true,url:normalized.targetUrl,selectors};
+ return {ok:true,url:approvedUrl,selectors};
 }
 /** Pure mapping for regression tests. Synthetic samples are NEVER evidence of
  * real Chrome/Tampermonkey execution; the live API below obtains its own CDP

@@ -105,7 +105,7 @@ test('TEST-013: classified result never leaks URL, selectors or script hash',()=
 });
 
 test('TEST-013: executable owned-browser entry refuses forged, unowned or cancelled sessions',async()=>{
- const bogus={ok:false,code:'NOT_STARTED'} as const;
+ const bogus={ok:false,code:'PREFLIGHT_FAILED'} as const;
  const target={ok:false,code:'UNVERIFIED_BROWSER'} as const;
  assert.equal((await inspectApprovedScenarioDom(bogus,target,baseScenario,false)).code,
    'NOT_AUTHORIZED');
