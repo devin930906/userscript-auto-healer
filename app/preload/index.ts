@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   startBrowser: (port: number): Promise<unknown> => ipcRenderer.invoke('browser:start', port),
   inspectTampermonkey: (): Promise<unknown> => ipcRenderer.invoke('browser:tampermonkey-hint'),
   stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop'),
-  startGmProbe: (runAt?: 'document-start' | 'document-idle'): Promise<unknown> =>
+  startGmProbe: (runAt?: 'document-start' | 'document-body' | 'document-end' | 'document-idle': Promise<unknown> =>
     ipcRenderer.invoke('gm-probe:start',runAt),
   gmProbeStatus: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:status'),
   visitGmFixture: (mode: 'broken' | 'fixed'): Promise<unknown> => ipcRenderer.invoke('gm-probe:visit',mode),
