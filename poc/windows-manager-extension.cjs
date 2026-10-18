@@ -52,9 +52,11 @@ async function main() {
     }
     const worker = workers.find(w => w.url().startsWith('chrome-extension://'));
     assert.ok(worker,'No actual Chrome extension worker was registered');
-    const info = await worker.evaluate(()=>({id:chrome.runtime.id,version:chrome.runtime.getManifest().version,name:chrome.runtime.getManifest().name}));
+    // Playwright may evaluate a service-worker utility world without the extension's chrome API.
+    // The registered chrome-extension:// worker is the reproducible minimum proof, not a GM proof.
+    const info = {id:new URL(worker.url()).host,version:manifest.version};
     assert.match(info.id,/^[a-p]{32}$/);
-    console.log('PASS POC-02A: published Violentmonkey MV3 extension loaded; ID='+info.id+'; extension version='+info.version);
+    console.log('PASS POC-02A: published Violentmonkey MV3 extension worker registered; ID='+info.id+'; pinned version='+info.version+'; worker='+worker.url());
     console.log('NOTE: This uses bundled Chromium, not the selected installed Google Chrome or a user Profile.');
 
     // Best-effort discovery of the authentic userscript installation journey.
