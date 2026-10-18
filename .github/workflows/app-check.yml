@@ -39,10 +39,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - name: Prepare dependency lock for first scaffold
-        shell: pwsh
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Install pinned toolchain without Electron binary execution
+      - name: Install locked toolchain for compile-time checks
         shell: pwsh
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Type check
@@ -51,9 +48,3 @@ jobs:
       - name: Security and configuration regression tests
         shell: pwsh
         run: npm test
-      - name: Export generated dependency lock for source-control follow-up
-        shell: pwsh
-        run: |
-          Write-Output 'UAH_LOCK_BEGIN'
-          [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'package-lock.json')))
-          Write-Output 'UAH_LOCK_END'

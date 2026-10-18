@@ -1,6 +1,6 @@
 # 项目开发交接
 
-> 状态：**（4）工程准备已完成期末审查并交接，（7）可按「有条件准入」从 TASK-001 开始**。当前尚无正式产品代码，真实用户环境全面兼容和 Stable 仍待后续任务验收。
+> 状态：**（4）工程准备已完成期末审查并交接，（7）可按「有条件准入」从 TASK-001 开始**。正式产品源码尚未完成，真实用户环境全面兼容和 Stable 仍待后续任务验收。
 
 ## 项目身份
 仓库 https://github.com/devin930906/userscript-auto-healer；默认分支 main；产品为 Windows 本地优先、自动诊断与保守修复因网页变化失效的油猴脚本，交付 EXE 安装版与真实 ZIP 便携包。不得混淆其他用户项目。
@@ -70,3 +70,7 @@ POC-03C 在 Windows Actions 完成普通 ZIP 压缩/解压/内容哈希验证，
 
 **延后而非忽略**：TASK-005 = Windows/Chrome/便携 Chrome/CDP Profile/9223 归属；TASK-007/010/018 = 独立云端真 Tampermonkey POC-02T、管理器适配、产品实际脚本业务断言/登录与安全矩阵；TASK-009..011 = 自动修复候选、备份/回滚/验收；TASK-019/020/021 = 真实应用 EXE+ZIP 及全部 Stable 门槛。PoC 无法替代任何正式 TEST/GATE。
 **停止规则**：此段不是开始 TASK-001 的授权；只有用户正式下达（7）后才进入产品代码开发。恢复时重新读取 main HEAD、CI、Open PR/Issues 并遵循 AGENTS.md；无需重复（4）。
+
+## （7）TASK-001 产品代码起步（2026-10-18）
+
+正式开发已经启动，已创建单一集成开发分支 `feat/stable-development`；Windows 安全壳源码和负例测试已推送。初步验证证据为 https://github.com/devin930906/userscript-auto-healer/actions/runs/39100320005（对应 SHA `244f853fae7e5f7443f86a69b5804bc14b7883aa`），静态类型检查和 11 项测试成功。**不是**实际 Electron 桌面启动、Tampermonkey/Chrome 或产品 TEST/GATE 完整通过。当前 TASK-001 是开发中，首要未完成工作是 Windows Electron 桌面启动、preload IPC 运行时和权限/导航防护的可追溯实测；按 09/07 检查后才能整合进入 main。当前正式产品尚无稳定安装 EXE、便携 ZIP 或 Release；不要重做（4），不要创建并行堆积 PR。下一轮须读取远程 HEAD/PR/Actions 后续状态，不以本文中的历史 SHA 代替最新 SHA。
