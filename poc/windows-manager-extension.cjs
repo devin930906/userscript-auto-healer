@@ -73,15 +73,20 @@ async function main() {
       console.log('INCOMPLETE installer navigation: '+String(err.message).slice(0,240));
     }
     console.log('Installation navigation destination: '+page.url());
-    if (page.url().startsWith('chrome-extension://')) {
-      const install=page.getByRole('button',{name:/install|安装|确定|confirm/i}).first();
-      const count=await install.count();
-      console.log('Installer UI button candidate count='+count);
-      if (count) {
-        await install.click({timeout:5000});
-        await page.waitForTimeout(1800);
+    await page.waitForTimeout(2500);
+    const candidates=context.pages().filter(tab=>tab.url().startsWith('chrome-extension://'+info.id));
+    console.log('Manager extension tabs after .user.js click: '+JSON.stringify(candidates.map(tab=>tab.url())));
+    const installer=candidates.find(tab=>tab.url().includes('/confirm/')) || (page.url().startsWith('chrome-extension://')?page:null);
+    if(installer){
+      try {
+        await installer.locator('#confirm').waitFor({state:'visible',timeout:12000});
+        await installer.locator('#confirm').click({timeout:7000});
+        await installer.waitForTimeout(2000);
+        console.log('Authentic manager install confirmation clicked in ephemeral profile.');
+      } catch(err){
+        console.log('INCOMPLETE authentic installer confirmation: '+String(err.message).slice(0,230));
       }
-    }
+    } else console.log('INCOMPLETE authentic installer: no manager confirmation tab observed');
     const probe=await context.newPage();
     await probe.goto('http://127.0.0.1:'+port+'/fixture',{waitUntil:'domcontentloaded'});
     let execution={installed:false};
