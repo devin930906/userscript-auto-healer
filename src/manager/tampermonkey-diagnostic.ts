@@ -306,9 +306,20 @@ export async function startApprovedTampermonkeyDiagnostic(
  const modeTargets:Partial<Record<GmProbeMode,Extract<OpenTargetResult,{ok:true}>>>={};
  const domEvidence:Partial<Record<GmProbeMode,FixtureDomEvidence>>={};
  let observationInProgress=false;
- const ready=()=>!stopped&&Date.now()<probe.expiresAt&&
-   !options.signal?.aborted&&isLiveApprovedChromeSession(browser);
- const stop=async()=>{stopped=true;await probe.stop();};
+ // Stopping a manual diagnostic must cancel pending owned-CDP tab navigation
+ // and DOM reads, not merely reject their results after they finish.
+ const sessionCancelled=new AbortController();
+ const sessionSignal=options.signal?
+   AbortSignal.any([sessionCancelled.signal,options.signal]):
+   sessionCancelled.signal;
+ const ready=()=>!stopped&&!sessionSignal.aborted&&
+   Date.now()<probe.expiresAt&&isLiveApprovedChromeSession(browser);
+ const stop=async()=>{
+   if(stopped)return;
+   stopped=true;
+   sessionCancelled.abort();
+   await probe.stop();
+ };
  const visit:ManualTampermonkeyDiagnosticSession['visit']=async(mode,explicitUserApproved)=>{
    if(explicitUserApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
    if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
@@ -318,7 +329,8 @@ export async function startApprovedTampermonkeyDiagnostic(
      code:reservation==='IN_PROGRESS'?'MODE_VISIT_IN_PROGRESS':'MODE_ALREADY_OPENED'};
    let confirmed=false;
    try{
-     const result=await openApprovedTarget(browser,probe.origin+'/?mode='+mode,true);
+     const result=await openApprovedTarget(browser,probe.origin+'/?mode='+mode,
+       true,sessionSignal);
      if(!result.ok)return {ok:false,code:result.code};
      if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
      confirmed=true;
@@ -341,8 +353,10 @@ export async function startApprovedTampermonkeyDiagnostic(
      // A failed recheck must never leave a previous matching DOM snapshot active.
      delete domEvidence[mode];
      try{
+       const observeSignal=signal?
+         AbortSignal.any([sessionSignal,signal]):sessionSignal;
        const sample=await observeApprovedDom(browser,target,
-         probe.origin+'/?mode='+mode,true,[...FIXTURE_SELECTORS],signal);
+         probe.origin+'/?mode='+mode,true,[...FIXTURE_SELECTORS],observeSignal);
        if(!ready()||signal?.aborted)return {ok:false,code:'SESSION_NOT_ACTIVE'};
        const result=summarizeFixtureDomEvidence(mode,sample);
        if(result.ok)domEvidence[mode]=result.evidence;
