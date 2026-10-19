@@ -111,6 +111,7 @@ let busy = false;
 let activeImport = false;
 let nativeImportMode = false;
 let cancelRequested = false;
+let dropScanController: AbortController | null = null;
 // Session-only counters: no script bytes, paths or account data enter history.
 let acceptedCount = 0;
 let duplicateCount = 0;
@@ -264,7 +265,31 @@ async function importFiles(files: readonly File[]): Promise<void> {
  * The renderer never sends filesystem paths to privileged IPC.
  * Directory traversal is bounded and never executes any script bytes.
  */
-async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
+/** Legacy directory-entry APIs cannot be interrupted at the browser layer.
+ * Settle a pending callback on cancel and ignore all late replies. */
+function readDropEntry<T>(
+  start:(ok:(value:T)=>void,fail:(error:DOMException)=>void)=>void,
+  signal:AbortSignal
+):Promise<T|null>{
+  return new Promise((resolve,reject)=>{
+    if(signal.aborted){resolve(null);return;}
+    let settled=false;
+    const finish=(value:T|null,error?:unknown)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(deadline);
+      signal.removeEventListener('abort',onAbort);
+      if(error!==undefined)reject(error);
+      else resolve(value);
+    };
+    const onAbort=()=>finish(null);
+    const deadline=setTimeout(()=>finish(null,new Error('DROP_ENTRY_TIMEOUT')),10000);
+    signal.addEventListener('abort',onAbort,{once:true});
+    try{start(value=>finish(value),error=>finish(null,error));}
+    catch(error){finish(null,error);}
+  });
+}
+async function filesFromDrop(transfer: DataTransfer,signal:AbortSignal): Promise<File[]> {
   const items = Array.from(transfer.items).filter(item => item.kind === 'file');
   if (!items.length) return Array.from(transfer.files);
   const roots: FileSystemEntry[] = [];
@@ -283,7 +308,7 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
   const visit = async (entry: FileSystemEntry, depth: number): Promise<void> => {
     // Cancellation covers asynchronous directory enumeration, not just the
     // later byte-import loop. Unknown/unvisited entries remain uncounted.
-    if (cancelRequested) return;
+    if (cancelRequested || signal.aborted) return;
     if (++visited > MAX_DIRECTORY_ENTRIES || found.length >= MAX_FILES) {
       throw new Error('SCAN_LIMIT');
     }
@@ -291,9 +316,9 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
       // Nested directory entries are filtered, but explicitly dropped root
       // files reach the native validator so invalid filenames are reported.
       if (depth > 0 && !entry.name.toLowerCase().endsWith('.user.js')) return;
-      const file = await new Promise<File>((resolve, reject) =>
-        (entry as FileSystemFileEntry).file(resolve, reject));
-      if (!cancelRequested) found.push(file);
+      const file = await readDropEntry<File>(
+        (ok,fail)=>(entry as FileSystemFileEntry).file(ok,fail),signal);
+      if (file&&!cancelRequested&&!signal.aborted) found.push(file);
       return;
     }
     if (!entry.isDirectory || cancelRequested) return;
@@ -302,10 +327,10 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
       return;
     }
     const reader = (entry as FileSystemDirectoryEntry).createReader();
-    while (!cancelRequested) {
-      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
-        reader.readEntries(resolve, reject));
-      if (cancelRequested || !batch.length) break;
+    while (!cancelRequested&&!signal.aborted) {
+      const batch = await readDropEntry<FileSystemEntry[]>(
+        (ok,fail)=>reader.readEntries(ok,fail),signal);
+      if (cancelRequested||signal.aborted||!batch||!batch.length) break;
       for (const child of batch) {
         if (cancelRequested) break;
         await visit(child, depth + 1);
@@ -324,6 +349,7 @@ cancelImport?.addEventListener('click', () => {
   cancelRequested = true;
   cancelImport.disabled = true;
   updateImportSummary();
+  if (!nativeImportMode) dropScanController?.abort();
   if (nativeImportMode) {
     // This requests cooperative cancellation; never claim a file read was
     // stopped until the native IPC actually resolves.
@@ -360,10 +386,12 @@ dropZone?.addEventListener('drop', event => {
   void locked(async () => {
     activeImport = true;
     cancelRequested = false;
+    const scanController=new AbortController();
+    dropScanController=scanController;
     if (cancelImport) cancelImport.disabled = false;
     updateImportSummary();
     try {
-      const dropped = await filesFromDrop(transfer);
+      const dropped = await filesFromDrop(transfer,scanController.signal);
       if (cancelRequested) {
         // This is a lower bound only: remaining unenumerated files are unknown.
         unprocessedCount += dropped.length;
@@ -371,8 +399,12 @@ dropZone?.addEventListener('drop', event => {
           ' 份文件未读取，其他未枚举文件数量未知。');
         return;
       }
+      // Enumeration finished; any later cancellation belongs to byte import.
+      dropScanController=null;
       await importFiles(dropped);
     } finally {
+      scanController.abort();
+      if(dropScanController===scanController)dropScanController=null;
       activeImport = false;
       cancelRequested = false;
       if (cancelImport) cancelImport.disabled = true;
