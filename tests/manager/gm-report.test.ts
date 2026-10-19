@@ -57,6 +57,8 @@ test('TEST-017: incomplete or malformed self-reports fail closed; never claim re
  const awaiting={...session,snapshot:()=>({...summary,
    status:'AWAITING_BROWSER_VISITS' as const,observedModes:0,
    reportedGmDefaultMatched:false,reportedBrokenFailed:false,reportedFixedRecovered:false}),
+   consistencySnapshot:()=>({...consistency,
+     status:'AWAITING_BROWSER_VISITS' as const,comparedModes:0 as const}),
    domSnapshot:()=>({})};
  const pending=createLimitedGmReport(awaiting,Date.parse('2026-10-19T02:02:00.000Z'));
  assert.equal(pending.status,'UNVERIFIED_REPORT_READY');
@@ -151,5 +153,42 @@ test('TEST-017: redirected directory and invalid report path cannot write native
   catch(e){if(['EPERM','EACCES','ENOTSUP'].includes((e as NodeJS.ErrnoException).code??'')){t.diagnostic('Junction privilege unavailable');return;}throw e;}
   assert.equal((await saveLimitedGmReportOnly(valid.report,join(link,'hidden.json'),true)).status,'BLOCKED');
   assert.deepEqual(await readdir(other),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+// A report may have valid types and still contradict itself. Never let a
+// hand-edited JSON report imply two-mode fixture agreement without evidence.
+test('TEST-017/026: coherent report semantics are required at capture and native save',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-report-coherence-'));
+ try{
+  const ready=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const original=ready.report;
+  const forged=[
+   {...original,assessment:{...original.assessment,observedModes:1}},
+   {...original,assessment:{...original.assessment,reportedBrokenFailed:false}},
+   {...original,assessment:{...original.assessment,status:'AWAITING_REPORTS',observedModes:2}},
+   {...original,consistency:{...original.consistency,comparedModes:1}},
+   {...original,consistency:{...original.consistency,status:'AWAITING_DOM_OBSERVATIONS'}},
+   {...original,dom:{...original.dom,broken:null}},
+   {...original,dom:{...original.dom,broken:{...original.dom.broken,actionCount:1}}},
+   {...original,dom:{...original.dom,fixed:{...original.dom.fixed,fixtureDomMatchesExpected:false}}},
+   {...original,dom:{...original.dom,fixed:{...original.dom.fixed,observedAt}}},
+  ];
+  for(const [i,bad] of forged.entries()){
+   const result=await saveLimitedGmReportOnly(
+    bad as typeof original,join(root,'forged-'+i+'.json'),true);
+   assert.equal(result.status,'BLOCKED','forged report '+i);
+  }
+  assert.deepEqual(await readdir(root),[]);
+  for(const fake of [
+   {...session,snapshot:()=>({...summary,observedModes:1})},
+   {...session,consistencySnapshot:()=>({...consistency,comparedModes:1})},
+   {...session,domSnapshot:()=>({broken:dom('broken',0)})}
+  ]){
+   assert.equal(createLimitedGmReport(fake as typeof session,
+    Date.parse('2026-10-19T02:02:00.000Z')).status,'BLOCKED');
+  }
  }finally{await rm(root,{recursive:true,force:true});}
 });

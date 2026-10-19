@@ -59,6 +59,49 @@ function validObservedAt(s:unknown):s is string{
  const d=Date.parse(s);
  return Number.isFinite(d)&&new Date(d).toISOString()===s;
 }
+/** Check *relationships*, not merely schemas. A diagnostic JSON remains
+ * explicitly unverified, but cannot falsely claim that two distinct DOM
+ * samples agree with both reports when the evidence says otherwise.
+ *
+ * This is not runtime authentication: callers may still supply self-reports.
+ */
+function coherentLimitedEvidence(
+ assessment:LimitedGmReport['assessment'],
+ consistency:LimitedGmReport['consistency'],
+ dom:LimitedGmReport['dom']
+):boolean{
+ const matchingReports=assessment.observedModes===2&&
+   assessment.reportedGmDefaultMatched&&assessment.reportedBrokenFailed&&
+   assessment.reportedFixedRecovered;
+ if(assessment.status==='SELF_REPORTED_EXPECTATIONS_MATCH'){
+   if(!matchingReports)return false;
+ }else if(
+   (assessment.status==='AWAITING_REPORTS'&&assessment.observedModes===2)||
+   (assessment.status==='REPORTED_MISMATCH'&&matchingReports)
+ )return false;
+ if(assessment.status!=='SELF_REPORTED_EXPECTATIONS_MATCH'){
+   return consistency.status===assessment.status&&consistency.comparedModes===0;
+ }
+ if(consistency.status==='AWAITING_BROWSER_VISITS'||
+    consistency.status==='AWAITING_REPORTS'||
+    consistency.status==='REPORTED_MISMATCH')return false;
+ if(consistency.status==='CONSISTENT_UNVERIFIED_FIXTURE_ONLY'){
+   const broken=dom.broken,fixed=dom.fixed;
+   return consistency.comparedModes===2&&broken!==null&&fixed!==null&&
+     broken.actionCount===0&&broken.fixtureDomMatchesExpected===true&&
+     fixed.actionCount===1&&fixed.fixtureDomMatchesExpected===true&&
+     broken.observedAt!==fixed.observedAt;
+ }
+ // The consistency evaluator visits 'broken' first, then 'fixed', and
+ // exits before incrementing when it encounters a missing/invalid mode.
+ if(consistency.comparedModes===2)return false;
+ if(consistency.comparedModes===1){
+   return dom.broken!==null&&dom.broken.actionCount===0&&
+     dom.broken.fixtureDomMatchesExpected===true;
+ }
+ return true;
+}
+
 /** Collect only explicitly listed primitive fields: never JSON.stringify
  * the original session, its URLs, its runtime hint or untrusted objects.
  */
@@ -111,6 +154,8 @@ export function createLimitedGmReport(
    consistency:Object.freeze({status:c.status,comparedModes:c.comparedModes}),
    dom:Object.freeze(picked),...flags
   });
+  if(!coherentLimitedEvidence(report.assessment,report.consistency,report.dom))
+    return invalid();
   if(Buffer.byteLength(JSON.stringify(report),'utf8')>4096)return invalid();
   return Object.freeze({status:'UNVERIFIED_REPORT_READY' as const,report});
  }catch{return invalid();}
@@ -185,21 +230,26 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
  }
  const broken=safeDom('broken'),fixed=safeDom('fixed');
  if(broken===undefined||fixed===undefined)return null;
- return Object.freeze({
-  schema:'uah-manual-gm-fixture-v1',verdict:'NOT_VERIFIED',
-  collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
-  assessment:Object.freeze({
+ const checkedAssessment={
    status:assessment.status as Status,
    observedModes:assessment.observedModes as number,
    reportedGmDefaultMatched:assessment.reportedGmDefaultMatched as boolean,
    reportedBrokenFailed:assessment.reportedBrokenFailed as boolean,
    reportedFixedRecovered:assessment.reportedFixedRecovered as boolean
-  }),
-  consistency:Object.freeze({
+ };
+ const checkedConsistency={
    status:consistency.status as Consistency,
    comparedModes:consistency.comparedModes as 0|1|2
-  }),
-  dom:Object.freeze({broken,fixed}),...flags
+ };
+ const checkedDom={broken,fixed};
+ if(!coherentLimitedEvidence(checkedAssessment,checkedConsistency,checkedDom))
+   return null;
+ return Object.freeze({
+  schema:'uah-manual-gm-fixture-v1',verdict:'NOT_VERIFIED',
+  collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
+  assessment:Object.freeze(checkedAssessment),
+  consistency:Object.freeze(checkedConsistency),
+  dom:Object.freeze(checkedDom),...flags
  });
 }
 
