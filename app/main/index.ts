@@ -635,7 +635,9 @@ async function createMainWindow(): Promise<void> {
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && rendered === true && isolated && canCancel && cancelled && " +
-      "document.getElementById('import-summary').textContent.includes('成功 2') && " +
+      "document.getElementById('import-summary').textContent.includes('成功 4') && " +
+      "document.getElementById('import-summary').textContent.includes('失败 1') && " +
+      "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 1') && " +
       "document.getElementById('cancel-import').disabled === true && " +
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
