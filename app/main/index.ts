@@ -137,7 +137,8 @@ function registerSafeIpc(): void {
   // request an action, but cannot pass paths, PIDs, Chromium switches or CDP.
   ipcMain.handle('browser:choose-chrome',async event=>{
     authorizeSender(event);
-    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     nativeSelectionInProgress=true;
@@ -158,7 +159,8 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:choose-profile',async event=>{
     authorizeSender(event);
-    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     nativeSelectionInProgress=true;
@@ -176,7 +178,8 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:create-profile',async event=>{
     authorizeSender(event);
-    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())
       return {ok:false,code:'BROWSER_BUSY'};
     if(!selectedChrome)return {ok:false,code:'CONFIG_NOT_SELECTED'};
     const win=mainWindow;
@@ -221,7 +224,8 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:start',async (event,port:unknown)=>{
     authorizeSender(event);
-    if(nativeSelectionInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
     if(!selectedChrome||!selectedProfile)
       return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
     const win=mainWindow;
@@ -535,7 +539,8 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController||droppedImportController||manualExportInProgress)
+    if(nativeImportController||droppedImportController||manualExportInProgress||
+        nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
@@ -580,7 +585,8 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
-    if(nativeImportController||droppedImportController||manualExportInProgress)
+    if(nativeImportController||droppedImportController||manualExportInProgress||
+        nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
     const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
@@ -923,10 +929,17 @@ async function createMainWindow(): Promise<void> {
       "const raceSerialized=race.filter(x=>x.ok===true).length===1 && " +
       "race.filter(x=>x.code==='BROWSER_BUSY').length===1; " +
       "const declinedProfile=await a.createProfile(); const blockedLaunch=await a.startBrowser(9223); " +
-      "const noNativeCancel=await a.cancelNativeImport(); " +
+      "const pendingBrowserPicker=a.chooseProfile(); " +
+       "await new Promise(resolve=>setTimeout(resolve,10)); " +
+       "const blockedImportDuringBrowserPicker=await a.chooseFiles(); " +
+       "const blockedDropDuringBrowserPicker=await a.importDropped('no-peek.user.js',new Uint8Array([47,47])); " +
+       "const browserPickerFinished=await pendingBrowserPicker; " +
+       "const noNativeCancel=await a.cancelNativeImport(); " +
       "const pendingNativeFiles=a.chooseFiles(); " +
       "await new Promise(resolve=>setTimeout(resolve,10)); " +
       "const rejectedOverlap=await a.chooseFolder(); " +
+       "const blockedBrowserDuringNativePicker=await a.chooseProfile(); " +
+       "const blockedLaunchDuringNativePicker=await a.startBrowser(9223); " +
        "const blockedDroppedOverlap=await a.importDropped('parallel.user.js',new Uint8Array([47,47,32,105,112,99])); " +
       "const requestedNativeCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFiles=await pendingNativeFiles; " +
@@ -1053,6 +1066,11 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
       "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && " +
+       "blockedImportDuringBrowserPicker.errors[0].code === 'IMPORT_BUSY' && " +
+       "blockedDropDuringBrowserPicker.code === 'IMPORT_BUSY' && " +
+       "browserPickerFinished.ok === true && " +
+       "blockedBrowserDuringNativePicker.code === 'BROWSER_BUSY' && " +
+       "blockedLaunchDuringNativePicker.code === 'BROWSER_BUSY' && " +
        "blockedDroppedOverlap.code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
       "cancelledNativeFiles.canceled && cancelledNativeFiles.scripts.length === 0 && " +
       "requestedFolderCancel.ok && cancelledNativeFolder.canceled && " +

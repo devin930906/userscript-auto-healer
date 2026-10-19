@@ -187,3 +187,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 ## （7）TASK-007 / TEST-017/026 临时本机 GM 测试请求中断可靠性（2026-10-19）
 
 实际服务 `src/manager/tampermonkey-gm-probe.ts` 的 POST /receipt 流此前未处理客户端在完整 HTTP 头部后、请求体未收齐时的 IncomingMessage aborted/error 事件。增加断连清空部分数据、阻止晚到 end 接纳以及不泄露报错的错误监听。新增真实 loopback TCP 半包中断测试，确认断连后无回执、服务仍然响应正常 GET 与后续合法 POST，且任何回执仍恒为 `SELF_REPORTED_FIXTURE_ONLY`。此项仅验证本机临时测试服务韧性，**不**构成独立 Tampermonkey 身份、脚本安装、GM API、业务恢复或 Stable GATE 的证明。
+
+## （7）TASK-017 / TEST-026 原生选择器跨模块互斥回归（2026-10-19）
+
+现有 Electron 主窗口已分别序列化 Chrome/Profile 选择与原生脚本导入，但两个入口没有共同检查相互持有的忙碌状态，允许 import/drag-drop 在 Chrome 选择器或启动授权期间并行发起，或相反。现在主进程 IPC 同时检查导入、拖放、浏览器选择器、Profile 创建及启动流程的互斥状态；在尚未完成的选择期间拒绝跨模块入口，不读取另一路径、不打开第二个原生选择器、不启动 Chrome。新增 Windows 真实 Electron renderer→preload→IPC smoke：Chrome 选择器悬挂时拒绝文件/拖放导入，文件选择器悬挂时拒绝 Chrome/Profile 选择和启动，结束后正常功能仍可用。没有向 renderer 开放任意文件路径或任何脚本写入接口。TEST-026 此阶段并发负例不代表完整 TASK-017/TEST-022/GATE 通过。
