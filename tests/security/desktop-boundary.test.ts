@@ -22,7 +22,7 @@ const approvedIpcChannels=[
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
  'import:dropped','import:files','import:folder','scenario:cancel',
- 'scenario:inspect','scenario:register'
+ 'scenario:export-manual','scenario:inspect','scenario:register'
 ] as const;
 
 
@@ -126,6 +126,11 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /ipcMain\.handle\('scenario:register'/);
   assert.match(main, /ipcMain\.handle\('scenario:inspect'/);
   assert.match(main, /ipcMain\.handle\('scenario:cancel'/);
+  assert.match(main, /ipcMain\.handle\('scenario:export-manual'/);
+  assert.match(main, /nativeImportedPaths\.set\(script\.sha256,script\.sourcePath\)/);
+  assert.match(main, /importApprovedPaths\(\[sourcePath\],controller\.signal\)/);
+  assert.match(main, /observeApprovedDomSeries\(owned,opened/);
+  assert.match(main, /exportReviewedImportedSelectorOnly\(/);
   assert.match(main, /scenarioSession\.resolveReadOnlyDom\(id\)/);
   assert.match(main, /openApprovedTarget\(owned,selected\.targetUrl,true,controller\.signal\)/);
   assert.match(main, /inspectApprovedScenarioDomSeries\(/);
@@ -159,6 +164,8 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /ipcRenderer\.invoke\('scenario:register',input\)/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:inspect',id\)/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:cancel'\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('scenario:export-manual',id\)/);
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-manual',\s*\{/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
 });
 
@@ -202,4 +209,27 @@ test('TASK-008/009/017 TEST-013/019/026: desktop comparison is bounded, consente
  // file paths or arbitrary CDP operations enter the response to renderer.
  assert.doesNotMatch(main,/selectorComparisonStatus:[\s\S]*candidateSource:/);
  assert.doesNotMatch(ui,/window\.healer\.(applyPatch|installScript|exportPatch)\(/);
+});
+
+test('TASK-009/012/017 TEST-019/020/023/026: manual export requires true live ownership and native consent',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(main,/const sourcePath=nativeImportedPaths\.get\(selected\.scenario\.scriptSha256\)/);
+ assert.match(main,/if\(!sourcePath\)return \{ok:false,code:'NO_NATIVE_SOURCE'/);
+ assert.match(main,/if\(selected\.scenario\.assertions\.length!==2\)/);
+ assert.match(main,/summarizeReadOnlyScenarioDomSeries\(selected\.scenario,evidence,true\)/);
+ assert.match(main,/triage\.triage\.evidenceIds\[0\]!=='scenario_assertion_1'/);
+ assert.match(main,/const current=await importApprovedPaths\(\[sourcePath\],controller\.signal\)/);
+ assert.match(main,/current\.scripts\[0\]\.sha256!==selected\.scenario\.scriptSha256/);
+ assert.match(main,/const approved=await dialog\.showMessageBox\(win/);
+ assert.match(main,/if\(approved\.response!==0\|\|revoked\(\)\)/);
+ assert.match(main,/exportReviewedImportedSelectorOnly\(/);
+ assert.match(main,/nativeImportedPaths\.clear\(\)/);
+ assert.doesNotMatch(main,/ipcMain\.handle\('scenario:export-manual',async\(event,(?:path|source|selector)/);
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-manual',\s*[^i]/);
+ assert.match(html,/id="scenario-export-manual"/);
+ assert.match(html,/不提供自动安装和回滚/);
+ assert.match(ui,/MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED/);
 });
