@@ -11,8 +11,23 @@ import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {BoundedFaultLog} from '../../src/diagnostics/fault-classifier';
 import {
   inspectApprovedPageExceptions,inspectAndLogApprovedPageExceptions,
-  countBoundedPageExceptionEvent
+  countBoundedPageExceptionEvent,isArmedFrameNavigationReplay
 } from '../../src/diagnostics/cdp-page-exceptions';
+
+test('TEST-013: delayed Page.frameNavigated replay is not a new route',()=>{
+  const armed={id:'frame-1',loaderId:'loader-1',url:'https://example.com/'};
+  const replay={frame:{id:armed.id,loaderId:armed.loaderId,url:armed.url}};
+  assert.equal(isArmedFrameNavigationReplay(replay,armed),true);
+  assert.equal(isArmedFrameNavigationReplay(replay,null),false);
+  assert.equal(isArmedFrameNavigationReplay(
+    {frame:{...replay.frame,loaderId:'loader-2'}},armed),false);
+  assert.equal(isArmedFrameNavigationReplay(
+    {frame:{...replay.frame,id:'other-frame'}},armed),false);
+  assert.equal(isArmedFrameNavigationReplay(
+    {frame:{...replay.frame,url:'https://example.com/new'}},armed),false);
+  assert.equal(isArmedFrameNavigationReplay({frame:{id:armed.id}},armed),false);
+  assert.equal(isArmedFrameNavigationReplay({},armed),false);
+});
 
 test('TEST-013: repeated CDP exception IDs still consume the 32-event budget',()=>{
   let total=0;
