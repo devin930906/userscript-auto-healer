@@ -117,7 +117,7 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /domSnapshot\(\)/);
   assert.match(main, /stopOnlyGmProbe\(\)/);
   assert.match(main, /onUnexpectedExit:\(\)=>/);
-  assert.match(main, /ownedBrowser=null;\s*stopOnlyGmProbe\(\)/);
+  assert.match(main, /ownedBrowser=null;\s*cancelScenarioObservation\(\);stopOnlyGmProbe\(\)/);
 });
 
 test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer', () => {
