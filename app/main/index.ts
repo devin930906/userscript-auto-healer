@@ -18,10 +18,12 @@ import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/g
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {inspectApprovedScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
+import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
 let scenarioObserveEpoch=0;
@@ -315,6 +317,8 @@ function registerSafeIpc(): void {
     if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'PROBE_BUSY',...unverified};
     gmStartInProgress=true;
     const epoch=gmProbeEpoch;
     const controller=new AbortController();
@@ -359,6 +363,7 @@ function registerSafeIpc(): void {
     }finally{
       gmStartInProgress=false;
       if(gmStartAbort===controller)gmStartAbort=null;
+      diagnosticGate.release(lease);
     }
   });
   ipcMain.handle('gm-probe:status',event=>{
@@ -443,6 +448,8 @@ function registerSafeIpc(): void {
       return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'PROBE_BUSY',...unverified};
     const epoch=gmProbeEpoch;
     gmActionInProgress=true;
     try{
@@ -463,7 +470,10 @@ function registerSafeIpc(): void {
       return {ok:true,status:result.status,mode:result.mode,...unverified};
     }catch{
       return {ok:false,code:'VISIT_FAILED',...unverified};
-    }finally{gmActionInProgress=false;}
+    }finally{
+      gmActionInProgress=false;
+      diagnosticGate.release(lease);
+    }
   });
   ipcMain.handle('gm-probe:observe',async(event,mode:unknown)=>{
     authorizeSender(event);
@@ -475,6 +485,8 @@ function registerSafeIpc(): void {
       return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'PROBE_BUSY',...unverified};
     const epoch=gmProbeEpoch;
     gmActionInProgress=true;
     try{
@@ -498,7 +510,10 @@ function registerSafeIpc(): void {
         ...unverified};
     }catch{
       return {ok:false,code:'OBSERVATION_FAILED',...unverified};
-    }finally{gmActionInProgress=false;}
+    }finally{
+      gmActionInProgress=false;
+      diagnosticGate.release(lease);
+    }
   });
   ipcMain.handle('gm-probe:stop',event=>{
     authorizeSender(event);
@@ -604,6 +619,8 @@ function registerSafeIpc(): void {
     if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',...unverified};
     const controller=new AbortController();
     const epoch=scenarioObserveEpoch;
     scenarioObserveController=controller;
@@ -645,6 +662,7 @@ function registerSafeIpc(): void {
     }finally{
       if(scenarioObserveController===controller)scenarioObserveController=null;
       scenarioObserveInProgress=false;
+      diagnosticGate.release(lease);
     }
   });
   ipcMain.handle('scenario:cancel',event=>{
