@@ -146,7 +146,11 @@ export async function startIsolatedTampermonkeyGmProbe(
    try{url=new URL(req.url,'http://'+host);}catch{
      res.writeHead(400).end();return;
    }
-   if(url.origin!=='http://'+host){res.writeHead(400).end();return;}
+   // Reject dot-segment aliases normalized by URL(): consented fixture routes
+   // must match the actual HTTP request target, not only its parsed pathname.
+   if(url.origin!=='http://'+host||req.url!==url.pathname+url.search){
+     res.writeHead(400).end();return;
+   }
    // Only an exact unguessable capability URL serves the disposable source.
    // The real manager may fetch it from its extension origin; Origin is NOT
    // authentication and is never interpreted as evidence of installation.
