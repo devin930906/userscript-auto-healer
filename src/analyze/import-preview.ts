@@ -8,13 +8,14 @@ import type {ImportedScript} from '../import/import-service';
 import {parseUserscriptMetadata,readUserscriptSource,type MetadataStatus} from './metadata-parser';
 import {analyzeSelectors,type SelectorKind} from './selector-analyzer';
 
-const MAX_ANALYSIS_BYTES=256*1024;
+export const MAX_ANALYSIS_BYTES=256*1024;
 const MAX_VISIBLE_SITES=8;
-const MAX_BATCH_PREVIEW_BYTES=1024*1024;
-const MAX_BATCH_PREVIEW_FILES=16;
+export const MAX_BATCH_PREVIEW_BYTES=1024*1024;
+export const MAX_BATCH_PREVIEW_FILES=16;
 export type ImportPreviewStatus=
  'STATIC_ANALYSIS_ONLY'|'SKIPPED_TOO_LARGE'|'INVALID_ENCODING'|
- 'INVALID_METADATA'|'PARSE_ERROR'|'SKIPPED_BATCH_BUDGET';
+ 'INVALID_METADATA'|'PARSE_ERROR'|'SKIPPED_BATCH_BUDGET'|
+ 'SKIPPED_CANCELLED'|'ISOLATED_ANALYSIS_FAILED';
 export interface ImportSelectorPreview {
  readonly line:number;
  readonly column:number;
@@ -34,7 +35,7 @@ export interface ImportAnalysisPreview {
 }
 const flags={tampermonkeyVerified:false as const,
  businessVerified:false as const,automaticPatchAllowed:false as const};
-function unavailable(status:ImportPreviewStatus,metadataStatus:ImportAnalysisPreview['metadataStatus']):
+export function unavailableImportPreview(status:ImportPreviewStatus,metadataStatus:ImportAnalysisPreview['metadataStatus']):
  ImportAnalysisPreview{
  return Object.freeze({status,metadataStatus,totalSites:0,literalSites:0,
    runtimeConfirmationSites:0,sites:Object.freeze([]),...flags});
@@ -48,16 +49,16 @@ export function previewImportedScriptAnalysis(
 ):ImportAnalysisPreview{
  try{
   if(!(script?.bytes instanceof Uint8Array)||script.bytes.byteLength>MAX_ANALYSIS_BYTES)
-    return unavailable('SKIPPED_TOO_LARGE','NOT_CHECKED');
+    return unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED');
   const metadata=parseUserscriptMetadata(script);
   if(metadata.status==='INVALID_ENCODING')
-    return unavailable('INVALID_ENCODING',metadata.status);
+    return unavailableImportPreview('INVALID_ENCODING',metadata.status);
   if(metadata.status!=='OK')
-    return unavailable('INVALID_METADATA',metadata.status);
+    return unavailableImportPreview('INVALID_METADATA',metadata.status);
   const source=readUserscriptSource(script);
-  if(source===null)return unavailable('INVALID_ENCODING',metadata.status);
+  if(source===null)return unavailableImportPreview('INVALID_ENCODING',metadata.status);
   const analysis=analyzeSelectors(source);
-  if(analysis.status!=='OK')return unavailable('PARSE_ERROR',metadata.status);
+  if(analysis.status!=='OK')return unavailableImportPreview('PARSE_ERROR',metadata.status);
   const visible=analysis.sites.slice(0,MAX_VISIBLE_SITES).map(site=>Object.freeze({
    line:site.line,column:site.column,method:site.method,kind:site.kind
   }));
@@ -70,7 +71,7 @@ export function previewImportedScriptAnalysis(
   });
  }catch{
   // Pathological syntax/depth and hostile objects do not reach the renderer.
-  return unavailable('PARSE_ERROR','NOT_CHECKED');
+  return unavailableImportPreview('PARSE_ERROR','NOT_CHECKED');
  }
 }
 
@@ -89,7 +90,7 @@ export function previewImportedBatch(
    return previewImportedScriptAnalysis(script);
   if(analyzedFiles>=MAX_BATCH_PREVIEW_FILES||
      bytesBudgetUsed+script.bytes.byteLength>MAX_BATCH_PREVIEW_BYTES)
-   return unavailable('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
+   return unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
   analyzedFiles++;
   bytesBudgetUsed+=script.bytes.byteLength;
   return previewImportedScriptAnalysis(script);
