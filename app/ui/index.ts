@@ -266,32 +266,41 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
   const found: File[] = [...fallback];
   let visited = 0;
   const visit = async (entry: FileSystemEntry, depth: number): Promise<void> => {
+    // Cancellation covers asynchronous directory enumeration, not just the
+    // later byte-import loop. Unknown/unvisited entries remain uncounted.
+    if (cancelRequested) return;
     if (++visited > MAX_DIRECTORY_ENTRIES || found.length >= MAX_FILES) {
       throw new Error('SCAN_LIMIT');
     }
     if (entry.isFile) {
-      // A dropped directory only contributes userscripts; for individual
-      // dropped files, leave extension validation to the main process.
-      if (!entry.name.toLowerCase().endsWith('.user.js')) return;
+      // Nested directory entries are filtered, but explicitly dropped root
+      // files reach the native validator so invalid filenames are reported.
+      if (depth > 0 && !entry.name.toLowerCase().endsWith('.user.js')) return;
       const file = await new Promise<File>((resolve, reject) =>
         (entry as FileSystemFileEntry).file(resolve, reject));
-      found.push(file);
+      if (!cancelRequested) found.push(file);
       return;
     }
-    if (!entry.isDirectory) return;
+    if (!entry.isDirectory || cancelRequested) return;
     if (depth >= MAX_DIRECTORY_DEPTH) {
       logLine(entry.name + ': SCAN_LIMIT');
       return;
     }
     const reader = (entry as FileSystemDirectoryEntry).createReader();
-    while (true) {
+    while (!cancelRequested) {
       const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
         reader.readEntries(resolve, reject));
-      if (!batch.length) break;
-      for (const child of batch) await visit(child, depth + 1);
+      if (cancelRequested || !batch.length) break;
+      for (const child of batch) {
+        if (cancelRequested) break;
+        await visit(child, depth + 1);
+      }
     }
   };
-  for (const root of roots) await visit(root, 0);
+  for (const root of roots) {
+    if (cancelRequested) break;
+    await visit(root, 0);
+  }
   return found;
 }
 
@@ -323,10 +332,31 @@ dropZone?.addEventListener('drop', event => {
   event.preventDefault();
   if (!(event instanceof DragEvent) || !event.dataTransfer || busy) return;
   // A second drop must not traverse entries while an earlier batch owns the lock.
-  // Acquire DataTransfer entries synchronously: drag data is protected after
-  // the drop event returns, even while downstream file reads are asynchronous.
-  const dropped = filesFromDrop(event.dataTransfer);
-  void locked(async () => importFiles(await dropped));
+  // Start scanning synchronously inside the lock: drag data is protected
+  // after the drop event returns. Keep cancellation enabled through scanning.
+  const transfer = event.dataTransfer;
+  void locked(async () => {
+    activeImport = true;
+    cancelRequested = false;
+    if (cancelImport) cancelImport.disabled = false;
+    updateImportSummary();
+    try {
+      const dropped = await filesFromDrop(transfer);
+      if (cancelRequested) {
+        // This is a lower bound only: remaining unenumerated files are unknown.
+        unprocessedCount += dropped.length;
+        logLine('已取消拖放目录扫描；已发现 ' + dropped.length +
+          ' 份文件未读取，其他未枚举文件数量未知。');
+        return;
+      }
+      await importFiles(dropped);
+    } finally {
+      activeImport = false;
+      cancelRequested = false;
+      if (cancelImport) cancelImport.disabled = true;
+      updateImportSummary();
+    }
+  });
 });
 
 void window.healer.getStatus().then(s => {
