@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   // Narrow cancellation only: no path, batch identifier, or elevated authority.
   cancelNativeImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-native'),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
+  registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
   chooseChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-chrome'),
   chooseProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-profile'),
   createProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:create-profile'),

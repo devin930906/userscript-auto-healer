@@ -19,6 +19,24 @@
       <p id="import-summary" role="status" aria-live="polite">尚未导入脚本。</p>
       <ul id="import-list" aria-live="polite"></ul>
     </section>
+    <section aria-labelledby="scenario-heading">
+      <h2 id="scenario-heading">导入脚本的测试场景登记（当前会话）</h2>
+      <p>仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
+      <label for="scenario-script">已导入脚本：</label>
+      <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
+      <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
+      <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
+      <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
+      <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
+      <label for="scenario-selector">需要出现的 CSS 选择器：</label>
+      <input id="scenario-selector" maxlength="512" placeholder="#target">
+      <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
+      <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
+      <label><input id="scenario-approve" type="checkbox"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
+      <button id="scenario-register" type="button" disabled>登记只读测试场景</button>
+      <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
+      <ul id="scenario-list" aria-live="polite"></ul>
+    </section>
     <section aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
       <p>先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
