@@ -10,8 +10,28 @@ import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {BoundedFaultLog} from '../../src/diagnostics/fault-classifier';
 import {
-  inspectApprovedPageExceptions,inspectAndLogApprovedPageExceptions
+  inspectApprovedPageExceptions,inspectAndLogApprovedPageExceptions,
+  countBoundedPageExceptionEvent
 } from '../../src/diagnostics/cdp-page-exceptions';
+
+test('TEST-013: repeated CDP exception IDs still consume the 32-event budget',()=>{
+  let total=0;
+  for(let i=0;i<32;i++){
+    const counted=countBoundedPageExceptionEvent(total,7); // intentional replay
+    assert.equal(counted.ok,true);
+    if(!counted.ok)return;
+    total=counted.count;
+  }
+  assert.equal(total,32);
+  assert.deepEqual(countBoundedPageExceptionEvent(total,7),
+    {ok:false,code:'TOO_MANY_EXCEPTIONS'});
+  for(const invalid of [-1,NaN,Infinity,1.5,'7',null,undefined]){
+    assert.deepEqual(countBoundedPageExceptionEvent(0,invalid),
+      {ok:false,code:'INVALID_EXCEPTION_ID'});
+  }
+  assert.deepEqual(countBoundedPageExceptionEvent(-1,7),
+    {ok:false,code:'INVALID_EXCEPTION_ID'});
+});
 
 test('TEST-013: no consent, fake ownership, bad targets, unsafe URL and bad window fail closed',async()=>{
   const bogusBrowser={
