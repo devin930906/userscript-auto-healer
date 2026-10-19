@@ -26,6 +26,12 @@ interface Window {
     chooseFolder(): Promise<ImportResponse>;
     cancelNativeImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
+    registerScenario(input: {
+      id:string;scriptSha256:string;targetUrl:string;selector:string;
+      userApproved:boolean;requiresLogin:boolean;loginReady:boolean;
+    }): Promise<{ok:boolean;code?:string;status?:string;id?:string;
+      state?:string;issues?:readonly string[];automaticPatchAllowed:false;
+      tampermonkeyVerified:false;businessVerified:false}>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
@@ -62,6 +68,21 @@ const chooseFolder = document.getElementById('choose-folder') as HTMLButtonEleme
 const chooser = document.getElementById('select-files') as HTMLInputElement | null;
 const dropZone = document.getElementById('drop-area');
 const seenScripts = new Set<string>();
+const scenarioScript = document.getElementById('scenario-script') as HTMLSelectElement | null;
+const scenarioId = document.getElementById('scenario-id') as HTMLInputElement | null;
+const scenarioUrl = document.getElementById('scenario-url') as HTMLInputElement | null;
+const scenarioSelector = document.getElementById('scenario-selector') as HTMLInputElement | null;
+const scenarioNeedsLogin = document.getElementById('scenario-needs-login') as HTMLInputElement | null;
+const scenarioLoginReady = document.getElementById('scenario-login-ready') as HTMLInputElement | null;
+const scenarioApprove = document.getElementById('scenario-approve') as HTMLInputElement | null;
+const scenarioRegister = document.getElementById('scenario-register') as HTMLButtonElement | null;
+const scenarioStatus = document.getElementById('scenario-status');
+const scenarioList = document.getElementById('scenario-list');
+let scenarioBusy=false;
+function updateScenarioControls():void{
+ if(scenarioScript)scenarioScript.disabled=seenScripts.size===0;
+ if(scenarioRegister)scenarioRegister.disabled=seenScripts.size===0||scenarioBusy;
+}
 let busy = false;
 let activeImport = false;
 let nativeImportMode = false;
@@ -96,6 +117,14 @@ function show(result: ImportResponse): void {
     const key = item.sha256;
     if (seenScripts.has(key)) { duplicates++; continue; }
     seenScripts.add(key);
+    if(scenarioScript){
+      const option=document.createElement('option');
+      option.value=key;
+      option.textContent=item.filename+' / '+key.slice(0,12);
+      scenarioScript.append(option);
+      if(scenarioScript.value==='')scenarioScript.value=key;
+    }
+    updateScenarioControls();
     acceptedCount++;
     const a = item.analysis;
     const preview = a?.status === 'STATIC_ANALYSIS_ONLY'
@@ -303,6 +332,41 @@ void window.healer.getStatus().then(s => {
   if (chooser) chooser.disabled = true;
 });
 
+
+// Staging is read-only, in-memory and keyed to an actual imported SHA-256.
+ // The native process checks the digest again; a renderer string cannot claim
+ // script import, browser consent or Tampermonkey verification.
+scenarioRegister?.addEventListener('click',()=>{
+ if(scenarioBusy||!scenarioScript?.value)return;
+ const input={
+  id:scenarioId?.value.trim()??'',
+  scriptSha256:scenarioScript.value,
+  targetUrl:scenarioUrl?.value.trim()??'',
+  selector:scenarioSelector?.value.trim()??'',
+  userApproved:scenarioApprove?.checked===true,
+  requiresLogin:scenarioNeedsLogin?.checked===true,
+  loginReady:scenarioLoginReady?.checked===true
+ };
+ scenarioBusy=true;updateScenarioControls();
+ if(scenarioStatus)scenarioStatus.textContent='正在检查本机会话场景输入；不会访问网站。';
+ void window.healer.registerScenario(input).then(result=>{
+  if(!result.ok||result.status!=='STAGED_RUNTIME_UNVERIFIED'){
+   if(scenarioStatus)scenarioStatus.textContent='场景未登记：'+(result.code??'UNKNOWN');
+   return;
+  }
+  if(scenarioStatus)scenarioStatus.textContent='场景登记成功：'+
+   (result.state??'UNKNOWN')+'。这是待测试状态，未验证任何业务动作。';
+  const item=document.createElement('li');
+  item.textContent=(result.id??input.id)+' / '+input.scriptSha256.slice(0,12)+
+   ' / '+(result.state??'UNKNOWN')+
+   ' / '+(result.issues?.join(',')||'无登记前置问题')+
+   '（未执行、未修改脚本）';
+  scenarioList?.append(item);
+ }).catch(()=>{
+  if(scenarioStatus)scenarioStatus.textContent='场景登记受阻；未获得成功结果。';
+ }).finally(()=>{scenarioBusy=false;updateScenarioControls();});
+});
+updateScenarioControls();
 
 // Native browser actions never expose arbitrary executable/Profile paths to
 // renderer IPC. Every connect and manager inspection asks through an Electron
