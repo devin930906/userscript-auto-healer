@@ -28,8 +28,11 @@
       <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
       <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
       <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
-      <label for="scenario-selector">需要出现的 CSS 选择器：</label>
-      <input id="scenario-selector" maxlength="512" placeholder="#target">
+      <label for="scenario-selector">当前脚本使用的 CSS 选择器（只读检查）：</label>
+      <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
+      <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
+      <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
+      <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改、导出、安装脚本，也不视为已验证的补丁。</p>
       <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
       <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
       <label><input id="scenario-approve" type="checkbox"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
@@ -38,7 +41,7 @@
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
       <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
       <button id="scenario-cancel" type="button" disabled>取消正在进行的 DOM 检查</button>
-      <p>检查只限独立 Chrome、无需登录且仅包含一个 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
+      <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
       <ul id="scenario-list" aria-live="polite"></ul>
     </section>
