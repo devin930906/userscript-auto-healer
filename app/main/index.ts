@@ -726,6 +726,8 @@ async function createMainWindow(): Promise<void> {
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
        "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
+       "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
+       "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
       "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
@@ -851,7 +853,9 @@ async function createMainWindow(): Promise<void> {
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && d.script.analysis.automaticPatchAllowed === false && " +
-       "noDroppedCancel.code === 'NO_ACTIVE_DROPPED_IMPORT' && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
+       "noDroppedCancel.code === 'NO_ACTIVE_DROPPED_IMPORT' && activeDroppedCancel.ok === true && " +
+       "abortedDrop.ok === true && abortedDrop.script.analysis.status === 'SKIPPED_CANCELLED' && " +
+       "abortedDrop.script.analysis.automaticPatchAllowed === false && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
       "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
