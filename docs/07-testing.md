@@ -171,3 +171,9 @@ PR [#53](https://github.com/devin930906/userscript-auto-healer/pull/53) 增加�
 ## （7）TEST-017 本机手动诊断报告阶段回归（2026-10-19）
 
 PR [#93](https://github.com/devin930906/userscript-auto-healer/pull/93) 增加 `tests/manager/gm-report.test.ts`：对报告白名单、未认证标志、错误/缺失证据、敏感脚本源码与本机令牌隔离、用户否决、无覆盖 JSON 文件写入、SHA-256、字节回读、目录重定向与路径规范化负例进行 Windows 回归。源 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Windows App #39189509991](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509991) success，248 项测试、247 pass、0 fail、1 skip，Electron smoke success；仅限报告服务与 IPC 安全边界。**未经真实 Tampermonkey 扩展/GM 行为认证，不能升级 TEST-017 或 TEST-018 正式验收状态；无需为取得此 JSON 安装或修改用户已有脚本。**
+
+## （7）TASK-007 / TEST-017 Chrome 版本绑定报告测试增量（2026-10-19）
+
+PR [#123](https://github.com/devin930906/userscript-auto-healer/pull/123) 将本应用校验过的 Chrome 版本值传入短时手动诊断会话，写入仅供人工核对的 `uah-manual-gm-fixture-v2` JSON。回归检查通过的限定要求为：正常四段版本能被导出且仍是 `NOT_VERIFIED`；缺失、畸形、注入式版本以及旧 v1 结构均不能成为新输出；输出继续禁止脚本源码、Profile 路径、URL/token 和任何 Tampermonkey/GM/业务 VERIFIED 断言。旧 v1 文件只保留为历史，不实施自动升级。
+
+Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skeleton Checks #39254390625](https://github.com/devin930906/userscript-auto-healer/actions/runs/39254390625) 已通过；本说明提交后须检查最新 HEAD 与 main 独立 CI。上述测试仍仅覆盖原生可信环境元数据传递与拒绝负例，**不是**完整 TEST-017/018、真实扩展内 GM API 与业务恢复、GATE-004/005 或正式 Stable 验收。
