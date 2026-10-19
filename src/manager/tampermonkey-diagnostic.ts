@@ -265,17 +265,19 @@ export function correlateManualFixtureEvidence(
  * navigation is recorded only AFTER the owned target was confirmed.
  */
 export function createManualModeVisitLatch() {
- const visited:Record<GmProbeMode,boolean>={broken:false,fixed:false};
+ const visited:Record<GmProbeMode,boolean>=Object.assign(Object.create(null),{broken:false,fixed:false});
  let pending:GmProbeMode|null=null;
  return Object.freeze({
-   reserve(mode:GmProbeMode):'RESERVED'|'IN_PROGRESS'|'ALREADY_VISITED'{
+   reserve(mode:GmProbeMode):'RESERVED'|'IN_PROGRESS'|'ALREADY_VISITED'|'INVALID_MODE'{
+     // Runtime inputs can bypass TypeScript; never reserve arbitrary keys.
+     if(mode!=='broken'&&mode!=='fixed')return 'INVALID_MODE';
      if(visited[mode])return 'ALREADY_VISITED';
      if(pending!==null)return 'IN_PROGRESS';
      pending=mode;
      return 'RESERVED';
    },
    finish(mode:GmProbeMode,confirmed:boolean):void{
-     if(pending!==mode)return;
+     if(mode!=='broken'&&mode!=='fixed'||pending!==mode)return;
      pending=null;
      if(confirmed)visited[mode]=true;
    },
@@ -351,6 +353,7 @@ export async function startApprovedTampermonkeyDiagnostic(
    if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
    if(!ready())return {ok:false,code:'SESSION_NOT_ACTIVE'};
    const reservation=visits.reserve(mode);
+   if(reservation==='INVALID_MODE')return {ok:false,code:'INVALID_MODE'};
    if(reservation!=='RESERVED')return {ok:false,
      code:reservation==='IN_PROGRESS'?'MODE_VISIT_IN_PROGRESS':'MODE_ALREADY_OPENED'};
    let confirmed=false;

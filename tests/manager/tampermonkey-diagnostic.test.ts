@@ -46,6 +46,28 @@ test('TEST-017: concurrent or duplicate manual visits are blocked before CDP nav
  assert.deepEqual(visits.snapshot(),{broken:true,fixed:true});
 });
 
+
+test('TEST-017: visit latch rejects malformed runtime modes without mutating evidence',()=>{
+ const visits=createManualModeVisitLatch();
+ const bad=['unknown','__proto__','constructor','toString','',null,undefined,0];
+ const snapshot={broken:false,fixed:false};
+ for(const value of bad){
+   assert.equal(visits.reserve(value as 'broken'),'INVALID_MODE');
+   visits.finish(value as 'broken',true);
+   assert.deepEqual(visits.snapshot(),snapshot);
+ }
+ assert.equal(visits.reserve('broken'),'RESERVED');
+ for(const value of bad){
+   assert.equal(visits.reserve(value as 'fixed'),'INVALID_MODE');
+   visits.finish(value as 'fixed',true);
+ }
+ assert.deepEqual(visits.snapshot(),snapshot);
+ visits.finish('broken',true);
+ assert.deepEqual(visits.snapshot(),{broken:true,fixed:false});
+ assert.deepEqual(Object.keys(visits.snapshot()).sort(),['broken','fixed']);
+});
+
+
 test('TEST-018 stage: read-only DOM fixture marker is evidence, never a GM or manager attestation',()=>{
  const sample=(actionCount:number,routeChanged=false)=>({
    ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
