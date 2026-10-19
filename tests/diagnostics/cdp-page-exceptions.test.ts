@@ -5,9 +5,11 @@ import {createServer as createTcpServer} from 'node:net';
 import {access,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,win32} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
+import {observeApprovedDom} from '../../src/observe/dom-observer';
 import {BoundedFaultLog} from '../../src/diagnostics/fault-classifier';
 import {
   inspectApprovedPageExceptions,inspectAndLogApprovedPageExceptions
@@ -104,6 +106,21 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   const faultTarget=await openApprovedTarget(launched,faultUrl,true);
   assert.equal(faultTarget.ok,true,JSON.stringify(faultTarget));
   if(!faultTarget.ok)return;
+  // Target discovery confirms a URL, not that Chrome has finished replacing
+  // about:blank. Wait for an independently checked, stable document before
+  // subscribing to page exceptions. Production still blocks any subsequent
+  // frame navigation during the observation window.
+  let fixtureReady=false;
+  for(let attempt=0;attempt<5;attempt++){
+    const dom=await observeApprovedDom(
+      launched,faultTarget,faultUrl,true,['#fixture']);
+    if(dom.ok&&dom.routeChanged===false&&dom.selectorCounts['#fixture']===1){
+      fixtureReady=true;
+      break;
+    }
+    await delay(150);
+  }
+  assert.equal(fixtureReady,true,'The approved fault fixture did not settle');
   const journal=new BoundedFaultLog(4);
   const fault=await inspectAndLogApprovedPageExceptions(
     launched,faultTarget,faultUrl,true,journal,1800);
