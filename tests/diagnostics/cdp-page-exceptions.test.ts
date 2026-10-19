@@ -111,16 +111,21 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   // subscribing to page exceptions. Production still blocks any subsequent
   // frame navigation during the observation window.
   let fixtureReady=false;
+  const readinessCodes:string[]=[];
   for(let attempt=0;attempt<5;attempt++){
     const dom=await observeApprovedDom(
       launched,faultTarget,faultUrl,true,['#fixture']);
+    readinessCodes.push(dom.ok?
+      (dom.routeChanged?'ROUTE_CHANGED':'COUNT_'+dom.selectorCounts['#fixture']):
+      dom.code);
     if(dom.ok&&dom.routeChanged===false&&dom.selectorCounts['#fixture']===1){
       fixtureReady=true;
       break;
     }
     await delay(150);
   }
-  assert.equal(fixtureReady,true,'The approved fault fixture did not settle');
+  assert.equal(fixtureReady,true,
+    'Approved fault fixture readiness: '+readinessCodes.join(','));
   const journal=new BoundedFaultLog(4);
   const fault=await inspectAndLogApprovedPageExceptions(
     launched,faultTarget,faultUrl,true,journal,1800);
