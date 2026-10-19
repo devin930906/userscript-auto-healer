@@ -633,7 +633,7 @@ function registerSafeIpc(): void {
         message:'允许访问已登记测试场景的网页并读取限定 DOM？',
         detail:'只在本程序启动的独立 Chrome 打开一个标签页：\\n'+
           selected.targetUrl+
-          '\\n最多采集 3 次只读选择器计数，并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
+          '\\n最多采集 3 次只读选择器计数（可选旧选择器与替代选择器同时观察），并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
           '\\nCDP 结果不验证 Tampermonkey、GM API 或真实业务。'
       });
       if(consent.response!==0||controller.signal.aborted||
@@ -668,6 +668,18 @@ function registerSafeIpc(): void {
         triageStatus:result.triage.status,
         faultCategory:result.triage.category,
         evidenceCount:result.triage.evidenceIds.length,
+        // These two observations remain review hints, not Tampermonkey/GM
+        // attestation or permission to apply a patch.
+        selectorComparisonStatus:selected.scenario.assertions.length!==2?
+          'NOT_REQUESTED' as const:
+          result.triage.status==='SINGLE_CAUSE_SIGNAL_ONLY'&&
+          result.triage.category==='SELECTOR_ASSERTION'&&
+          result.triage.evidenceIds.length===1&&
+          result.triage.evidenceIds[0]==='scenario_assertion_1'?
+            'OLD_SELECTOR_MISSING_ALTERNATIVE_PRESENT' as const:
+          result.triage.status==='NO_FAULT_SIGNAL'?
+            'NO_SELECTOR_MISSING_IN_WINDOW' as const:
+            'INCONCLUSIVE_OR_OTHER_SIGNAL' as const,
         pageRuntimeStatus:page.status,
         pageExceptionCount:page.observedCount,
         ...unverified};
