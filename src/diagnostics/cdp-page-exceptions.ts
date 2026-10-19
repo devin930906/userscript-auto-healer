@@ -23,6 +23,20 @@ export type PageExceptionSignalResult=Readonly<{
   automaticPatchAllowed:false;
 }>;
 const MAX_EXCEPTIONS=32;
+/** Bound all event deliveries, including repeated exception IDs. Unique IDs
+ * are not an event budget: CDP transport replays must not evade the cap.
+ * This only counts anonymous page signals, never manager/GM evidence. */
+export function countBoundedPageExceptionEvent(
+  previousCount:number,exceptionId:unknown
+):{ok:true;count:number}|{ok:false;code:'INVALID_EXCEPTION_ID'|'TOO_MANY_EXCEPTIONS'}{
+  if(!Number.isSafeInteger(previousCount)||previousCount<0||
+     previousCount>MAX_EXCEPTIONS||typeof exceptionId!=='number'||
+     !Number.isSafeInteger(exceptionId)||exceptionId<0)
+    return {ok:false,code:'INVALID_EXCEPTION_ID'};
+  if(previousCount===MAX_EXCEPTIONS)
+    return {ok:false,code:'TOO_MANY_EXCEPTIONS'};
+  return {ok:true,count:previousCount+1};
+}
 const MAX_MESSAGE_BYTES=128*1024;
 const uncertain=()=>classifyFaultSignals([{id:'page_runtime_unverified',code:'UNVERIFIED_OBSERVATION'}]);
 function result(
@@ -74,7 +88,7 @@ async function capture(
   let monitoringNavigation=false;
   let nextId=0;
   let open=false;
-  const ids=new Set<number>();
+  let count=0;
   const waiting=new Map<number,(reply:unknown)=>void>();
   const fail=()=>{
     broken=true;
@@ -103,10 +117,12 @@ async function capture(
         const detail=(msg.params as {exceptionDetails?:{exceptionId?:unknown}}|undefined)
           ?.exceptionDetails;
         const exceptionId=detail?.exceptionId;
-        if(typeof exceptionId!=='number'||!Number.isSafeInteger(exceptionId)||
-           exceptionId<0){fail();return;}
-        ids.add(exceptionId);
-        if(ids.size>MAX_EXCEPTIONS){tooMany=true;fail();}
+        const next=countBoundedPageExceptionEvent(count,exceptionId);
+        if(!next.ok){
+          if(next.code==='TOO_MANY_EXCEPTIONS')tooMany=true;
+          fail();return;
+        }
+        count=next.count;
       }
     }catch{fail();}
   };
@@ -162,7 +178,7 @@ async function capture(
       return {ok:false,code:'ROUTE_CHANGED'};
     if(broken)return {ok:false,code:'CDP_FAILED'};
     navigated=false;
-    ids.clear();
+    count=0;
     monitoringNavigation=true;
     listening=true;
     await new Promise<void>(resolve=>{
@@ -179,7 +195,7 @@ async function capture(
     if(navigated||!exactMainFrame(last,expectedUrl))
       return {ok:false,code:'ROUTE_CHANGED'};
     if(broken)return {ok:false,code:'CDP_FAILED'};
-    return {ok:true,count:ids.size};
+    return {ok:true,count};
   }finally{
     listening=false;
     monitoringNavigation=false;
