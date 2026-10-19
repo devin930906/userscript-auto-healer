@@ -965,11 +965,13 @@ async function createMainWindow(): Promise<void> {
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:slowDrop})); " +
       "const scanCancelReady=!!releaseScan&&!document.getElementById('cancel-import').disabled; " +
       "if(scanCancelReady)document.getElementById('cancel-import').click(); " +
-      "if(releaseScan)releaseScan(); " +
+      "// Never deliver readEntries before cancel: cancellation must not wait for it. " +
       "const scanCancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.includes('已取消拖放目录扫描')) && document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "if(releaseScan)releaseScan(); " +
+      "await new Promise(resolve=>setTimeout(resolve,20)); " +
       "Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',oldEntry); " +
       "const input=document.getElementById('select-files'); " +
       "const sample=new DataTransfer(); sample.items.add(new File(['bad'],'invalid.txt')); " +
