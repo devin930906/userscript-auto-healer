@@ -5,7 +5,8 @@ interface Imported {
   textEncoding: string;
   analysis: {
     status: 'STATIC_ANALYSIS_ONLY' | 'SKIPPED_TOO_LARGE' | 'INVALID_ENCODING' |
-      'INVALID_METADATA' | 'PARSE_ERROR' | 'SKIPPED_BATCH_BUDGET';
+      'INVALID_METADATA' | 'PARSE_ERROR' | 'SKIPPED_BATCH_BUDGET' |
+      'SKIPPED_CANCELLED' | 'ISOLATED_ANALYSIS_FAILED';
     totalSites: number;
     literalSites: number;
     runtimeConfirmationSites: number;
@@ -25,6 +26,7 @@ interface Window {
     chooseFiles(): Promise<ImportResponse>;
     chooseFolder(): Promise<ImportResponse>;
     cancelNativeImport(): Promise<{ok:boolean;code?:string;status?:string}>;
+    cancelDroppedImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
     registerScenario(input: {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
@@ -221,7 +223,7 @@ async function importFiles(files: readonly File[]): Promise<void> {
       }
       readBytes += file.size;
       // A rejected file never discards the rest of the batch.
-      // Cancellation does not interrupt already running native IPC.
+      // Byte reading may finish first; native IPC can abort the isolated AST worker.
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const answer = await window.healer.importDropped(file.name, bytes);
@@ -314,6 +316,13 @@ cancelImport?.addEventListener('click', () => {
     // stopped until the native IPC actually resolves.
     void window.healer.cancelNativeImport().catch(() => {
       logLine('原生导入取消请求未成功，需等待当前操作完成。');
+    });
+  }else{
+    // A drag/drop/file-input import already reading bytes keeps its valid
+    // result; only in-flight static analysis is canceled by native IPC.
+    // Scanning a dropped directory can be canceled locally before IPC exists.
+    void window.healer.cancelDroppedImport().catch(() => {
+      logLine('当前静态分析的取消请求未确认；需等待本次导入结束。');
     });
   }
 });
