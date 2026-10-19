@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {verifyBackupRecoverySource} from '../../src/version/recovery-source';
+import {verifyExactCandidateBytesReadOnly} from '../../src/version/candidate-bytes';
 
 const script=Buffer.from('// ==UserScript==\n// @name safe backup\n// ==/UserScript==\n', 'utf8');
 const hash=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
@@ -215,6 +216,27 @@ test('TEST-020: backup-only refuses a nested junction ancestor without publishin
     assert.equal(result.status,'BLOCKED');
     if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_DIRECTORY_INVALID');
     assert.deepEqual(await readdir(backupDir),[]);
+    assert.deepEqual(await readFile(file),script);
+  });
+});
+
+
+test('TEST-020: backup publication readback rejects oversized and in-place corrupted files',async()=>{
+  await fixture(async(file,backupDir)=>{
+    const result=await createVerifiedBackupOnly({
+      sourcePath:file,backupDirectory:backupDir,
+      expectedSha256:hash(script),userApproved:true
+    });
+    assert.equal(result.status,'BACKUP_ONLY',JSON.stringify(result));
+    if(result.status!=='BACKUP_ONLY')return;
+    const backup=join(backupDir,result.backupFileName);
+    assert.equal(await verifyExactCandidateBytesReadOnly(backup,script),'MATCH');
+    const corrupt=Buffer.from(script);
+    corrupt[0]^=1;
+    await writeFile(backup,corrupt);
+    assert.equal(await verifyExactCandidateBytesReadOnly(backup,script),'MISMATCH');
+    await truncate(backup,MAX_SCRIPT_BYTES+1);
+    assert.equal(await verifyExactCandidateBytesReadOnly(backup,script),'CHANGED');
     assert.deepEqual(await readFile(file),script);
   });
 });
