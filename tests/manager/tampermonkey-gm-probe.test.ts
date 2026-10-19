@@ -269,6 +269,36 @@ test('TEST-017: automatic expiry closes stalled loopback HTTP connections',async
  }
 });
 
+test('TEST-017: non-canonical route aliases cannot serve the consented fixture',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const query=new URL(probe.installUrl).search;
+ const rawGet=(path:string)=>new Promise<number>((resolve,reject)=>{
+   // Node's HTTP request path is left raw; fetch()/URL would normalize it.
+   const req=request(probe.origin,{method:'GET',path},response=>{
+     response.resume();
+     response.on('end',()=>resolve(response.statusCode??0));
+   });
+   req.on('error',reject);
+   req.end();
+ });
+ for(const path of [
+   '/unrelated/../install.user.js'+query,
+   '/unrelated/%2e%2e/install.user.js'+query,
+   '/./install.user.js'+query,
+   '/unrelated/../?mode=broken'
+ ]){
+   assert.equal(await rawGet(path),400,path);
+ }
+ // Exact canonical routes must remain available to the explicit tester.
+ assert.equal(await rawGet('/install.user.js'+query),200);
+ assert.equal(await rawGet('/?mode=broken'),200);
+ assert.deepEqual(probe.receiptSnapshot(),{});
+});
+
 test('TEST-017: disposable import URL serves only the authorized, expiring userscript source',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
