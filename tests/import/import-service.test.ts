@@ -90,7 +90,10 @@ test('TEST-003: nested directory skips non-scripts and avoids outside roots', as
   const nested = join(root, 'nested');
   await mkdir(nested);
   await writeFile(join(root, 'one.user.js'), script);
-  await writeFile(join(nested, 'two.user.js'), script);
+  // This fixture must exercise two genuinely different scripts: identical
+  // bytes under different names are now correctly counted as duplicates.
+  await writeFile(join(nested, 'two.user.js'),
+    script.replace('console.log(1)', 'console.log(2)'));
   await writeFile(join(nested, 'not-a-script.js'), 'bad');
   const o = await scanApprovedDirectory(root);
   assert.equal(o.scripts.length, 2);
