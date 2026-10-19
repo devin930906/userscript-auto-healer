@@ -199,3 +199,36 @@ test('TEST-002/022: cancellation between files preserves completed results', asy
   assert.deepEqual(await readFile(one), source);
   assert.deepEqual(await readFile(two), source);
 });
+
+test('TEST-002/003: byte-identical renamed scripts dedupe, changed revisions stay independent', async t => {
+  const root = await workspace(t);
+  const firstDir = join(root, 'one');
+  const secondDir = join(root, 'two');
+  await mkdir(firstDir); await mkdir(secondDir);
+  const a = join(firstDir, 'original.user.js');
+  const b = join(secondDir, 'renamed.user.js');
+  const c = join(secondDir, 'original.user.js');
+  const different = script.replace('console.log(1)', 'console.log(2)');
+  await writeFile(a, script);
+  await writeFile(b, script);
+  await writeFile(c, different);
+
+  const native = await importApprovedPaths([a, b, c]);
+  assert.equal(native.errors.length, 0);
+  assert.equal(native.duplicates, 1);
+  assert.deepEqual(native.scripts.map(x => x.filename),
+    ['original.user.js', 'original.user.js']);
+  assert.notEqual(native.scripts[0].sha256, native.scripts[1].sha256);
+
+  const folder = await scanApprovedDirectory(root);
+  assert.equal(folder.errors.length, 0);
+  assert.equal(folder.scripts.length, 2);
+  assert.equal(folder.duplicates, 1);
+  assert.deepEqual(new Set(folder.scripts.map(x => x.sha256)),
+    new Set(native.scripts.map(x => x.sha256)));
+
+  // Neither deduplication nor parsing is allowed to mutate originals.
+  assert.equal(await readFile(a, 'utf8'), script);
+  assert.equal(await readFile(b, 'utf8'), script);
+  assert.equal(await readFile(c, 'utf8'), different);
+});
