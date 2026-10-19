@@ -405,7 +405,7 @@ test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and 
    return copy;
  };
  const proxy=new Proxy({broken:both.broken,fixed:both.fixed},{
-   ownKeys:poison,
+   ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');},
    getOwnPropertyDescriptor:poison
  });
  const malformedReports=[
@@ -424,7 +424,7 @@ test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and 
      'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
  }
  for(const v of [
-   new Proxy(visited,{get:poison,ownKeys:poison}),
+   new Proxy(visited,{get:poison,ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');}}),
    {broken:true,get fixed(){return poison();}},
    {...visited,authorization:'forged'}
  ]){
@@ -445,8 +445,8 @@ test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and 
    fullPageVerified:false as const,userscriptVerified:false as const
  };
  const badSamples:unknown[]=[
-   new Proxy(sample,{get:poison,ownKeys:poison}),
-   {...sample,selectorCounts:new Proxy(sample.selectorCounts,{get:poison,ownKeys:poison})},
+   new Proxy(sample,{get:poison,ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');}}),
+   {...sample,selectorCounts:new Proxy(sample.selectorCounts,{get:poison,ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');}})},
    {...sample,summary:{...sample.summary,get elementCount(){return poison();}}},
    {...sample,get observedAt(){return poison();}}
  ];
@@ -471,15 +471,15 @@ test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and 
    gmApiVerified:false,businessVerified:false
  }};
  const hostileDom=[
-   new Proxy(validDom,{get:poison,ownKeys:poison}),
+   new Proxy(validDom,{get:poison,ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');}}),
    {...validDom,get fixed(){return poison();}},
    {...validDom,fixed:{...validDom.fixed,get actionCount(){return poison();}}},
-   {...validDom,fixed:new Proxy(validDom.fixed,{get:poison,ownKeys:poison})}
+   {...validDom,fixed:new Proxy(validDom.fixed,{get:poison,ownKeys:()=>{throw Error('UNTRUSTED_REFLECTION_TRAP');}})}
  ];
  for(const value of hostileDom){
    assert.doesNotThrow(()=>correlateManualFixtureEvidence(both,visited,value));
    assert.notEqual(correlateManualFixtureEvidence(both,visited,value).status,
       'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
  }
- assert.equal(called,0,'untrusted getters/traps must never execute');
+ assert.equal(called,0,'untrusted property getters/get traps must never execute');
 });
