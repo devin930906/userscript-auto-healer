@@ -8,6 +8,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import {link,lstat,open,unlink} from 'node:fs/promises';
+import {constants} from 'node:fs';
 import {basename,isAbsolute,join} from 'node:path';
 import type {LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyStagedCandidateReadOnly} from './staged-candidate-recheck';
@@ -177,4 +178,122 @@ export async function stageRecoveryCheckpointOnly(
     // Never leak full paths or source contents in error messages.
     return block('CHECKPOINT_FAILED');
   }
+}
+
+
+/** Reinspect a persisted checkpoint after losing the in-memory stage receipt.
+ * A matching journal plus live disk bytes is still NOT write authorization,
+ * recovery capability, Tampermonkey provenance, or business acceptance.
+ */
+export type CheckpointInspectionResult=
+  |Readonly<{status:'BLOCKED';reason:Reason}&typeof noAuthority>
+  |Readonly<{status:'CHECKPOINT_RECHECKED_READ_ONLY';
+    checkpointSha256:string;originalSha256:string;candidateSha256:string
+  }&typeof noAuthority>;
+
+export async function inspectRecoveryCheckpointReadOnly(
+  request:LiteralPatchRequest,checkpointFileName:unknown,
+  untrustedOptions:unknown
+):Promise<CheckpointInspectionResult>{
+  try{
+    const opts=optionsFrom(untrustedOptions);
+    if(!opts)return block('INVALID_REQUEST');
+    if(!opts.userApproved)return block('NOT_AUTHORIZED');
+    if(typeof checkpointFileName!=='string')return block('INVALID_REQUEST');
+    const uuid='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+    const name=new RegExp('^(.+)\\.('+uuid+')\\.checkpoint\\.json$').exec(checkpointFileName);
+    if(!name||name[1]!==checkpointPrefix(opts.sourcePath))
+      return block('INVALID_REQUEST');
+    if(await hasUnsafePathLink(opts.backupDirectory))
+      return block('UNSAFE_DESTINATION');
+    const folderBefore=await lstat(opts.backupDirectory,{bigint:true});
+    if(!folderBefore.isDirectory()||folderBefore.isSymbolicLink())
+      return block('UNSAFE_DESTINATION');
+    const path=join(opts.backupDirectory,checkpointFileName);
+    if(await hasUnsafePathLink(path))return block('UNSAFE_DESTINATION');
+    const fileBefore=await lstat(path,{bigint:true});
+    if(!fileBefore.isFile()||fileBefore.isSymbolicLink()||
+      fileBefore.nlink!==1n||fileBefore.size<=0n||fileBefore.size>4096n)
+      return block('CHECKPOINT_FAILED');
+    const handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+    let bytes:Buffer;
+    try{
+      const opened=await handle.stat({bigint:true});
+      if(!opened.isFile()||opened.nlink!==1n||
+        opened.dev!==fileBefore.dev||opened.ino!==fileBefore.ino||
+        opened.size!==fileBefore.size||opened.mtimeNs!==fileBefore.mtimeNs||
+        opened.ctimeNs!==fileBefore.ctimeNs)
+        return block('CHECKPOINT_FAILED');
+      const buffer=Buffer.allocUnsafe(4097);
+      let count=0;
+      while(true){
+        const {bytesRead}=await handle.read(buffer,count,4097-count,null);
+        if(bytesRead===0)break;
+        count+=bytesRead;
+        if(count>4096)return block('CHECKPOINT_FAILED');
+      }
+      const after=await handle.stat({bigint:true});
+      const named=await lstat(path,{bigint:true});
+      if(named.isSymbolicLink()||!named.isFile()||named.nlink!==1n||
+        after.dev!==fileBefore.dev||after.ino!==fileBefore.ino||
+        after.size!==fileBefore.size||after.mtimeNs!==fileBefore.mtimeNs||
+        after.ctimeNs!==fileBefore.ctimeNs||
+        named.dev!==after.dev||named.ino!==after.ino||
+        named.size!==after.size||named.mtimeNs!==after.mtimeNs||
+        named.ctimeNs!==after.ctimeNs||BigInt(count)!==after.size)
+        return block('CHECKPOINT_FAILED');
+      bytes=Buffer.from(buffer.subarray(0,count));
+    }finally{await handle.close();}
+    const text=bytes.toString('utf8');
+    let parsed:unknown;
+    try{parsed=JSON.parse(text);}catch{return block('CHECKPOINT_FAILED');}
+    const fields=values(parsed,[
+      'schemaVersion','status','sourcePathSha256','originalSha256',
+      'candidateSha256','candidateByteLength','backupFileName',
+      'candidateFileName','automaticPatchAllowed','automaticRollbackAllowed',
+      'tampermonkeyVerified','businessVerified'
+    ]);
+    if(!fields||JSON.stringify(parsed)+'\n'!==text||
+       fields.schemaVersion!==1||
+       fields.status!=='RECOVERY_CHECKPOINT_UNVERIFIED'||
+       fields.sourcePathSha256!==createHash('sha256')
+         .update(opts.sourcePath,'utf8').digest('hex')||
+       fields.automaticPatchAllowed!==false||
+       fields.automaticRollbackAllowed!==false||
+       fields.tampermonkeyVerified!==false||fields.businessVerified!==false)
+      return block('CHECKPOINT_FAILED');
+    const receipt={
+      status:'CANDIDATE_STAGED_RUNTIME_UNVERIFIED',
+      backupFileName:fields.backupFileName,
+      candidateFileName:fields.candidateFileName,
+      originalSha256:fields.originalSha256,
+      candidateSha256:fields.candidateSha256,
+      candidateByteLength:fields.candidateByteLength,
+      ...noAuthority
+    };
+    const stableRequest=values(request,[
+      'source','expectedSourceSha256','callOffset','method',
+      'originalSelector','replacementSelector','faultEvidenceId'
+    ]);
+    if(!stableRequest)return block('INVALID_REQUEST');
+    const check=await verifyStagedCandidateReadOnly(
+      stableRequest as unknown as LiteralPatchRequest,receipt,opts
+    );
+    if(check.status!=='CANDIDATE_RECHECKED_READ_ONLY')
+      return block('RECHECK_FAILED');
+    if(await verifyExactCandidateBytesReadOnly(path,bytes)!=='MATCH')
+      return block('CHECKPOINT_FAILED');
+    if(await hasUnsafePathLink(opts.backupDirectory))
+      return block('UNSAFE_DESTINATION');
+    const folderAfter=await lstat(opts.backupDirectory,{bigint:true});
+    if(folderAfter.isSymbolicLink()||!folderAfter.isDirectory()||
+       !sameDirectory(folderBefore,folderAfter))
+      return block('UNSAFE_DESTINATION');
+    return Object.freeze({
+      status:'CHECKPOINT_RECHECKED_READ_ONLY' as const,
+      checkpointSha256:createHash('sha256').update(bytes).digest('hex'),
+      originalSha256:check.originalSha256,candidateSha256:check.candidateSha256,
+      ...noAuthority
+    });
+  }catch{return block('CHECKPOINT_FAILED');}
 }
