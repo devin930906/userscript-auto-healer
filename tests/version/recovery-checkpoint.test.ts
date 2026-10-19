@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
 import {stageReviewedCandidateOnly} from '../../src/version/staged-candidate';
-import {stageRecoveryCheckpointOnly} from '../../src/version/recovery-checkpoint';
+import {stageRecoveryCheckpointOnly,inspectRecoveryCheckpointReadOnly} from '../../src/version/recovery-checkpoint';
 
 const source=[
  '// ==UserScript==',
@@ -64,6 +64,17 @@ test('TEST-020: persist a bounded recovery checkpoint without changing source or
   assert.equal(json.tampermonkeyVerified,false);
   assert.equal(json.businessVerified,false);
   assert.equal(output.checkpointSha256,hash(bytes));
+  // Rebuild the recovery observation from the persisted filename; no in-memory
+  // staged receipt is passed to the reader, and no original file is written.
+  const restored=await inspectRecoveryCheckpointReadOnly(
+    request,output.checkpointFileName,opts
+  );
+  assert.equal(restored.status,'CHECKPOINT_RECHECKED_READ_ONLY',JSON.stringify(restored));
+  if(restored.status==='CHECKPOINT_RECHECKED_READ_ONLY'){
+    assert.equal(restored.checkpointSha256,hash(bytes));
+    assert.equal(restored.originalSha256,hash(source));
+    assert.equal(restored.automaticRollbackAllowed,false);
+  }
   assert.equal(output.automaticPatchAllowed,false);
   assert.equal(output.automaticRollbackAllowed,false);
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
@@ -114,5 +125,39 @@ test('TEST-020: stale source or modified staged candidate never yields checkpoin
   assert.equal(changed.status,'BLOCKED');
   assert.equal((await readdir(opts.backupDirectory)).length,2);
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
+
+test('TEST-020: a forged or stale persisted checkpoint never gains restore authority',async()=>{
+ await fixture(async opts=>{
+  const stage=await stageReviewedCandidateOnly(request,candidate,opts);
+  assert.equal(stage.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+  if(stage.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const saved=await stageRecoveryCheckpointOnly(request,stage,opts);
+  assert.equal(saved.status,'CHECKPOINT_STAGED_UNVERIFIED');
+  if(saved.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+  const file=join(opts.backupDirectory,saved.checkpointFileName);
+  const original=await readFile(file);
+  const poisoned=JSON.parse(original.toString('utf8')) as Record<string,unknown>;
+  poisoned.automaticRollbackAllowed=true;
+  await writeFile(file,JSON.stringify(poisoned)+'\n');
+  const forged=await inspectRecoveryCheckpointReadOnly(
+    request,saved.checkpointFileName,opts
+  );
+  assert.equal(forged.status,'BLOCKED');
+  assert.equal(forged.automaticRollbackAllowed,false);
+  await writeFile(file,original);
+  const foreign=await inspectRecoveryCheckpointReadOnly(
+    request,'unrelated.00000000-0000-4000-8000-000000000000.checkpoint.json',opts
+  );
+  assert.equal(foreign.status,'BLOCKED');
+  await writeFile(opts.sourcePath,source+'// external editor\n');
+  const stale=await inspectRecoveryCheckpointReadOnly(
+    request,saved.checkpointFileName,opts
+  );
+  assert.equal(stale.status,'BLOCKED');
+  assert.equal(stale.automaticPatchAllowed,false);
+  assert.equal((await readdir(opts.backupDirectory)).length,3);
  });
 });
