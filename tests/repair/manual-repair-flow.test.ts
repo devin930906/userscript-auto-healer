@@ -1,0 +1,127 @@
+import {test} from 'node:test';
+import {strict as assert} from 'node:assert';
+import {createHash} from 'node:crypto';
+import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
+import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
+import {prepareManualRepairExportOnly} from '../../src/repair/manual-repair-flow';
+
+const header='// ==UserScript==\n// @name Manual repair flow\n'+
+  '// @match https://example.com/*\n// @grant none\n// ==/UserScript==\n';
+const source=header+"const target=document.querySelector('#old');\n";
+const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex');
+const patch:LiteralPatchRequest={
+  source,expectedSourceSha256:hash(source),
+  callOffset:source.indexOf('document.querySelector'),
+  method:'querySelector',originalSelector:'#old',
+  replacementSelector:'#new',faultEvidenceId:'scenario_assertion_1'
+};
+const scenario:ScenarioInput={
+  id:'manual_test',scriptSha256:hash(source),
+  userApproved:true,requiresLogin:false,targetUrl:'https://example.com/',
+  steps:[],assertions:[
+    {kind:'selector-present',selector:'#old'},
+    {kind:'selector-present',selector:'#new'}
+  ]
+};
+function sample(time:string,oldCount=0,newCount=1){
+  return {ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+    observedAt:time,originMatchesApproved:true as const,routeChanged:false,
+    summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,blindSpots:[]},
+    selectorCounts:{'#old':oldCount,'#new':newCount},
+    fullPageVerified:false as const,userscriptVerified:false as const};
+}
+const samples=()=>({ok:true as const,
+  status:'LIMITED_DYNAMIC_OBSERVATION' as const,
+  samples:[sample('2026-10-19T00:00:00Z'),sample('2026-10-19T00:00:01Z')],
+  routeChangeDetected:false,selectorCountChanged:false,domCountChanged:false,
+  userscriptVerified:false as const
+});
+async function fixture(run:(opts:{
+ sourcePath:string;backupDirectory:string;exportDirectory:string;userApproved:boolean
+})=>Promise<void>){
+ const root=await mkdtemp(join(tmpdir(),'uah-repair-flow-'));
+ const opts={sourcePath:join(root,'fixture.user.js'),
+   backupDirectory:join(root,'backups'),
+   exportDirectory:join(root,'manual-exports'),userApproved:true};
+ try{
+   await mkdir(opts.backupDirectory);
+   await mkdir(opts.exportDirectory);
+   await writeFile(opts.sourcePath,source);
+   await run(opts);
+ }finally{await rm(root,{recursive:true,force:true});}
+}
+
+test('TEST-014/019/020/023: stable DOM failure becomes separate reviewed manual file, never auto-apply',async()=>{
+ await fixture(async opts=>{
+   const result=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+   assert.equal(result.status,'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',JSON.stringify(result));
+   if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')return;
+   const staged=await readFile(join(opts.backupDirectory,result.candidateFileName),'utf8');
+   const exported=await readFile(join(opts.exportDirectory,result.exportFileName),'utf8');
+   assert.equal(exported,staged);
+   assert.equal(exported,header+'const target=document.querySelector("#new");\n');
+   assert.equal(result.sourceSha256,hash(source));
+   assert.equal(result.candidateSha256,hash(exported));
+   assert.equal(result.candidateByteLength,Buffer.byteLength(exported));
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.tampermonkeyVerified,false);
+   assert.equal(result.managerInstalled,false);
+   assert.equal(result.businessVerified,false);
+   assert.deepEqual(await readFile(opts.sourcePath,'utf8'),source);
+   assert.deepEqual(await readFile(join(opts.backupDirectory,result.backupFileName),'utf8'),source);
+   assert.deepEqual((await readdir(opts.backupDirectory)).sort(),
+     [result.backupFileName,result.candidateFileName].sort());
+   assert.equal((await readdir(opts.exportDirectory)).length,1);
+   assert.equal(JSON.stringify(result).includes(opts.sourcePath),false);
+ });
+});
+
+test('TEST-014/019: conflicting or forged DOM observations leave disk untouched',async()=>{
+ await fixture(async opts=>{
+  const mismatched={...samples(),samples:[
+    sample('2026-10-19T00:00:00Z',0,0),
+    sample('2026-10-19T00:00:01Z',0,0)
+  ]};
+  for(const [p,s,observation] of [
+    [patch,scenario,mismatched],
+    [patch,{...scenario,userApproved:false},samples()],
+    [{...patch,replacementSelector:'#evil'},scenario,samples()],
+    [Object.create(patch),scenario,samples()],
+    [patch,scenario,{...samples(),routeChangeDetected:true}]
+  ] as const){
+    const output=await prepareManualRepairExportOnly(p,s,observation,opts);
+    assert.equal(output.status,'BLOCKED');
+    assert.equal(output.automaticPatchAllowed,false);
+    assert.equal(output.managerInstalled,false);
+  }
+  const unauthorized=await prepareManualRepairExportOnly(
+    patch,scenario,samples(),{...opts,userApproved:false});
+  assert.equal(unauthorized.status,'BLOCKED');
+  assert.deepEqual(await readdir(opts.backupDirectory),[]);
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
+test('TEST-020/023: stale source or invalid export location never modifies selected original',async()=>{
+ await fixture(async opts=>{
+  await writeFile(opts.sourcePath,source+'// external change\n');
+  const stale=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+  assert.equal(stale.status,'BLOCKED');
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source+'// external change\n');
+  await writeFile(opts.sourcePath,source);
+  const invalid=await prepareManualRepairExportOnly(patch,scenario,samples(),{
+    ...opts,exportDirectory:opts.backupDirectory
+  });
+  assert.equal(invalid.status,'BLOCKED');
+  assert.equal(invalid.automaticPatchAllowed,false);
+  assert.equal(invalid.businessVerified,false);
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
