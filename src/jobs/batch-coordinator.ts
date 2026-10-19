@@ -41,6 +41,9 @@ const authority={
  businessVerified:false as const
 };
 function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|null{
+ // Hostile Proxies can throw during descriptor or prototype inspection.
+ // Treat them as invalid input, never propagate their arbitrary errors.
+ try{
  if(!input||typeof input!=='object'||Array.isArray(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
@@ -52,8 +55,10 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  const output:Record<string,unknown>=Object.create(null);
  for(const key of keys)output[key]=descriptors[key].value;
  return output;
+ }catch{return null;}
 }
 function validateOptions(options:Options):Required<Options>{
+ try{
  // Inspect own descriptors first; never invoke accessor properties while
  // validating potentially hostile batch options.
  if(!options||typeof options!=='object'||Array.isArray(options))
@@ -77,11 +82,13 @@ function validateOptions(options:Options):Required<Options>{
     !Number.isSafeInteger(concurrency)||concurrency<1||
     concurrency>MAX_CONCURRENCY)throw Error('INVALID_BATCH_OPTIONS');
  return {count,maxAttempts,concurrency};
+ }catch{throw Error('INVALID_BATCH_OPTIONS');}
 }
 /** No checkpoint contains a script name or an event log. A caller must not
  * treat this mutable progress format as a signed, persistent audit ledger.
  */
 function validateCheckpoint(input:unknown,opts:Required<Options>):MutableJob[]{
+ try{
  const top=exactData(input,[
   'schema','phase','maxAttempts','concurrency','jobs',
   'automaticPatchAllowed','automaticRollbackAllowed',
@@ -123,6 +130,7 @@ function validateCheckpoint(input:unknown,opts:Required<Options>):MutableJob[]{
   jobs.push({ordinal:i,state,attempts:job.attempts});
  }
  return jobs;
+ }catch{throw Error('INVALID_BATCH_CHECKPOINT');}
 }
 export class ReadOnlyBatchCoordinator{
  private readonly jobs:MutableJob[];
