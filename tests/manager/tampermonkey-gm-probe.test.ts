@@ -67,7 +67,7 @@ test('TEST-017: document-start invokes GM at injection and defers DOM until read
      assert.equal(options.once,true);
      handler=callback;
    },
-   querySelector:()=>{effects.queries++;return {setAttribute:()=>effects.actions++};}
+   querySelector:()=>{effects.queries++;return {setAttribute:()=>effects.actions++,getAttribute:()=> 'done'};}
  };
  const clock=class extends Date{static now(){return now;}};
  runInNewContext(probe.source,{
@@ -109,6 +109,37 @@ test('TEST-017: document-start expired while parsing never mutates DOM or report
  handler?.();
  assert.deepEqual(effects,{gm:1,query:0,report:0});
 });
+test('TEST-018: fixed-mode action must be read back, not inferred from selector existence',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const outcomes:boolean[]=[];
+ for(const persists of [false,true]){
+   let actualAttribute:string|undefined;
+   runInNewContext(probe.source,{
+     Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+     location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+     document:{readyState:'complete',querySelector:()=>({
+       setAttribute:(_name:string,value:string)=>{
+         if(persists)actualAttribute=value;
+       },
+       getAttribute:(_name:string)=>actualAttribute
+     })},
+     GM_getValue:(_key:string,fallback:string)=>fallback,
+     fetch:(_url:string,options:{body:string})=>{
+       const report=JSON.parse(options.body) as {businessAction:boolean};
+       outcomes.push(report.businessAction);
+       return Promise.resolve();
+     }
+   });
+ }
+ // A DOM element can exist while an action has not actually taken effect.
+ // Even a matching self-report must NEVER be treated as manager attestation.
+ assert.deepEqual(outcomes,[false,true]);
+});
+
 test('TEST-017/018 stage: isolated local probe generates explicit GM userscript but no verified claims',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
@@ -299,7 +330,7 @@ test('TEST-017: installed temporary fixture stops all DOM/GM/network effects aft
  t.after(()=>probe.stop());
  const execute=(now:number)=>{
    const effects={queries:0,attributes:0,gmCalls:0,network:0};
-   const target={setAttribute:()=>{effects.attributes++;}};
+   const target={setAttribute:()=>{effects.attributes++;},getAttribute:()=> 'done'};
    const clock=class extends Date {static now(){return now;}};
    runInNewContext(probe.source,{
      Date:clock,URL,
