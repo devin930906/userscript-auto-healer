@@ -37,7 +37,10 @@ interface Window {
       tampermonkeyVerified:false;businessVerified:false}>;
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
-      evidenceCount?:number;tampermonkeyVerified:false;businessVerified:false;
+      evidenceCount?:number;
+      pageRuntimeStatus?:'PAGE_EXCEPTION_SIGNAL_ONLY'|'NO_EXCEPTION_IN_WINDOW_ONLY';
+      pageExceptionCount?:number;
+      tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
@@ -509,7 +512,7 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
   return;
  }
  scenarioInspectionBusy=true;browserControls();
- if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权并执行限定 DOM 检查；这不是业务验收。';
+ if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权；限定 DOM 检查和短时页面 JavaScript 异常观察都不是业务验收。';
  try{
   const result=await window.healer.inspectScenario(id);
   if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
@@ -517,7 +520,12 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
       ' 项；故障信号 '+(result.faultCategory??'UNKNOWN')+
       ' / '+(result.triageStatus??'UNKNOWN')+
       '，证据数 '+(result.evidenceCount??0)+
-      '。仅限 DOM，Tampermonkey、GM 和真实业务未验证。'
+      '；页面 JavaScript 异常：'+(result.pageRuntimeStatus==='PAGE_EXCEPTION_SIGNAL_ONLY'
+        ?'在 1.2 秒窗口观察到 '+(result.pageExceptionCount??0)+' 次（不能归因油猴脚本）'
+        :result.pageRuntimeStatus==='NO_EXCEPTION_IN_WINDOW_ONLY'
+          ?'1.2 秒窗口未观察到（不代表没有异常）'
+          :'未取得可靠的页面异常观察')+
+      '。仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
    :'场景检查未通过：'+(result.code??'UNKNOWN')+
       '。没有获得 Tampermonkey 或业务验证结果。';
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
