@@ -5,6 +5,7 @@
  * Neither HTTP self-reports nor CDP page metadata attest extension provenance,
  * GM calls or business success. No existing scripts/profiles are ever edited.
  */
+import {isProxy} from 'node:util/types';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {openApprovedTarget,type OpenTargetResult} from '../browser/cdp-target';
@@ -182,7 +183,7 @@ function descriptorFields(
  value:unknown,allowed:readonly string[],exact=false
 ):Record<string,unknown>|null{
  try{
-   if(value===null||typeof value!=='object'||Array.isArray(value))return null;
+   if(value===null||typeof value!=='object'||isProxy(value)||Array.isArray(value))return null;
    const proto=Object.getPrototypeOf(value);
    if(proto!==Object.prototype&&proto!==null)return null;
    const descriptors=Object.getOwnPropertyDescriptors(value);
