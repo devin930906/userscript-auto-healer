@@ -54,10 +54,18 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  return output;
 }
 function validateOptions(options:Options):Required<Options>{
- const value=exactData(options,options.maxAttempts===undefined&&options.concurrency===undefined
-   ?['count']:options.maxAttempts===undefined?['count','concurrency']:
-    options.concurrency===undefined?['count','maxAttempts']:
-    ['count','maxAttempts','concurrency']);
+ // Inspect own descriptors first; never invoke accessor properties while
+ // validating potentially hostile batch options.
+ if(!options||typeof options!=='object'||Array.isArray(options))
+   throw Error('INVALID_BATCH_OPTIONS');
+ const descriptors=Object.getOwnPropertyDescriptors(options);
+ const allowed=['count','maxAttempts','concurrency'] as const;
+ const keys=Reflect.ownKeys(descriptors);
+ if(!Object.prototype.hasOwnProperty.call(descriptors,'count')||
+    keys.length>allowed.length||
+    keys.some(key=>typeof key!=='string'||!allowed.includes(key as typeof allowed[number])))
+   throw Error('INVALID_BATCH_OPTIONS');
+ const value=exactData(options,keys as string[]);
  if(!value)throw Error('INVALID_BATCH_OPTIONS');
  const count=value.count;
  const maxAttempts=value.maxAttempts??2;
@@ -86,14 +94,26 @@ function validateCheckpoint(input:unknown,opts:Required<Options>):MutableJob[]{
     top.tampermonkeyVerified!==false||top.businessVerified!==false||
     !Array.isArray(top.jobs)||top.jobs.length!==opts.count)
    throw Error('INVALID_BATCH_CHECKPOINT');
+ // Checkpoint arrays are untrusted: accessor-backed elements can have
+ // side effects, and sparse/extra properties must never be accepted.
+ const entries=top.jobs as unknown[];
+ if(Object.getPrototypeOf(entries)!==Array.prototype)
+   throw Error('INVALID_BATCH_CHECKPOINT');
+ const slots=Object.getOwnPropertyDescriptors(entries);
+ if(Reflect.ownKeys(slots).length!==opts.count+1)
+   throw Error('INVALID_BATCH_CHECKPOINT');
  const jobs:MutableJob[]=[];
  for(let i=0;i<opts.count;i++){
-  const job=exactData(top.jobs[i],['ordinal','state','attempts']);
+  const slot=slots[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
+    throw Error('INVALID_BATCH_CHECKPOINT');
+  const job=exactData(slot.value,['ordinal','state','attempts']);
   if(!job||job.ordinal!==i||!validState.has(job.state as BatchJobState)||
      typeof job.attempts!=='number'||!Number.isSafeInteger(job.attempts)||
      job.attempts<0||job.attempts>opts.maxAttempts||
      ((job.state==='RUNNING'||job.state==='SUCCEEDED'||job.state==='FAILED')&&
-      job.attempts===0))
+      job.attempts===0)||
+     (job.state==='QUEUED'&&job.attempts===opts.maxAttempts))
     throw Error('INVALID_BATCH_CHECKPOINT');
   // A killed read-only job may be retried at most within the original limit.
   // A completed job is never replayed just because the process restarted.
