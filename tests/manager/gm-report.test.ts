@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,sep} from 'node:path';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
 
 const flags={extensionAuthenticityVerified:false as const,
@@ -109,7 +109,7 @@ test('TEST-017: redirected directory and invalid report path cannot write native
   const valid=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
   assert.equal(valid.status,'UNVERIFIED_REPORT_READY');
   if(valid.status!=='UNVERIFIED_REPORT_READY')return;
-  for(const path of [join(other,'a.user.js'),'relative.json',join(other,'..','evil.json')]){
+  for(const path of [join(other,'a.user.js'),'relative.json',other+sep+'..'+sep+'evil.json']){
    const output=await saveLimitedGmReportOnly(valid.report,path,true);
    assert.equal(output.status,'BLOCKED');
   }

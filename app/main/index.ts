@@ -375,8 +375,7 @@ function registerSafeIpc(): void {
       const selected=await dialog.showSaveDialog(win,{
         title:'将未经认证的 GM 测试摘要另存为 JSON（不覆盖已有文件）',
         defaultPath:'UAH-GM-Fixture-Unverified.json',
-        filters:[{name:'JSON 报告',extensions:['json']}],
-        showOverwriteConfirmation:true
+        filters:[{name:'JSON 报告',extensions:['json']}]
       });
       if(selected.canceled||!selected.filePath)
         return {ok:false,code:'CANCELLED',...unverified};
