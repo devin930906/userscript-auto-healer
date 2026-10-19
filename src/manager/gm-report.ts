@@ -65,7 +65,7 @@ function validObservedAt(s:unknown):s is string{
  * Preserve only the numeric version; never export executable/Profile paths. */
 function validChromeVersion(value:unknown):value is string{
  return typeof value==='string'&&
-   /^\\d{1,4}(?:\\.\\d{1,8}){3}$/.test(value);
+   /^\d{1,4}(?:\.\d{1,8}){3}$/.test(value);
 }
 /** Check *relationships*, not merely schemas. A diagnostic JSON remains
  * explicitly unverified, but cannot falsely claim that two distinct DOM
