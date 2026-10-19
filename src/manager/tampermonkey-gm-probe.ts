@@ -192,15 +192,26 @@ export async function startIsolatedTampermonkeyGmProbe(
    }
    let body='';
    let oversized=false;
+   let disconnected=false;
+   // A peer may disconnect after headers but before Content-Length bytes.
+   // IncomingMessage then emits 'aborted' and may emit 'error' (ECONNRESET).
+   // Without an error listener, an incomplete loopback POST can terminate the
+   // privileged Electron main process. Never accept a partially read receipt.
+   const abandon=()=>{disconnected=true;body='';};
+   req.on('aborted',abandon);
+   req.on('error',abandon);
+   res.on('close',()=>{
+     if(!res.writableEnded)abandon();
+   });
    req.on('data',(chunk:Buffer)=>{
-     if(oversized)return;
+     if(oversized||disconnected)return;
      if(Buffer.byteLength(body)+chunk.length>MAX_BODY_BYTES){
        oversized=true;res.writeHead(413).end();return;
      }
      body+=chunk.toString('utf8');
    });
    req.on('end',()=>{
-     if(oversized||res.writableEnded)return;
+     if(disconnected||oversized||res.destroyed||res.writableEnded)return;
      // Recheck after the entire body arrives: a slow POST must not outlive
      // the consented probe interval merely because headers arrived in time.
      if(Date.now()>=expiresAt){res.writeHead(403).end();return;}

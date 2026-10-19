@@ -183,3 +183,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 沿用现有 `uah-manual-gm-fixture-v2` 合同，不修改 JSON schema 或权限。新增独立拒绝测试：报告采集时间必须在一次性测试服务截止时间之前；每个有限只读 DOM 观察时间不得晚于报告采集时间，也不得到达/超过测试截止时间。手动 broken/fixed 打开顺序不限，避免把正常逆序访问误判失败。对原生生成和持久保存两层同时检查，不允许格式合法却发生在未来或到期后的报告时间线进入文件。所有证据仍是未经认证的夹具摘要，绝不授权 Tampermonkey 安装、GM/业务 VERIFIED、自动修改或回滚。
 
 源码及当前提交验证记录以本轮对应 PR/Actions 为准；这项改动不代表完整 TEST-017/018、TEST-026、GATE-004/005/006 或最终 Stable 验收通过。
+
+## （7）TASK-007 / TEST-017/026 临时本机 GM 测试请求中断可靠性（2026-10-19）
+
+实际服务 `src/manager/tampermonkey-gm-probe.ts` 的 POST /receipt 流此前未处理客户端在完整 HTTP 头部后、请求体未收齐时的 IncomingMessage aborted/error 事件。增加断连清空部分数据、阻止晚到 end 接纳以及不泄露报错的错误监听。新增真实 loopback TCP 半包中断测试，确认断连后无回执、服务仍然响应正常 GET 与后续合法 POST，且任何回执仍恒为 `SELF_REPORTED_FIXTURE_ONLY`。此项仅验证本机临时测试服务韧性，**不**构成独立 Tampermonkey 身份、脚本安装、GM API、业务恢复或 Stable GATE 的证明。
