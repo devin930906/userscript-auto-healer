@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {importDroppedBytes} from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,previewImportedBatch} from '../../src/analyze/import-preview';
-import {previewImportedBatchOffMain} from '../../src/analyze/isolated-batch-preview';
+import {previewImportedBatchOffMain,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
 
 const header='// ==UserScript==\n// @name preview-test\n// @match https://example.org/*\n// ==/UserScript==\n';
 function imported(code:string){
@@ -123,4 +123,71 @@ test('TEST-004/022: one dropped userscript is parsed by the real isolated worker
  const [rejected]=await previewImportedBatchOffMain([invalid]);
  assert.equal(rejected.status,'INVALID_METADATA');
  assert.equal(rejected.automaticPatchAllowed,false);
+});
+
+test('TEST-011/022/026: isolated worker reply accepts only sanitized preview fields',()=>{
+ const original=previewImportedScriptAnalysis(imported(header+
+   'document.querySelector("#private-selector");'));
+ const clean=JSON.parse(JSON.stringify(original));
+ const received=validateIsolatedPreviewReply([clean],1);
+ assert.deepEqual(received,[original]);
+ assert.ok(received);
+ assert.notEqual(received![0],clean,'do not forward a worker-owned object directly');
+ assert.equal(JSON.stringify(received).includes('private-selector'),false);
+
+ // An unexpected field at any depth could carry private source/selector data.
+ assert.equal(validateIsolatedPreviewReply([{...clean,source:'SECRET_SOURCE'}],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,sites:[{...clean.sites[0],selector:'#SECRET_SELECTOR'}]
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,sites:[{...clean.sites[0],method:'document.cookie'}]
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,sites:[{...clean.sites[0],kind:'secret'}]
+ }],1),null);
+
+ // A syntactically plausible but contradictory result cannot claim evidence.
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,totalSites:10,literalSites:10,runtimeConfirmationSites:1
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,metadataStatus:'NOT_CHECKED'
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,sites:[{...clean.sites[0],line:0}]
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...clean,tampermonkeyVerified:true
+ }],1),null);
+});
+
+test('TEST-026: hostile worker-reply getters, proxies and array slots fail closed',()=>{
+ const preview=JSON.parse(JSON.stringify(previewImportedScriptAnalysis(
+   imported(header+'document.querySelector("#sensitive");'))));
+ let invoked=0;
+ const hostileSite={...preview.sites[0]};
+ Object.defineProperty(hostileSite,'method',{enumerable:true,
+   get(){invoked++;return 'querySelector';}});
+ assert.equal(validateIsolatedPreviewReply([{
+   ...preview,sites:[hostileSite]
+ }],1),null);
+ assert.equal(invoked,0);
+
+ const hostileTop={...preview};
+ Object.defineProperty(hostileTop,'sites',{enumerable:true,
+   get(){invoked++;return preview.sites;}});
+ assert.equal(validateIsolatedPreviewReply([hostileTop],1),null);
+ assert.equal(invoked,0);
+
+ const accessorArray=[preview];
+ Object.defineProperty(accessorArray,'0',{configurable:true,enumerable:true,
+   get(){invoked++;return preview;}});
+ assert.equal(validateIsolatedPreviewReply(accessorArray,1),null);
+ assert.equal(invoked,0);
+ assert.equal(validateIsolatedPreviewReply(new Array(1),1),null);
+ assert.equal(validateIsolatedPreviewReply(new Proxy([preview],{
+   ownKeys(){throw Error('PRIVATE_PROXY_ERROR');}
+ }),1),null);
+ assert.equal(validateIsolatedPreviewReply([Object.create({source:'leak'})],1),null);
 });

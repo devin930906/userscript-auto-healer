@@ -16,19 +16,127 @@ import {
 type Script=Pick<ImportedScript,'bytes'|'textEncoding'>;
 const WORKER_DEADLINE_MS=10000;
 
-function safeWorkerReply(value:unknown,count:number):value is ImportAnalysisPreview[]{
- if(!Array.isArray(value)||value.length!==count)return false;
+/** Treat worker messages as untrusted, even though today's worker is ours.
+ * No unexpected field (in particular source, paths or selector text) may
+ * cross this boundary. Copy only whitelisted scalar evidence into fresh
+ * objects; a message is all-or-nothing to avoid partial forged progress.
+ */
+const PREVIEW_KEYS=[
+ 'status','metadataStatus','totalSites','literalSites',
+ 'runtimeConfirmationSites','sites','tampermonkeyVerified',
+ 'businessVerified','automaticPatchAllowed'
+] as const;
+const SITE_KEYS=['line','column','method','kind'] as const;
+const PREVIEW_STATUSES=new Set([
+ 'STATIC_ANALYSIS_ONLY','SKIPPED_TOO_LARGE','INVALID_ENCODING',
+ 'INVALID_METADATA','PARSE_ERROR','SKIPPED_BATCH_BUDGET'
+]);
+const METADATA_STATUSES=new Set([
+ 'OK','MISSING_HEADER','UNTERMINATED_HEADER','INVALID_ENCODING','NOT_CHECKED'
+]);
+const SELECTOR_METHODS=new Set([
+ 'querySelector','querySelectorAll','getElementById',
+ 'getElementsByClassName','getElementsByName','getElementsByTagName',
+ '<dynamic-member>'
+]);
+function replyRecord(value:unknown,keys:readonly string[]):Record<string,unknown>|null{
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const proto=Object.getPrototypeOf(value);
+ if(proto!==Object.prototype&&proto!==null)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(value);
+ const names=Reflect.ownKeys(descriptors);
+ if(names.length!==keys.length||names.some(key=>typeof key!=='string')||
+    keys.some(key=>!Object.prototype.hasOwnProperty.call(descriptors,key)||
+      !Object.prototype.hasOwnProperty.call(descriptors[key],'value')))
+  return null;
+ const fields:Record<string,unknown>=Object.create(null);
+ for(const key of keys)fields[key]=descriptors[key].value;
+ return fields;
+}
+function replyArray(value:unknown,count:number):unknown[]|null{
+ if(!Array.isArray(value)||value.length!==count||
+    Object.getPrototypeOf(value)!==Array.prototype)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(value);
+ if(Reflect.ownKeys(descriptors).length!==count+1)return null;
+ const items:unknown[]=[];
+ for(let i=0;i<count;i++){
+  const slot=descriptors[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+  items.push(slot.value);
+ }
+ return items;
+}
+
+/** Internal reply-wire contract, exported for hostile-payload regression tests.
+ * It never authenticates an extension or gives repair/write permission.
+ */
+export function validateIsolatedPreviewReply(
+ value:unknown,count:number
+):ImportAnalysisPreview[]|null{
  try{
-  return value.every(x=>x&&typeof x==='object'&&!Array.isArray(x)&&
-   x.automaticPatchAllowed===false&&x.tampermonkeyVerified===false&&
-   x.businessVerified===false&&typeof x.status==='string'&&
-   ['STATIC_ANALYSIS_ONLY','SKIPPED_TOO_LARGE','INVALID_ENCODING',
-    'INVALID_METADATA','PARSE_ERROR','SKIPPED_BATCH_BUDGET'].includes(x.status)&&
-   Number.isSafeInteger(x.totalSites)&&x.totalSites>=0&&
-   Number.isSafeInteger(x.literalSites)&&x.literalSites>=0&&
-   Number.isSafeInteger(x.runtimeConfirmationSites)&&x.runtimeConfirmationSites>=0&&
-   Array.isArray(x.sites)&&x.sites.length<=8);
- }catch{return false;}
+  if(!Number.isSafeInteger(count)||count<0||count>MAX_BATCH_PREVIEW_FILES)
+   return null;
+  const rows=replyArray(value,count);
+  if(!rows)return null;
+  const safe:ImportAnalysisPreview[]=[];
+  for(const row of rows){
+   const x=replyRecord(row,PREVIEW_KEYS);
+   if(!x||typeof x.status!=='string'||!PREVIEW_STATUSES.has(x.status)||
+      typeof x.metadataStatus!=='string'||!METADATA_STATUSES.has(x.metadataStatus)||
+      x.automaticPatchAllowed!==false||x.tampermonkeyVerified!==false||
+      x.businessVerified!==false||
+      !Number.isSafeInteger(x.totalSites)||!(x.totalSites as number>=0)||
+      (x.totalSites as number)>MAX_ANALYSIS_BYTES||
+      !Number.isSafeInteger(x.literalSites)||!(x.literalSites as number>=0)||
+      !Number.isSafeInteger(x.runtimeConfirmationSites)||
+      !(x.runtimeConfirmationSites as number>=0)||
+      (x.literalSites as number)+(x.runtimeConfirmationSites as number)!==x.totalSites)
+    return null;
+   const sitesRaw=replyArray(x.sites,Math.min(8,x.totalSites as number));
+   if(!sitesRaw)return null;
+   if(x.status==='STATIC_ANALYSIS_ONLY'){
+    if(x.metadataStatus!=='OK')return null;
+   }else{
+    if(x.totalSites!==0||sitesRaw.length!==0)return null;
+    if(x.status==='INVALID_ENCODING'&&x.metadataStatus!=='INVALID_ENCODING')
+     return null;
+    if(x.status==='INVALID_METADATA'&&
+       x.metadataStatus!=='MISSING_HEADER'&&x.metadataStatus!=='UNTERMINATED_HEADER')
+     return null;
+    if((x.status==='SKIPPED_TOO_LARGE'||x.status==='SKIPPED_BATCH_BUDGET')&&
+       x.metadataStatus!=='NOT_CHECKED')return null;
+    if(x.status==='PARSE_ERROR'&&x.metadataStatus!=='OK'&&
+       x.metadataStatus!=='NOT_CHECKED')return null;
+   }
+   const sites:ImportAnalysisPreview['sites'][number][]=[];
+   for(const item of sitesRaw){
+    const s=replyRecord(item,SITE_KEYS);
+    if(!s||!Number.isSafeInteger(s.line)||!(s.line as number>=1)||
+       (s.line as number)>MAX_ANALYSIS_BYTES+1||
+       !Number.isSafeInteger(s.column)||!(s.column as number>=1)||
+       (s.column as number)>MAX_ANALYSIS_BYTES+1||
+       typeof s.method!=='string'||!SELECTOR_METHODS.has(s.method)||
+       (s.kind!=='literal'&&s.kind!=='needs-runtime-confirmation'))
+      return null;
+    sites.push(Object.freeze({
+     line:s.line as number,column:s.column as number,
+     method:s.method,kind:s.kind
+    }));
+   }
+   safe.push(Object.freeze({
+    status:x.status as ImportAnalysisPreview['status'],
+    metadataStatus:x.metadataStatus as ImportAnalysisPreview['metadataStatus'],
+    totalSites:x.totalSites as number,literalSites:x.literalSites as number,
+    runtimeConfirmationSites:x.runtimeConfirmationSites as number,
+    sites:Object.freeze(sites),tampermonkeyVerified:false as const,
+    businessVerified:false as const,automaticPatchAllowed:false as const
+   }));
+  }
+  return Object.freeze(safe) as unknown as ImportAnalysisPreview[];
+ }catch{
+  // Malicious Proxy traps and accessor-backed arrays cannot inject errors or data.
+  return null;
+ }
 }
 
 /** No paths, original file names or authenticated state are passed to the
@@ -82,7 +190,8 @@ export async function previewImportedBatchOffMain(
   };
   const cancel=()=>finish(null,true);
   worker.on('message',(value:unknown)=>{
-   finish(safeWorkerReply(value,selected.length)?value:null,false);
+   const checked=validateIsolatedPreviewReply(value,selected.length);
+   finish(checked,checked===null);
   });
   worker.on('error',()=>finish(null,true));
   worker.on('exit',()=>finish(null,false));
