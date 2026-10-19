@@ -57,6 +57,8 @@ test('TEST-017: incomplete or malformed self-reports fail closed; never claim re
  const awaiting={...session,snapshot:()=>({...summary,
    status:'AWAITING_BROWSER_VISITS' as const,observedModes:0,
    reportedGmDefaultMatched:false,reportedBrokenFailed:false,reportedFixedRecovered:false}),
+   consistencySnapshot:()=>({...consistency,
+     status:'AWAITING_BROWSER_VISITS' as const,comparedModes:0 as const}),
    domSnapshot:()=>({})};
  const pending=createLimitedGmReport(awaiting,Date.parse('2026-10-19T02:02:00.000Z'));
  assert.equal(pending.status,'UNVERIFIED_REPORT_READY');
