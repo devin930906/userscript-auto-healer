@@ -72,7 +72,7 @@ export class DesktopScenarioSession{
       typeof scenario.assertions[0].selector!=='string'||
       scenario.assertions[0].selector.length>256||
       scenario.assertions[0].selector.trim()!==scenario.assertions[0].selector||
-      /[\\u0000-\\u001f]/.test(scenario.assertions[0].selector)||
+      /[\u0000-\u001f]/.test(scenario.assertions[0].selector)||
       typeof scenario.targetUrl!=='string')
      return {ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'};
    const url=new URL(scenario.targetUrl);
