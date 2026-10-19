@@ -187,3 +187,9 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-013 只读批处理协调阶段交接（2026-10-19）
 
 新增 `src/jobs/batch-coordinator.ts` 与 `tests/jobs/batch-coordinator.test.ts`，提供内存队列隔离、最多两个并发、有限瞬时重试、取消及不含脚本内容/路径的非权威恢复快照；绝不执行或写入真实脚本，也不授权应用/回滚、Tampermonkey/业务验证。具体提交和 CI 以本阶段 PR 实际合并及最终 main 核验为准。TASK-013 仍为开发中：真实批处理服务集成、经验证的持久恢复、受授权运行和 TEST-022 完整验收未完成；TASK-007/010/011/012 不得因此标记完成。
+
+## （7）TASK-017 原生选择导入取消与批次互斥阶段（2026-10-19）
+
+PR [#101](https://github.com/devin930906/userscript-auto-healer/pull/101) 对 app/main、app/preload、app/ui 和 src/import/import-service.ts 接入 Windows 原生文件／文件夹选择后的**只读**导入批次互斥与取消。仅 Electron 已授权主窗口可经固定无参数 IPC 请求取消；每次批次保留原生选择器给出的路径，不接受 renderer 任意文件路径。目录扫描和文件读取在文件边界协作式中止，已完成结果保留、未处理数量限于已知选中项目。补充 TEST-002/022 的提前取消、文件间取消、未修改源文件与 Electron 原生选择器并发负例，更新 TEST-026 严格 IPC 白名单。Windows 最终回归结果须对照 PR 当前 HEAD 的 Actions；未通过前不得标为完成。
+
+此阶段**没有**持久化可靠队列、已认证的真实 Tampermonkey GM/业务证据、自动修复/回滚权限，也没有正式 EXE/ZIP 制品。TASK-013/017 仍为开发中，TEST-022 与所有 Stable GATE 的完整验收继续受阻。不得将本轮取消功能视为修复引擎或 Stable 验收通过.

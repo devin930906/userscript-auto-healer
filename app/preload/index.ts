@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   validateConfig: (config: unknown): Promise<unknown> => ipcRenderer.invoke('config:validate', config),
   chooseFiles: (): Promise<unknown> => ipcRenderer.invoke('import:files'),
   chooseFolder: (): Promise<unknown> => ipcRenderer.invoke('import:folder'),
+  // Narrow cancellation only: no path, batch identifier, or elevated authority.
+  cancelNativeImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-native'),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   chooseChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-chrome'),
   chooseProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-profile'),

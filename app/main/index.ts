@@ -31,6 +31,9 @@ let probeInProgress = false;
 // Serialize native Chrome/Profile selection: IPC dialogs must not race each other
 // or a consented browser launch. This flag is not proof of user authorization.
 let nativeSelectionInProgress = false;
+// Only one native picker/import batch can own this cancellation capability.
+// It never authorizes a script change, a Chrome launch, or privileged file IPC.
+let nativeImportController: AbortController | null = null;
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -87,7 +90,9 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
 }
 function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>) {
   const previews=previewImportedBatch(result.scripts);
-  return {canceled:false, scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
+  return {canceled:result.canceled===true,
+    unprocessed:result.unprocessed??0,
+    scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
     errors:result.errors, duplicates:result.duplicates};
 }
 function registerSafeIpc(): void {
@@ -485,25 +490,42 @@ function registerSafeIpc(): void {
   });
 
   // Every path MUST come from the native OS picker, not renderer-provided input.
-  ipcMain.handle('import:files', async (event) => {
+  // The renderer may request a picker, but cannot supply filesystem paths.
+  // Keep the native-selected batch cancellable between bounded file reads.
+  const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    const win = mainWindow;
-    if (!win || win.isDestroyed()) throw new Error('NO_WINDOW');
-    const choice = await dialog.showOpenDialog(win, {
-      title:'选择 .user.js 文件', properties:['openFile','multiSelections'],
-      filters:[{name:'Userscript',extensions:['js']}]
-    });
-    if (choice.canceled) return {canceled:true,scripts:[],errors:[],duplicates:0};
-    return summarizeResult(await importApprovedPaths(choice.filePaths));
-  });
-  ipcMain.handle('import:folder', async (event) => {
+    if(nativeImportController)
+      return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
+        duplicates:0,unprocessed:0};
+    const win=mainWindow;
+    if(!win||win.isDestroyed()) throw new Error('NO_WINDOW');
+    const controller=new AbortController();
+    nativeImportController=controller;
+    try {
+      const choice=await dialog.showOpenDialog(win,kind==='files'
+        ? {title:'选择 .user.js 文件',properties:['openFile','multiSelections'],
+          filters:[{name:'Userscript',extensions:['js']}]}
+        : {title:'选择脚本文件夹',properties:['openDirectory']});
+      if(choice.canceled||win!==mainWindow||win.isDestroyed()||
+        controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
+        return {canceled:true,scripts:[],errors:[],duplicates:0,
+          unprocessed:controller.signal.aborted?choice.filePaths.length:0};
+      const result=kind==='files'
+        ? await importApprovedPaths(choice.filePaths,controller.signal)
+        : await scanApprovedDirectory(choice.filePaths[0],controller.signal);
+      // Cancellation during processing retains successful earlier imports.
+      return summarizeResult(result);
+    } finally {
+      if(nativeImportController===controller)nativeImportController=null;
+    }
+  };
+  ipcMain.handle('import:files', event=>runNativeImport(event,'files'));
+  ipcMain.handle('import:folder', event=>runNativeImport(event,'folder'));
+  ipcMain.handle('import:cancel-native', event=>{
     authorizeSender(event);
-    const win = mainWindow;
-    if (!win || win.isDestroyed()) throw new Error('NO_WINDOW');
-    const choice = await dialog.showOpenDialog(win, {title:'选择脚本文件夹',properties:['openDirectory']});
-    if (choice.canceled || choice.filePaths.length !== 1)
-      return {canceled:true,scripts:[],errors:[],duplicates:0};
-    return summarizeResult(await scanApprovedDirectory(choice.filePaths[0]));
+    if(!nativeImportController)return {ok:false,code:'NO_ACTIVE_IMPORT'};
+    nativeImportController.abort();
+    return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
   ipcMain.handle('import:dropped', (event, name:unknown, data:unknown) => {
     authorizeSender(event);
@@ -530,6 +552,7 @@ async function createMainWindow(): Promise<void> {
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
   win.on('closed', () => {
     if (mainWindow === win) {
+      nativeImportController?.abort();
       stopOnlyOwnedBrowser();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -551,7 +574,9 @@ async function createMainWindow(): Promise<void> {
         // Keep the first native picker pending while a second IPC tries to open.
         // This is a real Electron IPC concurrency regression, not static text matching.
         if(options.title?.startsWith('选择独立 Chrome') ||
-           options.title?.startsWith('选择已有的独立调试'))
+           options.title?.startsWith('选择已有的独立调试') ||
+           options.title?.startsWith('选择 .user.js 文件') ||
+           options.title?.startsWith('选择脚本文件夹'))
           await new Promise(resolve=>setTimeout(resolve,60));
         return ({
         canceled: false,
@@ -589,6 +614,16 @@ async function createMainWindow(): Promise<void> {
       "const raceSerialized=race.filter(x=>x.ok===true).length===1 && " +
       "race.filter(x=>x.code==='BROWSER_BUSY').length===1; " +
       "const declinedProfile=await a.createProfile(); const blockedLaunch=await a.startBrowser(9223); " +
+      "const noNativeCancel=await a.cancelNativeImport(); " +
+      "const pendingNativeFiles=a.chooseFiles(); " +
+      "await new Promise(resolve=>setTimeout(resolve,10)); " +
+      "const rejectedOverlap=await a.chooseFolder(); " +
+      "const requestedNativeCancel=await a.cancelNativeImport(); " +
+      "const cancelledNativeFiles=await pendingNativeFiles; " +
+      "const pendingNativeFolder=a.chooseFolder(); " +
+      "await new Promise(resolve=>setTimeout(resolve,10)); " +
+      "const requestedFolderCancel=await a.cancelNativeImport(); " +
+      "const cancelledNativeFolder=await pendingNativeFolder; " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -640,6 +675,10 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 1') && " +
       "document.getElementById('cancel-import').disabled === true && " +
+      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
+      "cancelledNativeFiles.canceled && cancelledNativeFiles.scripts.length === 0 && " +
+      "requestedFolderCancel.ok && cancelledNativeFolder.canceled && " +
+      "cancelledNativeFolder.scripts.length === 0 && " +
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
       "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
@@ -650,7 +689,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelNativeImport,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;

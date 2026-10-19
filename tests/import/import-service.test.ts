@@ -159,3 +159,43 @@ test('TEST-001: disk source is re-read and rehashed instead of accepting stale s
   assert.deepEqual(Buffer.from(second.scripts[0].bytes), changed);
   assert.notEqual(first.scripts[0].sha256, second.scripts[0].sha256);
 });
+
+test('TEST-002/022: canceled native selection does not read any script bytes', async t => {
+  const root = await workspace(t);
+  const path = join(root, 'untouched.user.js');
+  const source = Buffer.from(script);
+  await writeFile(path, source);
+  const controller = new AbortController();
+  controller.abort();
+  const outcome = await importApprovedPaths([path], controller.signal);
+  assert.equal(outcome.canceled, true);
+  assert.equal(outcome.unprocessed, 1);
+  assert.equal(outcome.scripts.length, 0);
+  assert.deepEqual(await readFile(path), source);
+
+  const folder = await scanApprovedDirectory(root, controller.signal);
+  assert.equal(folder.canceled, true);
+  assert.equal(folder.scripts.length, 0);
+});
+
+test('TEST-002/022: cancellation between files preserves completed results', async t => {
+  const root = await workspace(t);
+  const one = join(root, 'first.user.js');
+  const two = join(root, 'second.user.js');
+  const source = Buffer.from(script);
+  await writeFile(one, source);
+  await writeFile(two, source);
+  const controller = new AbortController();
+  // Deterministic cancellation after first entry is scheduled, while keeping
+  // filesystem reads intact. The second path must never be processed.
+  const chosen = [one, two];
+  Object.defineProperty(chosen, '0', {configurable:true,
+    get(){controller.abort();return one;}});
+  const outcome = await importApprovedPaths(chosen, controller.signal);
+  assert.equal(outcome.canceled, true);
+  assert.equal(outcome.unprocessed, 1);
+  assert.deepEqual(outcome.scripts.map(x=>x.filename), ['first.user.js']);
+  assert.equal(outcome.errors.length, 0);
+  assert.deepEqual(await readFile(one), source);
+  assert.deepEqual(await readFile(two), source);
+});

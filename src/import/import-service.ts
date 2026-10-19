@@ -39,6 +39,10 @@ export interface ImportOutcome {
   readonly scripts: ImportedScript[];
   readonly errors: ImportFailure[];
   duplicates: number;
+  /** Cancellation never erases successfully completed read-only imports. */
+  canceled?: boolean;
+  /** Native-selected items not started after a cancellation. */
+  unprocessed?: number;
 }
 
 function failure(name: string, code: ImportFailureCode): ImportFailure {
@@ -170,7 +174,7 @@ async function readBoundedSelectedFile(path:string,initial:BigIntStats):Promise<
   }
 }
 
-export async function importApprovedPaths(paths: readonly string[]): Promise<ImportOutcome> {
+export async function importApprovedPaths(paths: readonly string[], signal?: AbortSignal): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   const seen = new Set<string>();
   let totalBytes = 0;
@@ -178,7 +182,15 @@ export async function importApprovedPaths(paths: readonly string[]): Promise<Imp
     outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
     return outcome;
   }
-  for (const path of paths) {
+  for (let index = 0; index < paths.length; index++) {
+    // Cooperative cancellation takes effect between files; do not interrupt a
+    // descriptor read mid-flight or discard already validated script results.
+    if (signal?.aborted) {
+      outcome.canceled = true;
+      outcome.unprocessed = paths.length - index;
+      break;
+    }
+    const path = paths[index];
     const display = typeof path === 'string' ? basename(path) : '(invalid)';
     if (typeof path !== 'string' || !isAbsolute(path) || !validName(display)) {
       outcome.errors.push(failure(display, typeof path === 'string' && !validName(display) ? 'NOT_USER_SCRIPT' : 'INVALID_PATH'));
@@ -220,8 +232,9 @@ export async function importApprovedPaths(paths: readonly string[]): Promise<Imp
  * Scope is the user-picked root only. No symlink traversal, no external access,
  * depth/file/entry budgets, and per-entry error isolation.
  */
-export async function scanApprovedDirectory(root: string): Promise<ImportOutcome> {
+export async function scanApprovedDirectory(root: string, signal?: AbortSignal): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
+  if (signal?.aborted) { outcome.canceled = true; return outcome; }
   if (typeof root !== 'string' || !isAbsolute(root)) {
     outcome.errors.push(failure('(folder)', 'INVALID_PATH'));
     return outcome;
@@ -240,13 +253,14 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
   let visited = 0;
   let budgetExceeded = false;
   const walk = async (dir: string, depth: number): Promise<void> => {
-    if (budgetExceeded) return;
+    if (budgetExceeded || signal?.aborted) { if (signal?.aborted) outcome.canceled = true; return; }
     const entries: Dirent[] = [];
     try {
       // Enforce the traversal budget during enumeration, not after an
       // unbounded readdir allocation. Never follow symlink directory entries.
       const opened = await opendir(dir);
       for await (const entry of opened) {
+        if (signal?.aborted) { outcome.canceled = true; return; }
         if (visited + entries.length >= MAX_DIRECTORY_ENTRIES) {
           budgetExceeded = true;
           outcome.errors.push(failure(basename(dir), 'SCAN_LIMIT'));
@@ -257,6 +271,7 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
     } catch { outcome.errors.push(failure(basename(dir), 'IO_FAILURE')); return; }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
+      if (signal?.aborted) { outcome.canceled = true; return; }
       visited++;
       if (visited > MAX_DIRECTORY_ENTRIES || approved.length >= MAX_SELECTED_FILES) {
         budgetExceeded = true;
@@ -283,9 +298,16 @@ export async function scanApprovedDirectory(root: string): Promise<ImportOutcome
     }
   };
   await walk(base, 0);
-  const imported = await importApprovedPaths(approved);
+  if (signal?.aborted || outcome.canceled) {
+    outcome.canceled = true;
+    outcome.unprocessed = approved.length;
+    return outcome;
+  }
+  const imported = await importApprovedPaths(approved, signal);
   outcome.scripts.push(...imported.scripts);
   outcome.errors.push(...imported.errors);
   outcome.duplicates += imported.duplicates;
+  if (imported.canceled) outcome.canceled = true;
+  if (imported.unprocessed !== undefined) outcome.unprocessed = imported.unprocessed;
   return outcome;
 }

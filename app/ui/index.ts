@@ -14,6 +14,7 @@ interface Imported {
 }
 interface ImportResponse {
   canceled: boolean;
+  unprocessed?: number;
   scripts: Imported[];
   errors: { filename: string; code: string }[];
   duplicates: number;
@@ -23,6 +24,7 @@ interface Window {
     getStatus(): Promise<{ shell: string; automaticRepairAvailable: boolean; aiEnabled: boolean; automaticApplyEnabled: boolean }>;
     chooseFiles(): Promise<ImportResponse>;
     chooseFolder(): Promise<ImportResponse>;
+    cancelNativeImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
@@ -62,6 +64,7 @@ const dropZone = document.getElementById('drop-area');
 const seenScripts = new Set<string>();
 let busy = false;
 let activeImport = false;
+let nativeImportMode = false;
 let cancelRequested = false;
 // Session-only counters: no script bytes, paths or account data enter history.
 let acceptedCount = 0;
@@ -84,7 +87,7 @@ function logLine(message: string): void {
   output?.append(item);
 }
 function show(result: ImportResponse): void {
-  if (result.canceled) return;
+  // A canceled native batch may still contain earlier successfully read files.
   let duplicates = result.duplicates;
   for (const item of result.scripts) {
     // Path-based dedup in the main process; content identity in the renderer
@@ -120,6 +123,30 @@ async function locked(task: () => Promise<void>): Promise<void> {
     if (chooseFile) chooseFile.disabled = false;
     if (chooseFolder) chooseFolder.disabled = false;
     if (chooser) chooser.disabled = false;
+  }
+}
+
+async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
+  activeImport = true;
+  nativeImportMode = true;
+  cancelRequested = false;
+  if (cancelImport) cancelImport.disabled = false;
+  updateImportSummary();
+  try {
+    const result = kind === 'files'
+      ? await window.healer.chooseFiles()
+      : await window.healer.chooseFolder();
+    show(result);
+    if (result.canceled) {
+      unprocessedCount += result.unprocessed ?? 0;
+      logLine('原生选择导入已取消；已经完成的只读结果仍保留。');
+    }
+  } finally {
+    nativeImportMode = false;
+    activeImport = false;
+    cancelRequested = false;
+    if (cancelImport) cancelImport.disabled = true;
+    updateImportSummary();
   }
 }
 
@@ -234,11 +261,18 @@ cancelImport?.addEventListener('click', () => {
   cancelRequested = true;
   cancelImport.disabled = true;
   updateImportSummary();
+  if (nativeImportMode) {
+    // This requests cooperative cancellation; never claim a file read was
+    // stopped until the native IPC actually resolves.
+    void window.healer.cancelNativeImport().catch(() => {
+      logLine('原生导入取消请求未成功，需等待当前操作完成。');
+    });
+  }
 });
 updateImportSummary();
 
-chooseFile?.addEventListener('click', () => { void locked(async () => show(await window.healer.chooseFiles())); });
-chooseFolder?.addEventListener('click', () => { void locked(async () => show(await window.healer.chooseFolder())); });
+chooseFile?.addEventListener('click', () => { void locked(async () => importNativeSelection('files')); });
+chooseFolder?.addEventListener('click', () => { void locked(async () => importNativeSelection('folder')); });
 chooser?.addEventListener('change', () => {
   void locked(async () => {
     try { await importFiles(Array.from(chooser.files ?? [])); }
