@@ -13,6 +13,7 @@ import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
+import {hasUnsafePathLink} from './path-boundary';
 import {verifyBackupRecoverySource} from './recovery-source';
 
 const MAX_DIRECTORY_ENTRIES=512;
@@ -82,6 +83,11 @@ export async function inspectBackupInventoryReadOnly(
    if(parsed===null)return blocked('INVALID_REQUEST');
    if(parsed.sourcePath==='')return blocked('NOT_AUTHORIZED');
    const {sourcePath,backupDirectory}=parsed;
+   // An empty directory contains no candidate to trigger recovery-source's
+   // stricter path inspection. Check the full selected path hierarchy first.
+   if(await hasUnsafePathLink(sourcePath))return blocked('INVALID_PATH');
+   if(await hasUnsafePathLink(backupDirectory))
+     return blocked('BACKUP_DIRECTORY_INVALID');
    const sourceStart=await lstat(sourcePath,{bigint:true});
    if(sourceStart.isSymbolicLink()||!sourceStart.isFile()||
       sourceStart.nlink!==1n)return blocked('INVALID_PATH');
@@ -150,6 +156,11 @@ export async function inspectBackupInventoryReadOnly(
    }
    const sourceEnd=await lstat(sourcePath,{bigint:true});
    const directoryEnd=await lstat(backupDirectory,{bigint:true});
+   // Recheck after walking potentially untrusted directory entries: a newly
+   // redirected ancestor must not yield an apparently clean inventory.
+   if(await hasUnsafePathLink(sourcePath))return blocked('SOURCE_CHANGED');
+   if(await hasUnsafePathLink(backupDirectory))
+     return blocked('BACKUP_DIRECTORY_INVALID');
    if(!sameFile(sourceStart,sourceEnd)||sourceEnd.nlink!==1n||
       sourceEnd.isSymbolicLink())return blocked('SOURCE_CHANGED');
    if(directoryEnd.isSymbolicLink()||!directoryEnd.isDirectory()||
