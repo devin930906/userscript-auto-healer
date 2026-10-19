@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   chooseFolder: (): Promise<unknown> => ipcRenderer.invoke('import:folder'),
   // Narrow cancellation only: no path, batch identifier, or elevated authority.
   cancelNativeImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-native'),
+  cancelDroppedImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-dropped'),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
   inspectScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:inspect',id),
