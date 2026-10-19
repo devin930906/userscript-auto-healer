@@ -64,49 +64,63 @@ export function summarizeFixtureDomEvidence(
  mode:GmProbeMode,observed:ObservationResult
 ):FixtureDomEvidenceResult{
  const invalid=():FixtureDomEvidenceResult=>({ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
- // TypeScript types do not protect the boundary against runtime/serialized data.
  if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
- if(!observed||typeof observed!=='object'||Array.isArray(observed))return invalid();
- if(observed.ok===false)return {ok:false,code:observed.code};
- if(observed.ok!==true)return invalid();
- const counts=observed.selectorCounts;
- if(!counts||typeof counts!=='object'||Array.isArray(counts))return invalid();
- const keys=Object.keys(counts);
- // Every count must originate from exactly the four authorized selectors.
- if(keys.length!==FIXTURE_SELECTORS.length||
-    keys.some(key=>!FIXTURE_SELECTORS.some(expected=>expected===key)))return invalid();
- const summary=observed.summary;
- if(!summary||
-    !Number.isSafeInteger(summary.elementCount)||summary.elementCount<1||
-    !Number.isSafeInteger(summary.iframeCount)||summary.iframeCount<0||
-    summary.iframeCount>summary.elementCount||
-    !Number.isSafeInteger(summary.visibleShadowRoots)||summary.visibleShadowRoots<0||
-    summary.visibleShadowRoots>summary.elementCount||
+ // Check data descriptors, not property reads. A CDP or deserialized result
+ // may contain a Proxy, getter, symbol or unexpected field.
+ const failed=descriptorFields(observed,['ok','code'],true);
+ if(failed&&failed.ok===false){
+   const errors:readonly string[]=[
+     'NOT_AUTHORIZED','UNVERIFIED_BROWSER','UNVERIFIED_TARGET',
+     'INVALID_OPTIONS','CDP_FAILED','DOM_TOO_COMPLEX','CANCELLED'
+   ];
+   return typeof failed.code==='string'&&errors.includes(failed.code)
+     ?{ok:false,code:failed.code as Extract<ObservationResult,{ok:false}>['code']}
+     :invalid();
+ }
+ const sample=descriptorFields(observed,[
+   'ok','status','observedAt','originMatchesApproved','routeChanged',
+   'summary','selectorCounts','fullPageVerified','userscriptVerified'
+ ],true);
+ if(!sample||sample.ok!==true)return invalid();
+ const counts=descriptorFields(sample.selectorCounts,FIXTURE_SELECTORS,true);
+ const summary=descriptorFields(sample.summary,[
+   'elementCount','iframeCount','visibleShadowRoots','blindSpots'
+ ],true);
+ if(!counts||!summary||
+    !Number.isSafeInteger(summary.elementCount)||
+    (summary.elementCount as number)<1||
+    !Number.isSafeInteger(summary.iframeCount)||
+    (summary.iframeCount as number)<0||
+    (summary.iframeCount as number)>(summary.elementCount as number)||
+    !Number.isSafeInteger(summary.visibleShadowRoots)||
+    (summary.visibleShadowRoots as number)<0||
+    (summary.visibleShadowRoots as number)>(summary.elementCount as number)||
     !Array.isArray(summary.blindSpots))return invalid();
  const current=counts[FIXTURE_SELECTORS[0]];
  const obsolete=counts[FIXTURE_SELECTORS[1]];
  const acted=counts[FIXTURE_SELECTORS[2]];
  const actedOnTarget=counts[FIXTURE_SELECTORS[3]];
- if(observed.routeChanged!==false||observed.originMatchesApproved!==true||
-    observed.status!=='LIMITED_DOM_OBSERVATION'||
-    observed.fullPageVerified!==false||observed.userscriptVerified!==false||
+ if(sample.routeChanged!==false||sample.originMatchesApproved!==true||
+    sample.status!=='LIMITED_DOM_OBSERVATION'||
+    sample.fullPageVerified!==false||sample.userscriptVerified!==false||
     !Number.isSafeInteger(current)||current!==1||
     !Number.isSafeInteger(obsolete)||obsolete!==0||
     !Number.isSafeInteger(acted)||(acted!==0&&acted!==1)||
     !Number.isSafeInteger(actedOnTarget)||actedOnTarget!==acted||
-    acted>summary.elementCount||
-    typeof observed.observedAt!=='string'||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(observed.observedAt)||
-    !Number.isFinite(Date.parse(observed.observedAt))||
-    new Date(observed.observedAt).toISOString()!==observed.observedAt)
+    (acted as number)>(summary.elementCount as number)||
+    typeof sample.observedAt!=='string'||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(sample.observedAt)||
+    !Number.isFinite(Date.parse(sample.observedAt))||
+    new Date(sample.observedAt).toISOString()!==sample.observedAt)
    return invalid();
  return {ok:true,evidence:Object.freeze({
-   status:'LIMITED_FIXTURE_DOM_ONLY',mode,observedAt:observed.observedAt,
+   status:'LIMITED_FIXTURE_DOM_ONLY',mode,observedAt:sample.observedAt,
    targetCount:1,actionCount:acted as 0|1,
    fixtureDomMatchesExpected:acted===(mode==='broken'?0:1),
    ...emptyFlags
  })};
 }
+
 /** Two independently limited observations can contradict each other, but even
  * matching reports and DOM never authenticate Tampermonkey, GM or a repair.
  */
@@ -162,38 +176,62 @@ const emptyFlags={
  extensionAuthenticityVerified:false as const,scriptInstallationVerified:false as const,
  gmApiVerified:false as const,businessVerified:false as const
 };
-function object(value:unknown):value is Record<string,unknown>{
- return value!==null&&typeof value==='object'&&!Array.isArray(value);
+/** A read-only, closed-schema copy of a potentially hostile browser or
+ * fixture report. Never invoke untrusted accessors/Proxy get traps. */
+function descriptorFields(
+ value:unknown,allowed:readonly string[],exact=false
+):Record<string,unknown>|null{
+ try{
+   if(value===null||typeof value!=='object'||Array.isArray(value))return null;
+   const proto=Object.getPrototypeOf(value);
+   if(proto!==Object.prototype&&proto!==null)return null;
+   const descriptors=Object.getOwnPropertyDescriptors(value);
+   const keys=Reflect.ownKeys(descriptors);
+   if((exact&&keys.length!==allowed.length)||
+      keys.some(k=>typeof k!=='string'||!allowed.includes(k)))return null;
+   const data:Record<string,unknown>=Object.create(null);
+   for(const key of keys){
+     const d=descriptors[key as string];
+     if(!Object.prototype.hasOwnProperty.call(d,'value'))return null;
+     data[key as string]=d.value;
+   }
+   return data;
+ }catch{return null;}
 }
-function cleanReceipt(value:unknown,mode:GmProbeMode):value is GmProbeReceipt{
- if(!object(value))return false;
- const keys=Object.keys(value).sort().join(',');
- if(keys!==[
-  'businessVerified','extensionAuthenticityVerified','gmApiVerified',
-  'mode','reportedBusinessAction','reportedGmDefaultMatched',
-  'scriptInstallationVerified','status'
- ].sort().join(','))return false;
- return value.status==='SELF_REPORTED_FIXTURE_ONLY'&&value.mode===mode&&
-   typeof value.reportedGmDefaultMatched==='boolean'&&
-   typeof value.reportedBusinessAction==='boolean'&&
-   value.extensionAuthenticityVerified===false&&
-   value.scriptInstallationVerified===false&&
-   value.gmApiVerified===false&&value.businessVerified===false;
+const receiptFields=[
+  'status','mode','reportedGmDefaultMatched','reportedBusinessAction',
+  'extensionAuthenticityVerified','scriptInstallationVerified',
+  'gmApiVerified','businessVerified'
+] as const;
+function cleanReceipt(value:unknown,mode:GmProbeMode):GmProbeReceipt|null{
+ const x=descriptorFields(value,receiptFields,true);
+ if(!x||x.status!=='SELF_REPORTED_FIXTURE_ONLY'||x.mode!==mode||
+   typeof x.reportedGmDefaultMatched!=='boolean'||
+   typeof x.reportedBusinessAction!=='boolean'||
+   x.extensionAuthenticityVerified!==false||
+   x.scriptInstallationVerified!==false||
+   x.gmApiVerified!==false||x.businessVerified!==false)
+   return null;
+ return Object.freeze({
+   status:'SELF_REPORTED_FIXTURE_ONLY',mode,
+   reportedGmDefaultMatched:x.reportedGmDefaultMatched,
+   reportedBusinessAction:x.reportedBusinessAction,
+   ...emptyFlags
+ });
 }
 /** Pure evaluation of UNTRUSTED observations: matching reports remain unverified. */
 export function assessManualProbeObservations(
  receipts:unknown,visits:unknown
 ):ManualDiagnosticAssessment{
- const r=object(receipts)?receipts:{};
- const v=object(visits)?visits:{};
+ const r=descriptorFields(receipts,['broken','fixed'])??Object.create(null);
+ const v=descriptorFields(visits,['broken','fixed'])??Object.create(null);
  const a=cleanReceipt(r.broken,'broken');
  const b=cleanReceipt(r.fixed,'fixed');
- const observedModes=Number(a)+Number(b);
- const reportedGmDefaultMatched=a&&b&&
-   (r.broken as GmProbeReceipt).reportedGmDefaultMatched&&
-   (r.fixed as GmProbeReceipt).reportedGmDefaultMatched;
- const reportedBrokenFailed=a&&(r.broken as GmProbeReceipt).reportedBusinessAction===false;
- const reportedFixedRecovered=b&&(r.fixed as GmProbeReceipt).reportedBusinessAction===true;
+ const observedModes=Number(a!==null)+Number(b!==null);
+ const reportedGmDefaultMatched=a!==null&&b!==null&&
+   a.reportedGmDefaultMatched&&b.reportedGmDefaultMatched;
+ const reportedBrokenFailed=a!==null&&a.reportedBusinessAction===false;
+ const reportedFixedRecovered=b!==null&&b.reportedBusinessAction===true;
  const exactVisits=Object.keys(v).sort().join(',')==='broken,fixed'&&
    v.broken===true&&v.fixed===true;
  const status:ManualDiagnosticAssessment['status']=
@@ -202,12 +240,9 @@ export function assessManualProbeObservations(
    a&&b&&reportedGmDefaultMatched&&reportedBrokenFailed&&reportedFixedRecovered?
      'SELF_REPORTED_EXPECTATIONS_MATCH':'REPORTED_MISMATCH';
  return {status,observedModes,
-   reportedGmDefaultMatched:Boolean(reportedGmDefaultMatched),
-   reportedBrokenFailed:Boolean(reportedBrokenFailed),
-   reportedFixedRecovered:Boolean(reportedFixedRecovered),
+   reportedGmDefaultMatched,reportedBrokenFailed,reportedFixedRecovered,
    ...emptyFlags};
 }
-
 
 /** Reject a plausible self-report when the independently observed fixture DOM
  * disagrees. Never turn consistency into manager, GM, or business verification.
@@ -215,42 +250,45 @@ export function assessManualProbeObservations(
  */
 export function correlateManualFixtureEvidence(
  receipts:unknown,visits:unknown,domEvidence:unknown
-):ManualFixtureConsistency {
- const assessment=assessManualProbeObservations(receipts,visits);
+):ManualFixtureConsistency{
+ // Snapshot before assessment: a getter or Proxy must not silently change
+ // the receipt between the status decision and the DOM comparison.
+ const r=descriptorFields(receipts,['broken','fixed']);
+ const v=descriptorFields(visits,['broken','fixed']);
+ const assessment=assessManualProbeObservations(r,v);
  const result=(status:ManualFixtureConsistency['status'],comparedModes:0|1|2):
    ManualFixtureConsistency=>Object.freeze({status,comparedModes,...emptyFlags});
  if(assessment.status!=='SELF_REPORTED_EXPECTATIONS_MATCH')
    return result(assessment.status,0);
- const dom=object(domEvidence)?domEvidence:{};
- const r=object(receipts)?receipts:{};
+ const dom=descriptorFields(domEvidence,['broken','fixed']);
+ if(!dom)return result('INVALID_DOM_EVIDENCE',0);
  let compared:0|1|2=0;
- // A replayed DOM sample is not an independent observation of both modes.
- // These timestamps are local CDP metadata, not extension authenticity proof.
  const observedTimes=new Set<string>();
+ const evidenceFields=[
+   'status','mode','observedAt','targetCount','actionCount',
+   'fixtureDomMatchesExpected','extensionAuthenticityVerified',
+   'scriptInstallationVerified','gmApiVerified','businessVerified'
+ ] as const;
  for(const mode of ['broken','fixed'] as const){
    if(!Object.prototype.hasOwnProperty.call(dom,mode))
      return result('AWAITING_DOM_OBSERVATIONS',compared);
-   const e=dom[mode];
+   const e=descriptorFields(dom[mode],evidenceFields,true);
    const expected=mode==='fixed'?1:0;
-   if(!object(e)||Object.keys(e).sort().join(',')!==[
-     'status','mode','observedAt','targetCount','actionCount',
-     'fixtureDomMatchesExpected','extensionAuthenticityVerified',
-     'scriptInstallationVerified','gmApiVerified','businessVerified'
-   ].sort().join(',')||
-     e.status!=='LIMITED_FIXTURE_DOM_ONLY'||e.mode!==mode||
-     typeof e.observedAt!=='string'||
-     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e.observedAt)||
-     !Number.isFinite(Date.parse(e.observedAt))||
-     new Date(e.observedAt).toISOString()!==e.observedAt||
-     observedTimes.has(e.observedAt)||
-     e.targetCount!==1||(e.actionCount!==0&&e.actionCount!==1)||
-     typeof e.fixtureDomMatchesExpected!=='boolean'||
-     e.extensionAuthenticityVerified!==false||
-     e.scriptInstallationVerified!==false||
-     e.gmApiVerified!==false||e.businessVerified!==false)
+   if(!e||e.status!=='LIMITED_FIXTURE_DOM_ONLY'||e.mode!==mode||
+      typeof e.observedAt!=='string'||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e.observedAt)||
+      !Number.isFinite(Date.parse(e.observedAt))||
+      new Date(e.observedAt).toISOString()!==e.observedAt||
+      observedTimes.has(e.observedAt)||
+      e.targetCount!==1||(e.actionCount!==0&&e.actionCount!==1)||
+      typeof e.fixtureDomMatchesExpected!=='boolean'||
+      e.extensionAuthenticityVerified!==false||
+      e.scriptInstallationVerified!==false||
+      e.gmApiVerified!==false||e.businessVerified!==false)
      return result('INVALID_DOM_EVIDENCE',compared);
    observedTimes.add(e.observedAt);
-   const report=r[mode] as GmProbeReceipt;
+   const report=cleanReceipt(r?.[mode],mode);
+   if(!report)return result('INVALID_DOM_EVIDENCE',compared);
    if(e.actionCount!==Number(report.reportedBusinessAction)||
       e.fixtureDomMatchesExpected!==(e.actionCount===expected))
      return result('DOM_REPORT_CONFLICT',compared);
