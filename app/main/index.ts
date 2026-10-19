@@ -13,6 +13,7 @@ import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launche
 import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
 import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
+import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
 
 let mainWindow: BrowserWindow | null = null;
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
@@ -34,6 +35,7 @@ let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
 let gmActionInProgress = false;
+let gmReportInProgress = false;
 let gmProbeEpoch = 0;
 /** Revokes the application's short-lived HTTP fixture without touching any
  * extension or installed script. Manual removal remains the tester's duty. */
@@ -355,6 +357,56 @@ function registerSafeIpc(): void {
       brokenDomAction:dom.broken?.actionCount??null,
       fixedDomAction:dom.fixed?.actionCount??null,...unverified};
   });
+  // Native-only bounded manual QA handoff. No report body, userscript source,
+  // token, selected path or arbitrary file-write IPC ever reaches the renderer.
+  ipcMain.handle('gm-probe:save-report',async event=>{
+    authorizeSender(event);
+    if(gmReportInProgress||gmStartInProgress||gmActionInProgress)
+      return {ok:false,code:'PROBE_BUSY',...unverified};
+    const active=liveGmProbe();
+    if(!active||!readOwnedBrowser())
+      return {ok:false,code:'NO_ACTIVE_FIXTURE',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())
+      return {ok:false,code:'NO_WINDOW',...unverified};
+    const epoch=gmProbeEpoch;
+    gmReportInProgress=true;
+    try{
+      const selected=await dialog.showSaveDialog(win,{
+        title:'将未经认证的 GM 测试摘要另存为 JSON（不覆盖已有文件）',
+        defaultPath:'UAH-GM-Fixture-Unverified.json',
+        filters:[{name:'JSON 报告',extensions:['json']}]
+      });
+      if(selected.canceled||!selected.filePath)
+        return {ok:false,code:'CANCELLED',...unverified};
+      if(epoch!==gmProbeEpoch||active!==liveGmProbe()||
+         win!==mainWindow||win.isDestroyed()||!readOwnedBrowser())
+        return {ok:false,code:'SESSION_REVOKED',...unverified};
+      const approved=await dialog.showMessageBox(win,{
+        type:'question',buttons:['保存未认证报告','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认保存此本机测试报告？',
+        detail:'只包含预设 broken/fixed 自报状态、有限 DOM 对照和时间。'+
+          '\\n不会包含脚本源码、测试 URL 令牌、Chrome/Profile 路径或网站私密资料。'+
+          '\\n不会覆盖任何现有文件。报告不证明 Tampermonkey、GM API 或业务恢复。'
+      });
+      if(approved.response!==0||epoch!==gmProbeEpoch||
+         active!==liveGmProbe()||win!==mainWindow||win.isDestroyed()||
+         !readOwnedBrowser())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const report=createLimitedGmReport(active);
+      if(report.status!=='UNVERIFIED_REPORT_READY')
+        return {ok:false,code:'INVALID_EVIDENCE',...unverified};
+      const saved=await saveLimitedGmReportOnly(report.report,selected.filePath,true);
+      if(saved.status!=='REPORT_SAVED_UNVERIFIED_ONLY')
+        return {ok:false,code:saved.code,...unverified};
+      return {ok:true,status:'UNVERIFIED_REPORT_SAVED_ONLY',
+        fileName:saved.fileName,sha256:saved.sha256,
+        byteLength:saved.byteLength,...unverified};
+    }catch{
+      return {ok:false,code:'REPORT_SAVE_FAILED',...unverified};
+    }finally{gmReportInProgress=false;}
+  });
   // Renderer can request only an exact fixture mode, never an arbitrary URL,
   // target, selector, browser, script source or path. Native consent is separate.
   ipcMain.handle('gm-probe:visit',async(event,mode:unknown)=>{
@@ -528,7 +580,7 @@ async function createMainWindow(): Promise<void> {
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
       "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
-      "const noGmStatus=await a.gmProbeStatus(); " +
+      "const noGmStatus=await a.gmProbeStatus(); const noGmReport=await a.saveGmReport(); " +
       "const noGmVisit=await a.visitGmFixture('broken'); const noGmObserve=await a.observeGmFixture('fixed'); " +
        "const badMode=await a.visitGmFixture('invalid'); const noGmStop=await a.stopGmProbe(); " +
       "const newProfileWithoutChrome=await a.createProfile(); " +
@@ -554,7 +606,7 @@ async function createMainWindow(): Promise<void> {
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
       "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
       "noGmStart.code === 'BROWSER_NOT_RUNNING' && invalidRunAt.code === 'INVALID_OPTIONS' && " +
-      "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
+      "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmReport.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
        "noGmObserve.code === 'NO_ACTIVE_FIXTURE' && badMode.code === 'INVALID_MODE' && " +
        "noGmStop.ok === false && " +
       "newProfileWithoutChrome.code === 'CONFIG_NOT_SELECTED' && " +
@@ -572,7 +624,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;

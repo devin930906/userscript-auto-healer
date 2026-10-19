@@ -32,6 +32,7 @@ interface Window {
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
     startGmProbe(runAt?:'document-start'|'document-body'|'document-end'|'document-idle'): Promise<{ok:boolean;code?:string;status?:string;runAt?:string;
       installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
+    saveGmReport(): Promise<{ok:boolean;code?:string;status?:string;fileName?:string;sha256?:string;byteLength?:number}>;
     gmProbeStatus(): Promise<{ok:boolean;code?:string;status?:string;
       observedModes?:number;reportedGmDefaultMatched?:boolean;
       reportedBrokenFailed?:boolean;reportedFixedRecovered?:boolean;
@@ -224,6 +225,7 @@ let gmProbeActive=false;
 const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
 const gmRunAtSelect=document.getElementById('gm-run-at') as HTMLSelectElement|null;
 const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
+const gmReportButton=document.getElementById('gm-probe-save-report') as HTMLButtonElement|null;
 const gmStopButton=document.getElementById('gm-probe-stop') as HTMLButtonElement|null;
 const gmVisitButtons={
  broken:document.getElementById('gm-probe-visit-broken') as HTMLButtonElement|null,
@@ -256,6 +258,7 @@ function browserControls():void{
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=browserBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
+ if(gmReportButton)gmReportButton.disabled=browserBusy||!gmProbeActive;
  for(const button of Object.values(gmVisitButtons))
   if(button)button.disabled=browserBusy||!gmProbeActive;
  for(const button of Object.values(gmObserveButtons))
@@ -374,6 +377,14 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
    '（已比较 '+(result.comparedModes??0)+' 组；broken 动作 '+
    (result.brokenDomAction??'未观察')+'、fixed 动作 '+
    (result.fixedDomAction??'未观察')+'）。仅限未经认证的夹具对照，不证明真实 GM 或业务恢复。';
+}));
+gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.saveGmReport();
+ if(gmResult)gmResult.textContent=result.ok&&result.status==='UNVERIFIED_REPORT_SAVED_ONLY'
+  ?'已另存未经认证的本机诊断摘要：'+result.fileName+
+   '（SHA-256 '+result.sha256+'，'+result.byteLength+' bytes）。'+
+   '仍须真实 Tampermonkey/GM/业务专项验收。'
+  :'本机报告未保存：'+(result.code??'UNKNOWN')+'。已有文件不会被覆盖。';
 }));
 for(const mode of ['broken','fixed'] as const){
  gmVisitButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
