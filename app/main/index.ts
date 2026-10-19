@@ -776,6 +776,8 @@ async function createMainWindow(): Promise<void> {
       "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
       "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
       "const stagedScenario=await a.registerScenario(scenarioInput); " +
+      "const dualScenario=await a.registerScenario({...scenarioInput,id:'smoke_dual',selector:'#obsolete',replacementSelector:'#current'}); " +
+      "const badDualScenario=await a.registerScenario({...scenarioInput,id:'smoke_bad_dual',replacementSelector:'#submit'}); " +
       "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
       "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
@@ -865,6 +867,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-id').value='smoke_ui_scenario'; " +
       "document.getElementById('scenario-url').value='https://example.test/smoke'; " +
       "document.getElementById('scenario-selector').value='#submit'; " +
+      "document.getElementById('scenario-replacement').value='#candidate'; " +
       "document.getElementById('scenario-approve').checked=true; " +
       "const uiScenarioButton=document.getElementById('scenario-register'); " +
       "const uiScenarioButtonEnabled=!uiScenarioButton.disabled; uiScenarioButton.click(); " +
@@ -901,7 +904,9 @@ async function createMainWindow(): Promise<void> {
        "abortedDrop.ok === true && abortedDrop.script.analysis.status === 'SKIPPED_CANCELLED' && " +
        "abortedDrop.script.analysis.automaticPatchAllowed === false && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
-      "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "stagedScenario.tampermonkeyVerified === false && dualScenario.readOnlyDomEligible === true && " +
+      "dualScenario.automaticPatchAllowed === false && badDualScenario.code === 'INVALID_REQUEST' && " +
+      "noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
       "uiUnknownButtonReady && uiUnknownNotOffered && " +
