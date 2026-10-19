@@ -1,0 +1,122 @@
+import {test} from 'node:test';
+import {strict as assert} from 'node:assert';
+import {createHash} from 'node:crypto';
+import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
+
+const flags={extensionAuthenticityVerified:false as const,
+  scriptInstallationVerified:false as const,gmApiVerified:false as const,businessVerified:false as const};
+const summary={
+ status:'SELF_REPORTED_EXPECTATIONS_MATCH' as const,observedModes:2,
+ reportedGmDefaultMatched:true,reportedBrokenFailed:true,
+ reportedFixedRecovered:true,...flags
+};
+const consistency={status:'CONSISTENT_UNVERIFIED_FIXTURE_ONLY' as const,comparedModes:2 as const,...flags};
+const observedAt='2026-10-19T02:00:00.000Z';
+const dom=(mode:'broken'|'fixed',actionCount:0|1)=>({
+ status:'LIMITED_FIXTURE_DOM_ONLY' as const,mode,observedAt:mode==='broken'?
+ observedAt:'2026-10-19T02:00:01.000Z',targetCount:1 as const,
+ actionCount,fixtureDomMatchesExpected:true,...flags
+});
+const session={
+ runAt:'document-end' as const,expiresAt:Date.parse('2026-10-19T02:05:00.000Z'),
+ source:'SECRET_SOURCE_NEVER_EXPORT',
+ installUrl:'http://127.0.0.1:4321/install.user.js?key=SECRET_TOKEN_NEVER_EXPORT',
+ origin:'http://127.0.0.1:4321',
+ runtimeHint:{status:'RUNTIME_TARGET_HINT_ONLY',manager:'Tampermonkey'},
+ snapshot:()=>summary,consistencySnapshot:()=>consistency,
+ domSnapshot:()=>({broken:dom('broken',0),fixed:dom('fixed',1)})
+};
+test('TEST-017: report includes bounded unverified evidence but no source, token, URL or manager claims',()=>{
+ const result=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+ assert.equal(result.status,'UNVERIFIED_REPORT_READY');
+ if(result.status!=='UNVERIFIED_REPORT_READY')return;
+ const report=result.report;
+ assert.equal(report.verdict,'NOT_VERIFIED');
+ assert.equal(report.runAt,'document-end');
+ assert.equal(report.assessment.status,'SELF_REPORTED_EXPECTATIONS_MATCH');
+ assert.equal(report.consistency.status,'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
+ assert.equal(report.dom.broken?.actionCount,0);
+ assert.equal(report.dom.fixed?.actionCount,1);
+ assert.equal(report.extensionAuthenticityVerified,false);
+ assert.equal(report.scriptInstallationVerified,false);
+ assert.equal(report.gmApiVerified,false);
+ assert.equal(report.businessVerified,false);
+ assert.equal(report.automaticPatchAllowed,false);
+ assert.equal(report.automaticRollbackAllowed,false);
+ const serialized=JSON.stringify(report);
+ for(const secret of ['SECRET_SOURCE_NEVER_EXPORT','SECRET_TOKEN_NEVER_EXPORT',
+   '127.0.0.1','install.user.js','runtimeHint','source','origin']){
+   assert.equal(serialized.includes(secret),false,secret);
+ }
+ assert.ok(Buffer.byteLength(serialized)<4096);
+});
+test('TEST-017: incomplete or malformed self-reports fail closed; never claim real GM success',()=>{
+ const awaiting={...session,snapshot:()=>({...summary,
+   status:'AWAITING_BROWSER_VISITS' as const,observedModes:0,
+   reportedGmDefaultMatched:false,reportedBrokenFailed:false,reportedFixedRecovered:false}),
+   domSnapshot:()=>({})};
+ const pending=createLimitedGmReport(awaiting,Date.parse('2026-10-19T02:02:00.000Z'));
+ assert.equal(pending.status,'UNVERIFIED_REPORT_READY');
+ if(pending.status==='UNVERIFIED_REPORT_READY'){
+   assert.equal(pending.report.verdict,'NOT_VERIFIED');
+   assert.equal(pending.report.dom.broken,null);
+   assert.equal(pending.report.dom.fixed,null);
+ }
+ for(const bad of [
+  {...session,runAt:'document-end;evil'},
+  {...session,snapshot:()=>({...summary,gmApiVerified:true})},
+  {...session,consistencySnapshot:()=>({...consistency,comparedModes:3})},
+  {...session,domSnapshot:()=>({broken:{...dom('broken',0),actionCount:2}})},
+  {...session,expiresAt:Infinity}
+ ]){
+   assert.equal(createLimitedGmReport(bad as typeof session,Date.now()).status,'BLOCKED');
+ }
+});
+test('TEST-017: native report creates a private separate JSON only once and never overwrites',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-report-'));
+ try{
+  const path=join(root,'manual-qa.json');
+  const ready=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const denied=await saveLimitedGmReportOnly(ready.report,path,false);
+  assert.equal(denied.status,'BLOCKED');
+  assert.deepEqual(await readdir(root),[]);
+  const saved=await saveLimitedGmReportOnly(ready.report,path,true);
+  assert.equal(saved.status,'REPORT_SAVED_UNVERIFIED_ONLY',JSON.stringify(saved));
+  if(saved.status!=='REPORT_SAVED_UNVERIFIED_ONLY')return;
+  const bytes=await readFile(path);
+  const parsed=JSON.parse(bytes.toString('utf8'));
+  assert.deepEqual(parsed,ready.report);
+  assert.equal(saved.sha256,createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(saved.fileName,'manual-qa.json');
+  assert.equal(saved.automaticPatchAllowed,false);
+  assert.equal(saved.businessVerified,false);
+  assert.equal(JSON.stringify(saved).includes(root),false);
+  const repeat=await saveLimitedGmReportOnly(ready.report,path,true);
+  assert.equal(repeat.status,'BLOCKED');
+  assert.deepEqual(await readFile(path),bytes);
+  assert.deepEqual(await readdir(root),['manual-qa.json']);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+test('TEST-017: redirected directory and invalid report path cannot write native evidence',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-report-negative-'));
+ try{
+  const other=join(root,'good');await mkdir(other);
+  const valid=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(valid.status,'UNVERIFIED_REPORT_READY');
+  if(valid.status!=='UNVERIFIED_REPORT_READY')return;
+  for(const path of [join(other,'a.user.js'),'relative.json',join(other,'..','evil.json')]){
+   const output=await saveLimitedGmReportOnly(valid.report,path,true);
+   assert.equal(output.status,'BLOCKED');
+  }
+  const link=join(root,'alias');
+  try{await symlink(other,link,process.platform==='win32'?'junction':'dir');}
+  catch(e){if(['EPERM','EACCES','ENOTSUP'].includes((e as NodeJS.ErrnoException).code??'')){t.diagnostic('Junction privilege unavailable');return;}throw e;}
+  assert.equal((await saveLimitedGmReportOnly(valid.report,join(link,'hidden.json'),true)).status,'BLOCKED');
+  assert.deepEqual(await readdir(other),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
