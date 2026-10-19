@@ -248,7 +248,8 @@ chooser?.addEventListener('change', () => {
 dropZone?.addEventListener('dragover', event => { event.preventDefault(); });
 dropZone?.addEventListener('drop', event => {
   event.preventDefault();
-  if (!(event instanceof DragEvent) || !event.dataTransfer) return;
+  if (!(event instanceof DragEvent) || !event.dataTransfer || busy) return;
+  // A second drop must not traverse entries while an earlier batch owns the lock.
   // Acquire DataTransfer entries synchronously: drag data is protected after
   // the drop event returns, even while downstream file reads are asynchronous.
   const dropped = filesFromDrop(event.dataTransfer);
