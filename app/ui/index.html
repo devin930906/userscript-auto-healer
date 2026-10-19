@@ -15,6 +15,8 @@
       <button id="choose-folder" type="button">选择脚本文件夹</button>
       <label for="select-files">也可选择或拖放 .user.js 文件：</label>
       <input id="select-files" type="file" multiple accept=".user.js">
+      <button id="cancel-import" type="button" disabled>取消当前批次（完成当前文件后停止）</button>
+      <p id="import-summary" role="status" aria-live="polite">尚未导入脚本。</p>
       <ul id="import-list" aria-live="polite"></ul>
     </section>
     <section aria-labelledby="browser-heading">
