@@ -530,7 +530,7 @@ function browserControls():void{
    (scenarioInspectId.options.length<=1);
  if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
    (scenarioInspectId?.options.length??0)<=1;
- if(scenarioCancelButton)scenarioCancelButton.disabled=!scenarioInspectionBusy;
+ if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||browserBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
@@ -609,12 +609,14 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
  }finally{manualExportBusy=false;browserControls();}
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
- if(!scenarioInspectionBusy)return;
+ if(!scenarioInspectionBusy&&!manualExportBusy)return;
  scenarioCancelButton.disabled=true;
  void window.healer.cancelScenarioInspection().then(result=>{
   if(scenarioStatus)scenarioStatus.textContent=result.ok
-   ?'已请求取消限定 DOM 检查；已打开的标签页不会被用于通过验收。'
-   :'取消请求未完成：'+(result.code??'UNKNOWN');
+   ?'已请求取消只读检查／人工导出写入前流程；打开过的标签页不用于业务验收。'
+   :result.code==='EXPORT_WRITE_ALREADY_STARTED'
+     ?'已开始创建备份／人工候选文件，无法通过此按钮撤销。请核对最终结果和输出目录。'
+     :'取消请求未完成：'+(result.code??'UNKNOWN');
  }).catch(()=>{
   if(scenarioStatus)scenarioStatus.textContent='取消检查失败，需核实运行状态。';
  });

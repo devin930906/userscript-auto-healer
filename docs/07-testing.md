@@ -191,3 +191,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 ## （7）TASK-017 / TEST-026 原生选择器跨模块互斥回归（2026-10-19）
 
 现有 Electron 主窗口已分别序列化 Chrome/Profile 选择与原生脚本导入，但两个入口没有共同检查相互持有的忙碌状态，允许 import/drag-drop 在 Chrome 选择器或启动授权期间并行发起，或相反。现在主进程 IPC 同时检查导入、拖放、浏览器选择器、Profile 创建及启动流程的互斥状态；在尚未完成的选择期间拒绝跨模块入口，不读取另一路径、不打开第二个原生选择器、不启动 Chrome。新增 Windows 真实 Electron renderer→preload→IPC smoke：Chrome 选择器悬挂时拒绝文件/拖放导入，文件选择器悬挂时拒绝 Chrome/Profile 选择和启动，结束后正常功能仍可用。没有向 renderer 开放任意文件路径或任何脚本写入接口。TEST-026 此阶段并发负例不代表完整 TASK-017/TEST-022/GATE 通过。
+
+## （7）TASK-017 / TEST-022/026 手动导出准备取消及文件写入边界（2026-10-19）
+
+已实现的 `scenario:export-manual` 与普通 DOM 检查共用 AbortController，但原有界面仅在普通检查过程中提供取消。现在也允许在人工候选导出的**写入前**准备（原生授权、页面只读观察、目录选择、源文件再核验）阶段请求取消。最终原生写入授权后、启动备份/候选生成前，主进程同步将 `manualExportCommitInProgress` 设为真，`scenario:cancel` 改为返回 `EXPORT_WRITE_ALREADY_STARTED`，不再错误承诺能取消已有新文件。原始用户脚本仍不会被自动覆盖。Windows 真 Electron renderer→preload→IPC smoke 检验了模拟活动阶段中 UI 启用取消、提交前取消信号及文件创建阶段拒绝取消。该 smoke 未实际创建备份文件，不证明真实 Tampermonkey、GM、业务恢复、完整 TEST-022 或 Stable GATE。
