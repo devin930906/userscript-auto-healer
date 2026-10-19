@@ -113,7 +113,7 @@ test('TEST-025: staged review cannot be mistaken for a Tampermonkey test or writ
   assert.equal(snapshot.tampermonkeyVerified,false);
   assert.equal(snapshot.businessVerified,false);
   assert.equal(snapshot.automaticActivationAllowed,false);
-  assert.equal(snapshot.preview?.bindings[0].selector,'#new-submit');
+  assert.equal(snapshot.preview?.bindings.find(binding=>binding.key==='submit')?.selector,'#new-submit');
   assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   assert.throws(() => new LimitedCompatibilityLayer({...initial,consumers:[A,'secret']}));
 });
