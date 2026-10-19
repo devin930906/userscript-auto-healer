@@ -178,3 +178,7 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 [PR #66](https://github.com/devin930906/userscript-auto-healer/pull/66) 已合并至 main，提交 78e3a86d4ededc5ec125ff14eeb611c527561f3f；合并后 Windows [应用检查 #39165441788](https://github.com/devin930906/userscript-auto-healer/actions/runs/39165441788) 成功。产品界面现通过系统路径选择器和单独的原生授权确认接入现有签名 Chrome/CDP 所属进程检查；停止仅针对本程序启动的 Chrome，Tampermonkey 探测只提供运行目标提示，扩展真实性、脚本安装、GM API 和业务恢复仍未得到产品级证明。
 
 后续在另一条可安全快进的历史 TASK-007 分支中，复用 prepareApprovedIsolatedProfile 实现“选取已有父目录→原生明确授权→随机生成子目录→签名 Chrome 校验→仅创建全新空 Profile”。本阶段不能覆盖、迁移或清理用户既有 Profile；代码与 Windows CI 的整合状态须根据当次 PR 重新核验。TEST-017/018、GATE-004/005 和正式 EXE/ZIP 均未完成。
+
+## （7）TASK-007 有限 GM 报告保存交接（2026-10-19）
+
+[PR #93](https://github.com/devin930906/userscript-auto-healer/pull/93) 的阶段实现（`src/manager/gm-report.ts`，Electron native save IPC，界面按钮及 `TEST-017` 回归）在活动且归属已核验的独立 Chrome 会话内，经原生文件选择与二次授权保存**未经认证**的脱敏 JSON 手动诊断摘要；不覆盖已有文件，返回本机文件名、长度与 SHA-256。主干合并之前来源证据为 `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 Windows [#39189509991](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509991) success（247 pass／0 fail／1 skip，Electron smoke）、便携 Chrome [#39189509990](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509990) success；合并结果及主干 CI 需重新读取。**下一任务仍是 TASK-007**：在受授权的真实 Tampermonkey 中安装/启用一次性测试脚本，独立取证 GM_getValue、注入时机与业务断言。报告中的自报与 DOM 对照不构成经理器认证或产品修复验收；TEST-017/018、GATE-004/005、EXE/ZIP 与 Stable 全部按原门槛保留。

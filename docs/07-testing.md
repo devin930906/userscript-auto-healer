@@ -167,3 +167,7 @@ PR [#53](https://github.com/devin930906/userscript-auto-healer/pull/53) 增加�
 临时隔离 GM 诊断 HTTP 服务原有 TTL，但用户**已经安装**的 `.user.js` 可以在服务关闭后继续留存，若本地端口后来被复用，旧脚本仍可能执行 DOM/GM/网络操作。新增 TEST-017 的 Node VM 隔离运行回归，用实际生成的临时脚本对比授权到期前、到期时与到期后的脚本副作用。先在测试提交 `0c2e0065ad4ca14baa9e17a420f047abebb9ea38` 的 [Windows CI #39158174162](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158174162) 证明失败（177 cases：175 pass、1 fail、1 skip），确认到期后仍发生一次 DOM 查询、属性修改、GM 模拟调用和网络调用；随后修复生成器，将一次性绝对到期时间嵌入脚本并在任何脚本副作用前阻断执行。代码提交 `46880b3ae2a1b72f260ef07bd5caaed32dcae619` 的 [Windows CI #39158298596](https://github.com/devin930906/userscript-auto-healer/actions/runs/39158298596) 通过：177 cases，176 pass、0 fail、1 skip；TypeScript 与真实 Electron IPC smoke 均成功。
 
 此项是**本地临时脚本安全门槛**，不是正式 Tampermonkey 扩展内 GM/注入/业务执行的独立验收：VM 中的 GM 函数是假实现，测试用户仍需主动卸载临时脚本；系统时间可能被调整，不能把客户端时间检查当成撤销扩展授权的机制。TEST-017/018、TASK-007 与 GATE-004/005 仍未全部通过。
+
+## （7）TEST-017 本机手动诊断报告阶段回归（2026-10-19）
+
+PR [#93](https://github.com/devin930906/userscript-auto-healer/pull/93) 增加 `tests/manager/gm-report.test.ts`：对报告白名单、未认证标志、错误/缺失证据、敏感脚本源码与本机令牌隔离、用户否决、无覆盖 JSON 文件写入、SHA-256、字节回读、目录重定向与路径规范化负例进行 Windows 回归。源 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Windows App #39189509991](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509991) success，248 项测试、247 pass、0 fail、1 skip，Electron smoke success；仅限报告服务与 IPC 安全边界。**未经真实 Tampermonkey 扩展/GM 行为认证，不能升级 TEST-017 或 TEST-018 正式验收状态；无需为取得此 JSON 安装或修改用户已有脚本。**
