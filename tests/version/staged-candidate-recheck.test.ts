@@ -76,6 +76,35 @@ test('TEST-020: candidate content changed after staging cannot receive recheck',
   assert.deepEqual(await readFile(p.sourcePath),Buffer.from(original));
  });
 });
+test('TEST-020: candidate modified during final source verification must fail closed',async()=>{
+ await setup(async(p,stage)=>{
+  // CommonJS test-only interception makes the late write deterministic:
+  // the first candidate read has completed before source verification #2.
+  const sourceModule=require('../../src/version/source-snapshot') as
+    typeof import('../../src/version/source-snapshot');
+  const originalVerify=sourceModule.verifyApprovedSourceFingerprint;
+  const candidatePath=join(p.backupDirectory,stage.candidateFileName);
+  let calls=0;
+  try{
+   sourceModule.verifyApprovedSourceFingerprint=async input=>{
+    const result=await originalVerify(input);
+    if(++calls===2){
+     const current=await readFile(candidatePath,'utf8');
+     await writeFile(candidatePath,current.replace('#new','#bad'));
+    }
+    return result;
+   };
+   const checked=await verifyStagedCandidateReadOnly(request,stage,args(p));
+   assert.equal(calls,2);
+   assert.equal(checked.status,'BLOCKED',JSON.stringify(checked));
+   if(checked.status==='BLOCKED')assert.equal(checked.reason,'CANDIDATE_MISMATCH');
+   assert.equal(checked.automaticPatchAllowed,false);
+   assert.deepEqual(await readFile(p.sourcePath),Buffer.from(original));
+  }finally{
+   sourceModule.verifyApprovedSourceFingerprint=originalVerify;
+  }
+ });
+});
 test('TEST-020: changed backup or original blocks candidate even when candidate bytes are intact',async()=>{
  for(const part of ['source','backup'] as const){
   await setup(async(p,stage)=>{

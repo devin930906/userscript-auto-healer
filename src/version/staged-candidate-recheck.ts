@@ -171,6 +171,12 @@ export async function verifyStagedCandidateReadOnly(
      });
      if(sourceAgain.status!=='MATCHED_READ_ONLY')
        return deny('SOURCE_UNVERIFIED');
+     // The candidate may change during the asynchronous backup/source
+     // rechecks. A stale initial byte check must never be returned as a
+     // successful observation; this is still not durable write authority.
+     const finalCandidate=await verifyExactCandidateBytesReadOnly(path,candidate);
+     if(finalCandidate==='CHANGED')return deny('CANDIDATE_CHANGED');
+     if(finalCandidate==='MISMATCH')return deny('CANDIDATE_MISMATCH');
      return Object.freeze({
        status:'CANDIDATE_RECHECKED_READ_ONLY' as const,
        originalSha256:receipt.originalSha256,
