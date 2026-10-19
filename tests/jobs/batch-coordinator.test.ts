@@ -178,3 +178,74 @@ test('TEST-022: hostile proxy traps cannot leak errors through batch validation'
  assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
    {...snapshot,jobs:[badJob]}),/INVALID_BATCH_CHECKPOINT/);
 });
+
+test('TEST-022/NFR-009: cancellation settles without waiting for an unresponsive read-only worker',async()=>{
+ let started!:()=>void;
+ const entered=new Promise<void>(resolve=>{started=resolve;});
+ let release!:()=>void;
+ const stalled=new Promise<void>(resolve=>{release=resolve;});
+ let dispatched=0;
+ let lateFinished=false;
+ const coordinator=new ReadOnlyBatchCoordinator({count:2},async()=>{
+  dispatched++;
+  started();
+  await stalled; // worker intentionally ignores the cancellation signal
+  lateFinished=true;
+  return 'DONE';
+ });
+ const running=coordinator.run();
+ await entered;
+ coordinator.cancel();
+ let timeout:NodeJS.Timeout|undefined;
+ let result;
+ try{
+  result=await Promise.race([
+   running,
+   new Promise<never>((_resolve,reject)=>{
+    timeout=setTimeout(()=>reject(Error('CANCELLATION_WAITED_FOR_WORKER')),2000);
+   })
+  ]);
+ }finally{
+  if(timeout)clearTimeout(timeout);
+  release(); // always release even when the regression fails
+ }
+ assert.deepEqual(result.jobs.map(j=>j.state),['CANCELLED','CANCELLED']);
+ assert.deepEqual(result.jobs.map(j=>j.attempts),[1,0]);
+ assert.equal(dispatched,1);
+ assert.equal(result.automaticPatchAllowed,false);
+ assert.equal(result.automaticRollbackAllowed,false);
+ assert.equal(result.tampermonkeyVerified,false);
+ assert.equal(result.businessVerified,false);
+ await new Promise<void>(resolve=>setImmediate(resolve));
+ assert.equal(lateFinished,true);
+ assert.deepEqual(coordinator.snapshot(),result,'late worker success must not change a cancelled terminal result');
+});
+
+test('TEST-022: late worker rejection after cancellation is contained',async()=>{
+ let started!:()=>void;
+ const entered=new Promise<void>(resolve=>{started=resolve;});
+ let rejectLate!:(error:Error)=>void;
+ const stalled=new Promise<never>((_resolve,reject)=>{rejectLate=reject;});
+ const coordinator=new ReadOnlyBatchCoordinator({count:1},async()=>{
+  started();
+  return await stalled;
+ });
+ const running=coordinator.run();
+ await entered;
+ coordinator.cancel();
+ let timeout:NodeJS.Timeout|undefined;
+ try {
+  const result=await Promise.race([
+   running,
+   new Promise<never>((_resolve,reject)=>{
+    timeout=setTimeout(()=>reject(Error('CANCEL_REJECTION_HUNG')),2000);
+   })
+  ]);
+  assert.equal(result.jobs[0].state,'CANCELLED');
+  rejectLate(Error('PRIVATE_WORKER_ERROR'));
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(coordinator.snapshot().jobs[0].state,'CANCELLED');
+ }finally{
+  if(timeout)clearTimeout(timeout);
+ }
+});
