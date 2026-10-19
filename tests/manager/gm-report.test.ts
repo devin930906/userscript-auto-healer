@@ -21,7 +21,8 @@ const dom=(mode:'broken'|'fixed',actionCount:0|1)=>({
  actionCount,fixtureDomMatchesExpected:true,...flags
 });
 const session={
- runAt:'document-end' as const,expiresAt:Date.parse('2026-10-19T02:05:00.000Z'),
+ runAt:'document-end' as const,browserVersion:'155.0.8059.40',
+ expiresAt:Date.parse('2026-10-19T02:05:00.000Z'),
  source:'SECRET_SOURCE_NEVER_EXPORT',
  installUrl:'http://127.0.0.1:4321/install.user.js?key=SECRET_TOKEN_NEVER_EXPORT',
  origin:'http://127.0.0.1:4321',
@@ -35,6 +36,8 @@ test('TEST-017: report includes bounded unverified evidence but no source, token
  if(result.status!=='UNVERIFIED_REPORT_READY')return;
  const report=result.report;
  assert.equal(report.verdict,'NOT_VERIFIED');
+ assert.equal(report.schema,'uah-manual-gm-fixture-v2');
+ assert.equal(report.browserVersion,'155.0.8059.40');
  assert.equal(report.runAt,'document-end');
  assert.equal(report.assessment.status,'SELF_REPORTED_EXPECTATIONS_MATCH');
  assert.equal(report.consistency.status,'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
@@ -72,7 +75,10 @@ test('TEST-017: incomplete or malformed self-reports fail closed; never claim re
   {...session,snapshot:()=>({...summary,gmApiVerified:true})},
   {...session,consistencySnapshot:()=>({...consistency,comparedModes:3})},
   {...session,domSnapshot:()=>({broken:{...dom('broken',0),actionCount:2}})},
-  {...session,expiresAt:Infinity}
+  {...session,expiresAt:Infinity},
+  {...session,browserVersion:'unverified'},
+  {...session,browserVersion:'155.0.8059.40;--debugging'},
+  {...session,browserVersion:'155.0.8059.40\\nProfile:secret'}
  ]){
    assert.equal(createLimitedGmReport(bad as typeof session,Date.now()).status,'BLOCKED');
  }
@@ -92,6 +98,9 @@ test('TEST-017: native report refuses nested unknown fields and accessors before
    {...report,dom:{...report.dom,extraneous:'SECRET_TOKEN'}},
    {...report,assessment:{...report.assessment,status:'VERIFIED'}},
    {...report,expiresAt:'invalid timestamp'},
+   {...report,browserVersion:'Chrome/155.0.8059.40'},
+   {...report,browserVersion:'155.0.8059.40\\nSECRET_PROFILE_PATH'},
+   {...report,schema:'uah-manual-gm-fixture-v1'},
    {...report,dom:{...report.dom,fixed:{...report.dom.fixed,actionCount:5}}}
   ];
   let getterCalls=0;
