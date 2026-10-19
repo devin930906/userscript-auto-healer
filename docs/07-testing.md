@@ -28,8 +28,8 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-012 | REQ-012 | 端到端 | Chrome 测试页 | 事件/路由夹具 | 路由与延迟渲染 | SPA 动态诊断：切换路由后监控 | 等待与时序证据正确 | 加载竞态错误归因 | 真实 E2E | Windows 自管 Chrome 阶段自动化通过；用户环境及完整发布回归待验收 |
 | TEST-013 | REQ-013 | 单元/集成 | 诊断模拟器 | 受控错误夹具 | 网络、权限、异常、断言 | 故障根因分类：逐项分类 | 不将非 DOM 强行改选择器 | 误分类强改 | 单元+集成 | 阶段单元测试通过（9 项；真实数据接入及集成验收未完成） |
 | TEST-014 | REQ-014 | 单元/集成 | Patch 夹具 | 可确认原意 | 坏定位器/不确定候选 | 本地修复规则：生成 diff | 只做最小变更 | 删功能或越权修改 | 单元 | 已规划 |
-| TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 已规划 |
-| TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 已规划 |
+| TEST-015 | REQ-015 | 集成 | Mock AI | 用户同意 | 含恶意 patch/敏感占位符 | AI 候选保护：网络调用及候选审查 | 仅候选；不发送禁止字段 | 直接采用或泄密 | 集成+抓包 | 开发中：本机 mock HTTP 外发字段审查、响应不可信、失败隔离与恶意输入负例已编码，待 Windows CI；真实用户许可、原生授权及自动修复端到端未验证 |
+| TEST-016 | REQ-016 | 集成 | Mock API | Base URL 已允许 | /models 不存在及手填 | 自定义 AI 兼容：探测/手填/限额测试 | 失败有安全 fallback | 无限重试/明文Key | 集成 | 开发中：自定义 Base URL、模型发现失败回退、限次、取消、超时及密钥不回显负例已编码，待 Windows CI；用户自定义服务及凭据受保护保存仍待集成 |
 | TEST-017 | REQ-017 | 端到端 | Chrome+真实 Tampermonkey | 已授权的隔离测试 Profile | 扩展缺失/错误管理器/缺许可/不同注入模式/GM 无权限 | 核对 Tampermonkey 身份版本、Chrome 权限、脚本安装启用、@match/@grant/@run-at、站点权限与注入模式 | Tampermonkey 前置条件全部满足，否则拒绝 VERIFIED | 仅 CDP/Violentmonkey 通过冒充 Tampermonkey | 独立 Tampermonkey E2E | 仅运行目标探测与拒绝负例已阶段执行；PR #79 已提供 document-start/document-idle；PR #81 增加 document-body/document-end 的受控手动夹具、DOMContentLoaded 处理、IPC 与界面选择及测试（须依当前提交 CI 和合并记录确认）；真实 Tampermonkey 安装/授权/GM/业务验收仍未执行 |
 | TEST-018 | REQ-018 | 端到端 | Chrome+真实 Tampermonkey | 真实 Tampermonkey/测试脚本已安装并授权，场景已定义 | 失效/已修脚本、GM API、不同注入时机 | 在 Tampermonkey 中实际注入，调用 GM API、执行业务断言与回归，记录扩展和浏览器版本及运行证据 | 真实 Tampermonkey 的业务断言满足才 VERIFIED | Violentmonkey/原生 DOM/人工修正版冒充产品自动修复 | 独立 Tampermonkey E2E | 已规划 |
 | TEST-019 | REQ-019 | 单元/集成 | Diff 审核引擎 | 原脚本及候选 | 扩增 @grant/无关变动 | 补丁与权限审查：计算变更与策略 | 自动应用被阻断 | 权限静默变化 | 单元 | 部分实现并验证：TASK-009 的独立只读候选复核、元数据与伪造输入拒绝在 Windows Actions #39142638654 通过；完整端到端集成、自动应用门控与真实 Tampermonkey 业务验收未完成 |
