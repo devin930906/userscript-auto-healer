@@ -14,8 +14,11 @@ import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonk
 import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
+import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 
 let mainWindow: BrowserWindow | null = null;
+// A new window gets a fresh read-only scenario scope; no disk persistence.
+let scenarioSession=new DesktopScenarioSession();
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
 const trustedUrl = pathToFileURL(uiFile).href;
 
@@ -513,6 +516,10 @@ function registerSafeIpc(): void {
       const result=kind==='files'
         ? await importApprovedPaths(choice.filePaths,controller.signal)
         : await scanApprovedDirectory(choice.filePaths[0],controller.signal);
+      // Only validated content hashes, never source paths or bytes, bind
+      // subsequently staged scenarios to this window's import session.
+      if(win===mainWindow&&!win.isDestroyed())
+        for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
       // Cancellation during processing retains successful earlier imports.
       return summarizeResult(result);
     } finally {
@@ -530,7 +537,15 @@ function registerSafeIpc(): void {
   ipcMain.handle('import:dropped', (event, name:unknown, data:unknown) => {
     authorizeSender(event);
     const result = importDroppedBytes(name,data);
-    return 'code' in result ? {ok:false,code:result.code} : {ok:true,script:summarize(result)};
+    if('code' in result)return {ok:false,code:result.code};
+    scenarioSession.recordImported(result.sha256);
+    return {ok:true,script:summarize(result)};
+  });
+  // Stage one bounded, read-only scenario only for a script imported by this
+  // window. No arbitrary source/path IPC or browser navigation is exposed.
+  ipcMain.handle('scenario:register',(event,input:unknown)=>{
+    authorizeSender(event);
+    return scenarioSession.register(input);
   });
 }
 
@@ -556,6 +571,7 @@ async function createMainWindow(): Promise<void> {
       stopOnlyOwnedBrowser();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
+      scenarioSession=new DesktopScenarioSession();
     }
   });
   await win.loadFile(uiFile);
@@ -602,6 +618,9 @@ async function createMainWindow(): Promise<void> {
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
+      "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
+      "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
+      "const stagedScenario=await a.registerScenario(scenarioInput); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
       "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
@@ -672,7 +691,9 @@ async function createMainWindow(): Promise<void> {
       "selectedExe.ok === true && selectedProfile.ok === true && raceSerialized && " +
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
-      "d.ok === true && rendered === true && isolated && canCancel && cancelled && " +
+      "d.ok === true && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
+      "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
+      "stagedScenario.tampermonkeyVerified === false && rendered === true && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 1') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
@@ -692,7 +713,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelNativeImport,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelNativeImport,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
