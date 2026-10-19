@@ -71,6 +71,7 @@ async function capture(
   let navigated=false;
   let tooMany=false;
   let listening=false;
+  let monitoringNavigation=false;
   let nextId=0;
   let open=false;
   const ids=new Set<number>();
@@ -92,7 +93,12 @@ async function capture(
         waiting.delete(msg.id);
         reply(msg.error===undefined?msg.result:null);
       }
-      if(msg.method==='Page.frameNavigated')navigated=true;
+      // Page.enable may replay the just-opened target's initial navigation.
+      // Only a navigation after the explicit sampling boundary is evidence
+      // of a route change during an observation.
+      if(monitoringNavigation&&
+         (msg.method==='Page.frameNavigated'||
+          msg.method==='Page.navigatedWithinDocument'))navigated=true;
       if(listening&&msg.method==='Runtime.exceptionThrown'){
         const detail=(msg.params as {exceptionDetails?:{exceptionId?:unknown}}|undefined)
           ?.exceptionDetails;
@@ -148,9 +154,17 @@ async function capture(
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     if(broken||first===null)return {ok:false,code:'CDP_FAILED'};
     if(!exactMainFrame(first,expectedUrl))return {ok:false,code:'ROUTE_CHANGED'};
-    navigated=false;
-    listening=true;
+    // Enabling Runtime can deliver cached exceptions and delayed navigation
+    // events from initial page creation. Neither is part of this sample.
     if(await command('Runtime.enable')===null)return {ok:false,code:'CDP_FAILED'};
+    const armedFrame=await command('Page.getFrameTree');
+    if(!exactMainFrame(armedFrame,expectedUrl))
+      return {ok:false,code:'ROUTE_CHANGED'};
+    if(broken)return {ok:false,code:'CDP_FAILED'};
+    navigated=false;
+    ids.clear();
+    monitoringNavigation=true;
+    listening=true;
     await new Promise<void>(resolve=>{
       const timer=setTimeout(()=>{signal?.removeEventListener('abort',onAbort);resolve();},durationMs);
       const onAbort=()=>{clearTimeout(timer);signal?.removeEventListener('abort',onAbort);resolve();};
@@ -168,6 +182,7 @@ async function capture(
     return {ok:true,count:ids.size};
   }finally{
     listening=false;
+    monitoringNavigation=false;
     try{ws.close();}catch{ /* already closed */ }
     for(const callback of waiting.values())callback(null);
     waiting.clear();
