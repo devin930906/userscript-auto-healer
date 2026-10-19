@@ -19,7 +19,7 @@ export type DesktopScenarioOutcome=
  |Readonly<{ok:false;code:BlockCode}&typeof noAuthority>
  |Readonly<{ok:true;status:'STAGED_RUNTIME_UNVERIFIED';
   id:string;scriptSha256:string;state:ScenarioState;
-  issues:readonly ScenarioIssue[]}&typeof noAuthority>;
+  issues:readonly ScenarioIssue[];readOnlyDomEligible:boolean}&typeof noAuthority>;
 const invalid=(code:BlockCode):DesktopScenarioOutcome=>
  Object.freeze({ok:false as const,code,...noAuthority});
 const SHA=/^[a-f0-9]{64}$/;
@@ -112,6 +112,9 @@ export class DesktopScenarioSession{
     ok:true as const,status:'STAGED_RUNTIME_UNVERIFIED' as const,
     id:result.input.id,scriptSha256:result.input.scriptSha256,
     state:result.state,issues:Object.freeze([...result.issues]),
+    // Eligibility is a bounded UI hint, never a browser visit authorization.
+    // The privileged inspector still re-resolves and asks for native consent.
+    readOnlyDomEligible:this.resolveReadOnlyDom(result.input.id).ok,
     ...noAuthority
    });
   }catch{return invalid('INVALID_REQUEST');}
