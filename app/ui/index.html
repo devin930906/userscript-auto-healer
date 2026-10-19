@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>Userscript Auto Healer</h1>
-    <p>当前支持只读导入、静态选择器分析与获授权的独立 Chrome/CDP 连接；不会执行、修改或安装脚本。静态结果或管理器运行目标提示不代表 Tampermonkey、GM API 或真实业务恢复验证，自动修复尚未开放。</p>
+    <p>当前支持只读导入、静态选择器分析与获授权的独立 Chrome/CDP 连接；不会改写原始脚本或自动安装脚本。只有经过独立原生授权的双选择器场景才可生成新的人工审核候选文件。静态结果或管理器运行目标提示不代表 Tampermonkey、GM API 或真实业务恢复验证，自动修复尚未开放。</p>
     <section id="drop-area" aria-label="油猴脚本导入区">
       <button id="choose-files" type="button">选择 .user.js 文件（多选）</button>
       <button id="choose-folder" type="button">选择脚本文件夹</button>
@@ -32,7 +32,7 @@
       <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
       <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
       <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
-      <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改、导出、安装脚本，也不视为已验证的补丁。</p>
+      <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
       <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
       <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
       <label><input id="scenario-approve" type="checkbox"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
@@ -40,6 +40,8 @@
       <label for="scenario-inspect-id">只读检查已登记场景：</label>
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
       <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
+      <button id="scenario-export-manual" type="button" disabled>单独授权实时 DOM 复核并导出人工候选（不改原脚本）</button>
+      <p>人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
       <button id="scenario-cancel" type="button" disabled>取消正在进行的 DOM 检查</button>
       <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>

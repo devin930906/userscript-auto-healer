@@ -17,13 +17,19 @@ import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
-import {inspectApprovedScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
+import {inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
+import {observeApprovedDomSeries} from '../../src/observe/dom-observer';
+import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+// Native-picked paths stay strictly in the privileged process. A renderer
+// may only refer to an already registered scenario ID, never a source path.
+const nativeImportedPaths=new Map<string,string>();
+let manualExportInProgress=false;
 const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
@@ -529,7 +535,7 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController||droppedImportController)
+    if(nativeImportController||droppedImportController||manualExportInProgress)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
@@ -551,7 +557,11 @@ function registerSafeIpc(): void {
       // Only validated content hashes, never source paths or bytes, bind
       // subsequently staged scenarios to this window's import session.
       if(win===mainWindow&&!win.isDestroyed())
-        for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
+        for(const script of result.scripts){
+          scenarioSession.recordImported(script.sha256);
+          if(script.sourcePath&&!nativeImportedPaths.has(script.sha256))
+            nativeImportedPaths.set(script.sha256,script.sourcePath);
+        }
       // Cancellation during processing retains successful earlier imports.
       return await summarizeResult(result,controller.signal);
     } finally {
@@ -570,7 +580,7 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
-    if(nativeImportController||droppedImportController)
+    if(nativeImportController||droppedImportController||manualExportInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
     const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
@@ -691,6 +701,123 @@ function registerSafeIpc(): void {
       diagnosticGate.release(lease);
     }
   });
+  // TASK-009/012/017: independently consented manual candidate export.
+  // Renderer supplies ONLY a staged scenario ID. A privileged native import
+  // remembers the on-disk file path; re-import verifies that same source just
+  // before any stage/export write. Never use drag-and-drop bytes for this.
+  ipcMain.handle('scenario:export-manual',async(event,id:unknown)=>{
+    authorizeSender(event);
+    if(manualExportInProgress||scenarioObserveInProgress||
+       nativeImportController||droppedImportController||
+       nativeSelectionInProgress||gmActionInProgress||gmStartInProgress)
+      return {ok:false,code:'EXPORT_BUSY',...unverified};
+    const selected=scenarioSession.resolveReadOnlyDom(id);
+    if(!selected.ok)return {ok:false,code:selected.code,...unverified};
+    if(selected.scenario.assertions.length!==2)
+      return {ok:false,code:'TWO_SELECTORS_REQUIRED',...unverified};
+    const sourcePath=nativeImportedPaths.get(selected.scenario.scriptSha256);
+    if(!sourcePath)return {ok:false,code:'NO_NATIVE_SOURCE',...unverified};
+    const owned=readOwnedBrowser();
+    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'EXPORT_BUSY',...unverified};
+    const controller=new AbortController();
+    const epoch=scenarioObserveEpoch;
+    scenarioObserveController=controller;
+    scenarioObserveInProgress=true;
+    manualExportInProgress=true;
+    nativeSelectionInProgress=true;
+    const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
+      win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许只读检查后准备人工导出','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认对已登记场景执行只读双选择器复核？',
+        detail:'访问独立 Chrome 内的 '+selected.targetUrl+
+          '\n采集三次只读 DOM 计数，旧选择器必须持续缺失、替代选择器持续存在。'+
+          '\n只用此前原生选择的本地脚本；稍后另行选择备份及导出文件夹并确认保存。'+
+          '\n不会安装/更新 Tampermonkey、改写原始脚本或证明业务修复。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const opened=await openApprovedTarget(owned,selected.targetUrl,true,controller.signal);
+      if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(!opened.ok)return {ok:false,code:opened.code,...unverified};
+      const selectors=selected.scenario.assertions.map(a=>a.selector);
+      const evidence=await observeApprovedDomSeries(owned,opened,
+        selected.targetUrl,true,selectors,3,250,controller.signal);
+      if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
+      const triage=summarizeReadOnlyScenarioDomSeries(selected.scenario,evidence,true);
+      if(triage.status!=='LIMITED_DOM_SIGNAL_ONLY'||triage.code!=='NONE'||
+         triage.triage.status!=='SINGLE_CAUSE_SIGNAL_ONLY'||
+         triage.triage.category!=='SELECTOR_ASSERTION'||
+         triage.triage.evidenceIds.length!==1||
+         triage.triage.evidenceIds[0]!=='scenario_assertion_1')
+        return {ok:false,code:'DOM_EVIDENCE_NOT_SUFFICIENT',...unverified};
+      const backup=await dialog.showOpenDialog(win,{
+        title:'选择备份文件夹（只存新备份，不覆盖任何已有文件）',
+        properties:['openDirectory']
+      });
+      if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(backup.canceled||backup.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      const destination=await dialog.showOpenDialog(win,{
+        title:'选择独立的人工候选导出文件夹（不得与备份相同）',
+        properties:['openDirectory']
+      });
+      if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(destination.canceled||destination.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      // The source file may have changed while the user was inspecting the
+      // page or choosing directories. Re-read it from the originally approved
+      // native source path and compare to the staged scenario's exact digest.
+      const current=await importApprovedPaths([sourcePath],controller.signal);
+      if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
+      if(current.errors.length!==0||current.scripts.length!==1||
+         current.scripts[0].sha256!==selected.scenario.scriptSha256)
+        return {ok:false,code:'SOURCE_CHANGED_OR_UNREADABLE',...unverified};
+      const approved=await dialog.showMessageBox(win,{
+        type:'question',buttons:['创建备份并导出人工候选','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认写入独立的备份和人工候选文件？',
+        detail:'脚本：'+current.scripts[0].filename+
+          '\n备份文件夹：'+backup.filePaths[0]+
+          '\n候选文件夹：'+destination.filePaths[0]+
+          '\n不会覆盖原始脚本或安装/更新浏览器扩展。'+
+          '\n新文件一旦开始创建，不能用取消观察来撤销；请自行检查导出版本。'+
+          '\n只读 DOM 信号不是 Tampermonkey/GM/业务验证。'
+      });
+      if(approved.response!==0||revoked())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const result=await exportReviewedImportedSelectorOnly(
+        current.scripts[0],selected.scenario,evidence,{
+          backupDirectory:backup.filePaths[0],
+          exportDirectory:destination.filePaths[0],
+          userApproved:true
+        });
+      if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')
+        return {ok:false,code:result.reason,...unverified};
+      // This is a limited local file receipt, not script or manager authority.
+      return {ok:true,status:result.status,
+        backupFileName:result.backupFileName,
+        candidateFileName:result.candidateFileName,
+        exportFileName:result.exportFileName,
+        candidateSha256:result.candidateSha256,
+        candidateByteLength:result.candidateByteLength,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'EXPORT_FAILED',...unverified};
+    }finally{
+      if(scenarioObserveController===controller)scenarioObserveController=null;
+      scenarioObserveInProgress=false;
+      manualExportInProgress=false;
+      nativeSelectionInProgress=false;
+      diagnosticGate.release(lease);
+    }
+  });
   ipcMain.handle('scenario:cancel',event=>{
     authorizeSender(event);
     if(!scenarioObserveInProgress)
@@ -724,6 +851,7 @@ async function createMainWindow(): Promise<void> {
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
       scenarioSession=new DesktopScenarioSession();
+      nativeImportedPaths.clear();
     }
   });
   await win.loadFile(uiFile);
@@ -779,6 +907,8 @@ async function createMainWindow(): Promise<void> {
       "const dualScenario=await a.registerScenario({...scenarioInput,id:'smoke_dual',selector:'#obsolete',replacementSelector:'#current'}); " +
       "const badDualScenario=await a.registerScenario({...scenarioInput,id:'smoke_bad_dual',replacementSelector:'#submit'}); " +
       "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
+      "const noNativeExport=await a.exportManualScenario('smoke_dual'); " +
+      "const singleSelectorExport=await a.exportManualScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
       "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
@@ -907,11 +1037,13 @@ async function createMainWindow(): Promise<void> {
       "stagedScenario.tampermonkeyVerified === false && dualScenario.readOnlyDomEligible === true && " +
       "dualScenario.automaticPatchAllowed === false && badDualScenario.code === 'INVALID_REQUEST' && " +
       "noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "noNativeExport.code === 'NO_NATIVE_SOURCE' && singleSelectorExport.code === 'TWO_SELECTORS_REQUIRED' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
       "uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
+      "document.getElementById('scenario-export-manual').disabled && " +
       "rendered === true && badDropReported && scanCancelReady && scanCancelled && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
@@ -933,7 +1065,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;

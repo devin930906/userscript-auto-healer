@@ -36,6 +36,10 @@ interface Window {
       state?:string;issues?:readonly string[];readOnlyDomEligible?:boolean;
        automaticPatchAllowed:false;
       tampermonkeyVerified:false;businessVerified:false}>;
+    exportManualScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
+      backupFileName?:string;candidateFileName?:string;exportFileName?:string;
+      candidateSha256?:string;candidateByteLength?:number;
+      tampermonkeyVerified:false;businessVerified:false;automaticPatchAllowed:false}>;
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;
@@ -95,6 +99,7 @@ const scenarioRegister = document.getElementById('scenario-register') as HTMLBut
 const scenarioStatus = document.getElementById('scenario-status');
 const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTMLSelectElement | null;
 const scenarioInspectButton = document.getElementById('scenario-inspect') as HTMLButtonElement | null;
+const scenarioExportButton = document.getElementById('scenario-export-manual') as HTMLButtonElement | null;
 const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
 let scenarioBusy=false;
@@ -450,6 +455,7 @@ const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
 let browserBusy=false;
 let scenarioInspectionBusy=false;
+let manualExportBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
@@ -493,6 +499,8 @@ function browserControls():void{
  if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!scenarioInspectionBusy;
+ if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||browserBusy||
+   manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=browserBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
@@ -544,6 +552,29 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
       '。没有获得 Tampermonkey 或业务验证结果。';
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
  }finally{scenarioInspectionBusy=false;browserControls();}
+}));
+scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const id=scenarioInspectId?.value??'';
+ if(!id){
+  if(scenarioStatus)scenarioStatus.textContent='先选择已登记的双选择器场景。';
+  return;
+ }
+ manualExportBusy=true;browserControls();
+ if(scenarioStatus)scenarioStatus.textContent=
+   '正在等待原生授权并重新采集真实 DOM；未获授权、证据不足或源文件变化时不会导出。';
+ try{
+  const answer=await window.healer.exportManualScenario(id);
+  if(scenarioStatus)scenarioStatus.textContent=
+   answer.ok&&answer.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'
+    ?'已生成本地人工审核候选：'+(answer.exportFileName??'')+
+      '（'+(answer.candidateByteLength??0)+' 字节；SHA-256 '+(answer.candidateSha256??'')+
+      '）。独立备份：'+(answer.backupFileName??'')+
+      '。原始脚本未被本程序改写；仍需用户自行在真实 Tampermonkey 中审阅、安装、运行并验证业务。'
+    :'人工导出未完成：'+(answer.code??'UNKNOWN')+
+      '。未取得可用的候选导出回执；可能存在独立暂存文件，须检查所选文件夹。';
+  if(answer.code==='BROWSER_NOT_RUNNING'||answer.code==='SESSION_REVOKED')
+   browserConnected=false;
+ }finally{manualExportBusy=false;browserControls();}
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
  if(!scenarioInspectionBusy)return;
