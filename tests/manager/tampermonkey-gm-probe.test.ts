@@ -67,7 +67,7 @@ test('TEST-017: document-start invokes GM at injection and defers DOM until read
      assert.equal(options.once,true);
      handler=callback;
    },
-   querySelector:()=>{effects.queries++;return {setAttribute:()=>effects.actions++};}
+   querySelector:()=>{effects.queries++;return {setAttribute:()=>effects.actions++,getAttribute:()=> 'done'};}
  };
  const clock=class extends Date{static now(){return now;}};
  runInNewContext(probe.source,{
@@ -330,7 +330,7 @@ test('TEST-017: installed temporary fixture stops all DOM/GM/network effects aft
  t.after(()=>probe.stop());
  const execute=(now:number)=>{
    const effects={queries:0,attributes:0,gmCalls:0,network:0};
-   const target={setAttribute:()=>{effects.attributes++;}};
+   const target={setAttribute:()=>{effects.attributes++;},getAttribute:()=> 'done'};
    const clock=class extends Date {static now(){return now;}};
    runInNewContext(probe.source,{
      Date:clock,URL,
