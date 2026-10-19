@@ -907,6 +907,8 @@ async function createMainWindow(): Promise<void> {
       "const dualScenario=await a.registerScenario({...scenarioInput,id:'smoke_dual',selector:'#obsolete',replacementSelector:'#current'}); " +
       "const badDualScenario=await a.registerScenario({...scenarioInput,id:'smoke_bad_dual',replacementSelector:'#submit'}); " +
       "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
+      "const noNativeExport=await a.exportManualScenario('smoke_dual'); " +
+      "const singleSelectorExport=await a.exportManualScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
       "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
@@ -1035,11 +1037,13 @@ async function createMainWindow(): Promise<void> {
       "stagedScenario.tampermonkeyVerified === false && dualScenario.readOnlyDomEligible === true && " +
       "dualScenario.automaticPatchAllowed === false && badDualScenario.code === 'INVALID_REQUEST' && " +
       "noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "noNativeExport.code === 'NO_NATIVE_SOURCE' && singleSelectorExport.code === 'TWO_SELECTORS_REQUIRED' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
       "uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
+      "document.getElementById('scenario-export-manual').disabled && " +
       "rendered === true && badDropReported && scanCancelReady && scanCancelled && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
@@ -1061,7 +1065,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
