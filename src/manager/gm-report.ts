@@ -115,6 +115,94 @@ export function createLimitedGmReport(
   return Object.freeze({status:'UNVERIFIED_REPORT_READY' as const,report});
  }catch{return invalid();}
 }
+
+const savedReportKeys=[
+ 'schema','verdict','collectedAt','expiresAt','runAt','assessment',
+ 'consistency','dom','extensionAuthenticityVerified',
+ 'scriptInstallationVerified','gmApiVerified','businessVerified',
+ 'automaticPatchAllowed','automaticRollbackAllowed'
+];
+/** Inspect own data descriptors, including nested objects: getters, symbols,
+ * extra fields and non-plain prototypes are not safe export data.
+ */
+function exactData(input:unknown,fields:readonly string[]):Record<string,unknown>|null{
+ if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ const prototype=Object.getPrototypeOf(input);
+ if(prototype!==Object.prototype&&prototype!==null)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ const ownKeys=Reflect.ownKeys(descriptors);
+ if(ownKeys.length!==fields.length||
+    ownKeys.some(key=>typeof key!=='string')||
+    fields.some(key=>!Object.prototype.hasOwnProperty.call(descriptors,key)||
+      !Object.prototype.hasOwnProperty.call(descriptors[key],'value')))return null;
+ const picked:Record<string,unknown>=Object.create(null);
+ for(const key of fields)picked[key]=descriptors[key].value;
+ return picked;
+}
+/** A caller can pass a forged runtime object despite the TypeScript type.
+ * Only a newly constructed, closed-schema snapshot may be serialized.
+ */
+function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
+ const root=exactData(input,savedReportKeys);
+ if(!root)return null;
+ const assessment=exactData(root.assessment,[
+  'status','observedModes','reportedGmDefaultMatched',
+  'reportedBrokenFailed','reportedFixedRecovered'
+ ]);
+ const consistency=exactData(root.consistency,['status','comparedModes']);
+ const dom=exactData(root.dom,['broken','fixed']);
+ if(!assessment||!consistency||!dom||
+    root.schema!=='uah-manual-gm-fixture-v1'||root.verdict!=='NOT_VERIFIED'||
+    !validObservedAt(root.collectedAt)||!validObservedAt(root.expiresAt)||
+    !isSupportedGmProbeRunAt(root.runAt)||
+    root.extensionAuthenticityVerified!==false||
+    root.scriptInstallationVerified!==false||root.gmApiVerified!==false||
+    root.businessVerified!==false||root.automaticPatchAllowed!==false||
+    root.automaticRollbackAllowed!==false||
+    !statuses.has(assessment.status as Status)||
+    !Number.isInteger(assessment.observedModes)||
+    (assessment.observedModes as number)<0||
+    (assessment.observedModes as number)>2||
+    typeof assessment.reportedGmDefaultMatched!=='boolean'||
+    typeof assessment.reportedBrokenFailed!=='boolean'||
+    typeof assessment.reportedFixedRecovered!=='boolean'||
+    !consistencyStatuses.has(consistency.status as Consistency)||
+    !Number.isInteger(consistency.comparedModes)||
+    (consistency.comparedModes as number)<0||
+    (consistency.comparedModes as number)>2)return null;
+ function safeDom(mode:'broken'|'fixed'):Readonly<LimitedDom>|null|undefined{
+  if(dom![mode]===null)return null;
+  const value=exactData(dom![mode],[
+   'observedAt','actionCount','fixtureDomMatchesExpected'
+  ]);
+  if(!value||!validObservedAt(value.observedAt)||
+     (value.actionCount!==0&&value.actionCount!==1)||
+     typeof value.fixtureDomMatchesExpected!=='boolean')return undefined;
+  return Object.freeze({
+   observedAt:value.observedAt,actionCount:value.actionCount,
+   fixtureDomMatchesExpected:value.fixtureDomMatchesExpected
+  });
+ }
+ const broken=safeDom('broken'),fixed=safeDom('fixed');
+ if(broken===undefined||fixed===undefined)return null;
+ return Object.freeze({
+  schema:'uah-manual-gm-fixture-v1',verdict:'NOT_VERIFIED',
+  collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
+  assessment:Object.freeze({
+   status:assessment.status as Status,
+   observedModes:assessment.observedModes as number,
+   reportedGmDefaultMatched:assessment.reportedGmDefaultMatched as boolean,
+   reportedBrokenFailed:assessment.reportedBrokenFailed as boolean,
+   reportedFixedRecovered:assessment.reportedFixedRecovered as boolean
+  }),
+  consistency:Object.freeze({
+   status:consistency.status as Consistency,
+   comparedModes:consistency.comparedModes as 0|1|2
+  }),
+  dom:Object.freeze({broken,fixed}),...flags
+ });
+}
+
 type SaveFail='INVALID_REQUEST'|'NOT_AUTHORIZED'|'UNSAFE_DESTINATION'|'SAVE_FAILED';
 export type SavedGmReportResult=
  |Readonly<{status:'BLOCKED';code:SaveFail}&typeof flags>
@@ -136,23 +224,9 @@ export async function saveLimitedGmReportOnly(
     !/^[^\\/\u0000-\u001f]+\.json$/i.test(basename(outputPath)))
    return block('INVALID_REQUEST');
  try{
-  if(!report||report.schema!=='uah-manual-gm-fixture-v1'||
-     report.verdict!=='NOT_VERIFIED'||report.automaticPatchAllowed!==false||
-     report.automaticRollbackAllowed!==false||
-     report.extensionAuthenticityVerified!==false||
-     report.scriptInstallationVerified!==false||
-     report.gmApiVerified!==false||report.businessVerified!==false)
-    return block('INVALID_REQUEST');
-  // Reject unexpected extra fields that might leak paths, user scripts or
-  // fixture capability URLs when a native caller changes in the future.
-  const exact=[
-   'schema','verdict','collectedAt','expiresAt','runAt','assessment',
-   'consistency','dom','extensionAuthenticityVerified',
-   'scriptInstallationVerified','gmApiVerified','businessVerified',
-   'automaticPatchAllowed','automaticRollbackAllowed'
-  ].sort().join(',');
-  if(Object.keys(report).sort().join(',')!==exact)return block('INVALID_REQUEST');
-  const bytes=Buffer.from(JSON.stringify(report,null,2)+'\n','utf8');
+  const sanitized=sanitizeReportForSave(report);
+  if(!sanitized)return block('INVALID_REQUEST');
+  const bytes=Buffer.from(JSON.stringify(sanitized,null,2)+'\n','utf8');
   if(bytes.length>4096)return block('INVALID_REQUEST');
   const parent=dirname(outputPath);
   if(await hasUnsafePathLink(parent))return block('UNSAFE_DESTINATION');
