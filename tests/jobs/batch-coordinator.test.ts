@@ -249,3 +249,83 @@ test('TEST-022: late worker rejection after cancellation is contained',async()=>
   if(timeout)clearTimeout(timeout);
  }
 });
+
+
+test('TEST-022/NFR-009: a stalled worker without user cancellation times out and stops dispatch',async()=>{
+ let release!:()=>void;
+ const stalled=new Promise<void>(resolve=>{release=resolve;});
+ let entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ const dispatched:number[]=[];
+ const queue=new ReadOnlyBatchCoordinator(
+  {count:3,concurrency:1,maxAttempts:2,timeoutMs:50},
+  async ordinal=>{
+   dispatched.push(ordinal);
+   entered();
+   await stalled; // deliberately ignores the AbortSignal forever
+   return 'DONE';
+  }
+ );
+ let timer:NodeJS.Timeout|undefined;
+ try{
+  const run=queue.run();
+  await started;
+  const report=await Promise.race([
+   run,
+   new Promise<never>((_resolve,reject)=>{
+    timer=setTimeout(()=>reject(Error('TIMED_OUT_WORKER_BLOCKED_QUEUE')),2000);
+   })
+  ]);
+  assert.deepEqual(dispatched,[0]);
+  assert.deepEqual(report.jobs.map(x=>x.state),['FAILED','CANCELLED','CANCELLED']);
+  assert.deepEqual(report.jobs.map(x=>x.attempts),[1,0,0]);
+  assert.equal(report.automaticPatchAllowed,false);
+  assert.equal(report.automaticRollbackAllowed,false);
+  assert.equal(report.tampermonkeyVerified,false);
+  assert.equal(report.businessVerified,false);
+  release(); // late completion must never promote a failed result
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.deepEqual(queue.snapshot(),report);
+  assert.deepEqual(await queue.run(),report);
+ }finally{
+  if(timer)clearTimeout(timer);
+  release();
+ }
+});
+
+test('TEST-022/NFR-009: user cancellation before worker deadline stays CANCELLED',async()=>{
+ let entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});
+ let release!:()=>void;
+ const stalled=new Promise<void>(resolve=>{release=resolve;});
+ const queue=new ReadOnlyBatchCoordinator({count:2,timeoutMs:200},
+  async()=>{
+   entered();
+   await stalled;
+   return 'DONE';
+  });
+ try{
+  const run=queue.run();
+  await started;
+  queue.cancel();
+  const report=await run;
+  assert.deepEqual(report.jobs.map(x=>x.state),['CANCELLED','CANCELLED']);
+  await new Promise(resolve=>setTimeout(resolve,230));
+  assert.deepEqual(queue.snapshot(),report,'cleared deadline must not flip cancellation to failure');
+ }finally{release();}
+});
+
+test('TEST-022/NFR-009: invalid timeout settings and hostile accessor are rejected',()=>{
+ const worker=async()=> 'DONE' as const;
+ for(const timeoutMs of [-1,0,24,300001,1.5,NaN,Infinity]){
+  assert.throws(()=>new ReadOnlyBatchCoordinator({count:1,timeoutMs},worker),
+   /INVALID_BATCH_OPTIONS/);
+ }
+ let accessed=0;
+ const options={count:1};
+ Object.defineProperty(options,'timeoutMs',{enumerable:true,
+  get(){accessed++;return 100;}});
+ assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker),
+  /INVALID_BATCH_OPTIONS/);
+ assert.equal(accessed,0);
+});
