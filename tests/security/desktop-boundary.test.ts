@@ -106,6 +106,7 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /startApprovedTampermonkeyDiagnostic\(owned,true/);
   assert.match(main, /ipcMain\.handle\('gm-probe:visit'/);
   assert.match(main, /ipcMain\.handle\('gm-probe:observe'/);
+  assert.match(main, /ipcMain\.handle\('scenario:register'/);
   assert.match(main, /consistencySnapshot\(\)/);
   assert.match(main, /domSnapshot\(\)/);
   assert.match(main, /stopOnlyGmProbe\(\)/);
@@ -129,6 +130,5 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:stop'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:visit',mode\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:observe',mode\)/);
-  assert.match(main, /ipcMain\.handle\('scenario:register'/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:register',input\)/);
 });
