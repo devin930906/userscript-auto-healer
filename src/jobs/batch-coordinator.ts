@@ -185,8 +185,25 @@ export class ReadOnlyBatchCoordinator{
     const job=take();
     if(!job)return;
     let outcome:ReadOnlyWorkResult='PERMANENT_FAILURE';
-    try{outcome=await this.worker(job.ordinal,controller.signal);}
-    catch{ /* a thrown error is not proven transient; do not retry */ }
+    // A cooperative read-only worker may ignore AbortSignal forever. Do not
+    // hold the entire batch open after cancellation, and never accept its
+    // late success. The underlying worker cannot be forcibly stopped here;
+    // callers MUST keep it trusted, read-only and independently cancellable.
+    let removeAbortListener=()=>{};
+    const cancelled=new Promise<undefined>(resolve=>{
+     if(controller.signal.aborted){resolve(undefined);return;}
+     const onAbort=()=>resolve(undefined);
+     controller.signal.addEventListener('abort',onAbort,{once:true});
+     removeAbortListener=()=>controller.signal.removeEventListener('abort',onAbort);
+    });
+    try{
+     const settled=await Promise.race([
+      this.worker(job.ordinal,controller.signal),
+      cancelled
+     ]);
+     if(settled!==undefined)outcome=settled;
+    }catch{ /* unknown worker errors are permanent, never trusted as transient */ }
+    finally{removeAbortListener();}
     if(controller.signal.aborted)job.state='CANCELLED';
     else if(outcome==='DONE')job.state='SUCCEEDED';
     else if(outcome==='RETRYABLE_FAILURE'&&job.attempts<this.maxAttempts)
