@@ -176,8 +176,11 @@ async function readBoundedSelectedFile(path:string,initial:BigIntStats):Promise<
 
 export async function importApprovedPaths(paths: readonly string[], signal?: AbortSignal): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
-  const seen = new Set<string>();
-  let totalBytes = 0;
+  const seenPaths = new Set<string>();
+  const seenContents = new Set<string>();
+  // Bound physical read work even when many different paths contain
+  // byte-identical files (or malformed files which never reach scripts[]).
+  let selectedBytes = 0;
   if (!Array.isArray(paths) || paths.length > MAX_SELECTED_FILES) {
     outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
     return outcome;
@@ -198,27 +201,29 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     }
     const normalized = resolve(path);
     const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-    if (seen.has(key)) { outcome.duplicates++; continue; }
-    seen.add(key);
+    if (seenPaths.has(key)) { outcome.duplicates++; continue; }
+    seenPaths.add(key);
     try {
       const info = await lstat(normalized,{bigint:true});
       if (info.isSymbolicLink()) { outcome.errors.push(failure(display, 'SYMLINK_REJECTED')); continue; }
       if (!info.isFile()) { outcome.errors.push(failure(display, 'NOT_REGULAR_FILE')); continue; }
       if (info.size > BigInt(MAX_SCRIPT_BYTES)) { outcome.errors.push(failure(display, 'FILE_TOO_LARGE')); continue; }
-      if (BigInt(totalBytes) + info.size > BigInt(MAX_TOTAL_IMPORTED_BYTES)) {
+      if (BigInt(selectedBytes) + info.size > BigInt(MAX_TOTAL_IMPORTED_BYTES)) {
         outcome.errors.push(failure(display, 'SCAN_LIMIT'));
         break;
       }
+      // Account for attempted file reads, not just accepted unique results.
+      // Otherwise 1000 renamed identical files can evade the batch budget.
+      selectedBytes += Number(info.size);
       const read = await readBoundedSelectedFile(normalized,info);
       if (!read.ok) {outcome.errors.push(failure(display,read.code));continue;}
-      if (totalBytes + read.bytes.length > MAX_TOTAL_IMPORTED_BYTES) {
-        outcome.errors.push(failure(display, 'SCAN_LIMIT'));
-        break;
-      }
       const parsed = fromBytes(display, read.bytes);
       if ('code' in parsed) outcome.errors.push(parsed);
+      else if (seenContents.has(parsed.sha256)) outcome.duplicates++;
       else {
-        totalBytes += parsed.byteLength;
+        // SHA-256 is over the exact source bytes, not file names or paths.
+        // Different revisions with the same name remain distinct.
+        seenContents.add(parsed.sha256);
         outcome.scripts.push({ ...parsed, sourcePath: normalized });
       }
     } catch {

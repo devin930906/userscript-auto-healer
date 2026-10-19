@@ -90,9 +90,10 @@ function show(result: ImportResponse): void {
   // A canceled native batch may still contain earlier successfully read files.
   let duplicates = result.duplicates;
   for (const item of result.scripts) {
-    // Path-based dedup in the main process; content identity in the renderer
-    // also covers repeated drag/drop and files chosen in different dialogs.
-    const key = JSON.stringify([item.filename.toLowerCase(), item.sha256]);
+    // Exact byte identity works across renamed files, native pickers,
+    // drag/drop and file-input batches. Same name with changed bytes stays
+    // separately reviewable; nothing is executed or overwritten.
+    const key = item.sha256;
     if (seenScripts.has(key)) { duplicates++; continue; }
     seenScripts.add(key);
     acceptedCount++;
