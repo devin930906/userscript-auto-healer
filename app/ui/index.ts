@@ -30,6 +30,7 @@ interface Window {
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
     registerScenario(input: {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
+      replacementSelector?:string;
       userApproved:boolean;requiresLogin:boolean;loginReady:boolean;
     }): Promise<{ok:boolean;code?:string;status?:string;id?:string;
       state?:string;issues?:readonly string[];readOnlyDomEligible?:boolean;
@@ -38,6 +39,9 @@ interface Window {
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;
+      selectorComparisonStatus?:'NOT_REQUESTED'|
+        'OLD_SELECTOR_MISSING_ALTERNATIVE_PRESENT'|
+        'NO_SELECTOR_MISSING_IN_WINDOW'|'INCONCLUSIVE_OR_OTHER_SIGNAL';
       pageRuntimeStatus?:'PAGE_EXCEPTION_SIGNAL_ONLY'|'NO_EXCEPTION_IN_WINDOW_ONLY';
       pageExceptionCount?:number;
       tampermonkeyVerified:false;businessVerified:false;
@@ -83,6 +87,7 @@ const scenarioScript = document.getElementById('scenario-script') as HTMLSelectE
 const scenarioId = document.getElementById('scenario-id') as HTMLInputElement | null;
 const scenarioUrl = document.getElementById('scenario-url') as HTMLInputElement | null;
 const scenarioSelector = document.getElementById('scenario-selector') as HTMLInputElement | null;
+const scenarioReplacement = document.getElementById('scenario-replacement') as HTMLInputElement | null;
 const scenarioNeedsLogin = document.getElementById('scenario-needs-login') as HTMLInputElement | null;
 const scenarioLoginReady = document.getElementById('scenario-login-ready') as HTMLInputElement | null;
 const scenarioApprove = document.getElementById('scenario-approve') as HTMLInputElement | null;
@@ -394,6 +399,7 @@ scenarioRegister?.addEventListener('click',()=>{
   scriptSha256:scenarioScript.value,
   targetUrl:scenarioUrl?.value.trim()??'',
   selector:scenarioSelector?.value.trim()??'',
+  ...(scenarioReplacement?.value.trim()?{replacementSelector:scenarioReplacement.value.trim()}:{}),
   userApproved:scenarioApprove?.checked===true,
   requiresLogin:scenarioNeedsLogin?.checked===true,
   loginReady:scenarioLoginReady?.checked===true
@@ -520,6 +526,14 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
       ' 项；故障信号 '+(result.faultCategory??'UNKNOWN')+
       ' / '+(result.triageStatus??'UNKNOWN')+
       '，证据数 '+(result.evidenceCount??0)+
+      '；双选择器人工审核提示：'+(
+        result.selectorComparisonStatus==='OLD_SELECTOR_MISSING_ALTERNATIVE_PRESENT'
+          ?'本次稳定 DOM 观察到旧选择器缺失、替代选择器存在；仅供人工审核，不证明补丁能修复脚本'
+          :result.selectorComparisonStatus==='NO_SELECTOR_MISSING_IN_WINDOW'
+            ?'本次窗口两项选择器均未观察到缺失；未发现此类故障'
+            :result.selectorComparisonStatus==='INCONCLUSIVE_OR_OTHER_SIGNAL'
+              ?'无法确认旧缺失而新存在；请人工复核'
+              :'未申请双选择器比较')+
       '；页面 JavaScript 异常：'+(result.pageRuntimeStatus==='PAGE_EXCEPTION_SIGNAL_ONLY'
         ?'在 1.2 秒窗口观察到 '+(result.pageExceptionCount??0)+' 次（不能归因油猴脚本）'
         :result.pageRuntimeStatus==='NO_EXCEPTION_IN_WINDOW_ONLY'
