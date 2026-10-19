@@ -145,6 +145,9 @@ type VisitStatus=
 export interface ManualTampermonkeyDiagnosticSession {
  readonly status:'MANUAL_TEST_READY_NOT_VERIFIED';
  readonly runAt:GmProbeRunAt;
+ /** Version from the independently verified application-owned Chrome binary;
+  * this never establishes Tampermonkey extension identity or script execution. */
+ readonly browserVersion:string;
  /** Contains a single-run token. Never log or put this in arbitrary renderer content. */
  readonly source:string;
  /** Sensitive, temporary URL; native diagnostic tester must import explicitly. */
@@ -437,7 +440,8 @@ export async function startApprovedTampermonkeyDiagnostic(
    return assessManualProbeObservations(probe.receiptSnapshot(),visits.snapshot());
  };
  return {ok:true,session:Object.freeze({
-   status:'MANUAL_TEST_READY_NOT_VERIFIED',runAt:probe.runAt,source:probe.source,
+   status:'MANUAL_TEST_READY_NOT_VERIFIED',runAt:probe.runAt,
+    browserVersion:browser.chromeVersion,source:probe.source,
    installUrl:probe.installUrl,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
    visit,observe,domSnapshot,
