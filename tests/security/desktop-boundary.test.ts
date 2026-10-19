@@ -88,7 +88,7 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
   assert.match(main, /on\('will-navigate', \(event\) => event\.preventDefault\(\)\)/);
   assert.match(main, /setPermissionRequestHandler/);
-  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 16);
+  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 17);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
   assert.match(main, /dialog\.showMessageBox/);
   assert.match(main, /stopOnlyOwnedBrowser\(\)/);
@@ -97,6 +97,9 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /ipcMain\.handle\('gm-probe:start'/);
   assert.match(main, /isSupportedGmProbeRunAt\(runAt\)/);
   assert.match(main, /ipcMain\.handle\('gm-probe:status'/);
+  assert.match(main, /ipcMain\.handle\('gm-probe:save-report'/);
+  assert.match(main, /dialog\.showSaveDialog/);
+  assert.match(main, /saveLimitedGmReportOnly/);
   assert.match(main, /ipcMain\.handle\('gm-probe:stop'/);
   assert.match(main, /startApprovedTampermonkeyDiagnostic\(owned,true/);
   assert.match(main, /ipcMain\.handle\('gm-probe:visit'/);
@@ -113,11 +116,12 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /contextBridge\.exposeInMainWorld/);
   assert.doesNotMatch(preload, /ipcRenderer\.(send|on|sendSync)\b/);
   assert.doesNotMatch(preload, /require\(['"]node:(fs|child_process)/);
-  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 16);
+  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 17);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
   assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-body' \| 'document-end' \| 'document-idle'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:start',runAt\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:status'\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('gm-probe:save-report'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:stop'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:visit',mode\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:observe',mode\)/);
