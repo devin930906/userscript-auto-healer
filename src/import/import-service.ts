@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { constants, type BigIntStats, type Dirent } from 'node:fs';
 import { lstat, opendir, open, realpath } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 export const MAX_SCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_SELECTED_FILES = 1000;
@@ -174,6 +174,21 @@ async function readBoundedSelectedFile(path:string,initial:BigIntStats):Promise<
   }
 }
 
+/** Reject directory junctions/symlinks above a native-selected item as well
+ * as a link at the final item. O_NOFOLLOW protects only the final component;
+ * this is a preflight guard, not an OS-wide lock against concurrent renames.
+ */
+async function hasLinkedPathComponent(path: string): Promise<boolean> {
+  const normalized = resolve(path);
+  const root = parse(normalized).root;
+  let cursor = root;
+  for (const part of normalized.slice(root.length).split(sep).filter(Boolean)) {
+    cursor = join(cursor, part);
+    if ((await lstat(cursor)).isSymbolicLink()) return true;
+  }
+  return false;
+}
+
 export async function importApprovedPaths(paths: readonly string[], signal?: AbortSignal): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   const seenPaths = new Set<string>();
@@ -204,6 +219,10 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     if (seenPaths.has(key)) { outcome.duplicates++; continue; }
     seenPaths.add(key);
     try {
+      if (await hasLinkedPathComponent(normalized)) {
+        outcome.errors.push(failure(display, 'SYMLINK_REJECTED'));
+        continue;
+      }
       const info = await lstat(normalized,{bigint:true});
       if (info.isSymbolicLink()) { outcome.errors.push(failure(display, 'SYMLINK_REJECTED')); continue; }
       if (!info.isFile()) { outcome.errors.push(failure(display, 'NOT_REGULAR_FILE')); continue; }
@@ -246,6 +265,10 @@ export async function scanApprovedDirectory(root: string, signal?: AbortSignal):
   }
   let base: string;
   try {
+    if (await hasLinkedPathComponent(root)) {
+      outcome.errors.push(failure(basename(root), 'SYMLINK_REJECTED'));
+      return outcome;
+    }
     const info = await lstat(root);
     if (info.isSymbolicLink()) { outcome.errors.push(failure(basename(root), 'SYMLINK_REJECTED')); return outcome; }
     if (!info.isDirectory()) { outcome.errors.push(failure(basename(root), 'NOT_REGULAR_FILE')); return outcome; }
