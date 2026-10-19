@@ -30,6 +30,9 @@ let scenarioSession=new DesktopScenarioSession();
 // may only refer to an already registered scenario ID, never a source path.
 const nativeImportedPaths=new Map<string,string>();
 let manualExportInProgress=false;
+// New independent files can already exist after final native write consent.
+// Never acknowledge cancellation that cannot unwind the write operation.
+let manualExportCommitInProgress=false;
 const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
@@ -798,6 +801,8 @@ function registerSafeIpc(): void {
       });
       if(approved.response!==0||revoked())
         return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      // No await between final consent and marking the non-cancellable write.
+      manualExportCommitInProgress=true;
       const result=await exportReviewedImportedSelectorOnly(
         current.scripts[0],selected.scenario,evidence,{
           backupDirectory:backup.filePaths[0],
@@ -819,6 +824,7 @@ function registerSafeIpc(): void {
     }finally{
       if(scenarioObserveController===controller)scenarioObserveController=null;
       scenarioObserveInProgress=false;
+      manualExportCommitInProgress=false;
       manualExportInProgress=false;
       nativeSelectionInProgress=false;
       diagnosticGate.release(lease);
@@ -828,6 +834,8 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     if(!scenarioObserveInProgress)
       return {ok:false,code:'NO_ACTIVE_OBSERVATION',...unverified};
+    if(manualExportCommitInProgress)
+      return {ok:false,code:'EXPORT_WRITE_ALREADY_STARTED',...unverified};
     cancelScenarioObservation();
     return {ok:true,status:'OBSERVATION_CANCEL_REQUESTED',...unverified};
   });
@@ -1088,6 +1096,32 @@ async function createMainWindow(): Promise<void> {
         'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
+    // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
+    const uiCancelReady=await win.webContents.executeJavaScript(
+      "(() => {const el=document.getElementById('scenario-cancel');"+
+      "manualExportBusy=true;browserControls();const active=!el.disabled;"+
+      "manualExportBusy=false;browserControls();return active&&el.disabled;})()"
+    ) as boolean;
+    scenarioObserveController=new AbortController();
+    scenarioObserveInProgress=true;
+    manualExportInProgress=true;
+    const beforeCommit=await win.webContents.executeJavaScript(
+      'window.healer.cancelScenarioInspection()') as {ok:boolean;status?:string};
+    const preCommitAborted=scenarioObserveController.signal.aborted;
+    scenarioObserveController=new AbortController();
+    manualExportCommitInProgress=true;
+    const duringCommit=await win.webContents.executeJavaScript(
+      'window.healer.cancelScenarioInspection()') as {ok:boolean;code?:string};
+    const commitUnaffected=!scenarioObserveController.signal.aborted;
+    manualExportCommitInProgress=false;
+    scenarioObserveInProgress=false;
+    manualExportInProgress=false;
+    scenarioObserveController=null;
+    if(!uiCancelReady||beforeCommit.ok!==true||
+       beforeCommit.status!=='OBSERVATION_CANCEL_REQUESTED'||
+       !preCommitAborted||duringCommit.ok!==false||
+       duringCommit.code!=='EXPORT_WRITE_ALREADY_STARTED'||!commitUnaffected)
+      throw new Error('MANUAL_EXPORT_CANCEL_GATE_FAILED');
     const receipt = process.env.UAH_SMOKE_RECEIPT;
     if (!receipt) throw new Error('SHELL_SMOKE_RECEIPT_NOT_CONFIGURED');
     writeFileSync(receipt, JSON.stringify({

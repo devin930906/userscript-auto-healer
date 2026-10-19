@@ -282,3 +282,7 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 
 - 现有脚本导入与 Chrome/Profile 原生选择、Profile 创建及启动处理器新增互斥状态校验；旧实现仅在各自局部串行，可能发生并发 OS 对话框、相互竞争或错误选择状态。此项只改变主进程保守 BUSY 拒绝条件，没有扩大 Chrome 权限、脚本导入能力或自动修复范围。
 - Windows Electron 真实 renderer/preload IPC smoke 加入双向悬挂选择器及启动拒绝测试；原有独立的浏览器与导入并发检查保留。运行结果以当前 PR HEAD 与合并后 main 的 GitHub Actions 为准。TASK-017 完整用户旅程和正式 Stable GATE 仍未通过。
+
+## （7）TASK-017 / TEST-022/026 手动导出准备取消及文件写入边界（2026-10-19）
+
+已实现的 `scenario:export-manual` 与普通 DOM 检查共用 AbortController，但原有界面仅在普通检查过程中提供取消。现在也允许在人工候选导出的**写入前**准备（原生授权、页面只读观察、目录选择、源文件再核验）阶段请求取消。最终原生写入授权后、启动备份/候选生成前，主进程同步将 `manualExportCommitInProgress` 设为真，`scenario:cancel` 改为返回 `EXPORT_WRITE_ALREADY_STARTED`，不再错误承诺能取消已有新文件。原始用户脚本仍不会被自动覆盖。Windows 真 Electron renderer→preload→IPC smoke 检验了模拟活动阶段中 UI 启用取消、提交前取消信号及文件创建阶段拒绝取消。该 smoke 未实际创建备份文件，不证明真实 Tampermonkey、GM、业务恢复、完整 TEST-022 或 Stable GATE。
