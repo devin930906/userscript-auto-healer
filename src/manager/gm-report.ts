@@ -20,7 +20,7 @@ const flags=Object.freeze({
   automaticRollbackAllowed:false as const
 });
 type Input=Pick<ManualTampermonkeyDiagnosticSession,
- 'runAt'|'expiresAt'|'snapshot'|'consistencySnapshot'|'domSnapshot'>;
+ 'runAt'|'browserVersion'|'expiresAt'|'snapshot'|'consistencySnapshot'|'domSnapshot'>;
 type Status=ReturnType<Input['snapshot']>['status'];
 type Consistency=ReturnType<Input['consistencySnapshot']>['status'];
 const statuses=new Set<Status>([
@@ -35,7 +35,8 @@ const consistencyStatuses=new Set<Consistency>([
 type LimitedDom={observedAt:string;actionCount:0|1;
  fixtureDomMatchesExpected:boolean};
 export type LimitedGmReport=Readonly<{
- schema:'uah-manual-gm-fixture-v1';verdict:'NOT_VERIFIED';
+ schema:'uah-manual-gm-fixture-v2';verdict:'NOT_VERIFIED';
+ browserVersion:string;
  collectedAt:string;expiresAt:string;
  runAt:'document-start'|'document-body'|'document-end'|'document-idle';
  assessment:Readonly<{
@@ -58,6 +59,13 @@ function validObservedAt(s:unknown):s is string{
  if(typeof s!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/.test(s))return false;
  const d=Date.parse(s);
  return Number.isFinite(d)&&new Date(d).toISOString()===s;
+}
+/** Chrome's four-part binary version is obtained from the signed, owned
+ * Chrome process via the diagnostic session, never from an HTTP receipt.
+ * Preserve only the numeric version; never export executable/Profile paths. */
+function validChromeVersion(value:unknown):value is string{
+ return typeof value==='string'&&
+   /^\\d{1,4}(?:\\.\\d{1,8}){3}$/.test(value);
 }
 /** Check *relationships*, not merely schemas. A diagnostic JSON remains
  * explicitly unverified, but cannot falsely claim that two distinct DOM
@@ -110,7 +118,8 @@ export function createLimitedGmReport(
 ):LimitedGmReportResult{
  try{
   if(!session||!iso(collectedAt)||!iso(session.expiresAt)||
-     !isSupportedGmProbeRunAt(session.runAt))return invalid();
+     !isSupportedGmProbeRunAt(session.runAt)||
+     !validChromeVersion(session.browserVersion))return invalid();
   const s=session.snapshot(),c=session.consistencySnapshot(),dom=session.domSnapshot();
   if(!s||!c||!dom||!statuses.has(s.status)||
      !consistencyStatuses.has(c.status)||
@@ -140,8 +149,9 @@ export function createLimitedGmReport(
       actionCount:d.actionCount,fixtureDomMatchesExpected:d.fixtureDomMatchesExpected});
   }
   const report:LimitedGmReport=Object.freeze({
-   schema:'uah-manual-gm-fixture-v1' as const,
+   schema:'uah-manual-gm-fixture-v2' as const,
    verdict:'NOT_VERIFIED' as const,
+   browserVersion:session.browserVersion,
    collectedAt:new Date(collectedAt).toISOString(),
    expiresAt:new Date(session.expiresAt).toISOString(),
    runAt:session.runAt,
@@ -162,7 +172,7 @@ export function createLimitedGmReport(
 }
 
 const savedReportKeys=[
- 'schema','verdict','collectedAt','expiresAt','runAt','assessment',
+ 'schema','verdict','browserVersion','collectedAt','expiresAt','runAt','assessment',
  'consistency','dom','extensionAuthenticityVerified',
  'scriptInstallationVerified','gmApiVerified','businessVerified',
  'automaticPatchAllowed','automaticRollbackAllowed'
@@ -197,7 +207,8 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
  const consistency=exactData(root.consistency,['status','comparedModes']);
  const dom=exactData(root.dom,['broken','fixed']);
  if(!assessment||!consistency||!dom||
-    root.schema!=='uah-manual-gm-fixture-v1'||root.verdict!=='NOT_VERIFIED'||
+    root.schema!=='uah-manual-gm-fixture-v2'||root.verdict!=='NOT_VERIFIED'||
+    !validChromeVersion(root.browserVersion)||
     !validObservedAt(root.collectedAt)||!validObservedAt(root.expiresAt)||
     !isSupportedGmProbeRunAt(root.runAt)||
     root.extensionAuthenticityVerified!==false||
@@ -245,7 +256,8 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
  if(!coherentLimitedEvidence(checkedAssessment,checkedConsistency,checkedDom))
    return null;
  return Object.freeze({
-  schema:'uah-manual-gm-fixture-v1',verdict:'NOT_VERIFIED',
+  schema:'uah-manual-gm-fixture-v2',verdict:'NOT_VERIFIED',
+  browserVersion:root.browserVersion,
   collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
   assessment:Object.freeze(checkedAssessment),
   consistency:Object.freeze(checkedConsistency),
