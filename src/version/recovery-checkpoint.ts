@@ -30,7 +30,7 @@ export type RecoveryCheckpointResult=
     checkpointFileName:string;checkpointSha256:string;
     originalSha256:string;candidateSha256:string
   }&typeof noAuthority>;
-const block=(reason:Reason):RecoveryCheckpointResult=>
+const block=(reason:Reason):Extract<RecoveryCheckpointResult,{status:'BLOCKED'}>=>
   Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
 
 const receiptFields=[
