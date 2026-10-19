@@ -62,6 +62,31 @@ function validUrl(raw:unknown):raw is string{
       !!url.hostname&&!url.username&&!url.password&&!url.hash;
   }catch{return false;}
 }
+type FrameIdentity = {readonly id:string;readonly loaderId:string;readonly url:string};
+/** Frame events replayed after Page.enable are not a new navigation if
+ * their main-frame ID, document loader and URL match the armed checkpoint.
+ * A different loader (including same-URL reload) must still invalidate it.
+ */
+function getArmedFrameIdentity(reply:unknown,expectedUrl:string):FrameIdentity|null{
+  if(!exactMainFrame(reply,expectedUrl))return null;
+  const tree=(reply as {frameTree?:{frame?:unknown}}).frameTree;
+  const frame=tree?.frame as Record<string,unknown>|undefined;
+  if(typeof frame?.id!=='string'||!frame.id||
+     typeof frame.loaderId!=='string'||!frame.loaderId)return null;
+  return {id:frame.id,loaderId:frame.loaderId,url:expectedUrl};
+}
+export function isArmedFrameNavigationReplay(
+  params:unknown,armed:FrameIdentity|null
+):boolean{
+  if(!armed||!params||typeof params!=='object'||Array.isArray(params))
+    return false;
+  const frame=(params as {frame?:unknown}).frame;
+  if(!frame||typeof frame!=='object'||Array.isArray(frame))return false;
+  const data=frame as Record<string,unknown>;
+  return data.id===armed.id&&data.loaderId===armed.loaderId&&
+    data.url===armed.url;
+}
+
 function exactMainFrame(reply:unknown,expectedUrl:string):boolean{
   if(!reply||typeof reply!=='object'||Array.isArray(reply))return false;
   const tree=(reply as {frameTree?:unknown}).frameTree;
@@ -86,6 +111,7 @@ async function capture(
   let tooMany=false;
   let listening=false;
   let monitoringNavigation=false;
+  let armedIdentity:FrameIdentity|null=null;
   let nextId=0;
   let open=false;
   let count=0;
@@ -110,9 +136,10 @@ async function capture(
       // Page.enable may replay the just-opened target's initial navigation.
       // Only a navigation after the explicit sampling boundary is evidence
       // of a route change during an observation.
-      if(monitoringNavigation&&
-         (msg.method==='Page.frameNavigated'||
-          msg.method==='Page.navigatedWithinDocument'))navigated=true;
+      if(monitoringNavigation&&msg.method==='Page.frameNavigated'&&
+         !isArmedFrameNavigationReplay(msg.params,armedIdentity))navigated=true;
+      if(monitoringNavigation&&msg.method==='Page.navigatedWithinDocument')
+        navigated=true;
       if(listening&&msg.method==='Runtime.exceptionThrown'){
         const detail=(msg.params as {exceptionDetails?:{exceptionId?:unknown}}|undefined)
           ?.exceptionDetails;
@@ -176,6 +203,7 @@ async function capture(
     const armedFrame=await command('Page.getFrameTree');
     if(!exactMainFrame(armedFrame,expectedUrl))
       return {ok:false,code:'ROUTE_CHANGED'};
+    armedIdentity=getArmedFrameIdentity(armedFrame,expectedUrl);
     if(broken)return {ok:false,code:'CDP_FAILED'};
     navigated=false;
     count=0;
