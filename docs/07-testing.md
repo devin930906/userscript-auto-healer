@@ -177,3 +177,9 @@ PR [#93](https://github.com/devin930906/userscript-auto-healer/pull/93) 增加 `
 PR [#123](https://github.com/devin930906/userscript-auto-healer/pull/123) 将本应用校验过的 Chrome 版本值传入短时手动诊断会话，写入仅供人工核对的 `uah-manual-gm-fixture-v2` JSON。回归检查通过的限定要求为：正常四段版本能被导出且仍是 `NOT_VERIFIED`；缺失、畸形、注入式版本以及旧 v1 结构均不能成为新输出；输出继续禁止脚本源码、Profile 路径、URL/token 和任何 Tampermonkey/GM/业务 VERIFIED 断言。旧 v1 文件只保留为历史，不实施自动升级。
 
 Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skeleton Checks #39254390625](https://github.com/devin930906/userscript-auto-healer/actions/runs/39254390625) 已通过；本说明提交后须检查最新 HEAD 与 main 独立 CI。上述测试仍仅覆盖原生可信环境元数据传递与拒绝负例，**不是**完整 TEST-017/018、真实扩展内 GM API 与业务恢复、GATE-004/005 或正式 Stable 验收。
+
+## （7）TASK-007 / TEST-017/026 诊断报告时间线一致性负例（2026-10-19）
+
+沿用现有 `uah-manual-gm-fixture-v2` 合同，不修改 JSON schema 或权限。新增独立拒绝测试：报告采集时间必须在一次性测试服务截止时间之前；每个有限只读 DOM 观察时间不得晚于报告采集时间，也不得到达/超过测试截止时间。手动 broken/fixed 打开顺序不限，避免把正常逆序访问误判失败。对原生生成和持久保存两层同时检查，不允许格式合法却发生在未来或到期后的报告时间线进入文件。所有证据仍是未经认证的夹具摘要，绝不授权 Tampermonkey 安装、GM/业务 VERIFIED、自动修改或回滚。
+
+源码及当前提交验证记录以本轮对应 PR/Actions 为准；这项改动不代表完整 TEST-017/018、TEST-026、GATE-004/005/006 或最终 Stable 验收通过。

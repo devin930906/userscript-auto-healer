@@ -266,3 +266,9 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 - PR [#123](https://github.com/devin930906/userscript-auto-healer/pull/123) 将本应用**已验证归属的 Chrome 进程**提供的四段数字版本加入限定诊断会话与原生 JSON 报告，以便人工 TEST-017 环境追踪。原报告仅包含预设 broken/fixed 自报及有限 DOM 证据，没有所测 Chrome 版本。新增的 `browserVersion` 必须符合严格版本格式，不接收页面/HTTP 自报，不存储 Chrome.exe 路径、Profile、GM 脚本、URL 或令牌。
 - 保存格式明确由 `uah-manual-gm-fixture-v1` 变更为 `uah-manual-gm-fixture-v2`，是**新生成报告**的版本升级；旧 v1 历史文件不会自动修改、覆盖或宣称兼容导入（应用本来没有 v1 导入路径）。原生系统二次确认说明新增了 Chrome 版本信息；失效/伪造的版本和旧 schema 均拒绝作为新 v2 文件保存。TEST-017 与受影响 Node/Electron 测试随同 PR 回归。
 - 首个代码 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 Windows [Application Skeleton Checks #39254390625](https://github.com/devin930906/userscript-auto-healer/actions/runs/39254390625) 已完成并成功；**本段文档更新后的最终 HEAD、实际合并及合并后 main CI 仍须分别核验**。版本属于被本应用验证的 Chrome，而非 Tampermonkey 扩展身份/版本证明。真实脚本安装、GM API、业务断言、自动补丁与回滚均未因此获得 VERIFIED；TASK-007、TEST-017/018、GATE-004/005 继续开发/受阻。
+
+## （7）TASK-007 有限 GM 报告的时间线边界修复（2026-10-19）
+
+- 关联 REQ-017/018、TEST-017/026、RISK-003、GATE-004/005/006。源 `src/manager/gm-report.ts` 的 v2 报告此前只检查 ISO 时间戳形状与局部 DOM 一致性；新负例揭示采集时间达到/超过一次性探针到期时，以及 DOM 证据晚于采集时间/到期时间时，格式完整的 JSON 仍可能被导出。现统一在生成与持久保存边界拒绝不可能的时间线，同时允许正常的任意模式访问顺序。
+- 保留原生 `wx` 无覆盖保存、SHA-256/字节回读与严格数据白名单；没有用户脚本、扩展权限、Chrome Profile 或原始文件修改，也没有扩大任何自动修复权限。只有授权独立管理器/业务 E2E 证据才可推进 TEST-017/018；真实 Tampermonkey 与 Windows Stable 其余 GATE 不变。
+- 最终提交、PR 与 Windows Actions 结论以对应远端运行记录核实，本段本身不是验收通过声明。
