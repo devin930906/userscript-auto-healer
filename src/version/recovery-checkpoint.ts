@@ -103,7 +103,7 @@ export async function stageRecoveryCheckpointOnly(
       return block('RECHECK_FAILED');
     // Recheck already validated the strict receipt schema; never copy fields
     // from a caller's prototype/getter or grant authority from JSON flags.
-    const receipt=data as Receipt;
+    const receipt=data as unknown as Receipt;
     if(await hasUnsafePathLink(opts.backupDirectory))
       return block('UNSAFE_DESTINATION');
     const dir=await lstat(opts.backupDirectory,{bigint:true});
