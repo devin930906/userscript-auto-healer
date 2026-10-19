@@ -30,7 +30,8 @@ interface Window {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
       userApproved:boolean;requiresLogin:boolean;loginReady:boolean;
     }): Promise<{ok:boolean;code?:string;status?:string;id?:string;
-      state?:string;issues?:readonly string[];automaticPatchAllowed:false;
+      state?:string;issues?:readonly string[];readOnlyDomEligible?:boolean;
+       automaticPatchAllowed:false;
       tampermonkeyVerified:false;businessVerified:false}>;
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
@@ -363,8 +364,12 @@ scenarioRegister?.addEventListener('click',()=>{
    return;
   }
   if(scenarioStatus)scenarioStatus.textContent='场景登记成功：'+
-   (result.state??'UNKNOWN')+'。这是待测试状态，未验证任何业务动作。';
-  if(scenarioInspectId){
+   (result.state??'UNKNOWN')+'。'+(result.readOnlyDomEligible===true
+     ?'可申请限定只读 DOM 检查；仍未验证任何业务动作。'
+     :'仅已登记；当前不符合限定只读 DOM 检查条件，未执行任何业务动作。');
+  // Native eligibility is a UI hint only. The privileged main process
+  // independently rechecks ownership and requires fresh native consent.
+  if(scenarioInspectId&&result.readOnlyDomEligible===true){
    const option=document.createElement('option');
    option.value=result.id??input.id;
    option.textContent=result.id??input.id;

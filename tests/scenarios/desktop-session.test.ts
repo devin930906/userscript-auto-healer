@@ -19,6 +19,7 @@ test('TEST-005/017: only a SHA from the native read-only import session can stag
  if(staged.ok){
   assert.equal(staged.status,'STAGED_RUNTIME_UNVERIFIED');
   assert.equal(staged.state,'READY_TO_TEST');
+  assert.equal(staged.readOnlyDomEligible,true);
   assert.deepEqual(staged.issues,[]);
   assert.equal(staged.scriptSha256,digest);
   assert.equal(staged.automaticPatchAllowed,false);
@@ -37,6 +38,7 @@ test('TEST-005/017: staging never authorizes a browser visit, login or manager a
  assert.equal(result.ok,true);
  if(result.ok){
   assert.equal(result.state,'UNKNOWN');
+  assert.equal(result.readOnlyDomEligible,false);
   assert.deepEqual(result.issues,['LOGIN_NOT_READY']);
   assert.equal(result.automaticPatchAllowed,false);
  }
@@ -112,7 +114,10 @@ test('TEST-005/017: login cases and unsupported DOM selectors remain staged but 
   {...request(),id:'fragment_url',targetUrl:'https://example.test/app#secret'}
  ];
  for(const item of cases){
-  assert.equal(session.register(item).ok,true);
+  const staged=session.register(item);
+  assert.equal(staged.ok,true);
+  if(staged.ok)assert.equal(staged.readOnlyDomEligible,false,
+   'non-inspectable scenario must not appear as an inspectable UI choice');
   assert.deepEqual(session.resolveReadOnlyDom(item.id),{
    ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'
   });

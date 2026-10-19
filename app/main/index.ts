@@ -769,6 +769,18 @@ async function createMainWindow(): Promise<void> {
       "const lines=Array.from(document.querySelectorAll('#scenario-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.includes('smoke_ui_scenario') && x.includes('READY_TO_TEST') && x.includes('未执行')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      "const uiUnknownButtonReady=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "if(!uiScenarioButton.disabled)resolve(true);else if(Date.now()-start>3000)resolve(false); " +
+      "else setTimeout(tick,40);};tick();}); " +
+      "document.getElementById('scenario-id').value='smoke_login_unknown'; " +
+      "document.getElementById('scenario-needs-login').checked=true; " +
+      "if(uiUnknownButtonReady)uiScenarioButton.click(); " +
+      "const uiUnknownNotOffered=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#scenario-list li')).map(x=>x.textContent); " +
+      "const listed=lines.some(x=>x.includes('smoke_login_unknown') && x.includes('UNKNOWN')); " +
+      "const options=Array.from(document.getElementById('scenario-inspect-id').options); " +
+      "if(listed)resolve(!options.some(x=>x.value==='smoke_login_unknown')); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
@@ -786,6 +798,7 @@ async function createMainWindow(): Promise<void> {
       "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
+      "uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
       "rendered === true && isolated && canCancel && cancelled && " +
