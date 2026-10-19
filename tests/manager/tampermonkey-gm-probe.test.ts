@@ -19,6 +19,38 @@ test('TEST-017: only supported GM injection timing values can be requested',asyn
      true,30000,invalid as 'document-start'),{ok:false,code:'INVALID_OPTIONS'});
  }
 });
+test('TEST-017: separate temporary sessions never reuse a Tampermonkey userscript identity',async t=>{
+ const first=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(first.ok,true);
+ if(!first.ok)return;
+ t.after(()=>first.session.stop());
+ const second=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(second.ok,true);
+ if(!second.ok)return;
+ t.after(()=>second.session.stop());
+ const identity=(text:string)=>{
+  const meta=text.split('// ==/UserScript==')[0];
+  const name=/^\/\/ @name (.+)$/m.exec(meta)?.[1];
+  const namespace=/^\/\/ @namespace (.+)$/m.exec(meta)?.[1];
+  assert.match(name??'',/^UAH Isolated GM Diagnostic [0-9a-f]{8}$/);
+  assert.match(namespace??'',/^uah-isolated-gm-probe\.[0-9a-f]{32}$/);
+  return {name,namespace};
+ };
+ const a=identity(first.session.source),b=identity(second.session.source);
+ assert.notEqual(a.name,b.name);
+ assert.notEqual(a.namespace,b.namespace);
+ assert.equal(first.session.source.includes('// @grant GM_getValue'),true);
+ assert.equal(second.session.source.includes('// @grant GM_getValue'),true);
+ for(const session of [first.session,second.session]){
+  const token=session.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+  assert.ok(token);
+  const meta=session.source.split('// ==/UserScript==')[0];
+  assert.equal(meta.includes(token),false,'capability must not be published in manager identity');
+  const downloaded=await fetch(session.installUrl);
+  assert.equal(downloaded.status,200);
+  assert.equal(await downloaded.text(),session.source);
+ }
+});
 test('TEST-017: document-body and document-end accept each explicit run-at and defer DOM when parsing',async t=>{
  for(const runAt of ['document-body','document-end'] as const){
   const result=await startIsolatedTampermonkeyGmProbe(true,30000,runAt);
