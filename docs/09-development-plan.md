@@ -272,3 +272,8 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 - 关联 REQ-017/018、TEST-017/026、RISK-003、GATE-004/005/006。源 `src/manager/gm-report.ts` 的 v2 报告此前只检查 ISO 时间戳形状与局部 DOM 一致性；新负例揭示采集时间达到/超过一次性探针到期时，以及 DOM 证据晚于采集时间/到期时间时，格式完整的 JSON 仍可能被导出。现统一在生成与持久保存边界拒绝不可能的时间线，同时允许正常的任意模式访问顺序。
 - 保留原生 `wx` 无覆盖保存、SHA-256/字节回读与严格数据白名单；没有用户脚本、扩展权限、Chrome Profile 或原始文件修改，也没有扩大任何自动修复权限。只有授权独立管理器/业务 E2E 证据才可推进 TEST-017/018；真实 Tampermonkey 与 Windows Stable 其余 GATE 不变。
 - 最终提交、PR 与 Windows Actions 结论以对应远端运行记录核实，本段本身不是验收通过声明。
+
+## （7）TASK-007 GM 探针半包断连安全收尾（2026-10-19）
+
+- 关联 REQ-017/018、TEST-017/026、GATE-006/007；修复本机一次性 HTTP 诊断接收器在恶意/意外提前关闭连接时缺少请求流 error/aborted 处理的问题（Node.js IncomingMessage 的非监听 error 可能中止 Electron 主进程）。独立处理断开连接并拒绝任何截断回执；原先 token、来源、时间、数据上限及单模式首份回执保护均保留。
+- 新增真实 TCP 流中断测试与正常 POST 恢复测试，没有修改现有脚本、浏览器 Profile、扩展权限或安装内容，也不授予自动应用/回滚。真实 Tampermonkey TEST-017/018 和正式 GATE 仍待其他独立证据，本段阶段记录不代表 Stable 完成。

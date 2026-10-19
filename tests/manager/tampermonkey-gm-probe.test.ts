@@ -422,3 +422,48 @@ test('TEST-017: mid-run consent expiry prevents later GM fixture side effects',a
    },'Expired fixture must not advance to another side effect after '+expiresDuring);
  }
 });
+
+test('TEST-017/026: interrupted HTTP receipt does not terminate fixture or record partial evidence',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const port=Number(new URL(probe.origin).port);
+ const socket=createConnection({host:'127.0.0.1',port});
+ socket.on('error',()=>{}); // Client may observe reset when it aborts.
+ try{
+   await new Promise<void>((resolve,reject)=>{
+     socket.once('connect',resolve);
+     socket.once('error',reject);
+   });
+   // A complete HTTP header but deliberately incomplete JSON and body.
+   socket.write('POST /receipt HTTP/1.1\r\nHost: 127.0.0.1:'+port+
+     '\r\nContent-Type: application/json\r\nContent-Length: 512\r\n\r\n'+
+     '{"token":"incomplete');
+   // Give the receiver a chance to attach request stream listeners.
+   await new Promise(resolve=>setTimeout(resolve,50));
+   const closed=new Promise<void>(resolve=>socket.once('close',()=>resolve()));
+   socket.destroy();
+   await closed;
+
+   assert.deepEqual(probe.receiptSnapshot(),{});
+   const page=await fetch(probe.origin+'/?mode=broken');
+   assert.equal(page.status,200);
+   assert.match(await page.text(),/id="current-target"/);
+   // A subsequent *complete* POST remains usable, but still never authenticates
+   // the extension, script installation, GM API or business outcome.
+   const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+   assert.ok(token);
+   const reply=await fetch(probe.origin+'/receipt',{
+     method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({token,mode:'broken',
+       gmDefaultMatched:false,businessAction:false})
+   });
+   assert.equal(reply.status,204);
+   assert.equal(probe.receiptSnapshot().broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
+   assert.equal(probe.receiptSnapshot().broken?.gmApiVerified,false);
+ }finally{
+   socket.destroy();
+ }
+});
