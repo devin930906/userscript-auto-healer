@@ -97,8 +97,15 @@ export async function stageRecoveryCheckpointOnly(
     if(!opts)return block('INVALID_REQUEST');
     if(!opts.userApproved)return block('NOT_AUTHORIZED');
     const data=values(untrustedReceipt,receiptFields);
-    if(!data)return block('INVALID_REQUEST');
-    const result=await verifyStagedCandidateReadOnly(request,untrustedReceipt,opts);
+    // Snapshot all caller data before the first await: mutable serialized
+    // requests and receipts must not switch identity between rechecks.
+    const requestData=values(request,[
+      'source','expectedSourceSha256','callOffset','method',
+      'originalSelector','replacementSelector','faultEvidenceId'
+    ]);
+    if(!data||!requestData)return block('INVALID_REQUEST');
+    const stableRequest=requestData as unknown as LiteralPatchRequest;
+    const result=await verifyStagedCandidateReadOnly(stableRequest,data,opts);
     if(result.status!=='CANDIDATE_RECHECKED_READ_ONLY')
       return block('RECHECK_FAILED');
     // Recheck already validated the strict receipt schema; never copy fields
@@ -153,7 +160,7 @@ export async function stageRecoveryCheckpointOnly(
          !sameDirectory(dir,afterPublish))return block('UNSAFE_DESTINATION');
       // Any stale disk file during publication invalidates this observation.
       // The record remains for explicit investigation, NEVER for auto-apply.
-      const rechecked=await verifyStagedCandidateReadOnly(request,untrustedReceipt,opts);
+      const rechecked=await verifyStagedCandidateReadOnly(stableRequest,data,opts);
       if(rechecked.status!=='CANDIDATE_RECHECKED_READ_ONLY')
         return block('RECHECK_FAILED');
       return Object.freeze({
