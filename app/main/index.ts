@@ -601,6 +601,27 @@ async function createMainWindow(): Promise<void> {
       "list.filter(x=>x.startsWith('drop-other.user.js:')).length===1 && " +
       "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      "const input=document.getElementById('select-files'); " +
+      "const sample=new DataTransfer(); sample.items.add(new File(['bad'],'invalid.txt')); " +
+      "sample.items.add(new File(['// accepted'],'accepted-batch.user.js')); " +
+      "Object.defineProperty(input,'files',{configurable:true,value:sample.files}); " +
+      "input.dispatchEvent(new Event('change',{bubbles:true})); " +
+      "const isolated=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
+      "if(lines.some(x=>x.startsWith('invalid.txt:')) && " +
+      "lines.some(x=>x.startsWith('accepted-batch.user.js:')))resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const next=new DataTransfer(); next.items.add(new File(['// first'],'cancel-first.user.js')); " +
+      "next.items.add(new File(['// second'],'cancel-second.user.js')); " +
+      "Object.defineProperty(input,'files',{configurable:true,value:next.files}); " +
+      "input.dispatchEvent(new Event('change',{bubbles:true})); " +
+      "const canCancel=!document.getElementById('cancel-import').disabled; " +
+      "document.getElementById('cancel-import').click(); " +
+      "const cancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
+      "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
+      "document.getElementById('cancel-import').disabled)resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
@@ -613,7 +634,7 @@ async function createMainWindow(): Promise<void> {
       "selectedExe.ok === true && selectedProfile.ok === true && raceSerialized && " +
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
-      "d.ok === true && rendered === true && " +
+      "d.ok === true && rendered === true && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 2') && " +
       "document.getElementById('import-summary').textContent.includes('重复 1') && " +
       "document.getElementById('cancel-import').disabled === true && " +
