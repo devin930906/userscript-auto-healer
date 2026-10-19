@@ -201,3 +201,54 @@ test('TEST-017/026: coherent report semantics are required at capture and native
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TEST-017/026: report chronology rejects future DOM and post-expiry evidence at capture and save',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-timeline-'));
+ try{
+  const at=Date.parse('2026-10-19T02:02:00.000Z');
+  const ready=createLimitedGmReport(session,at);
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const report=ready.report;
+
+  // Legitimate operators can visit fixed first: chronology is bounded but
+  // the two modes are not assumed to have a fixed temporal ordering.
+  const reverse={...session,domSnapshot:()=>({
+    broken:{...dom('broken',0),observedAt:'2026-10-19T02:00:01.000Z'},
+    fixed:{...dom('fixed',1),observedAt:'2026-10-19T02:00:00.000Z'}
+  })};
+  assert.equal(createLimitedGmReport(reverse,at).status,'UNVERIFIED_REPORT_READY');
+
+  const impossible=[
+    {...session,expiresAt:at},
+    {...session,expiresAt:at-1},
+    {...session,domSnapshot:()=>({
+      broken:{...dom('broken',0),observedAt:'2026-10-19T02:02:01.000Z'},
+      fixed:dom('fixed',1)
+    })},
+    {...session,domSnapshot:()=>({
+      broken:dom('broken',0),
+      fixed:{...dom('fixed',1),observedAt:'2026-10-19T02:06:00.000Z'}
+    })}
+  ];
+  for(const [i,invalid] of impossible.entries()){
+    assert.equal(createLimitedGmReport(invalid as typeof session,at).status,
+      'BLOCKED','capture timeline '+i);
+  }
+
+  const forged=[
+    {...report,collectedAt:'2026-10-19T02:05:00.000Z'},
+    {...report,expiresAt:'2026-10-19T02:02:00.000Z'},
+    {...report,dom:{...report.dom,broken:{
+      ...report.dom.broken,observedAt:'2026-10-19T02:02:01.000Z'}}},
+    {...report,dom:{...report.dom,fixed:{
+      ...report.dom.fixed,observedAt:'2026-10-19T02:06:00.000Z'}}}
+  ];
+  for(const [i,invalid] of forged.entries()){
+    const saved=await saveLimitedGmReportOnly(
+      invalid as typeof report,join(root,'timeline-'+i+'.json'),true);
+    assert.equal(saved.status,'BLOCKED','saved timeline '+i);
+  }
+  assert.deepEqual(await readdir(root),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

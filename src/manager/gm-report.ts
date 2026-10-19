@@ -110,6 +110,25 @@ function coherentLimitedEvidence(
  return true;
 }
 
+/** Refuse impossible diagnostic timelines even for explicitly UNVERIFIED
+ * evidence. Fixture DOM samples must precede the exported snapshot and the
+ * bounded fixture expiry. Do not infer a required broken/fixed visit order:
+ * the human tester may visit either mode first.
+ */
+function chronologicalLimitedEvidence(
+ report:LimitedGmReport
+):boolean{
+ const collected=Date.parse(report.collectedAt);
+ const expires=Date.parse(report.expiresAt);
+ if(collected>=expires)return false;
+ for(const sample of [report.dom.broken,report.dom.fixed]){
+  if(sample===null)continue;
+  const observed=Date.parse(sample.observedAt);
+  if(observed>collected||observed>=expires)return false;
+ }
+ return true;
+}
+
 /** Collect only explicitly listed primitive fields: never JSON.stringify
  * the original session, its URLs, its runtime hint or untrusted objects.
  */
@@ -164,7 +183,8 @@ export function createLimitedGmReport(
    consistency:Object.freeze({status:c.status,comparedModes:c.comparedModes}),
    dom:Object.freeze(picked),...flags
   });
-  if(!coherentLimitedEvidence(report.assessment,report.consistency,report.dom))
+  if(!coherentLimitedEvidence(report.assessment,report.consistency,report.dom)||
+      !chronologicalLimitedEvidence(report))
     return invalid();
   if(Buffer.byteLength(JSON.stringify(report),'utf8')>4096)return invalid();
   return Object.freeze({status:'UNVERIFIED_REPORT_READY' as const,report});
@@ -253,7 +273,16 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
    comparedModes:consistency.comparedModes as 0|1|2
  };
  const checkedDom={broken,fixed};
- if(!coherentLimitedEvidence(checkedAssessment,checkedConsistency,checkedDom))
+ const checkedReport={
+  schema:'uah-manual-gm-fixture-v2' as const,
+  verdict:'NOT_VERIFIED' as const,
+  browserVersion:root.browserVersion,
+  collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
+  assessment:checkedAssessment,consistency:checkedConsistency,dom:checkedDom,
+  ...flags
+ };
+ if(!coherentLimitedEvidence(checkedAssessment,checkedConsistency,checkedDom)||
+    !chronologicalLimitedEvidence(checkedReport))
    return null;
  return Object.freeze({
   schema:'uah-manual-gm-fixture-v2',verdict:'NOT_VERIFIED',
