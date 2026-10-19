@@ -210,7 +210,11 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     }
     const path = paths[index];
     const display = typeof path === 'string' ? basename(path) : '(invalid)';
-    if (typeof path !== 'string' || !isAbsolute(path) || !validName(display)) {
+    // A native picker selects an exact path. Do not silently normalize away
+    // . / .. components: with linked ancestors, lexical resolution can read a
+    // different file than the one selected (or bypass an ancestor link check).
+    if (typeof path !== 'string' || !isAbsolute(path) ||
+        path !== resolve(path) || !validName(display)) {
       outcome.errors.push(failure(display, typeof path === 'string' && !validName(display) ? 'NOT_USER_SCRIPT' : 'INVALID_PATH'));
       continue;
     }
@@ -259,7 +263,9 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
 export async function scanApprovedDirectory(root: string, signal?: AbortSignal): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   if (signal?.aborted) { outcome.canceled = true; return outcome; }
-  if (typeof root !== 'string' || !isAbsolute(root)) {
+  // Match the native-selected directory exactly; aliases must not be
+  // reinterpreted before the linked-ancestor and containment checks.
+  if (typeof root !== 'string' || !isAbsolute(root) || root !== resolve(root)) {
     outcome.errors.push(failure('(folder)', 'INVALID_PATH'));
     return outcome;
   }
