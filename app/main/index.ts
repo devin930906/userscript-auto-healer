@@ -617,6 +617,7 @@ async function createMainWindow(): Promise<void> {
       "const noNativeCancel=await a.cancelNativeImport(); " +
       "const pendingNativeFiles=a.chooseFiles(); " +
       "await new Promise(resolve=>setTimeout(resolve,10)); " +
+      "const rejectedOverlap=await a.chooseFolder(); " +
       "const requestedNativeCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFiles=await pendingNativeFiles; " +
       "const pendingNativeFolder=a.chooseFolder(); " +
@@ -674,7 +675,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 1') && " +
       "document.getElementById('cancel-import').disabled === true && " +
-      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && requestedNativeCancel.ok && " +
+      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
       "cancelledNativeFiles.canceled && cancelledNativeFiles.scripts.length === 0 && " +
       "requestedFolderCancel.ok && cancelledNativeFolder.canceled && " +
       "cancelledNativeFolder.scripts.length === 0 && " +
