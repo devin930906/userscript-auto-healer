@@ -253,3 +253,10 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 - 为 worker 设置有限内存与 10 秒分析截止时间。用户取消或 worker 失败时，只将静态预览置为 `SKIPPED_CANCELLED` / `ISOLATED_ANALYSIS_FAILED`；此前真实导入的合法文件记录不因分析失败而被伪装成导入失败。新的 Node 真实工作线程测试核对对外回执仅有有限定位点计数、不泄露源码／选择器，且已限制的非分析项不会绕过预算。
 - 来源检查：PR Head `373795ddfc03317a29d1e476672fffbd6fa57824` 的 Windows [Application Skeleton Checks #39221140487](https://github.com/devin930906/userscript-auto-healer/actions/runs/39221140487) 已完成并返回 success，包括 Node 回归与真实 Electron shell smoke；修改本进度文档后仍须对**最新** HEAD 及合并后的 main 分别重新验证。
 - **TASK-013/017 仍开发中**，本轮是原生只读分析响应性与取消能力的一段功能集成，不是可终止任意恶意脚本代码的沙箱、持久可靠队列、可信真实 Tampermonkey/GM/业务验收、事务性自动应用／回滚，亦不满足全部 TEST-022 或 GATE-007。下一步仍应优先推进 TASK-007 的经许可真实 Tampermonkey 证据和 TASK-010/011 可信恢复路径，最终 EXE/ZIP 以 TASK-019..021 为准。
+
+
+## （7）TASK-013／TASK-017 拖放静态分析工作线程与取消（2026-10-19）
+
+- 关联：REQ-004、REQ-011、REQ-022；NFR-009；TEST-004/011/022。PR [#112](https://github.com/devin930906/userscript-auto-healer/pull/112) 继承 PR #111 的本机受限工作线程分析，补齐此前仍在 Electron 主进程同步调用 `previewImportedScriptAnalysis` 的 `import:dropped`（包括拖放及文件输入框）路径；静态解析改由现有受限 worker 完成，仍沿用单份 256 KiB、10 秒截止与失效时 fail-closed 的逻辑。主进程仍先按 8 MiB 单文件限制执行只读字节与 SHA-256 校验；无任意文件路径 IPC、用户脚本执行或自动修复权限。
+- 限定 `import:cancel-dropped` 为当前窗口的一次 read-only AST 分析取消请求；取消前已验证的导入内容和 SHA-256 不被伪报失败，未完成的解析只能产生 `SKIPPED_CANCELLED`。新增原生选择与拖放请求的双向互斥、窗口关闭时撤销分析且禁止写入新窗口会话，以及实际 Electron IPC/Node worker 负例。拖放文件夹枚举或单份 File.arrayBuffer 仍只在当前操作结束时协作式停止，不宣称不可中断的字节读取已经终止。
+- 验证与合并状态以 PR #112 最新 HEAD 的 Windows Application Skeleton Checks、实际 Electron smoke 和最终 main SHA 为准；早期提交不能代替最新验证。**TASK-013/017 仍开发中**：本改动不是实际脚本批处理修复/回滚、可信持久任务恢复、真实 Tampermonkey/GM/业务验收，也不满足完整 TEST-022 或 GATE-007。正式 Windows EXE/ZIP 依旧须经 TASK-018..021 与所有适用 GATE。
