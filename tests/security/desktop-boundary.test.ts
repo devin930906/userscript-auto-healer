@@ -88,7 +88,7 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
   assert.match(main, /on\('will-navigate', \(event\) => event\.preventDefault\(\)\)/);
   assert.match(main, /setPermissionRequestHandler/);
-  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 19);
+  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 21);
   assert.match(main, /ipcMain\.handle\('import:cancel-native', event=>/);
   assert.match(main, /authorizeSender\(event\);\s*if\(!nativeImportController\)return/);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
@@ -107,6 +107,12 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /ipcMain\.handle\('gm-probe:visit'/);
   assert.match(main, /ipcMain\.handle\('gm-probe:observe'/);
   assert.match(main, /ipcMain\.handle\('scenario:register'/);
+  assert.match(main, /ipcMain\.handle\('scenario:inspect'/);
+  assert.match(main, /ipcMain\.handle\('scenario:cancel'/);
+  assert.match(main, /scenarioSession\.resolveReadOnlyDom\(id\)/);
+  assert.match(main, /openApprovedTarget\(owned,selected\.targetUrl,true,controller\.signal\)/);
+  assert.match(main, /inspectApprovedScenarioDomSeries\(/);
+  assert.match(main, /cancelScenarioObservation\(\)/);
   assert.match(main, /consistencySnapshot\(\)/);
   assert.match(main, /domSnapshot\(\)/);
   assert.match(main, /stopOnlyGmProbe\(\)/);
@@ -119,7 +125,7 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /contextBridge\.exposeInMainWorld/);
   assert.doesNotMatch(preload, /ipcRenderer\.(send|on|sendSync)\b/);
   assert.doesNotMatch(preload, /require\(['"]node:(fs|child_process)/);
-  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 19);
+  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 21);
   assert.match(preload, /cancelNativeImport: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:cancel-native'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
@@ -131,4 +137,7 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:visit',mode\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:observe',mode\)/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:register',input\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('scenario:inspect',id\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('scenario:cancel'\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
 });
