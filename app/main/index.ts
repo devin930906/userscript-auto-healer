@@ -47,6 +47,9 @@ let nativeSelectionInProgress = false;
 // Only one native picker/import batch can own this cancellation capability.
 // It never authorizes a script change, a Chrome launch, or privileged file IPC.
 let nativeImportController: AbortController | null = null;
+// The renderer can cancel its current read-only dropped-file AST preview.
+// Never grant arbitrary-path, manager or script-write authority through this.
+let droppedImportController: AbortController | null = null;
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -510,7 +513,7 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController)
+    if(nativeImportController||droppedImportController)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
@@ -547,12 +550,39 @@ function registerSafeIpc(): void {
     nativeImportController.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
-  ipcMain.handle('import:dropped', (event, name:unknown, data:unknown) => {
+  ipcMain.handle('import:dropped', async (event, name:unknown, data:unknown) => {
     authorizeSender(event);
-    const result = importDroppedBytes(name,data);
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(nativeImportController||droppedImportController)
+      return {ok:false,code:'IMPORT_BUSY'};
+    const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
-    scenarioSession.recordImported(result.sha256);
-    return {ok:true,script:summarize(result)};
+    const controller=new AbortController();
+    droppedImportController=controller;
+    try{
+      // A dragged .user.js is untrusted even after successful byte import.
+      // AST parsing must not block the privileged Electron event loop.
+      // No script is executed, applied or sent to the browser/manager.
+      const [analysis]=await previewImportedBatchOffMain([result],controller.signal);
+      if(win!==mainWindow||win.isDestroyed())
+        return {ok:false,code:'WINDOW_CLOSED'};
+      // Cancellation only stops optional AST work. Validated imported bytes
+      // were already read, so retain the SHA for this window's staged history.
+      scenarioSession.recordImported(result.sha256);
+      return {ok:true,script:summarize(result,analysis)};
+    }catch{
+      return {ok:false,code:'DROPPED_IMPORT_FAILED'};
+    }finally{
+      if(droppedImportController===controller)droppedImportController=null;
+    }
+  });
+  ipcMain.handle('import:cancel-dropped',event=>{
+    authorizeSender(event);
+    if(!droppedImportController)
+      return {ok:false,code:'NO_ACTIVE_DROPPED_IMPORT'};
+    droppedImportController.abort();
+    return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
   // Stage one bounded, read-only scenario only for a script imported by this
   // window. No arbitrary source/path IPC or browser navigation is exposed.
@@ -645,6 +675,7 @@ async function createMainWindow(): Promise<void> {
   win.on('closed', () => {
     if (mainWindow === win) {
       nativeImportController?.abort();
+      droppedImportController?.abort();
       stopOnlyOwnedBrowser();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -694,6 +725,9 @@ async function createMainWindow(): Promise<void> {
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const bad = await a.validateConfig({}); " +
+       "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
+       "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
+       "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
       "const d = await a.importDropped('smoke.user.js', new Uint8Array([47,47,32,111,107])); " +
       "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
       "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
@@ -717,6 +751,7 @@ async function createMainWindow(): Promise<void> {
       "const pendingNativeFiles=a.chooseFiles(); " +
       "await new Promise(resolve=>setTimeout(resolve,10)); " +
       "const rejectedOverlap=await a.chooseFolder(); " +
+       "const blockedDroppedOverlap=await a.importDropped('parallel.user.js',new Uint8Array([47,47,32,105,112,99])); " +
       "const requestedNativeCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFiles=await pendingNativeFiles; " +
       "const pendingNativeFolder=a.chooseFolder(); " +
@@ -817,7 +852,10 @@ async function createMainWindow(): Promise<void> {
       "selectedExe.ok === true && selectedProfile.ok === true && raceSerialized && " +
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
-      "d.ok === true && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
+      "d.ok === true && d.script.analysis.automaticPatchAllowed === false && " +
+       "noDroppedCancel.code === 'NO_ACTIVE_DROPPED_IMPORT' && activeDroppedCancel.ok === true && " +
+       "abortedDrop.ok === true && abortedDrop.script.analysis.status === 'SKIPPED_CANCELLED' && " +
+       "abortedDrop.script.analysis.automaticPatchAllowed === false && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
       "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
@@ -831,7 +869,8 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
-      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
+      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && " +
+       "blockedDroppedOverlap.code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
       "cancelledNativeFiles.canceled && cancelledNativeFiles.scripts.length === 0 && " +
       "requestedFolderCancel.ok && cancelledNativeFolder.canceled && " +
       "cancelledNativeFolder.scripts.length === 0 && " +
@@ -845,7 +884,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
@@ -876,7 +915,11 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
-app.on('before-quit',stopOnlyOwnedBrowser);
+app.on('before-quit',()=>{
+  nativeImportController?.abort();
+  droppedImportController?.abort();
+  stopOnlyOwnedBrowser();
+});
 app.on('window-all-closed', () => {
   stopOnlyOwnedBrowser();
   if (process.platform !== 'darwin') app.quit();

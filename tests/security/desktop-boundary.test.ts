@@ -12,6 +12,20 @@ const allowed = {
   bindAddress: '127.0.0.1'
 };
 
+
+/** Exact IPC inventory: cancel-only drag/drop analysis expands the native
+ * contract by precisely one channel, not by an arbitrary renderer gateway. */
+const approvedIpcChannels=[
+ 'app:status','browser:choose-chrome','browser:choose-profile',
+ 'browser:create-profile','browser:start','browser:stop',
+ 'browser:tampermonkey-hint','config:validate','gm-probe:observe',
+ 'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
+ 'gm-probe:visit','import:cancel-dropped','import:cancel-native',
+ 'import:dropped','import:files','import:folder','scenario:cancel',
+ 'scenario:inspect','scenario:register'
+] as const;
+
+
 test('TASK-001/TEST-026: security-critical renderer flags are fixed', () => {
   assert.equal(DESKTOP_WEB_PREFERENCES.sandbox, true);
   assert.equal(DESKTOP_WEB_PREFERENCES.contextIsolation, true);
@@ -88,7 +102,10 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/);
   assert.match(main, /on\('will-navigate', \(event\) => event\.preventDefault\(\)\)/);
   assert.match(main, /setPermissionRequestHandler/);
-  assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 21);
+  const handles=[...main.matchAll(/ipcMain\.handle\('([^']+)'/g)].map(m=>m[1]).sort();
+  assert.deepEqual(handles,approvedIpcChannels);
+  assert.match(main, /ipcMain\.handle\('import:cancel-dropped',event=>/);
+  assert.match(main, /authorizeSender\(event\);\s*if\(!droppedImportController\)/);
   assert.match(main, /ipcMain\.handle\('import:cancel-native', event=>/);
   assert.match(main, /authorizeSender\(event\);\s*if\(!nativeImportController\)return/);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
@@ -125,7 +142,10 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /contextBridge\.exposeInMainWorld/);
   assert.doesNotMatch(preload, /ipcRenderer\.(send|on|sendSync)\b/);
   assert.doesNotMatch(preload, /require\(['"]node:(fs|child_process)/);
-  assert.equal((preload.match(/ipcRenderer\.invoke\(/g) || []).length, 21);
+  const invokes=[...preload.matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map(m=>m[1]).sort();
+  assert.deepEqual(invokes,approvedIpcChannels);
+  assert.match(preload, /cancelDroppedImport: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:cancel-dropped'\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-dropped',\s*[^)]/);
   assert.match(preload, /cancelNativeImport: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:cancel-native'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
