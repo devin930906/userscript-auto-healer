@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript } from '../../src/import/import-service';
-import { previewImportedScriptAnalysis, previewImportedBatch, type ImportAnalysisPreview } from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
+import {previewImportedBatchOffMain} from '../../src/analyze/isolated-batch-preview';
 import { join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -102,9 +103,10 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     sha256:script.sha256, textEncoding:script.textEncoding,
     analysis};
 }
-function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>) {
-  const previews=previewImportedBatch(result.scripts);
-  return {canceled:result.canceled===true,
+async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
+  signal?:AbortSignal) {
+  const previews=await previewImportedBatchOffMain(result.scripts,signal);
+  return {canceled:result.canceled===true||signal?.aborted===true,
     unprocessed:result.unprocessed??0,
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
     errors:result.errors, duplicates:result.duplicates};
@@ -532,7 +534,7 @@ function registerSafeIpc(): void {
       if(win===mainWindow&&!win.isDestroyed())
         for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
       // Cancellation during processing retains successful earlier imports.
-      return summarizeResult(result);
+      return await summarizeResult(result,controller.signal);
     } finally {
       if(nativeImportController===controller)nativeImportController=null;
     }

@@ -245,3 +245,11 @@ Windows 源 SHA `14c51715435da5ec02ff07347f37d772f0bf70b6` 的 [应用工作流 
 [PR #93](https://github.com/devin930906/userscript-auto-healer/pull/93) 在既有获授权、自管独立 Chrome/Tampermonkey 手动测试流程中增加原生“保存脱敏测试摘要 JSON”入口。应用仅从本次活动会话收集明确列出的自报 broken/fixed 状态、有限 DOM 对照、注入时机和时间；所有真实性、脚本安装、GM API、业务恢复与自动补丁许可继续固定为 false。通过 Electron 原生“另存为”窗口选路径并二次确认，使用无覆盖创建、有限字节复核和 SHA-256；不包含安装令牌、脚本源码、网站内容或 Chrome/Profile 路径。取消、会话撤销、异常路径、重复文件名或符号链接路径均保守拒绝。不安装或更改 Tampermonkey 扩展及已有脚本。
 
 Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Application Checks #39189509991](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509991) 通过 TypeScript、Node 248 项（247 pass、0 fail、1 条件 skip）及真实 Electron 预载与沙箱 smoke；[独立便携 Chrome #39189509990](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509990) success。以上只证明原生 JSON 报告安全阶段功能，**不能作为实际 Tampermonkey 安装、GM_getValue 成功、业务恢复或 TEST-017/018 完整通过的证据**；PR 整合与主干 CI 仍须按实际记录核验。TASK-007 维持“开发中”，GATE-004/005 及最终 Stable 仍受阻。
+
+
+## （7）TASK-013／TASK-017 原生批量 AST 预览隔离（2026-10-19）
+
+- 关联：REQ-004、REQ-011、REQ-022；NFR-009；TEST-004/011/022；GATE-007（部分阶段进展）。PR [#111](https://github.com/devin930906/userscript-auto-healer/pull/111) 在已存在的批次静态解析预算（至多 16 份、总计 1 MiB、单份 256 KiB）内，将**原生文件／文件夹选择器完成后的静态 AST 预览**从 Electron 主进程迁移至隔离的 Node worker。仍不执行脚本、访问网站、修改脚本、访问用户 Chrome Profile 或提升修复权限；拖放单份脚本仍沿用已受单文件预算限制的静态解析。
+- 为 worker 设置有限内存与 10 秒分析截止时间。用户取消或 worker 失败时，只将静态预览置为 `SKIPPED_CANCELLED` / `ISOLATED_ANALYSIS_FAILED`；此前真实导入的合法文件记录不因分析失败而被伪装成导入失败。新的 Node 真实工作线程测试核对对外回执仅有有限定位点计数、不泄露源码／选择器，且已限制的非分析项不会绕过预算。
+- 来源检查：PR Head `373795ddfc03317a29d1e476672fffbd6fa57824` 的 Windows [Application Skeleton Checks #39221140487](https://github.com/devin930906/userscript-auto-healer/actions/runs/39221140487) 已完成并返回 success，包括 Node 回归与真实 Electron shell smoke；修改本进度文档后仍须对**最新** HEAD 及合并后的 main 分别重新验证。
+- **TASK-013/017 仍开发中**，本轮是原生只读分析响应性与取消能力的一段功能集成，不是可终止任意恶意脚本代码的沙箱、持久可靠队列、可信真实 Tampermonkey/GM/业务验收、事务性自动应用／回滚，亦不满足全部 TEST-022 或 GATE-007。下一步仍应优先推进 TASK-007 的经许可真实 Tampermonkey 证据和 TASK-010/011 可信恢复路径，最终 EXE/ZIP 以 TASK-019..021 为准。
