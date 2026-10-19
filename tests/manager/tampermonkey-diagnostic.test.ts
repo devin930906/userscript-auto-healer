@@ -391,3 +391,95 @@ test('TEST-018 stage: real isolated Windows Chrome never reports a repair withou
  assert.deepEqual(probe.session.receiptSnapshot(),{},
    'No manager is installed, so the fixture has no GM userscript report');
 });
+
+
+test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and hostile proxies without executing getters',()=>{
+ let called=0;
+ const poison=()=>{
+   called++;
+   throw Error('UNTRUSTED_ACCESSOR_SHOULD_NOT_RUN');
+ };
+ const getter=(key:string,value:unknown)=>{
+   const copy={...both};
+   Object.defineProperty(copy,key,{get:poison,enumerable:true});
+   return copy;
+ };
+ const proxy=new Proxy({broken:both.broken,fixed:both.fixed},{
+   ownKeys:poison,
+   getOwnPropertyDescriptor:poison
+ });
+ const malformedReports=[
+   getter('broken',both.broken),
+   {...both,broken:new Proxy(both.broken,{get:poison})},
+   proxy,
+   {broken:{...both.broken,get reportedGmDefaultMatched(){return poison();}},
+    fixed:both.fixed},
+   {...both,hidden:{scriptSource:'PRIVATE'}}
+ ];
+ for(const report of malformedReports){
+   assert.doesNotThrow(()=>assessManualProbeObservations(report,visited));
+   assert.notEqual(assessManualProbeObservations(report,visited).status,
+     'SELF_REPORTED_EXPECTATIONS_MATCH');
+   assert.notEqual(correlateManualFixtureEvidence(report,visited,{}).status,
+     'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
+ }
+ for(const v of [
+   new Proxy(visited,{get:poison,ownKeys:poison}),
+   {broken:true,get fixed(){return poison();}},
+   {...visited,authorization:'forged'}
+ ]){
+   assert.doesNotThrow(()=>assessManualProbeObservations(both,v));
+   assert.notEqual(assessManualProbeObservations(both,v).status,
+     'SELF_REPORTED_EXPECTATIONS_MATCH');
+ }
+ const sample={
+   ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+   observedAt:'2026-10-18T00:00:00.000Z',
+   originMatchesApproved:true as const,routeChanged:false,
+   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,blindSpots:[]},
+   selectorCounts:{
+     '#current-target':1,'#obsolete-target':0,
+     '[data-uah-probe-action="done"]':1,
+     '#current-target[data-uah-probe-action="done"]':1
+   },
+   fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ const badSamples:unknown[]=[
+   new Proxy(sample,{get:poison,ownKeys:poison}),
+   {...sample,selectorCounts:new Proxy(sample.selectorCounts,{get:poison,ownKeys:poison})},
+   {...sample,summary:{...sample.summary,get elementCount(){return poison();}}},
+   {...sample,get observedAt(){return poison();}}
+ ];
+ for(const malformed of badSamples){
+   assert.doesNotThrow(()=>summarizeFixtureDomEvidence('fixed',
+     malformed as Parameters<typeof summarizeFixtureDomEvidence>[1]));
+   assert.deepEqual(summarizeFixtureDomEvidence('fixed',
+     malformed as Parameters<typeof summarizeFixtureDomEvidence>[1]),
+     {ok:false,code:'INVALID_FIXTURE_OBSERVATION'});
+ }
+ const validDom={broken:{
+   status:'LIMITED_FIXTURE_DOM_ONLY',mode:'broken',
+   observedAt:'2026-10-18T00:00:00.000Z',targetCount:1,
+   actionCount:0,fixtureDomMatchesExpected:true,
+   extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+   gmApiVerified:false,businessVerified:false
+ },fixed:{
+   status:'LIMITED_FIXTURE_DOM_ONLY',mode:'fixed',
+   observedAt:'2026-10-18T00:00:01.000Z',targetCount:1,
+   actionCount:1,fixtureDomMatchesExpected:true,
+   extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+   gmApiVerified:false,businessVerified:false
+ }};
+ const hostileDom=[
+   new Proxy(validDom,{get:poison,ownKeys:poison}),
+   {...validDom,get fixed(){return poison();}},
+   {...validDom,fixed:{...validDom.fixed,get actionCount(){return poison();}}},
+   {...validDom,fixed:new Proxy(validDom.fixed,{get:poison,ownKeys:poison})}
+ ];
+ for(const value of hostileDom){
+   assert.doesNotThrow(()=>correlateManualFixtureEvidence(both,visited,value));
+   assert.notEqual(correlateManualFixtureEvidence(both,visited,value).status,
+      'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
+ }
+ assert.equal(called,0,'untrusted getters/traps must never execute');
+});
