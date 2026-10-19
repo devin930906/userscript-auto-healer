@@ -235,3 +235,25 @@ test('TEST-002/003: byte-identical renamed scripts dedupe, changed revisions sta
   assert.equal(await readFile(b, 'utf8'), script);
   assert.equal(await readFile(c, 'utf8'), different);
 });
+
+test('TEST-003: native selected file and folder reject linked ancestor directories', async t => {
+  const root = await workspace(t);
+  const outside = await workspace(t);
+  const nested = join(outside, 'nested');
+  await mkdir(nested);
+  const privatePath = join(nested, 'private.user.js');
+  await writeFile(privatePath, script);
+  const link = join(root, 'folder-link');
+  await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+
+  // The file and selected folder are themselves regular entries. Only an
+  // ancestor is a link; O_NOFOLLOW on the file cannot protect this path.
+  const file = await importApprovedPaths([join(link, 'nested', 'private.user.js')]);
+  assert.equal(file.scripts.length, 0);
+  assert.ok(file.errors.some(error => error.code === 'SYMLINK_REJECTED'));
+
+  const folder = await scanApprovedDirectory(join(link, 'nested'));
+  assert.equal(folder.scripts.length, 0);
+  assert.ok(folder.errors.some(error => error.code === 'SYMLINK_REJECTED'));
+  assert.equal(await readFile(privatePath, 'utf8'), script);
+});
