@@ -182,3 +182,8 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 ## （7）TASK-007 有限 GM 报告保存交接（2026-10-19）
 
 [PR #93](https://github.com/devin930906/userscript-auto-healer/pull/93) 的阶段实现（`src/manager/gm-report.ts`，Electron native save IPC，界面按钮及 `TEST-017` 回归）在活动且归属已核验的独立 Chrome 会话内，经原生文件选择与二次授权保存**未经认证**的脱敏 JSON 手动诊断摘要；不覆盖已有文件，返回本机文件名、长度与 SHA-256。主干合并之前来源证据为 `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 Windows [#39189509991](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509991) success（247 pass／0 fail／1 skip，Electron smoke）、便携 Chrome [#39189509990](https://github.com/devin930906/userscript-auto-healer/actions/runs/39189509990) success；合并结果及主干 CI 需重新读取。**下一任务仍是 TASK-007**：在受授权的真实 Tampermonkey 中安装/启用一次性测试脚本，独立取证 GM_getValue、注入时机与业务断言。报告中的自报与 DOM 对照不构成经理器认证或产品修复验收；TEST-017/018、GATE-004/005、EXE/ZIP 与 Stable 全部按原门槛保留。
+
+
+## （7）TASK-013 只读批处理协调阶段交接（2026-10-19）
+
+新增 `src/jobs/batch-coordinator.ts` 与 `tests/jobs/batch-coordinator.test.ts`，提供内存队列隔离、最多两个并发、有限瞬时重试、取消及不含脚本内容/路径的非权威恢复快照；绝不执行或写入真实脚本，也不授权应用/回滚、Tampermonkey/业务验证。具体提交和 CI 以本阶段 PR 实际合并及最终 main 核验为准。TASK-013 仍为开发中：真实批处理服务集成、经验证的持久恢复、受授权运行和 TEST-022 完整验收未完成；TASK-007/010/011/012 不得因此标记完成。
