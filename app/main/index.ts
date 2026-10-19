@@ -736,6 +736,28 @@ async function createMainWindow(): Promise<void> {
       "list.filter(x=>x.startsWith('drop-renamed.user.js:')).length===0 && " +
       "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      "const badDrop=new DataTransfer();badDrop.items.add(new File(['ignored'],'bad-drop.txt')); " +
+      "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:badDrop})); " +
+      "const badDropReported=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
+      "if(lines.some(x=>x.startsWith('bad-drop.txt: NOT_USER_SCRIPT')))resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype,'webkitGetAsEntry'); " +
+      "let releaseScan=null;Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',{ " +
+      "configurable:true,writable:true,value:function(){const file=this.getAsFile(); " +
+      "if(file&&file.name==='scan-fixture.user.js')return {isFile:false,isDirectory:true,name:'scan-root', " +
+      "createReader:()=>({readEntries:cb=>{releaseScan=()=>cb([]);}})}; " +
+      "return oldEntry.value.call(this);}}); " +
+      "const slowDrop=new DataTransfer();slowDrop.items.add(new File(['// fixture'],'scan-fixture.user.js')); " +
+      "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:slowDrop})); " +
+      "const scanCancelReady=!!releaseScan&&!document.getElementById('cancel-import').disabled; " +
+      "if(scanCancelReady)document.getElementById('cancel-import').click(); " +
+      "if(releaseScan)releaseScan(); " +
+      "const scanCancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
+      "if(lines.some(x=>x.includes('已取消拖放目录扫描')) && document.getElementById('cancel-import').disabled)resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',oldEntry); " +
       "const input=document.getElementById('select-files'); " +
       "const sample=new DataTransfer(); sample.items.add(new File(['bad'],'invalid.txt')); " +
       "sample.items.add(new File(['// accepted'],'accepted-batch.user.js')); " +
@@ -801,9 +823,9 @@ async function createMainWindow(): Promise<void> {
       "uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
-      "rendered === true && isolated && canCancel && cancelled && " +
+      "rendered === true && badDropReported && scanCancelReady && scanCancelled && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
-      "document.getElementById('import-summary').textContent.includes('失败 1') && " +
+      "document.getElementById('import-summary').textContent.includes('失败 2') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
