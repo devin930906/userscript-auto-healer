@@ -75,6 +75,39 @@ test('TEST-017: incomplete or malformed self-reports fail closed; never claim re
    assert.equal(createLimitedGmReport(bad as typeof session,Date.now()).status,'BLOCKED');
  }
 });
+
+test('TEST-017: native report refuses nested unknown fields and accessors before writing',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-report-schema-'));
+ try{
+  const ready=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const report=ready.report;
+  const malformed:unknown[]=[
+   {...report,assessment:{...report.assessment,installUrl:'SECRET_URL'}},
+   {...report,consistency:{...report.consistency,source:'SECRET_SOURCE'}},
+   {...report,dom:{...report.dom,broken:{...report.dom.broken,source:'SECRET_SOURCE'}}},
+   {...report,dom:{...report.dom,extraneous:'SECRET_TOKEN'}},
+   {...report,assessment:{...report.assessment,status:'VERIFIED'}},
+   {...report,expiresAt:'invalid timestamp'},
+   {...report,dom:{...report.dom,fixed:{...report.dom.fixed,actionCount:5}}}
+  ];
+  let getterCalls=0;
+  const withAccessor={...report,assessment:{...report.assessment}};
+  Object.defineProperty(withAccessor.assessment,'status',{
+   enumerable:true,get(){getterCalls++;return 'SELF_REPORTED_EXPECTATIONS_MATCH';}
+  });
+  malformed.push(withAccessor);
+  for(let i=0;i<malformed.length;i++){
+   const result=await saveLimitedGmReportOnly(
+    malformed[i] as typeof report,join(root,'malformed-'+i+'.json'),true);
+   assert.equal(result.status,'BLOCKED','malformed '+i);
+  }
+  assert.equal(getterCalls,0);
+  assert.deepEqual(await readdir(root),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-017: native report creates a private separate JSON only once and never overwrites',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-gm-report-'));
  try{
