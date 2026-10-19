@@ -124,3 +124,61 @@ test('TEST-005/017: login cases and unsupported DOM selectors remain staged but 
  }
  assert.equal(session.resolveReadOnlyDom('missing').ok,false);
 });
+
+
+test('TEST-005/013/019: imported script can stage two distinct read-only selectors for review',()=>{
+ const session=new DesktopScenarioSession();
+ session.recordImported(digest);
+ const staged=session.register({...request(),id:'comparison',
+   selector:'#obsolete-target',replacementSelector:'#current-target'});
+ assert.equal(staged.ok,true);
+ if(staged.ok){
+   assert.equal(staged.readOnlyDomEligible,true);
+   assert.equal(staged.automaticPatchAllowed,false);
+   assert.equal(staged.tampermonkeyVerified,false);
+   assert.equal(staged.businessVerified,false);
+   assert.equal(JSON.stringify(staged).includes('#obsolete-target'),false);
+   assert.equal(JSON.stringify(staged).includes('#current-target'),false);
+ }
+ const resolved=session.resolveReadOnlyDom('comparison');
+ assert.equal(resolved.ok,true);
+ if(resolved.ok){
+   assert.deepEqual(resolved.scenario.assertions,[
+     {kind:'selector-present',selector:'#obsolete-target'},
+     {kind:'selector-present',selector:'#current-target'}
+   ]);
+ }
+ // Original one-selector request remains supported for existing users.
+ const original=session.register({...request(),id:'single'});
+ assert.equal(original.ok,true);
+ assert.equal(session.resolveReadOnlyDom('single').ok,true);
+});
+
+test('TEST-005/019/026: alternative selector must be distinct, bounded and ordinary data',()=>{
+ const session=new DesktopScenarioSession();
+ session.recordImported(digest);
+ let getters=0;
+ const withGetter={...request()};
+ Object.defineProperty(withGetter,'replacementSelector',{enumerable:true,get(){
+   getters++;throw Error('UNTRUSTED_CSS');
+ }});
+ const invalid=[
+   {...request(),replacementSelector:''},
+   {...request(),replacementSelector:' '},
+   {...request(),replacementSelector:'#submit'},
+   {...request(),replacementSelector:'x'.repeat(257)},
+   {...request(),replacementSelector:'#submit\n'},
+   {...request(),replacementSelector:null},
+   {...request(),replacementSelector:12},
+   {...request(),replacementSelector:'#other',arbitrarySource:'secret'},
+   withGetter
+ ];
+ for(const input of invalid){
+   const outcome=session.register(input);
+   assert.equal(outcome.ok,false);
+   assert.equal(outcome.automaticPatchAllowed,false);
+   assert.equal(outcome.tampermonkeyVerified,false);
+ }
+ assert.equal(getters,0);
+ assert.equal(session.register({...request(),replacementSelector:'#replacement'}).ok,true);
+});

@@ -633,7 +633,7 @@ function registerSafeIpc(): void {
         message:'允许访问已登记测试场景的网页并读取限定 DOM？',
         detail:'只在本程序启动的独立 Chrome 打开一个标签页：\\n'+
           selected.targetUrl+
-          '\\n最多采集 3 次只读选择器计数，并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
+          '\\n最多采集 3 次只读选择器计数（可选旧选择器与替代选择器同时观察），并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
           '\\nCDP 结果不验证 Tampermonkey、GM API 或真实业务。'
       });
       if(consent.response!==0||controller.signal.aborted||
@@ -668,6 +668,18 @@ function registerSafeIpc(): void {
         triageStatus:result.triage.status,
         faultCategory:result.triage.category,
         evidenceCount:result.triage.evidenceIds.length,
+        // These two observations remain review hints, not Tampermonkey/GM
+        // attestation or permission to apply a patch.
+        selectorComparisonStatus:selected.scenario.assertions.length!==2?
+          'NOT_REQUESTED' as const:
+          result.triage.status==='SINGLE_CAUSE_SIGNAL_ONLY'&&
+          result.triage.category==='SELECTOR_ASSERTION'&&
+          result.triage.evidenceIds.length===1&&
+          result.triage.evidenceIds[0]==='scenario_assertion_1'?
+            'OLD_SELECTOR_MISSING_ALTERNATIVE_PRESENT' as const:
+          result.triage.status==='NO_FAULT_SIGNAL'?
+            'NO_SELECTOR_MISSING_IN_WINDOW' as const:
+            'INCONCLUSIVE_OR_OTHER_SIGNAL' as const,
         pageRuntimeStatus:page.status,
         pageExceptionCount:page.observedCount,
         ...unverified};
@@ -764,6 +776,8 @@ async function createMainWindow(): Promise<void> {
       "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
       "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
       "const stagedScenario=await a.registerScenario(scenarioInput); " +
+      "const dualScenario=await a.registerScenario({...scenarioInput,id:'smoke_dual',selector:'#obsolete',replacementSelector:'#current'}); " +
+      "const badDualScenario=await a.registerScenario({...scenarioInput,id:'smoke_bad_dual',replacementSelector:'#submit'}); " +
       "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
       "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
@@ -853,6 +867,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-id').value='smoke_ui_scenario'; " +
       "document.getElementById('scenario-url').value='https://example.test/smoke'; " +
       "document.getElementById('scenario-selector').value='#submit'; " +
+      "document.getElementById('scenario-replacement').value='#candidate'; " +
       "document.getElementById('scenario-approve').checked=true; " +
       "const uiScenarioButton=document.getElementById('scenario-register'); " +
       "const uiScenarioButtonEnabled=!uiScenarioButton.disabled; uiScenarioButton.click(); " +
@@ -889,7 +904,9 @@ async function createMainWindow(): Promise<void> {
        "abortedDrop.ok === true && abortedDrop.script.analysis.status === 'SKIPPED_CANCELLED' && " +
        "abortedDrop.script.analysis.automaticPatchAllowed === false && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
-      "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "stagedScenario.tampermonkeyVerified === false && dualScenario.readOnlyDomEligible === true && " +
+      "dualScenario.automaticPatchAllowed === false && badDualScenario.code === 'INVALID_REQUEST' && " +
+      "noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
       "uiUnknownButtonReady && uiUnknownNotOffered && " +

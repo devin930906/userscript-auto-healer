@@ -180,3 +180,26 @@ test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attest
   assert.match(html,/页面 JavaScript 异常/);
   assert.doesNotMatch(main,/pageExceptionMessage|pageExceptionStack|pageExceptionSource/);
 });
+
+
+test('TASK-008/009/017 TEST-013/019/026: desktop comparison is bounded, consented and review-only',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const session=readFileSync(join(process.cwd(),'src/scenarios/desktop-session.ts'),'utf8');
+ assert.match(html,/id="scenario-replacement" maxlength="256"/);
+ assert.match(html,/人工审核线索/);
+ assert.match(ui,/replacementSelector\?:string/);
+ assert.match(ui,/replacementSelector:scenarioReplacement\.value\.trim\(\)/);
+ assert.match(ui,/OLD_SELECTOR_MISSING_ALTERNATIVE_PRESENT/);
+ assert.match(main,/selected\.scenario\.assertions\.length!==2/);
+ assert.match(main,/result\.triage\.evidenceIds\[0\]==='scenario_assertion_1'/);
+ assert.match(main,/inspectApprovedScenarioDomSeries\(/);
+ assert.match(main,/dialog\.showMessageBox\(win/);
+ assert.match(session,/scenario\.assertions\.length!==2/);
+ assert.match(session,/new Set\(scenario\.assertions\.map/);
+ // Purely read-only: existing channels remain exact and no candidate bytes,
+ // file paths or arbitrary CDP operations enter the response to renderer.
+ assert.doesNotMatch(main,/selectorComparisonStatus:[\s\S]*candidateSource:/);
+ assert.doesNotMatch(ui,/window\.healer\.(applyPatch|installScript|exportPatch)\(/);
+});

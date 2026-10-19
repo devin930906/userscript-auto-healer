@@ -27,6 +27,7 @@ const ID=/^[A-Za-z0-9_-]{1,64}$/;
 const MAX_SESSION_SCENARIOS=100;
 const payloadKeys=['id','scriptSha256','targetUrl','selector',
   'userApproved','requiresLogin','loginReady'] as const;
+const allowedFields=new Set<string>([...payloadKeys,'replacementSelector']);
 function fields(input:unknown):Record<string,unknown>|null{
  try{
   if(!input||typeof input!=='object'||Array.isArray(input))return null;
@@ -34,11 +35,16 @@ function fields(input:unknown):Record<string,unknown>|null{
   if(proto!==Object.prototype&&proto!==null)return null;
   const props=Object.getOwnPropertyDescriptors(input);
   const own=Reflect.ownKeys(props);
-  if(own.length!==payloadKeys.length||own.some(k=>typeof k!=='string')||
+  const hasReplacement=Object.prototype.hasOwnProperty.call(props,'replacementSelector');
+  if(own.length!==payloadKeys.length+Number(hasReplacement)||
+     own.some(k=>typeof k!=='string'||!allowedFields.has(k))||
      payloadKeys.some(k=>!Object.prototype.hasOwnProperty.call(props,k)||
-       !Object.prototype.hasOwnProperty.call(props[k],'value')))return null;
+       !Object.prototype.hasOwnProperty.call(props[k],'value'))||
+     (hasReplacement&&!Object.prototype.hasOwnProperty.call(props.replacementSelector,'value')))
+    return null;
   const data:Record<string,unknown>=Object.create(null);
   for(const name of payloadKeys)data[name]=props[name].value;
+  if(hasReplacement)data.replacementSelector=props.replacementSelector.value;
   return data;
  }catch{return null;}
 }
@@ -66,13 +72,14 @@ export class DesktopScenarioSession{
    if(saved.state!=='READY_TO_TEST'||
       !this.importedHashes.has(scenario.scriptSha256)||
       scenario.userApproved!==true||scenario.requiresLogin!==false||
-      scenario.steps.length!==0||scenario.assertions.length!==1||
-      scenario.assertions[0].kind!=='selector-present'||
-      scenario.assertions[0].expectedText!==undefined||
-      typeof scenario.assertions[0].selector!=='string'||
-      scenario.assertions[0].selector.length>256||
-      scenario.assertions[0].selector.trim()!==scenario.assertions[0].selector||
-      /[\u0000-\u001f]/.test(scenario.assertions[0].selector)||
+      scenario.steps.length!==0||
+      (scenario.assertions.length!==1&&scenario.assertions.length!==2)||
+      scenario.assertions.some(a=>
+        a.kind!=='selector-present'||a.expectedText!==undefined||
+        typeof a.selector!=='string'||!a.selector||
+        a.selector.length>256||a.selector.trim()!==a.selector||
+        /[\u0000-\u001f]/.test(a.selector))||
+      new Set(scenario.assertions.map(a=>a.selector)).size!==scenario.assertions.length||
       typeof scenario.targetUrl!=='string')
      return {ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'};
    const url=new URL(scenario.targetUrl);
@@ -94,6 +101,14 @@ export class DesktopScenarioSession{
       typeof data.requiresLogin!=='boolean'||
       typeof data.loginReady!=='boolean')
     return invalid('INVALID_REQUEST');
+   const hasReplacement=Object.prototype.hasOwnProperty.call(data,'replacementSelector');
+   if(hasReplacement&&(
+      typeof data.replacementSelector!=='string'||
+      data.replacementSelector.length===0||data.replacementSelector.length>256||
+      data.replacementSelector.trim()!==data.replacementSelector||
+      /[\u0000-\u001f]/.test(data.replacementSelector)||
+      data.replacementSelector===data.selector))
+     return invalid('INVALID_REQUEST');
    if(!this.importedHashes.has(data.scriptSha256))return invalid('SCRIPT_NOT_IMPORTED');
    if(data.userApproved!==true)return invalid('NOT_AUTHORIZED');
    if(this.registry.get(data.id))return invalid('DUPLICATE_ID');
@@ -102,7 +117,9 @@ export class DesktopScenarioSession{
     id:data.id,scriptSha256:data.scriptSha256,targetUrl:data.targetUrl,
     userApproved:true,requiresLogin:data.requiresLogin,
     loginReady:data.loginReady,steps:[],
-    assertions:[{kind:'selector-present',selector:data.selector}]
+    assertions:[{kind:'selector-present',selector:data.selector},
+      ...(hasReplacement?
+        [{kind:'selector-present' as const,selector:data.replacementSelector as string}]:[])]
    };
    // preflightScenario checks URL scheme, host and credentials and returns
    // UNKNOWN for unverified login prerequisites; it does not visit the site.
