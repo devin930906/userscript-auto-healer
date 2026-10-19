@@ -785,7 +785,10 @@ async function createMainWindow(): Promise<void> {
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
       "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
-      "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && rendered === true && isolated && canCancel && cancelled && " +
+      "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
+      "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
+      "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
+      "rendered === true && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 1') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
@@ -805,7 +808,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelNativeImport,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,registerScenario,inspectScenario,cancelScenarioInspection,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
