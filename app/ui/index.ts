@@ -32,6 +32,11 @@ interface Window {
     }): Promise<{ok:boolean;code?:string;status?:string;id?:string;
       state?:string;issues?:readonly string[];automaticPatchAllowed:false;
       tampermonkeyVerified:false;businessVerified:false}>;
+    inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
+      checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
+      evidenceCount?:number;tampermonkeyVerified:false;businessVerified:false;
+      automaticPatchAllowed:false}>;
+    cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
@@ -77,6 +82,9 @@ const scenarioLoginReady = document.getElementById('scenario-login-ready') as HT
 const scenarioApprove = document.getElementById('scenario-approve') as HTMLInputElement | null;
 const scenarioRegister = document.getElementById('scenario-register') as HTMLButtonElement | null;
 const scenarioStatus = document.getElementById('scenario-status');
+const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTMLSelectElement | null;
+const scenarioInspectButton = document.getElementById('scenario-inspect') as HTMLButtonElement | null;
+const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
 let scenarioBusy=false;
 function updateScenarioControls():void{
@@ -356,6 +364,14 @@ scenarioRegister?.addEventListener('click',()=>{
   }
   if(scenarioStatus)scenarioStatus.textContent='场景登记成功：'+
    (result.state??'UNKNOWN')+'。这是待测试状态，未验证任何业务动作。';
+  if(scenarioInspectId){
+   const option=document.createElement('option');
+   option.value=result.id??input.id;
+   option.textContent=result.id??input.id;
+   scenarioInspectId.append(option);
+   if(scenarioInspectId.value==='')scenarioInspectId.value=option.value;
+  }
+  browserControls();
   const item=document.createElement('li');
   item.textContent=(result.id??input.id)+' / '+input.scriptSha256.slice(0,12)+
    ' / '+(result.state??'UNKNOWN')+
@@ -380,6 +396,7 @@ const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|nul
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
 let browserBusy=false;
+let scenarioInspectionBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
@@ -418,6 +435,11 @@ function browserControls():void{
    !chromeSelected||!profileSelected;
  if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
+ if(scenarioInspectId)scenarioInspectId.disabled=!browserConnected||browserBusy||
+   (scenarioInspectId.options.length<=1);
+ if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
+   (scenarioInspectId?.options.length??0)<=1;
+ if(scenarioCancelButton)scenarioCancelButton.disabled=!scenarioInspectionBusy;
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=browserBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
@@ -436,6 +458,38 @@ async function browserAction(fn:()=>Promise<void>):Promise<void>{
  catch{setBrowserStatus('浏览器操作受阻；没有获得验证成功的结果。');}
  finally{browserBusy=false;browserControls();}
 }
+scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const id=scenarioInspectId?.value??'';
+ if(!id){
+  if(scenarioStatus)scenarioStatus.textContent='必须先登记并选择一个场景。';
+  return;
+ }
+ scenarioInspectionBusy=true;browserControls();
+ if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权并执行限定 DOM 检查；这不是业务验收。';
+ try{
+  const result=await window.healer.inspectScenario(id);
+  if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
+   ?'场景 '+id+'：只读 DOM 断言 '+(result.checkedAssertions??0)+
+      ' 项；故障信号 '+(result.faultCategory??'UNKNOWN')+
+      ' / '+(result.triageStatus??'UNKNOWN')+
+      '，证据数 '+(result.evidenceCount??0)+
+      '。仅限 DOM，Tampermonkey、GM 和真实业务未验证。'
+   :'场景检查未通过：'+(result.code??'UNKNOWN')+
+      '。没有获得 Tampermonkey 或业务验证结果。';
+  if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+ }finally{scenarioInspectionBusy=false;browserControls();}
+}));
+scenarioCancelButton?.addEventListener('click',()=>{
+ if(!scenarioInspectionBusy)return;
+ scenarioCancelButton.disabled=true;
+ void window.healer.cancelScenarioInspection().then(result=>{
+  if(scenarioStatus)scenarioStatus.textContent=result.ok
+   ?'已请求取消限定 DOM 检查；已打开的标签页不会被用于通过验收。'
+   :'取消请求未完成：'+(result.code??'UNKNOWN');
+ }).catch(()=>{
+  if(scenarioStatus)scenarioStatus.textContent='取消检查失败，需核实运行状态。';
+ });
+});
 chooseChromeButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.chooseChrome();
  if(result.ok){

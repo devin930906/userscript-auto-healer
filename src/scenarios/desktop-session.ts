@@ -49,6 +49,39 @@ export class DesktopScenarioSession{
  recordImported(digest:string):void{
   if(typeof digest==='string'&&SHA.test(digest))this.importedHashes.add(digest);
  }
+ /**
+  * Resolve only an already-imported, caller-staged, non-login selector
+  * scenario. This internal result is never returned over renderer IPC.
+  * It grants no authority: the privileged caller MUST independently
+  * confirm ownership of Chrome and obtain fresh native user consent.
+  */
+ resolveReadOnlyDom(id:unknown):
+  |Readonly<{ok:false;code:'INVALID_ID'|'SCENARIO_NOT_FOUND'|'SCENARIO_NOT_READONLY_ELIGIBLE'}>
+  |Readonly<{ok:true;targetUrl:string;scenario:ScenarioInput}>{
+  try{
+   if(typeof id!=='string'||!ID.test(id))return {ok:false,code:'INVALID_ID'};
+   const saved=this.registry.get(id);
+   if(!saved)return {ok:false,code:'SCENARIO_NOT_FOUND'};
+   const scenario=saved.input;
+   if(saved.state!=='READY_TO_TEST'||
+      !this.importedHashes.has(scenario.scriptSha256)||
+      scenario.userApproved!==true||scenario.requiresLogin!==false||
+      scenario.steps.length!==0||scenario.assertions.length!==1||
+      scenario.assertions[0].kind!=='selector-present'||
+      scenario.assertions[0].expectedText!==undefined||
+      typeof scenario.assertions[0].selector!=='string'||
+      scenario.assertions[0].selector.length>256||
+      scenario.assertions[0].selector.trim()!==scenario.assertions[0].selector||
+      /[\u0000-\u001f]/.test(scenario.assertions[0].selector)||
+      typeof scenario.targetUrl!=='string')
+     return {ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'};
+   const url=new URL(scenario.targetUrl);
+   if(!['http:','https:'].includes(url.protocol)||
+      !url.hostname||url.username||url.password||url.hash)
+     return {ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'};
+   return {ok:true,targetUrl:url.href,scenario};
+  }catch{return {ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'};}
+ }
  register(input:unknown):DesktopScenarioOutcome{
   try{
    const data=fields(input);

@@ -34,6 +34,11 @@
       <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
       <label><input id="scenario-approve" type="checkbox"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
       <button id="scenario-register" type="button" disabled>登记只读测试场景</button>
+      <label for="scenario-inspect-id">只读检查已登记场景：</label>
+      <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
+      <button id="scenario-inspect" type="button" disabled>授权打开并只读检查网页 DOM</button>
+      <button id="scenario-cancel" type="button" disabled>取消正在进行的 DOM 检查</button>
+      <p>检查只限独立 Chrome、无需登录且仅包含一个 CSS 存在性断言的场景。每次访问需要系统确认。DOM 结果无法证明 Tampermonkey、GM 或业务恢复。</p>
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
       <ul id="scenario-list" aria-live="polite"></ul>
     </section>

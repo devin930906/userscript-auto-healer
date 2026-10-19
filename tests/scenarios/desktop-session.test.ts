@@ -80,3 +80,42 @@ test('TEST-005: a failed attempt does not consume a scenario identifier',()=>{
  const b=session.register(request());
  assert.equal(b.ok,true);
 });
+
+test('TEST-005/017: only an approved non-login staged selector scenario can be resolved for explicit DOM observation',()=>{
+ const session=new DesktopScenarioSession();
+ assert.deepEqual(session.resolveReadOnlyDom('unseen'),{ok:false,code:'SCENARIO_NOT_FOUND'});
+ session.recordImported(digest);
+ assert.equal(session.register(request()).ok,true);
+ const found=session.resolveReadOnlyDom('user_scenario_01');
+ assert.equal(found.ok,true);
+ if(found.ok){
+  assert.equal(found.targetUrl,'https://example.test/app');
+  assert.equal(found.scenario.id,'user_scenario_01');
+  assert.equal(found.scenario.assertions[0].selector,'#submit');
+  assert.equal(found.scenario.requiresLogin,false);
+  assert.equal(found.scenario.steps.length,0);
+  assert.equal(found.scenario.userApproved,true);
+  assert.notEqual(found.scenario,session.resolveReadOnlyDom('user_scenario_01'));
+ }
+ for(const id of ['', '../escaped', 'missing', {id:'user_scenario_01'}, null, new Proxy({},{get(){throw Error('secret')}})]){
+  const result=session.resolveReadOnlyDom(id);
+  assert.equal(result.ok,false);
+ }
+});
+test('TEST-005/017: login cases and unsupported DOM selectors remain staged but cannot be inspected',()=>{
+ const session=new DesktopScenarioSession();
+ session.recordImported(digest);
+ const cases=[
+  {...request(),id:'login_case',requiresLogin:true,loginReady:true},
+  {...request(),id:'login_pending',requiresLogin:true,loginReady:false},
+  {...request(),id:'too_long_selector',selector:'#'+ 'a'.repeat(260)},
+  {...request(),id:'fragment_url',targetUrl:'https://example.test/app#secret'}
+ ];
+ for(const item of cases){
+  assert.equal(session.register(item).ok,true);
+  assert.deepEqual(session.resolveReadOnlyDom(item.id),{
+   ok:false,code:'SCENARIO_NOT_READONLY_ELIGIBLE'
+  });
+ }
+ assert.equal(session.resolveReadOnlyDom('missing').ok,false);
+});

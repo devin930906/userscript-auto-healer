@@ -15,10 +15,19 @@ import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticS
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
+import {openApprovedTarget} from '../../src/browser/cdp-target';
+import {inspectApprovedScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+let scenarioObserveController:AbortController|null=null;
+let scenarioObserveInProgress=false;
+let scenarioObserveEpoch=0;
+function cancelScenarioObservation():void{
+  scenarioObserveEpoch++;
+  scenarioObserveController?.abort();
+}
 const uiFile = join(__dirname, '..', 'ui', 'index.html');
 const trustedUrl = pathToFileURL(uiFile).href;
 
@@ -61,6 +70,7 @@ const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as c
   businessVerified:false as const,automaticPatchAllowed:false as const};
 
 function stopOnlyOwnedBrowser():void {
+  cancelScenarioObservation();
   stopOnlyGmProbe();
   launchAbort?.abort();
   if(ownedBrowser){ownedBrowser.stop();ownedBrowser=null;}
@@ -69,6 +79,7 @@ function readOwnedBrowser(){
   if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser)){
     // Defensive fallback when a child exits before its lifecycle notification.
     ownedBrowser=null;
+    cancelScenarioObservation();
     stopOnlyGmProbe();
   }
   return ownedBrowser;
@@ -231,7 +242,7 @@ function registerSafeIpc(): void {
         userApproved:true,signal:controller.signal,
         onUnexpectedExit:()=>{
           // Never revoke a later replacement session on an older child exit.
-          if(ownedBrowser===launched){ownedBrowser=null;stopOnlyGmProbe();}
+          if(ownedBrowser===launched){ownedBrowser=null;cancelScenarioObservation();stopOnlyGmProbe();}
         }
       });
       if(!result.ok)return {ok:false,code:result.code,...unverified};
@@ -547,6 +558,70 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     return scenarioSession.register(input);
   });
+
+  // Fresh native consent, verified owned Chrome process and a scenario ID from
+  // this window are all required. The renderer cannot supply navigation URL,
+  // CSS selector, browser endpoint, script source or approval for this action.
+  ipcMain.handle('scenario:inspect',async(event,id:unknown)=>{
+    authorizeSender(event);
+    if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress)
+      return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    const selected=scenarioSession.resolveReadOnlyDom(id);
+    if(!selected.ok)return {ok:false,code:selected.code,...unverified};
+    const owned=readOwnedBrowser();
+    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const controller=new AbortController();
+    const epoch=scenarioObserveEpoch;
+    scenarioObserveController=controller;
+    scenarioObserveInProgress=true;
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许只读打开并检查','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'允许访问已登记测试场景的网页并读取限定 DOM？',
+        detail:'只在本程序启动的独立 Chrome 打开一个标签页：\\n'+
+          selected.targetUrl+
+          '\\n最多采集 3 次只读选择器计数，不读取页面文本、执行用户脚本或修改文件。'+
+          '\\nCDP 结果不验证 Tampermonkey、GM API 或真实业务。'
+      });
+      if(consent.response!==0||controller.signal.aborted||
+         epoch!==scenarioObserveEpoch||win!==mainWindow||win.isDestroyed()||
+         readOwnedBrowser()!==owned)
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const opened=await openApprovedTarget(owned,selected.targetUrl,true,controller.signal);
+      if(controller.signal.aborted||epoch!==scenarioObserveEpoch||
+         win!==mainWindow||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
+      if(!opened.ok)return {ok:false,code:opened.code,...unverified};
+      const result=await inspectApprovedScenarioDomSeries(
+        owned,opened,selected.scenario,true,3,250,controller.signal);
+      if(controller.signal.aborted||epoch!==scenarioObserveEpoch||
+         win!==mainWindow||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
+      if(result.status!=='LIMITED_DOM_SIGNAL_ONLY'||result.code!=='NONE')
+        return {ok:false,code:result.code,...unverified};
+      return {ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',
+        checkedAssertions:result.checkedAssertions,
+        triageStatus:result.triage.status,
+        faultCategory:result.triage.category,
+        evidenceCount:result.triage.evidenceIds.length,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'OBSERVATION_FAILED',...unverified};
+    }finally{
+      if(scenarioObserveController===controller)scenarioObserveController=null;
+      scenarioObserveInProgress=false;
+    }
+  });
+  ipcMain.handle('scenario:cancel',event=>{
+    authorizeSender(event);
+    if(!scenarioObserveInProgress)
+      return {ok:false,code:'NO_ACTIVE_OBSERVATION',...unverified};
+    cancelScenarioObservation();
+    return {ok:true,status:'OBSERVATION_CANCEL_REQUESTED',...unverified};
+  });
 }
 
 async function createMainWindow(): Promise<void> {
@@ -621,6 +696,9 @@ async function createMainWindow(): Promise<void> {
       "const scenarioInput={id:'smoke_scenario',scriptSha256:d.script.sha256,targetUrl:'https://example.test/app',selector:'#submit',userApproved:true,requiresLogin:false,loginReady:false}; " +
       "const foreignScenario=await a.registerScenario({...scenarioInput,id:'foreign',scriptSha256:'b'.repeat(64)}); " +
       "const stagedScenario=await a.registerScenario(scenarioInput); " +
+      "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
+      "const noScenarioCancel=await a.cancelScenarioInspection(); " +
+      "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
       "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
       "const noStop=await a.stopBrowser(); " +
       "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
@@ -705,7 +783,12 @@ async function createMainWindow(): Promise<void> {
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
-      "stagedScenario.tampermonkeyVerified === false && uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && rendered === true && isolated && canCancel && cancelled && " +
+      "stagedScenario.tampermonkeyVerified === false && noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
+      "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
+      "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
+      "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
+      "rendered === true && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 1') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
@@ -725,7 +808,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelNativeImport,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     const receipt = process.env.UAH_SMOKE_RECEIPT;
