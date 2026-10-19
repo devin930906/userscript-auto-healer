@@ -177,3 +177,46 @@ test('TEST-020: oversized directory inventory is refused even when entries are u
    assert.deepEqual(await readFile(source),fixtureBytes);
  });
 });
+
+
+test('TEST-020: empty inventory rejects linked ancestor paths without touching user files',async t=>{
+ await withFixture(async(source,backupDirectory,root)=>{
+   const nested=join(root,'nested');
+   const alias=join(root,'nested-junction');
+   await mkdir(nested);
+   const nestedSource=join(nested,'nested.user.js');
+   const nestedBackup=join(nested,'empty-backups');
+   await writeFile(nestedSource,fixtureBytes);
+   await mkdir(nestedBackup);
+   try{
+     await symlink(nested,alias,process.platform==='win32'?'junction':'dir');
+   }catch(error){
+     if(['EPERM','ENOTSUP','EACCES'].includes(
+       (error as NodeJS.ErrnoException).code??'')){
+       t.diagnostic('Ancestor junction privilege unavailable');
+       return;
+     }
+     throw error;
+   }
+   // The final file or directory is ordinary: only a parent is redirected.
+   assert.equal((await lstat(join(alias,'nested.user.js'))).isSymbolicLink(),false);
+   assert.equal((await lstat(join(alias,'empty-backups'))).isSymbolicLink(),false);
+   const redirectedSource=await inspectBackupInventoryReadOnly({
+     sourcePath:join(alias,'nested.user.js'),
+     backupDirectory,userApproved:true
+   });
+   assert.equal(redirectedSource.status,'BLOCKED');
+   if(redirectedSource.status==='BLOCKED')
+     assert.equal(redirectedSource.reason,'INVALID_PATH');
+   const redirectedDirectory=await inspectBackupInventoryReadOnly({
+     sourcePath:source,
+     backupDirectory:join(alias,'empty-backups'),userApproved:true
+   });
+   assert.equal(redirectedDirectory.status,'BLOCKED');
+   if(redirectedDirectory.status==='BLOCKED')
+     assert.equal(redirectedDirectory.reason,'BACKUP_DIRECTORY_INVALID');
+   assert.deepEqual(await readdir(nestedBackup),[]);
+   assert.deepEqual(await readFile(source),fixtureBytes);
+   assert.deepEqual(await readFile(nestedSource),fixtureBytes);
+ });
+});
