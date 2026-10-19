@@ -422,7 +422,7 @@ function registerSafeIpc(): void {
         type:'question',buttons:['保存未认证报告','取消'],
         defaultId:1,cancelId:1,noLink:true,
         message:'确认保存此本机测试报告？',
-        detail:'只包含预设 broken/fixed 自报状态、有限 DOM 对照和时间。'+
+        detail:'只包含预设 broken/fixed 自报状态、有限 DOM 对照、测试时间及本程序已核验 Chrome 版本。'+
           '\\n不会包含脚本源码、测试 URL 令牌、Chrome/Profile 路径或网站私密资料。'+
           '\\n不会覆盖任何现有文件。报告不证明 Tampermonkey、GM API 或业务恢复。'
       });
