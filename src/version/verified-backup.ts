@@ -6,11 +6,12 @@
  */
 import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
-import {link,lstat,open,readFile,unlink} from 'node:fs/promises';
+import {link,lstat,open,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {hasUnsafePathLink} from './path-boundary';
+import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 
 type Failure =
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SOURCE_CHANGED'|
@@ -137,9 +138,9 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       tempCreated=true;
       try {await out.writeFile(bytes);await out.sync();}
       finally {await out.close();}
-      const staged=await readFile(pending);
-      if(staged.length!==bytes.length||
-         createHash('sha256').update(staged).digest('hex')!==digest)
+      // Bound post-write verification and require stable inode, size and
+      // timestamps. An external process can replace/grow a staging file.
+      if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
         return deny('IO_FAILURE');
 
       // Abort if source or destination directory changed before publish.
@@ -155,11 +156,6 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       // existing backup. On unsupported filesystems, block rather than fall
       // back to a non-atomic or overwrite-prone publication path.
       await link(pending,final);
-      const saved=await readFile(final);
-      if(saved.length!==bytes.length||
-         createHash('sha256').update(saved).digest('hex')!==digest)
-        return deny('IO_FAILURE');
-
       // The published backup and staging name initially refer to the same
       // inode. Do not report a standalone recovery copy while this temporary
       // hard link still exists: recovery-source rejects multiply linked files.
@@ -173,9 +169,9 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
          independent.nlink!==1n||verifiedDir.isSymbolicLink()||
          !verifiedDir.isDirectory()||!sameDirectory(backupDir,verifiedDir))
         return deny('IO_FAILURE');
-      const finalBytes=await readFile(final);
-      if(finalBytes.length!==bytes.length||
-         createHash('sha256').update(finalBytes).digest('hex')!==digest)
+      // Now that the temporary hard link is gone, re-open the final name
+      // with bounded descriptor reads and recheck both file identities.
+      if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
         return deny('IO_FAILURE');
 
       return Object.freeze({status:'BACKUP_ONLY' as const,
