@@ -161,3 +161,22 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /ipcRenderer\.invoke\('scenario:cancel'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
 });
+
+test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attesting page exception signals',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+  // No new renderer IPC capability: reuse the existing consented, owned tab.
+  assert.match(main,/inspectApprovedPageExceptions\(/);
+  assert.match(main,/owned,opened,selected\.targetUrl,true,1200,controller\.signal/);
+  assert.match(main,/pageRuntimeStatus:page\.status/);
+  assert.match(main,/pageExceptionCount:page\.observedCount/);
+  // Failure to monitor an unstable page cannot be promoted to DOM success.
+  assert.match(main,/if\(page\.status==='BLOCKED'\)/);
+  assert.match(main,/page\.code,\.\.\.unverified/);
+  assert.match(ui,/pageRuntimeStatus\?:'PAGE_EXCEPTION_SIGNAL_ONLY'\|'NO_EXCEPTION_IN_WINDOW_ONLY'/);
+  assert.match(ui,/pageExceptionCount\?:number/);
+  assert.match(ui,/页面 JavaScript 异常/);
+  assert.match(html,/页面 JavaScript 异常/);
+  assert.doesNotMatch(main,/pageExceptionMessage|pageExceptionStack|pageExceptionSource/);
+});
