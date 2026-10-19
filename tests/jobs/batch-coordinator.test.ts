@@ -146,3 +146,35 @@ test('TEST-022: untrusted options and checkpoint array slots never invoke getter
   {...checkpoint,jobs:[,{ordinal:0,state:'QUEUED',attempts:0}]}),
   /INVALID_BATCH_CHECKPOINT/);
 });
+
+test('TEST-022: hostile proxy traps cannot leak errors through batch validation',()=>{
+ const worker=async()=> 'DONE' as const;
+ const secret='PRIVATE_PROXY_EXCEPTION_MUST_NOT_ESCAPE';
+ const badOptions=new Proxy({count:1},{
+  ownKeys(){throw Error(secret);}
+ });
+ assert.throws(()=>new ReadOnlyBatchCoordinator(badOptions,worker),
+   /INVALID_BATCH_OPTIONS/);
+
+ const snapshot=new ReadOnlyBatchCoordinator({count:1},worker).snapshot();
+ const badTop=new Proxy({...snapshot},{
+  getOwnPropertyDescriptor(){throw Error(secret);}
+ });
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,badTop),
+   /INVALID_BATCH_CHECKPOINT/);
+
+ const badSlots=new Proxy([{ordinal:0,state:'QUEUED',attempts:0}],{
+  get(target,prop,receiver){
+   if(prop==='length')throw Error(secret);
+   return Reflect.get(target,prop,receiver);
+  }
+ });
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
+   {...snapshot,jobs:badSlots}),/INVALID_BATCH_CHECKPOINT/);
+
+ const badJob=new Proxy({ordinal:0,state:'QUEUED',attempts:0},{
+  ownKeys(){throw Error(secret);}
+ });
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
+   {...snapshot,jobs:[badJob]}),/INVALID_BATCH_CHECKPOINT/);
+});
