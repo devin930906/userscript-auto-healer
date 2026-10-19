@@ -53,12 +53,30 @@ const MAX_DIRECTORY_ENTRIES = 10000;
 
 const statusElement = document.getElementById('status');
 const output = document.getElementById('import-list');
+const importSummary = document.getElementById('import-summary');
+const cancelImport = document.getElementById('cancel-import') as HTMLButtonElement | null;
 const chooseFile = document.getElementById('choose-files') as HTMLButtonElement | null;
 const chooseFolder = document.getElementById('choose-folder') as HTMLButtonElement | null;
 const chooser = document.getElementById('select-files') as HTMLInputElement | null;
 const dropZone = document.getElementById('drop-area');
 const seenScripts = new Set<string>();
 let busy = false;
+let activeImport = false;
+let cancelRequested = false;
+// Session-only counters: no script bytes, paths or account data enter history.
+let acceptedCount = 0;
+let duplicateCount = 0;
+let failedCount = 0;
+let unprocessedCount = 0;
+
+function updateImportSummary(): void {
+  if (importSummary) importSummary.textContent =
+    '本次会话：成功 ' + acceptedCount + '，重复 ' + duplicateCount +
+    '，失败 ' + failedCount + '，未处理 ' + unprocessedCount +
+    '。' + (activeImport
+      ? cancelRequested ? ' 正在取消，当前文件读取完成后停止。' : ' 正在导入，只读分析。'
+      : ' 不代表真实 Tampermonkey 或业务修复验证。');
+}
 
 function logLine(message: string): void {
   const item = document.createElement('li');
@@ -74,6 +92,7 @@ function show(result: ImportResponse): void {
     const key = JSON.stringify([item.filename.toLowerCase(), item.sha256]);
     if (seenScripts.has(key)) { duplicates++; continue; }
     seenScripts.add(key);
+    acceptedCount++;
     const a = item.analysis;
     const preview = a?.status === 'STATIC_ANALYSIS_ONLY'
       ? '静态定位器 ' + a.totalSites + '（字面值 ' + a.literalSites +
@@ -82,8 +101,10 @@ function show(result: ImportResponse): void {
     logLine(item.filename + ': ' + item.byteLength + ' bytes / ' +
       item.textEncoding + ' / SHA-256 ' + item.sha256 + ' / ' + preview);
   }
-  for (const error of result.errors) logLine(error.filename + ': ' + error.code);
+  for (const error of result.errors) { failedCount++; logLine(error.filename + ': ' + error.code); }
+  duplicateCount += duplicates;
   if (duplicates) logLine('忽略重复脚本：' + duplicates);
+  updateImportSummary();
 }
 
 async function locked(task: () => Promise<void>): Promise<void> {
@@ -93,7 +114,7 @@ async function locked(task: () => Promise<void>): Promise<void> {
   if (chooseFolder) chooseFolder.disabled = true;
   if (chooser) chooser.disabled = true;
   try { await task(); }
-  catch { logLine('导入未成功：文件、目录或权限检查未通过。'); }
+  catch { failedCount++; logLine('导入未成功：文件、目录或权限检查未通过。'); updateImportSummary(); }
   finally {
     busy = false;
     if (chooseFile) chooseFile.disabled = false;
@@ -103,24 +124,58 @@ async function locked(task: () => Promise<void>): Promise<void> {
 }
 
 async function importFiles(files: readonly File[]): Promise<void> {
-  if (files.length > MAX_FILES) { logLine('单批最多处理 1000 份文件'); return; }
-  let readBytes = 0;
-  for (const file of files) {
-    if (file.size > MAX_FILE_BYTES) {
-      logLine(file.name + ': FILE_TOO_LARGE');
-      continue;
+  activeImport = true;
+  cancelRequested = false;
+  if (cancelImport) cancelImport.disabled = false;
+  updateImportSummary();
+  try {
+    if (files.length > MAX_FILES) {
+      failedCount++;
+      logLine('单批最多处理 1000 份文件');
+      return;
     }
-    if (readBytes + file.size > MAX_BATCH_BYTES) {
-      logLine('本批次超过 128 MiB 导入限制；后续文件未读取。');
-      break;
+    let readBytes = 0;
+    for (let index = 0; index < files.length; index++) {
+      if (cancelRequested) {
+        unprocessedCount += files.length - index;
+        logLine('用户取消导入：其余 ' + (files.length - index) + ' 份文件未读取。');
+        break;
+      }
+      const file = files[index];
+      if (file.size > MAX_FILE_BYTES) {
+        failedCount++;
+        logLine(file.name + ': FILE_TOO_LARGE');
+        updateImportSummary();
+        continue;
+      }
+      if (readBytes + file.size > MAX_BATCH_BYTES) {
+        unprocessedCount += files.length - index;
+        logLine('本批次超过 128 MiB 导入限制；后续文件未读取。');
+        break;
+      }
+      readBytes += file.size;
+      // A rejected file never discards the rest of the batch.
+      // Cancellation does not interrupt already running native IPC.
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const answer = await window.healer.importDropped(file.name, bytes);
+        if (answer.ok && answer.script) {
+          show({ canceled: false, scripts: [answer.script], errors: [], duplicates: 0 });
+        } else {
+          failedCount++;
+          logLine(file.name + ': ' + (answer.code ?? 'INVALID_INPUT'));
+        }
+      } catch {
+        failedCount++;
+        logLine(file.name + ': READ_OR_IMPORT_FAILED');
+      }
+      updateImportSummary();
     }
-    readBytes += file.size;
-    const answer = await window.healer.importDropped(file.name, new Uint8Array(await file.arrayBuffer()));
-    if (answer.ok && answer.script) {
-      show({ canceled: false, scripts: [answer.script], errors: [], duplicates: 0 });
-    } else {
-      logLine(file.name + ': ' + (answer.code ?? 'INVALID_INPUT'));
-    }
+  } finally {
+    activeImport = false;
+    cancelRequested = false;
+    if (cancelImport) cancelImport.disabled = true;
+    updateImportSummary();
   }
 }
 
@@ -174,6 +229,14 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
   return found;
 }
 
+cancelImport?.addEventListener('click', () => {
+  if (!activeImport || cancelRequested) return;
+  cancelRequested = true;
+  cancelImport.disabled = true;
+  updateImportSummary();
+});
+updateImportSummary();
+
 chooseFile?.addEventListener('click', () => { void locked(async () => show(await window.healer.chooseFiles())); });
 chooseFolder?.addEventListener('click', () => { void locked(async () => show(await window.healer.chooseFolder())); });
 chooser?.addEventListener('change', () => {
@@ -185,7 +248,8 @@ chooser?.addEventListener('change', () => {
 dropZone?.addEventListener('dragover', event => { event.preventDefault(); });
 dropZone?.addEventListener('drop', event => {
   event.preventDefault();
-  if (!(event instanceof DragEvent) || !event.dataTransfer) return;
+  if (!(event instanceof DragEvent) || !event.dataTransfer || busy) return;
+  // A second drop must not traverse entries while an earlier batch owns the lock.
   // Acquire DataTransfer entries synchronously: drag data is protected after
   // the drop event returns, even while downstream file reads are asynchronous.
   const dropped = filesFromDrop(event.dataTransfer);
