@@ -53,13 +53,16 @@ const PROBE_DEFAULT='UAH_GM_PROBE_DEFAULT';
 function isObject(value:unknown):value is Record<string,unknown>{
  return value!==null&&typeof value==='object'&&!Array.isArray(value);
 }
-function produceFixtureSource(origin:string,token:string,expiresAt:number,runAt:GmProbeRunAt):string {
+function produceFixtureSource(origin:string,token:string,scriptId:string,expiresAt:number,runAt:GmProbeRunAt):string {
  // Userscript @match does not encode a port. The explicit origin check below
  // ensures the test script does nothing on another loopback port.
  const script=[
  '// ==UserScript==',
- '// @name UAH Isolated GM Diagnostic (temporary)',
- '// @namespace uah-isolated-gm-probe',
+ // Separate random script identity is NEVER the receipt or install token.
+ // Each independently consented test remains a distinct manager entry; the
+ // tester must explicitly remove it after completing the diagnostic.
+ '// @name UAH Isolated GM Diagnostic '+scriptId.slice(0,8),
+ '// @namespace uah-isolated-gm-probe.'+scriptId,
  '// @version 0.0.1',
  '// @match http://127.0.0.1/*',
  '// @grant GM_getValue',
@@ -124,6 +127,7 @@ export async function startIsolatedTampermonkeyGmProbe(
    return {ok:false,code:'INVALID_OPTIONS'};
  const token=randomBytes(32).toString('hex');
  const installKey=randomBytes(32).toString('hex');
+ const scriptId=randomBytes(16).toString('hex');
  const managerOrigin='chrome-extension://'+TAMPERMONKEY_EXTENSION_ID;
  const expiresAt=Date.now()+ttlMs;
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
@@ -171,7 +175,7 @@ export async function startIsolatedTampermonkeyGmProbe(
      if(req.headers.origin===managerOrigin)
        headers['Access-Control-Allow-Origin']=managerOrigin;
      res.writeHead(200,headers);
-     res.end(produceFixtureSource('http://'+host,token,expiresAt,runAt));
+     res.end(produceFixtureSource('http://'+host,token,scriptId,expiresAt,runAt));
      return;
    }
    // The fixture page's same-origin POST may supply Origin. Never treat a
@@ -270,7 +274,7 @@ export async function startIsolatedTampermonkeyGmProbe(
  expiryTimer.unref();
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',runAt,
-   origin,source:produceFixtureSource(origin,token,expiresAt,runAt),
+   origin,source:produceFixtureSource(origin,token,scriptId,expiresAt,runAt),
    installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
    receiptSnapshot:()=>Object.freeze({...receipts}),
    stop
