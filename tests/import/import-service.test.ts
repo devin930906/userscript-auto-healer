@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { importApprovedPaths, importDroppedBytes, MAX_SCRIPT_BYTES, scanApprovedDirectory } from '../../src/import/import-service';
 
 async function workspace(t: { after: (cb: () => Promise<void>) => void }): Promise<string> {
@@ -256,4 +256,46 @@ test('TEST-003: native selected file and folder reject linked ancestor directori
   assert.equal(folder.scripts.length, 0);
   assert.ok(folder.errors.some(error => error.code === 'SYMLINK_REJECTED'));
   assert.equal(await readFile(privatePath, 'utf8'), script);
+});
+
+test('TEST-001/003: native paths with dot components never select a different file', async t => {
+  const root = await workspace(t);
+  const outside = await workspace(t);
+  const canonical = join(root, 'real.user.js');
+  const other = join(outside, 'private.user.js');
+  await writeFile(canonical, script);
+  await writeFile(other, script.replace('console.log(1)', 'console.log(9)'));
+  await mkdir(join(root, 'nested'));
+  // Native selection is a specific path, not a request to reinterpret aliases.
+  // A linked ancestor followed by '..' is especially dangerous: lexical
+  // normalization could target another file than the selected filesystem path.
+  await symlink(outside, join(root, 'redirect'),
+    process.platform === 'win32' ? 'junction' : 'dir');
+  const aliases = [
+    root + sep + '.' + sep + 'real.user.js',
+    root + sep + 'nested' + sep + '..' + sep + 'real.user.js',
+    root + sep + 'redirect' + sep + '..' + sep + 'real.user.js'
+  ];
+  const imported = await importApprovedPaths([...aliases, canonical]);
+  assert.equal(imported.scripts.length, 1);
+  assert.equal(imported.scripts[0].sourcePath, canonical);
+  assert.equal(imported.scripts[0].sha256,
+    createHash('sha256').update(script).digest('hex'));
+  assert.deepEqual(imported.errors.map(x => x.code),
+    ['INVALID_PATH', 'INVALID_PATH', 'INVALID_PATH']);
+  assert.equal(imported.duplicates, 0);
+
+  for(const alias of [
+    root + sep + '.',
+    root + sep + 'nested' + sep + '..'
+  ]){
+    const scan=await scanApprovedDirectory(alias);
+    assert.deepEqual(scan.scripts, []);
+    assert.equal(scan.errors[0]?.code,'INVALID_PATH');
+  }
+  const normal=await scanApprovedDirectory(root);
+  assert.equal(normal.scripts.length,1);
+  assert.deepEqual(await readFile(canonical,'utf8'),script);
+  assert.deepEqual(await readFile(other,'utf8'),
+    script.replace('console.log(1)', 'console.log(9)'));
 });
