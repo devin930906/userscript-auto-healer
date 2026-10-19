@@ -120,3 +120,29 @@ test('TEST-022: reject oversized batches, forged checkpoints and hostile getter 
   ...checkpoint,jobs:[{ordinal:0,state:'RUNNING',attempts:0}]
  }));
 });
+
+test('TEST-022: untrusted options and checkpoint array slots never invoke getters',()=>{
+ const worker=async()=> 'DONE' as const;
+ let optionGetterCalls=0;
+ const options={count:1};
+ Object.defineProperty(options,'maxAttempts',{enumerable:true,
+  get(){optionGetterCalls++;return 2;}});
+ assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker),/INVALID_BATCH_OPTIONS/);
+ assert.equal(optionGetterCalls,0);
+
+ const coordinator=new ReadOnlyBatchCoordinator({count:1},worker);
+ const checkpoint=coordinator.snapshot();
+ let slotGetterCalls=0;
+ const hostileJobs=[{ordinal:0,state:'QUEUED',attempts:0}];
+ Object.defineProperty(hostileJobs,'0',{enumerable:true,configurable:true,
+  get(){slotGetterCalls++;return {ordinal:0,state:'QUEUED',attempts:0};}});
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
+  {...checkpoint,jobs:hostileJobs}),/INVALID_BATCH_CHECKPOINT/);
+ assert.equal(slotGetterCalls,0);
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
+  {...checkpoint,jobs:[{ordinal:0,state:'QUEUED',attempts:2}]}),
+  /INVALID_BATCH_CHECKPOINT/);
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:1},worker,
+  {...checkpoint,jobs:[,{ordinal:0,state:'QUEUED',attempts:0}]}),
+  /INVALID_BATCH_CHECKPOINT/);
+});
