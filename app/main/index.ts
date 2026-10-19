@@ -628,12 +628,15 @@ async function createMainWindow(): Promise<void> {
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
+      "transfer.items.add(new File(['// test'], 'drop-renamed.user.js')); " +
+      "transfer.items.add(new File(['// edited'], 'drop-smoke.user.js')); " +
       "transfer.items.add(new File(['// other'], 'drop-other.user.js')); " +
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer})); " +
       "const rendered=await new Promise(resolve=>{ const start=Date.now(); const tick=()=>{ " +
       "const list=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
-      "const yes=list.filter(x=>x.startsWith('drop-smoke.user.js:')).length===1 && " +
+      "const yes=list.filter(x=>x.startsWith('drop-smoke.user.js:')).length===2 && " +
       "list.filter(x=>x.startsWith('drop-other.user.js:')).length===1 && " +
+      "list.filter(x=>x.startsWith('drop-renamed.user.js:')).length===0 && " +
       "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "const input=document.getElementById('select-files'); " +
@@ -670,10 +673,10 @@ async function createMainWindow(): Promise<void> {
       "declinedProfile.code === 'NOT_AUTHORIZED' && " +
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && rendered === true && isolated && canCancel && cancelled && " +
-      "document.getElementById('import-summary').textContent.includes('成功 4') && " +
+      "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 1') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
-      "document.getElementById('import-summary').textContent.includes('重复 1') && " +
+      "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
       "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && requestedNativeCancel.ok && " +
       "cancelledNativeFiles.canceled && cancelledNativeFiles.scripts.length === 0 && " +
