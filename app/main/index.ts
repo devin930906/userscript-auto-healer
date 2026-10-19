@@ -47,6 +47,9 @@ let nativeSelectionInProgress = false;
 // Only one native picker/import batch can own this cancellation capability.
 // It never authorizes a script change, a Chrome launch, or privileged file IPC.
 let nativeImportController: AbortController | null = null;
+// The renderer can cancel its current read-only dropped-file AST preview.
+// Never grant arbitrary-path, manager or script-write authority through this.
+let droppedImportController: AbortController | null = null;
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -510,7 +513,7 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController)
+    if(nativeImportController||droppedImportController)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
@@ -547,12 +550,39 @@ function registerSafeIpc(): void {
     nativeImportController.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
-  ipcMain.handle('import:dropped', (event, name:unknown, data:unknown) => {
+  ipcMain.handle('import:dropped', async (event, name:unknown, data:unknown) => {
     authorizeSender(event);
-    const result = importDroppedBytes(name,data);
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(nativeImportController||droppedImportController)
+      return {ok:false,code:'IMPORT_BUSY'};
+    const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
-    scenarioSession.recordImported(result.sha256);
-    return {ok:true,script:summarize(result)};
+    const controller=new AbortController();
+    droppedImportController=controller;
+    try{
+      // A dragged .user.js is untrusted even after successful byte import.
+      // AST parsing must not block the privileged Electron event loop.
+      // No script is executed, applied or sent to the browser/manager.
+      const [analysis]=await previewImportedBatchOffMain([result],controller.signal);
+      if(win!==mainWindow||win.isDestroyed())
+        return {ok:false,code:'WINDOW_CLOSED'};
+      // Cancellation only stops optional AST work. Validated imported bytes
+      // were already read, so retain the SHA for this window's staged history.
+      scenarioSession.recordImported(result.sha256);
+      return {ok:true,script:summarize(result,analysis)};
+    }catch{
+      return {ok:false,code:'DROPPED_IMPORT_FAILED'};
+    }finally{
+      if(droppedImportController===controller)droppedImportController=null;
+    }
+  });
+  ipcMain.handle('import:cancel-dropped',event=>{
+    authorizeSender(event);
+    if(!droppedImportController)
+      return {ok:false,code:'NO_ACTIVE_DROPPED_IMPORT'};
+    droppedImportController.abort();
+    return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
   // Stage one bounded, read-only scenario only for a script imported by this
   // window. No arbitrary source/path IPC or browser navigation is exposed.
@@ -645,6 +675,7 @@ async function createMainWindow(): Promise<void> {
   win.on('closed', () => {
     if (mainWindow === win) {
       nativeImportController?.abort();
+      droppedImportController?.abort();
       stopOnlyOwnedBrowser();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -878,7 +909,11 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
-app.on('before-quit',stopOnlyOwnedBrowser);
+app.on('before-quit',()=>{
+  nativeImportController?.abort();
+  droppedImportController?.abort();
+  stopOnlyOwnedBrowser();
+});
 app.on('window-all-closed', () => {
   stopOnlyOwnedBrowser();
   if (process.platform !== 'darwin') app.quit();
