@@ -679,6 +679,18 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
       "document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const uiScenarioSelect=document.getElementById('scenario-script'); " +
+      "const uiScenarioImported=uiScenarioSelect.options.length>=2 && !uiScenarioSelect.disabled; " +
+      "document.getElementById('scenario-id').value='smoke_ui_scenario'; " +
+      "document.getElementById('scenario-url').value='https://example.test/smoke'; " +
+      "document.getElementById('scenario-selector').value='#submit'; " +
+      "document.getElementById('scenario-approve').checked=true; " +
+      "const uiScenarioButton=document.getElementById('scenario-register'); " +
+      "const uiScenarioButtonEnabled=!uiScenarioButton.disabled; uiScenarioButton.click(); " +
+      "const uiScenarioStaged=await new Promise(resolve=>{const start=Date.now(); const tick=()=>{ " +
+      "const lines=Array.from(document.querySelectorAll('#scenario-list li')).map(x=>x.textContent); " +
+      "if(lines.some(x=>x.includes('smoke_ui_scenario') && x.includes('READY_TO_TEST') && x.includes('未执行')))resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
@@ -693,7 +705,7 @@ async function createMainWindow(): Promise<void> {
       "blockedLaunch.code === 'NOT_AUTHORIZED' && blockedLaunch.tampermonkeyVerified === false && " +
       "d.ok === true && foreignScenario.code === 'SCRIPT_NOT_IMPORTED' && " +
       "stagedScenario.status === 'STAGED_RUNTIME_UNVERIFIED' && stagedScenario.automaticPatchAllowed === false && " +
-      "stagedScenario.tampermonkeyVerified === false && rendered === true && isolated && canCancel && cancelled && " +
+      "stagedScenario.tampermonkeyVerified === false && uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && rendered === true && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 1') && " +
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
