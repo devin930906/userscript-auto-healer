@@ -18,6 +18,7 @@ import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/g
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {inspectApprovedScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
+import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
@@ -632,7 +633,7 @@ function registerSafeIpc(): void {
         message:'允许访问已登记测试场景的网页并读取限定 DOM？',
         detail:'只在本程序启动的独立 Chrome 打开一个标签页：\\n'+
           selected.targetUrl+
-          '\\n最多采集 3 次只读选择器计数，不读取页面文本、执行用户脚本或修改文件。'+
+          '\\n最多采集 3 次只读选择器计数，并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
           '\\nCDP 结果不验证 Tampermonkey、GM API 或真实业务。'
       });
       if(consent.response!==0||controller.signal.aborted||
@@ -651,11 +652,24 @@ function registerSafeIpc(): void {
         return {ok:false,code:'CANCELLED',...unverified};
       if(result.status!=='LIMITED_DOM_SIGNAL_ONLY'||result.code!=='NONE')
         return {ok:false,code:result.code,...unverified};
+      // A passive PAGE exception sample is not userscript or GM evidence.
+      // Reuse the owned tab and native consent, never collect exception text.
+      const page=await inspectApprovedPageExceptions(
+        owned,opened,selected.targetUrl,true,1200,controller.signal);
+      if(controller.signal.aborted||epoch!==scenarioObserveEpoch||
+         win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
+      // Invalid identity, navigation or failed sampling invalidates the whole
+      // combined result; earlier DOM counts must not imply a successful visit.
+      if(page.status==='BLOCKED')
+        return {ok:false,code:page.code,...unverified};
       return {ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',
         checkedAssertions:result.checkedAssertions,
         triageStatus:result.triage.status,
         faultCategory:result.triage.category,
         evidenceCount:result.triage.evidenceIds.length,
+        pageRuntimeStatus:page.status,
+        pageExceptionCount:page.observedCount,
         ...unverified};
     }catch{
       return {ok:false,code:'OBSERVATION_FAILED',...unverified};

@@ -36,9 +36,9 @@
       <button id="scenario-register" type="button" disabled>登记只读测试场景</button>
       <label for="scenario-inspect-id">只读检查已登记场景：</label>
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
-      <button id="scenario-inspect" type="button" disabled>授权打开并只读检查网页 DOM</button>
+      <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
       <button id="scenario-cancel" type="button" disabled>取消正在进行的 DOM 检查</button>
-      <p>检查只限独立 Chrome、无需登录且仅包含一个 CSS 存在性断言的场景。每次访问需要系统确认。DOM 结果无法证明 Tampermonkey、GM 或业务恢复。</p>
+      <p>检查只限独立 Chrome、无需登录且仅包含一个 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
       <ul id="scenario-list" aria-live="polite"></ul>
     </section>
