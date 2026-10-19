@@ -260,3 +260,9 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 - 关联：REQ-004、REQ-011、REQ-022；NFR-009；TEST-004/011/022。PR [#112](https://github.com/devin930906/userscript-auto-healer/pull/112) 继承 PR #111 的本机受限工作线程分析，补齐此前仍在 Electron 主进程同步调用 `previewImportedScriptAnalysis` 的 `import:dropped`（包括拖放及文件输入框）路径；静态解析改由现有受限 worker 完成，仍沿用单份 256 KiB、10 秒截止与失效时 fail-closed 的逻辑。主进程仍先按 8 MiB 单文件限制执行只读字节与 SHA-256 校验；无任意文件路径 IPC、用户脚本执行或自动修复权限。
 - 限定 `import:cancel-dropped` 为当前窗口的一次 read-only AST 分析取消请求；取消前已验证的导入内容和 SHA-256 不被伪报失败，未完成的解析只能产生 `SKIPPED_CANCELLED`。新增原生选择与拖放请求的双向互斥、窗口关闭时撤销分析且禁止写入新窗口会话，以及实际 Electron IPC/Node worker 负例。拖放文件夹枚举或单份 File.arrayBuffer 仍只在当前操作结束时协作式停止，不宣称不可中断的字节读取已经终止。
 - 验证与合并状态以 PR #112 最新 HEAD 的 Windows Application Skeleton Checks、实际 Electron smoke 和最终 main SHA 为准；早期提交不能代替最新验证。**TASK-013/017 仍开发中**：本改动不是实际脚本批处理修复/回滚、可信持久任务恢复、真实 Tampermonkey/GM/业务验收，也不满足完整 TEST-022 或 GATE-007。正式 Windows EXE/ZIP 依旧须经 TASK-018..021 与所有适用 GATE。
+
+## （7）TASK-007 / TEST-017 有限 GM 报告的 Chrome 版本追踪（2026-10-19）
+
+- PR [#123](https://github.com/devin930906/userscript-auto-healer/pull/123) 将本应用**已验证归属的 Chrome 进程**提供的四段数字版本加入限定诊断会话与原生 JSON 报告，以便人工 TEST-017 环境追踪。原报告仅包含预设 broken/fixed 自报及有限 DOM 证据，没有所测 Chrome 版本。新增的 `browserVersion` 必须符合严格版本格式，不接收页面/HTTP 自报，不存储 Chrome.exe 路径、Profile、GM 脚本、URL 或令牌。
+- 保存格式明确由 `uah-manual-gm-fixture-v1` 变更为 `uah-manual-gm-fixture-v2`，是**新生成报告**的版本升级；旧 v1 历史文件不会自动修改、覆盖或宣称兼容导入（应用本来没有 v1 导入路径）。原生系统二次确认说明新增了 Chrome 版本信息；失效/伪造的版本和旧 schema 均拒绝作为新 v2 文件保存。TEST-017 与受影响 Node/Electron 测试随同 PR 回归。
+- 首个代码 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 Windows [Application Skeleton Checks #39254390625](https://github.com/devin930906/userscript-auto-healer/actions/runs/39254390625) 已完成并成功；**本段文档更新后的最终 HEAD、实际合并及合并后 main CI 仍须分别核验**。版本属于被本应用验证的 Chrome，而非 Tampermonkey 扩展身份/版本证明。真实脚本安装、GM API、业务断言、自动补丁与回滚均未因此获得 VERIFIED；TASK-007、TEST-017/018、GATE-004/005 继续开发/受阻。
