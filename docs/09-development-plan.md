@@ -277,3 +277,8 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 
 - 关联 REQ-017/018、TEST-017/026、GATE-006/007；修复本机一次性 HTTP 诊断接收器在恶意/意外提前关闭连接时缺少请求流 error/aborted 处理的问题（Node.js IncomingMessage 的非监听 error 可能中止 Electron 主进程）。独立处理断开连接并拒绝任何截断回执；原先 token、来源、时间、数据上限及单模式首份回执保护均保留。
 - 新增真实 TCP 流中断测试与正常 POST 恢复测试，没有修改现有脚本、浏览器 Profile、扩展权限或安装内容，也不授予自动应用/回滚。真实 Tampermonkey TEST-017/018 和正式 GATE 仍待其他独立证据，本段阶段记录不代表 Stable 完成。
+
+## （7）TASK-017 / TEST-026 导入与浏览器原生授权选择互斥（2026-10-19）
+
+- 现有脚本导入与 Chrome/Profile 原生选择、Profile 创建及启动处理器新增互斥状态校验；旧实现仅在各自局部串行，可能发生并发 OS 对话框、相互竞争或错误选择状态。此项只改变主进程保守 BUSY 拒绝条件，没有扩大 Chrome 权限、脚本导入能力或自动修复范围。
+- Windows Electron 真实 renderer/preload IPC smoke 加入双向悬挂选择器及启动拒绝测试；原有独立的浏览器与导入并发检查保留。运行结果以当前 PR HEAD 与合并后 main 的 GitHub Actions 为准。TASK-017 完整用户旅程和正式 Stable GATE 仍未通过。
