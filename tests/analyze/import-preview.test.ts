@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {importDroppedBytes} from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,previewImportedBatch} from '../../src/analyze/import-preview';
+import {previewImportedBatchOffMain} from '../../src/analyze/isolated-batch-preview';
 
 const header='// ==UserScript==\n// @name preview-test\n// @match https://example.org/*\n// ==/UserScript==\n';
 function imported(code:string){
@@ -59,4 +60,48 @@ test('TEST-011: batch AST work is bounded without dropping imported scripts',()=
  assert.equal(previews.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,16);
  assert.equal(previews.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,8);
  assert.ok(previews.every(x=>x.automaticPatchAllowed===false));
+});
+
+test('TEST-004/011/022: native-batch AST results run in an actual isolated Node worker',async()=>{
+ const scripts=Array.from({length:24},(_,i)=>imported(
+  header+`document.querySelector("#private-selector-${i}");`
+ ));
+ const actual=await previewImportedBatchOffMain(scripts);
+ const expected=previewImportedBatch(scripts);
+ assert.deepEqual(actual,expected);
+ assert.equal(actual.length,24);
+ assert.equal(actual.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,16);
+ assert.equal(actual.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,8);
+ assert.equal(JSON.stringify(actual).includes('private-selector-'),false);
+ assert.ok(actual.every(x=>!x.automaticPatchAllowed&&!x.tampermonkeyVerified&&
+   !x.businessVerified));
+});
+
+test('TEST-022/NFR-009: already-cancelled worker request cannot start source analysis',async()=>{
+ const controller=new AbortController();
+ controller.abort();
+ const results=await previewImportedBatchOffMain(
+  [imported(header+'document.querySelector("#secret");')],controller.signal);
+ assert.deepEqual(results.map(x=>x.status),['SKIPPED_CANCELLED']);
+ assert.equal(results[0].totalSites,0);
+ assert.equal(JSON.stringify(results).includes('secret'),false);
+});
+
+test('TEST-022/NFR-009: cancellation terminates in-flight static worker without verified claims',async()=>{
+ const controller=new AbortController();
+ const scripts=Array.from({length:5},()=>imported(header+
+  'document.querySelector("#private");'.repeat(5000)));
+ const analysis=previewImportedBatchOffMain(scripts,controller.signal);
+ controller.abort();
+ let timeout:NodeJS.Timeout|undefined;
+ try{
+  const results=await Promise.race([analysis,
+   new Promise<never>((_resolve,reject)=>{
+    timeout=setTimeout(()=>reject(Error('WORKER_CANCELLATION_STALLED')),2000);
+   })]);
+  assert.equal(results.length,5);
+  assert.ok(results.some(x=>x.status==='SKIPPED_CANCELLED'));
+  assert.ok(results.every(x=>x.automaticPatchAllowed===false&&
+    x.tampermonkeyVerified===false&&x.businessVerified===false));
+ }finally{if(timeout)clearTimeout(timeout);}
 });
