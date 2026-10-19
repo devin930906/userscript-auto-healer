@@ -105,3 +105,22 @@ test('TEST-022/NFR-009: cancellation terminates in-flight static worker without 
     x.tampermonkeyVerified===false&&x.businessVerified===false));
  }finally{if(timeout)clearTimeout(timeout);}
 });
+
+
+test('TEST-004/022: one dropped userscript is parsed by the real isolated worker, never verified',async()=>{
+ const source=header+'document.querySelector("#sensitive-candidate");';
+ const script=imported(source);
+ const before=Buffer.from(script.bytes).toString('hex');
+ const [isolated]=await previewImportedBatchOffMain([script]);
+ assert.deepEqual(isolated,previewImportedScriptAnalysis(script));
+ assert.equal(isolated.status,'STATIC_ANALYSIS_ONLY');
+ assert.equal(isolated.automaticPatchAllowed,false);
+ assert.equal(isolated.tampermonkeyVerified,false);
+ assert.equal(isolated.businessVerified,false);
+ assert.equal(JSON.stringify(isolated).includes('sensitive-candidate'),false);
+ assert.equal(Buffer.from(script.bytes).toString('hex'),before,'worker cannot modify imported bytes');
+ const invalid=imported('document.querySelector("#private");');
+ const [rejected]=await previewImportedBatchOffMain([invalid]);
+ assert.equal(rejected.status,'INVALID_METADATA');
+ assert.equal(rejected.automaticPatchAllowed,false);
+});
