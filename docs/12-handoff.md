@@ -193,3 +193,9 @@ PR [#6](https://github.com/devin930906/userscript-auto-healer/pull/6) 已合并�
 PR [#101](https://github.com/devin930906/userscript-auto-healer/pull/101) 对 app/main、app/preload、app/ui 和 src/import/import-service.ts 接入 Windows 原生文件／文件夹选择后的**只读**导入批次互斥与取消。仅 Electron 已授权主窗口可经固定无参数 IPC 请求取消；每次批次保留原生选择器给出的路径，不接受 renderer 任意文件路径。目录扫描和文件读取在文件边界协作式中止，已完成结果保留、未处理数量限于已知选中项目。补充 TEST-002/022 的提前取消、文件间取消、未修改源文件与 Electron 原生选择器并发负例，更新 TEST-026 严格 IPC 白名单。Windows 最终回归结果须对照 PR 当前 HEAD 的 Actions；未通过前不得标为完成。
 
 此阶段**没有**持久化可靠队列、已认证的真实 Tampermonkey GM/业务证据、自动修复/回滚权限，也没有正式 EXE/ZIP 制品。TASK-013/017 仍为开发中，TEST-022 与所有 Stable GATE 的完整验收继续受阻。不得将本轮取消功能视为修复引擎或 Stable 验收通过.
+
+## （7）TASK-002／017 字节身份去重阶段（2026-10-19）
+
+[PR #102](https://github.com/devin930906/userscript-auto-healer/pull/102) 在已整合的只读导入上统一 SHA-256 原字节身份：不同文件名但字节相同的 native 多选／目录／拖放脚本按重复处理，同文件名但内容确实不同的脚本版本保留为独立只读结果。文件读取预算覆盖已扫描的相同内容／坏编码，而非仅计入最终保留的唯一脚本。TEST-002/003 增补 Windows 文件系统及 Electron 界面回归，主仓库 PR HEAD、CI 和 main 合并结果需以实际 GitHub 记录为准。
+
+此阶段不修改、执行、安装任何脚本，也不会验证真实 Tampermonkey GM、网站业务或自动修复；TASK-007/013/017、正式 Windows 双包及完整 Stable GATE 仍未完成。
