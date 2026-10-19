@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   cancelNativeImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-native'),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
+  inspectScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:inspect',id),
+  cancelScenarioInspection: (): Promise<unknown> => ipcRenderer.invoke('scenario:cancel'),
   chooseChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-chrome'),
   chooseProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-profile'),
   createProfile: (): Promise<unknown> => ipcRenderer.invoke('browser:create-profile'),
