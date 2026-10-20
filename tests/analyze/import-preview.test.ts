@@ -81,7 +81,10 @@ test('TEST-022/017: native batch previews 36 scripts across bounded isolated wor
  const scripts=Array.from({length:36},(_,i)=>imported(
   header+'document.querySelector("#private-segment-'+i+'");'
  ));
- const results=await previewImportedBatchOffMain(scripts);
+ const counts:Array<[number,number]>=[];
+ const results=await previewImportedBatchOffMain(scripts,undefined,
+   (processed,total)=>counts.push([processed,total]));
+ assert.deepEqual(counts,[[16,36],[32,36],[36,36]]);
  assert.equal(results.length,36);
  assert.equal(results.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,36,
   'files past the first 16 must be processed by later bounded worker segments');
@@ -95,7 +98,14 @@ test('TEST-022/NFR-009: read-only native AST batch has a hard 64-file ceiling',a
  const scripts=Array.from({length:70},(_,i)=>imported(
   header+'document.querySelector("#not-exposed-'+i+'");'
  ));
- const reports=await previewImportedBatchOffMain(scripts);
+ const progress:number[]=[];
+ const reports=await previewImportedBatchOffMain(scripts,undefined,
+   (processed,total)=>{
+     assert.equal(total,70);
+     progress.push(processed);
+   });
+ assert.deepEqual(progress,[16,32,48,64,70],
+   'even budget-skipped files must complete the finite UI counter');
  assert.equal(reports.length,70);
  assert.deepEqual(reports.slice(0,64).map(x=>x.status),
   Array(64).fill('STATIC_ANALYSIS_ONLY'));

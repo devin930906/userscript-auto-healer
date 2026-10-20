@@ -20,12 +20,19 @@ interface ImportResponse {
   errors: { filename: string; code: string }[];
   duplicates: number;
 }
+interface NativeImportProgress {
+  active:boolean;
+  phase?:'PICKING'|'SCANNING'|'IMPORTING'|'ANALYZING';
+  processed?:number;total?:number;
+  accepted?:number;duplicates?:number;failed?:number;
+}
 interface Window {
   healer: {
     getStatus(): Promise<{ shell: string; automaticRepairAvailable: boolean; aiEnabled: boolean; automaticApplyEnabled: boolean }>;
     chooseFiles(): Promise<ImportResponse>;
     chooseFolder(): Promise<ImportResponse>;
     cancelNativeImport(): Promise<{ok:boolean;code?:string;status?:string}>;
+    getNativeImportProgress(): Promise<NativeImportProgress>;
     cancelDroppedImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
     registerScenario(input: {
@@ -123,6 +130,7 @@ function updateScenarioControls():void{
 let busy = false;
 let activeImport = false;
 let nativeImportMode = false;
+let liveNativeImportProgress:NativeImportProgress|null=null;
 let cancelRequested = false;
 let dropScanController: AbortController | null = null;
 // Session-only counters: no script bytes, paths or account data enter history.
@@ -137,7 +145,18 @@ function updateImportSummary(): void {
     '，失败 ' + failedCount + '，未处理 ' + unprocessedCount +
     '。' + (activeImport
       ? cancelRequested ? ' 正在取消，当前文件读取完成后停止。' : ' 正在导入，只读分析。'
-      : ' 不代表真实 Tampermonkey 或业务修复验证。');
+      : ' 不代表真实 Tampermonkey 或业务修复验证。')+
+    (nativeImportMode&&liveNativeImportProgress?.active===true
+      ? ' 原生进度：'+({
+          PICKING:'等待选择文件',SCANNING:'扫描授权文件夹',
+          IMPORTING:'读取文件',ANALYZING:'隔离 AST 分析'
+        }[liveNativeImportProgress.phase??'PICKING'])+
+        ' '+(liveNativeImportProgress.processed??0)+'/'+
+        (liveNativeImportProgress.total??0)+
+        '（成功 '+(liveNativeImportProgress.accepted??0)+
+        '、重复 '+(liveNativeImportProgress.duplicates??0)+
+        '、失败 '+(liveNativeImportProgress.failed??0)+'）'
+      : '');
 }
 
 function logLine(message: string): void {
@@ -200,6 +219,24 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
   cancelRequested = false;
   if (cancelImport) cancelImport.disabled = false;
   updateImportSummary();
+  // Poll only while this exact native request owns the renderer import state.
+  // The bridge returns bounded counters, never source hashes/paths or script text.
+  const refresh=async()=>{
+    try {
+      const result=await window.healer.getNativeImportProgress();
+      if(!activeImport||!nativeImportMode)return;
+      if(result.active&&typeof result.phase==='string'&&
+         ['PICKING','SCANNING','IMPORTING','ANALYZING'].includes(result.phase)&&
+         [result.processed,result.total,result.accepted,result.duplicates,result.failed]
+           .every(v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=1000)&&
+         result.processed! <= result.total!){
+        liveNativeImportProgress=result;
+        updateImportSummary();
+      }
+    }catch{/* progress UI cannot change the authenticated import */}
+  };
+  const poll=window.setInterval(()=>void refresh(),250);
+  void refresh();
   try {
     const result = kind === 'files'
       ? await window.healer.chooseFiles()
@@ -210,6 +247,8 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       logLine('原生选择导入已取消；已经完成的只读结果仍保留。');
     }
   } finally {
+    window.clearInterval(poll);
+    liveNativeImportProgress=null;
     nativeImportMode = false;
     activeImport = false;
     cancelRequested = false;

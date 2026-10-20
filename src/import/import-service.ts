@@ -189,7 +189,18 @@ async function hasLinkedPathComponent(path: string): Promise<boolean> {
   return false;
 }
 
-export async function importApprovedPaths(paths: readonly string[], signal?: AbortSignal): Promise<ImportOutcome> {
+export interface ReadOnlyImportProgress {
+  readonly phase:'IMPORTING_READ_ONLY';
+  readonly processed:number;
+  readonly total:number;
+  readonly accepted:number;
+  readonly duplicates:number;
+  readonly failed:number;
+}
+/** Native-only progress callback: counters, no filenames, paths, bytes or hashes. */
+export type ImportProgressCallback=(update:ReadOnlyImportProgress)=>void;
+export async function importApprovedPaths(paths: readonly string[], signal?: AbortSignal,
+  onProgress?:ImportProgressCallback): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   const seenPaths = new Set<string>();
   const seenContents = new Set<string>();
@@ -208,6 +219,7 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
       outcome.unprocessed = paths.length - index;
       break;
     }
+    try {
     const path = paths[index];
     const display = typeof path === 'string' ? basename(path) : '(invalid)';
     // A native picker selects an exact path. Do not silently normalize away
@@ -252,6 +264,15 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     } catch {
       outcome.errors.push(failure(display, 'IO_FAILURE'));
     }
+    } finally {
+      // Do not allow a failed UI status listener to stop a validated import.
+      // A native cancel still occurs between scripts, not in a file read.
+      try { onProgress?.(Object.freeze({
+        phase:'IMPORTING_READ_ONLY',processed:index+1,total:paths.length,
+        accepted:outcome.scripts.length,duplicates:outcome.duplicates,
+        failed:outcome.errors.length
+      })); } catch { /* progress reporting has no file authority */ }
+    }
   }
   return outcome;
 }
@@ -260,7 +281,8 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
  * Scope is the user-picked root only. No symlink traversal, no external access,
  * depth/file/entry budgets, and per-entry error isolation.
  */
-export async function scanApprovedDirectory(root: string, signal?: AbortSignal): Promise<ImportOutcome> {
+export async function scanApprovedDirectory(root: string, signal?: AbortSignal,
+  onProgress?:ImportProgressCallback): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
   if (signal?.aborted) { outcome.canceled = true; return outcome; }
   // Match the native-selected directory exactly; aliases must not be
@@ -337,7 +359,7 @@ export async function scanApprovedDirectory(root: string, signal?: AbortSignal):
     outcome.unprocessed = approved.length;
     return outcome;
   }
-  const imported = await importApprovedPaths(approved, signal);
+  const imported = await importApprovedPaths(approved, signal, onProgress);
   outcome.scripts.push(...imported.scripts);
   outcome.errors.push(...imported.errors);
   outcome.duplicates += imported.duplicates;
