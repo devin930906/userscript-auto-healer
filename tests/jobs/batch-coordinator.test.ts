@@ -2,6 +2,8 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 
+const SCRIPT_A='a'.repeat(64), SCRIPT_B='b'.repeat(64), SCRIPT_C='c'.repeat(64);
+
 test('TEST-022: independent batch results, bounded transient retry and no automatic authority',async()=>{
  const visited:number[]=[];
  const coordinator=new ReadOnlyBatchCoordinator({count:4,maxAttempts:2},
@@ -52,7 +54,8 @@ test('TEST-022: restart checkpoint preserves completed work, bounds interrupted 
  const wait=new Promise<void>(resolve=>{release=resolve;});
  let started!:()=>void;
  const active=new Promise<void>(resolve=>{started=resolve;});
- const first=new ReadOnlyBatchCoordinator({count:3,maxAttempts:2},async ordinal=>{
+ const first=new ReadOnlyBatchCoordinator({count:3,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]},async ordinal=>{
   if(ordinal===0)return 'DONE';
   started();
   await wait;
@@ -66,7 +69,8 @@ test('TEST-022: restart checkpoint preserves completed work, bounds interrupted 
  release();
  await original;
  const replay:number[]=[];
- const resumed=new ReadOnlyBatchCoordinator({count:3,maxAttempts:2},
+ const resumed=new ReadOnlyBatchCoordinator({count:3,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]},
   async ordinal=>{replay.push(ordinal);return 'DONE';},captured);
  const result=await resumed.run();
  assert.deepEqual(replay,[1,2]);
@@ -74,13 +78,13 @@ test('TEST-022: restart checkpoint preserves completed work, bounds interrupted 
  assert.ok(result.jobs.every(j=>j.state==='SUCCEEDED'));
 });
 test('TEST-022: exhausting retry budget is final after restart',async()=>{
- const c=new ReadOnlyBatchCoordinator({count:1,maxAttempts:2},
+ const c=new ReadOnlyBatchCoordinator({count:1,maxAttempts:2,jobHashes:[SCRIPT_A]},
    async()=> 'RETRYABLE_FAILURE');
  const failed=await c.run();
  assert.equal(failed.jobs[0].state,'FAILED');
  assert.equal(failed.jobs[0].attempts,2);
  let replayed=false;
- const next=new ReadOnlyBatchCoordinator({count:1,maxAttempts:2},
+ const next=new ReadOnlyBatchCoordinator({count:1,maxAttempts:2,jobHashes:[SCRIPT_A]},
   async()=>{replayed=true;return 'DONE';},failed);
  await next.run();
  assert.equal(replayed,false);
@@ -328,4 +332,61 @@ test('TEST-022/NFR-009: invalid timeout settings and hostile accessor are reject
  assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker),
   /INVALID_BATCH_OPTIONS/);
  assert.equal(accessed,0);
+});
+
+// A positional scheduling checkpoint is not sufficient to resume the same
+// scripts. Bind it to the ordered, already-imported byte identities.
+test('TEST-022: resume never transfers terminal states to a different batch of identical size',async()=>{
+ const keys=[SCRIPT_A,SCRIPT_B];
+ const options={count:2,maxAttempts:2,jobHashes:keys};
+ const completed=new ReadOnlyBatchCoordinator(options,async()=> 'DONE');
+ const receipt=await completed.run();
+ assert.deepEqual(receipt.jobs.map(j=>j.state),['SUCCEEDED','SUCCEEDED']);
+ assert.match(receipt.batchFingerprint??'',/^[0-9a-f]{64}$/);
+ let replayCount=0;
+ const continued=new ReadOnlyBatchCoordinator(options,async()=>{
+  replayCount++;return 'DONE';
+ },receipt);
+ assert.deepEqual(await continued.run(),receipt);
+ assert.equal(replayCount,0);
+ for(const next of [
+  {count:2,maxAttempts:2,jobHashes:[SCRIPT_B,SCRIPT_A]},
+  {count:2,maxAttempts:2,jobHashes:[SCRIPT_A,SCRIPT_C]},
+  {count:2,maxAttempts:2},
+ ])assert.throws(()=>new ReadOnlyBatchCoordinator(next,async()=>{
+  replayCount++;return 'DONE';
+ },receipt),/INVALID_BATCH_CHECKPOINT/);
+ assert.equal(replayCount,0);
+});
+
+test('TEST-022/026: script identity binding rejects sparse, accessor, duplicate and forged identities',()=>{
+ const worker=async()=> 'DONE' as const;
+ const valid={count:2,jobHashes:[SCRIPT_A,SCRIPT_B]};
+ const saved=new ReadOnlyBatchCoordinator(valid,worker).snapshot();
+ assert.equal(saved.automaticPatchAllowed,false);
+ const aliases=[
+  {count:2,jobHashes:[SCRIPT_A,SCRIPT_A]},
+  {count:2,jobHashes:[SCRIPT_A,'invalid']},
+  {count:2,jobHashes:[SCRIPT_A]},
+  {count:2,jobHashes:[,SCRIPT_B]},
+  {count:2,jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]},
+ ];
+ for(const opts of aliases)assert.throws(()=>new ReadOnlyBatchCoordinator(opts,worker),
+  /INVALID_BATCH_OPTIONS/);
+ let getterCalled=false;
+ const accessors=[SCRIPT_A,SCRIPT_B];
+ Object.defineProperty(accessors,'0',{configurable:true,enumerable:true,get(){
+  getterCalled=true;throw Error('PRIVATE_SCRIPT');
+ }});
+ assert.throws(()=>new ReadOnlyBatchCoordinator({count:2,jobHashes:accessors},worker),
+  /INVALID_BATCH_OPTIONS/);
+ assert.equal(getterCalled,false);
+ const forged={...saved,batchFingerprint:SCRIPT_A};
+ assert.throws(()=>new ReadOnlyBatchCoordinator(valid,worker,forged),
+  /INVALID_BATCH_CHECKPOINT/);
+ // Old position-only snapshots cannot be treated as safely resumable.
+ const old={...saved};
+ delete (old as {batchFingerprint?:unknown}).batchFingerprint;
+ assert.throws(()=>new ReadOnlyBatchCoordinator(valid,worker,old),
+  /INVALID_BATCH_CHECKPOINT/);
 });
