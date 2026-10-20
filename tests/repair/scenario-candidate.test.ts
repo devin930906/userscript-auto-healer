@@ -2,8 +2,10 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {proposeFromReadOnlyDomDiagnostic} from '../../src/repair/scenario-candidate';
+import {summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
+import type {DomSummary} from '../../src/observe/dom-observer';
 
 const header='// ==UserScript==\n// @name Test\n// @match https://example.com/*\n// @grant none\n// ==/UserScript==\n';
 const source=header+"const target=document.querySelector('#old');\n";
@@ -53,6 +55,55 @@ test('TEST-014: stable old-absent/new-present DOM signals produce only a local c
   assert.equal(result.reason,'REQUIRES_REAL_MANAGER_AND_BUSINESS_VALIDATION');
   assert.equal(result.candidateSource,header+"const target=document.querySelector(\"#new\");\n");
   assert.notEqual(result.candidateSha256,result.originalSha256);
+});
+
+test('TEST-019/026: a detected iframe or shadow subtree blocks incomplete-scope repair candidates',()=>{
+  const complete=series();
+  const cases:{name:string;summary:DomSummary}[]=[
+    {name:'iframe content is outside the top-level selector inventory',summary:{
+      elementCount:4,iframeCount:1,visibleShadowRoots:0,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED']}},
+    {name:'visible shadow subtree has a distinct selector scope',summary:{
+      elementCount:4,iframeCount:0,visibleShadowRoots:1,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']}},
+    {name:'cross-origin iframe remains unverified',summary:{
+      elementCount:4,iframeCount:1,visibleShadowRoots:0,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED',
+        'CROSS_ORIGIN_FRAME_UNVERIFIED']}}
+  ];
+  // Read-only diagnostics remain usable; only escalating an unverified
+  // top-level selector absence to a patch candidate is restricted.
+  for(const entry of cases){
+    const incomplete={...complete,samples:complete.samples.map(sample=>({
+      ...sample,summary:entry.summary
+    }))};
+    const observation=summarizeReadOnlyScenarioDomSeries(
+      scenario,incomplete,true);
+    assert.equal(observation.status,'LIMITED_DOM_SIGNAL_ONLY',entry.name);
+    const candidate=proposeFromReadOnlyDomDiagnostic(
+      patch,scenario,incomplete,true);
+    assert.equal(candidate.status,'BLOCKED',entry.name);
+    if(candidate.status==='BLOCKED')
+      assert.equal(String(candidate.reason),'INCOMPLETE_DOM_COVERAGE',entry.name);
+    assert.equal(candidate.automaticPatchAllowed,false,entry.name);
+    assert.equal('candidateSource' in candidate,false,entry.name);
+  }
+});
+
+test('TEST-019: unobservable closed-shadow possibility alone must not disable all review-only candidates',()=>{
+  // The real CDP DOM summary always includes this conservative unknown
+  // marker; it does not establish a detected shadow root on the page.
+  const base=series();
+  const samples=base.samples.map(s=>({
+    ...s,summary:{...s.summary,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN'] as const}
+  }));
+  const observed={...base,samples};
+  assert.equal(summarizeReadOnlyScenarioDomSeries(scenario,observed,true).status,
+    'LIMITED_DOM_SIGNAL_ONLY');
+  const result=proposeFromReadOnlyDomDiagnostic(patch,scenario,observed,true);
+  assert.equal(result.status,'CANDIDATE_ONLY');
+  assert.equal(result.automaticPatchAllowed,false);
 });
 
 test('TEST-019: a missing new selector or a clean old selector cannot produce a candidate',()=>{
