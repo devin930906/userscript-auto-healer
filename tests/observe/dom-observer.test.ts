@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {summarizeDomTree,observeApprovedDom,isApprovedTopFrame,approvedTopFrameUrl} from '../../src/observe/dom-observer';
+import {summarizeDomTree,observeApprovedDom,isApprovedTopFrame,approvedTopFrameUrl,awaitReadOnlyCdpSocketOpen} from '../../src/observe/dom-observer';
 test('TEST-010: iframe and shadow scope remain limited, not full-page coverage',()=>{
   const node={nodeType:9,nodeName:'#document',children:[
     {nodeType:1,nodeName:'HTML',children:[
@@ -80,4 +80,38 @@ test('TEST-012: CDP frame URL distinguishes same-origin routes without elevating
  ]){
    assert.equal(approvedTopFrameUrl(frame,origin),null);
  }
+});
+
+test('TEST-010/017: abort during pending CDP open settles immediately, not after handshake timeout',async()=>{
+ const socket=new EventTarget() as WebSocket;
+ const controller=new AbortController();
+ const pending=awaitReadOnlyCdpSocketOpen(socket,controller.signal);
+ let settled:'PENDING'|'OPEN'|'BLOCKED'='PENDING';
+ void pending.then(open=>{settled=open?'OPEN':'BLOCKED';});
+ controller.abort();
+ await Promise.resolve();
+ assert.equal(settled,'BLOCKED','revocation must unblock a pending connection');
+ assert.equal(await pending,false);
+ socket.dispatchEvent(new Event('open'));
+ assert.equal(settled,'BLOCKED','late OPEN must not resurrect revoked consent');
+});
+
+test('TEST-010/017: already aborted CDP open never yields an authenticated transport',async()=>{
+ const socket=new EventTarget() as WebSocket;
+ const controller=new AbortController();
+ controller.abort();
+ assert.equal(await awaitReadOnlyCdpSocketOpen(socket,controller.signal),false);
+ socket.dispatchEvent(new Event('open'));
+});
+
+test('TEST-010: CDP open succeeds only on timely OPEN, and fails on socket loss',async()=>{
+ const socket=new EventTarget() as WebSocket;
+ const opened=awaitReadOnlyCdpSocketOpen(socket);
+ socket.dispatchEvent(new Event('open'));
+ assert.equal(await opened,true);
+ const failed=new EventTarget() as WebSocket;
+ const closed=awaitReadOnlyCdpSocketOpen(failed);
+ failed.dispatchEvent(new Event('close'));
+ assert.equal(await closed,false);
+ failed.dispatchEvent(new Event('open'));
 });
