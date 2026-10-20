@@ -152,11 +152,13 @@ Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoa
 # REQ-028/TEST-028: a read-only extracted application directory must NOT be
 # required for data writes. Use real Windows NTFS ACLs (not merely the
 # directory ReadOnly attribute, which does not deny file creation).
+# Deny only Windows FILE_WRITE_DATA / directory FILE_ADD_FILE, not generic
+# Write (W), which also prevents CreateProcess from starting the runtime.
 # Everything here is disposable runner-local candidate content; never alter
 # user-provided paths or an installed Stable location.
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if($sid -notmatch '^S-1-[0-9-]+$') { throw 'Unable to identify Windows test principal' }
-$denyRule='*'+$sid+':(OI)(CI)(W)'
+$denyRule='*'+$sid+':(OI)(CI)(WD)'
 $removeRule='*'+$sid
 & icacls.exe $expanded /deny $denyRule | Out-Null
 if($LASTEXITCODE -ne 0) { throw 'Unable to make candidate extraction read-only' }
