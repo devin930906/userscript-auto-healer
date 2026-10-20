@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {link,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -150,5 +150,35 @@ test('TEST-020: extra hardlink to changed source is not a trusted restore target
   assert.equal(result.automaticPatchAllowed,false);
   assert.equal(result.automaticRollbackAllowed,false);
   assert.equal(await readFile(sourcePath,'utf8'),changed);
+ });
+});
+
+// A digest alone does not bind two observations to the same approved inode.
+// Swap at the boundary between the first source read and the recovery check:
+// both independent SHA-256 reads still match, so cross-read identity matters.
+test('TEST-020: same-byte source replacement during preflight fails closed',async()=>{
+ await fixture(async ({sourcePath,opts})=>{
+  const recovery=require('../../src/version/recovery-source') as typeof import('../../src/version/recovery-source');
+  const originalVerify=recovery.verifyBackupRecoverySource;
+  let replaced=false;
+  // This test uses an isolated Node test process; restore the export in finally.
+  (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=async (input)=>{
+   if(!replaced){
+    replaced=true;
+    await rename(sourcePath,sourcePath+'.prior-inode');
+    await writeFile(sourcePath,changed,'utf8');
+   }
+   return originalVerify(input);
+  };
+  try{
+   const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+   assert.equal(replaced,true);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'SOURCE_UNVERIFIED');
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(await readFile(sourcePath,'utf8'),changed);
+  }finally{
+   (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=originalVerify;
+  }
  });
 });
