@@ -7,6 +7,8 @@
  * This checkpoint is a non-authoritative scheduling hint. Neither "DONE"
  * nor a resumed checkpoint verifies a userscript, Tampermonkey, or recovery.
  */
+import {createHash} from 'node:crypto';
+
 export type ReadOnlyWorkResult='DONE'|'RETRYABLE_FAILURE'|'PERMANENT_FAILURE';
 export type BatchJobState='QUEUED'|'RUNNING'|'SUCCEEDED'|'FAILED'|'CANCELLED';
 export interface BatchJobSnapshot{
@@ -19,6 +21,8 @@ export interface ReadOnlyBatchSnapshot{
  readonly phase:'SCHEDULING_ONLY_UNVERIFIED';
  readonly maxAttempts:number;
  readonly concurrency:number;
+ /** A non-authenticating SHA-256 commitment to the ordered imported script identities. */
+ readonly batchFingerprint:string|null;
  readonly jobs:readonly BatchJobSnapshot[];
  readonly automaticPatchAllowed:false;
  readonly automaticRollbackAllowed:false;
@@ -27,7 +31,11 @@ export interface ReadOnlyBatchSnapshot{
 }
 export type ReadOnlyWorker=(ordinal:number,signal:AbortSignal)=>Promise<ReadOnlyWorkResult>;
 interface MutableJob{ordinal:number;state:BatchJobState;attempts:number}
-type Options={count:number;maxAttempts?:number;concurrency?:number;timeoutMs?:number};
+type Options={count:number;maxAttempts?:number;concurrency?:number;timeoutMs?:number;
+ /** Native-validated, ordered script byte hashes, never names or paths. */
+ jobHashes?:readonly string[]};
+type ValidatedOptions={count:number;maxAttempts:number;concurrency:number;
+ timeoutMs:number;batchFingerprint:string|null};
 const MAX_JOBS=1000;
 const MAX_CONCURRENCY=2;
 const MAX_ATTEMPTS=3;
@@ -60,14 +68,39 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  return output;
  }catch{return null;}
 }
-function validateOptions(options:Options):Required<Options>{
+/** An unbound positional snapshot cannot safely skip work for a new batch.
+ * A digest protects against accidental cross-batch replay, NOT intentional
+ * forgery of the mutable snapshot. It never grants repair or file authority.
+ */
+function fingerprintHashes(input:unknown,count:number):string|null {
+ if(input===undefined)return null;
+ if(!Array.isArray(input)||input.length!==count||
+    Object.getPrototypeOf(input)!==Array.prototype)
+   throw Error('INVALID_BATCH_OPTIONS');
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ if(Reflect.ownKeys(descriptors).length!==count+1)
+   throw Error('INVALID_BATCH_OPTIONS');
+ const seen=new Set<string>();
+ const hash=createHash('sha256').update('uah-readonly-batch-identities-v1\0');
+ for(let i=0;i<count;i++){
+  const slot=descriptors[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value')||
+     typeof slot.value!=='string'||!/^[0-9a-f]{64}$/.test(slot.value)||
+     seen.has(slot.value))
+   throw Error('INVALID_BATCH_OPTIONS');
+  seen.add(slot.value);
+  hash.update(slot.value);
+ }
+ return hash.digest('hex');
+}
+function validateOptions(options:Options):ValidatedOptions{
  try{
  // Inspect own descriptors first; never invoke accessor properties while
  // validating potentially hostile batch options.
  if(!options||typeof options!=='object'||Array.isArray(options))
    throw Error('INVALID_BATCH_OPTIONS');
  const descriptors=Object.getOwnPropertyDescriptors(options);
- const allowed=['count','maxAttempts','concurrency','timeoutMs'] as const;
+ const allowed=['count','maxAttempts','concurrency','timeoutMs','jobHashes'] as const;
  const keys=Reflect.ownKeys(descriptors);
  if(!Object.prototype.hasOwnProperty.call(descriptors,'count')||
     keys.length>allowed.length||
@@ -87,22 +120,24 @@ function validateOptions(options:Options):Required<Options>{
     concurrency>MAX_CONCURRENCY||typeof timeoutMs!=='number'||
     !Number.isSafeInteger(timeoutMs)||timeoutMs<MIN_TIMEOUT_MS||
     timeoutMs>MAX_TIMEOUT_MS)throw Error('INVALID_BATCH_OPTIONS');
- return {count,maxAttempts,concurrency,timeoutMs};
+ return {count,maxAttempts,concurrency,timeoutMs,
+  batchFingerprint:fingerprintHashes(value.jobHashes,count)};
  }catch{throw Error('INVALID_BATCH_OPTIONS');}
 }
 /** No checkpoint contains a script name or an event log. A caller must not
  * treat this mutable progress format as a signed, persistent audit ledger.
  */
-function validateCheckpoint(input:unknown,opts:Required<Options>):MutableJob[]{
+function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
  try{
  const top=exactData(input,[
-  'schema','phase','maxAttempts','concurrency','jobs',
+  'schema','phase','maxAttempts','concurrency','batchFingerprint','jobs',
   'automaticPatchAllowed','automaticRollbackAllowed',
   'tampermonkeyVerified','businessVerified'
  ]);
  if(!top||top.schema!=='uah-readonly-batch-v1'||
     top.phase!=='SCHEDULING_ONLY_UNVERIFIED'||
     top.maxAttempts!==opts.maxAttempts||top.concurrency!==opts.concurrency||
+    opts.batchFingerprint===null||top.batchFingerprint!==opts.batchFingerprint||
     top.automaticPatchAllowed!==false||top.automaticRollbackAllowed!==false||
     top.tampermonkeyVerified!==false||top.businessVerified!==false||
     !Array.isArray(top.jobs)||top.jobs.length!==opts.count)
@@ -143,6 +178,7 @@ export class ReadOnlyBatchCoordinator{
  private readonly maxAttempts:number;
  private readonly concurrency:number;
  private readonly timeoutMs:number;
+ private readonly batchFingerprint:string|null;
  private readonly worker:ReadOnlyWorker;
  private controller:AbortController|null=null;
  private inFlight:Promise<ReadOnlyBatchSnapshot>|null=null;
@@ -152,6 +188,7 @@ export class ReadOnlyBatchCoordinator{
   this.maxAttempts=opts.maxAttempts;
   this.concurrency=opts.concurrency;
   this.timeoutMs=opts.timeoutMs;
+  this.batchFingerprint=opts.batchFingerprint;
   this.worker=worker;
   this.jobs=checkpoint===undefined
     ?Array.from({length:opts.count},(_,ordinal)=>({
@@ -165,6 +202,7 @@ export class ReadOnlyBatchCoordinator{
    phase:'SCHEDULING_ONLY_UNVERIFIED' as const,
    maxAttempts:this.maxAttempts,
    concurrency:this.concurrency,
+   batchFingerprint:this.batchFingerprint,
    jobs:Object.freeze(this.jobs.map(job=>Object.freeze({...job}))),
    ...authority
   });
