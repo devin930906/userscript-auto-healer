@@ -158,7 +158,7 @@ $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if($sid -notmatch '^S-1-[0-9-]+$') { throw 'Unable to identify Windows test principal' }
 $denyRule='*'+$sid+':(OI)(CI)(W)'
 $removeRule='*'+$sid
-& icacls.exe $expanded /deny $denyRule /T | Out-Null
+& icacls.exe $expanded /deny $denyRule | Out-Null
 if($LASTEXITCODE -ne 0) { throw 'Unable to make candidate extraction read-only' }
 try {
   $unexpectedWrite=Join-Path $expanded 'uah-candidate-readonly-write-probe.tmp'
@@ -176,8 +176,8 @@ try {
   Assert-RetainedData $readonlyReceipt $userDataRoot $canary $canaryText $smokeRoaming
 } finally {
   # Restore only the denial added to the disposable expanded candidate tree,
-  # including child DLLs, so runner cleanup is not impaired.
-  & icacls.exe $expanded /remove:d $removeRule /T | Out-Null
+  # inherited by children, so runner cleanup is not impaired.
+  & icacls.exe $expanded /remove:d $removeRule | Out-Null
   if($LASTEXITCODE -ne 0) { throw 'Failed to restore candidate directory permissions' }
 }
 Write-Output 'PASS: actual Windows ACL read-only ZIP extraction denies writes and starts Electron using retained external userData'
