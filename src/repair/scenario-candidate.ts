@@ -70,7 +70,11 @@ function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
      metadata.tags.downloadurl!==undefined||
      !Array.isArray(metadata.tags.match)||
      metadata.tags.match.length===0)return false;
-  return metadata.tags.match.some(pattern=>
+  // A single page proves nothing about a userscript's OTHER @match
+  // destinations or paths. The entire declared execution scope must be
+  // eligible for this exact read-only scenario before proposing even a
+  // manual-review candidate; unknown/wildcard patterns fail closed.
+  return metadata.tags.match.every(pattern=>
     matchingExactOriginPattern(pattern,target));
 }
 

@@ -127,3 +127,25 @@ test('TEST-020/023: stale source or invalid export location never modifies selec
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
  });
 });
+
+test('TEST-019/023/026: cross-origin @match blocks manual candidate export without any disk side effects',async()=>{
+ await fixture(async opts=>{
+   const expandedSource=source.replace('// @grant none',
+     '// @match https://unobserved.example/*\n// @grant none');
+   await writeFile(opts.sourcePath,expandedSource);
+   const expandedPatch:LiteralPatchRequest={...patch,source:expandedSource,
+     expectedSourceSha256:hash(expandedSource),
+     callOffset:expandedSource.indexOf('document.querySelector')};
+   const linkedScenario={...scenario,scriptSha256:expandedPatch.expectedSourceSha256};
+   const result=await prepareManualRepairExportOnly(
+     expandedPatch,linkedScenario,samples(),opts);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.managerInstalled,false);
+   assert.equal(result.businessVerified,false);
+   assert.deepEqual(await readdir(opts.backupDirectory),[]);
+   assert.deepEqual(await readdir(opts.exportDirectory),[]);
+   assert.equal(await readFile(opts.sourcePath,'utf8'),expandedSource);
+ });
+});
