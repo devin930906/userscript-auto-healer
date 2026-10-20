@@ -278,3 +278,37 @@ test('TEST-019/026: hostile scenario getters and forged fields never enter the c
  }
  assert.equal(invoked,0,'no untrusted scenario accessor may execute');
 });
+
+test('TEST-019/026: one consented DOM origin cannot review a multi-origin userscript',()=>{
+  // The old predicate only required SOME @match line to match. A second
+  // unobserved site or a different path remains outside the DOM evidence.
+  for(const otherMatch of [
+    '// @match https://unobserved.example/*',
+    '// @match http://example.com/*',
+    '// @match https://example.com/private/*',
+    '// @match *://*/*'
+  ]){
+    const multiSource=source.replace('// @grant none',
+      otherMatch+'\\n// @grant none');
+    const request={...patch,source:multiSource,
+      expectedSourceSha256:createHash('sha256').update(multiSource).digest('hex'),
+      callOffset:multiSource.indexOf('document.querySelector')};
+    const observedScenario={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(
+      request,observedScenario,series(),true);
+    assert.equal(result.status,'BLOCKED',otherMatch);
+    assert.equal(result.automaticPatchAllowed,false,otherMatch);
+    assert.equal('candidateSource' in result,false,otherMatch);
+  }
+  // Multiple explicitly scoped patterns that BOTH match the same observed
+  // target remain eligible for human review (never automatic application).
+  const redundantSource=source.replace('// @grant none',
+    '// @match https://example.com/\\n// @grant none');
+  const request={...patch,source:redundantSource,
+    expectedSourceSha256:createHash('sha256').update(redundantSource).digest('hex'),
+    callOffset:redundantSource.indexOf('document.querySelector')};
+  const result=proposeFromReadOnlyDomDiagnostic(
+    request,{...scenario,scriptSha256:request.expectedSourceSha256},series(),true);
+  assert.equal(result.status,'CANDIDATE_ONLY');
+  assert.equal(result.automaticPatchAllowed,false);
+});
