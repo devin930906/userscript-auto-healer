@@ -16,8 +16,20 @@ concurrency:
 
 jobs:
   actual-tampermonkey:
+    name: Tampermonkey ${{ matrix.run_at }}
     runs-on: windows-2025
     timeout-minutes: 20
+    strategy:
+      # Each independent profile proves a distinct @run-at mode, not a
+      # synthetic declaration check. Limit simultaneous Windows runners.
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        run_at:
+          - document-start
+          - document-body
+          - document-end
+          - document-idle
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -83,6 +95,8 @@ jobs:
           "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
       - name: Execute real extension manager + GM API + synthetic business assertions
         shell: pwsh
+        env:
+          UAH_TM_RUN_AT: ${{ matrix.run_at }}
         run: |
           $env:NODE_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules'
           node ./poc/windows-tampermonkey-cloud.cjs
