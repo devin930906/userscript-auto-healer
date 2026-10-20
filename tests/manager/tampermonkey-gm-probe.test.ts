@@ -499,3 +499,72 @@ test('TEST-017/026: interrupted HTTP receipt does not terminate fixture or recor
    socket.destroy();
  }
 });
+
+test('TEST-017/018: fixture rejects noncanonical route and delayed route drift',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-start');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const clock=class extends Date {static now(){return probe.expiresAt-1000;}};
+ for(const href of [
+   probe.origin+'/other?mode=fixed',
+   probe.origin+'/?mode=fixed&extra=1',
+   probe.origin+'/?mode=fixed#not-the-approved-route'
+ ]){
+   const effects={gm:0,query:0,action:0,report:0};
+   runInNewContext(probe.source,{
+     Date:clock,URL,location:{origin:probe.origin,href},
+     document:{readyState:'complete',querySelector:()=>{
+       effects.query++;return {setAttribute:()=>{effects.action++;},getAttribute:()=> 'done'};
+     }},
+     GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+     fetch:()=>{effects.report++;return Promise.resolve();}
+   });
+   assert.deepEqual(effects,{gm:0,query:0,action:0,report:0},href);
+ }
+ const location={origin:probe.origin,href:probe.origin+'/?mode=fixed'};
+ let ready:(()=>void)|undefined;
+ const delayed={gm:0,query:0,action:0,report:0};
+ runInNewContext(probe.source,{
+   Date:clock,URL,location,
+   document:{readyState:'loading',addEventListener:(_name:string,fn:()=>void)=>{ready=fn;},
+     querySelector:()=>{delayed.query++;return {setAttribute:()=>{delayed.action++;},getAttribute:()=> 'done'};}},
+   GM_getValue:(_key:string,fallback:string)=>{delayed.gm++;return fallback;},
+   fetch:()=>{delayed.report++;return Promise.resolve();}
+ });
+ assert.equal(delayed.gm,1);
+ location.href=probe.origin+'/?mode=broken';
+ ready?.();
+ assert.deepEqual(delayed,{gm:1,query:0,action:0,report:0},
+   'An existing delayed callback must not report or mutate a different test mode');
+ const during={gm:0,query:0,action:0,report:0};
+ location.href=probe.origin+'/?mode=fixed';
+ runInNewContext(probe.source,{
+   Date:clock,URL,location,
+   document:{readyState:'complete',querySelector:()=>{
+     during.query++;
+     location.href=probe.origin+'/other?mode=fixed';
+     return {setAttribute:()=>{during.action++;},getAttribute:()=> 'done'};
+   }},
+   GM_getValue:(_key:string,fallback:string)=>{during.gm++;return fallback;},
+   fetch:()=>{during.report++;return Promise.resolve();}
+ });
+ assert.deepEqual(during,{gm:1,query:1,action:0,report:0},
+   'A route change during DOM lookup must not mutate the stale target');
+ const afterSet={gm:0,query:0,action:0,read:0,report:0};
+ location.href=probe.origin+'/?mode=fixed';
+ runInNewContext(probe.source,{
+   Date:clock,URL,location,
+   document:{readyState:'complete',querySelector:()=>{
+     afterSet.query++;
+     return {setAttribute:()=>{
+       afterSet.action++;location.href=probe.origin+'/?mode=broken';
+     },getAttribute:()=>{afterSet.read++;return 'done';}};
+   }},
+   GM_getValue:(_key:string,fallback:string)=>{afterSet.gm++;return fallback;},
+   fetch:()=>{afterSet.report++;return Promise.resolve();}
+ });
+ assert.deepEqual(afterSet,{gm:1,query:1,action:1,read:0,report:0},
+   'A route change during DOM action must not yield a stale success report');
+});

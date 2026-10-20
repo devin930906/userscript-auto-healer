@@ -286,3 +286,8 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 ## （7）TASK-017 / TEST-022/026 手动导出准备取消及文件写入边界（2026-10-19）
 
 已实现的 `scenario:export-manual` 与普通 DOM 检查共用 AbortController，但原有界面仅在普通检查过程中提供取消。现在也允许在人工候选导出的**写入前**准备（原生授权、页面只读观察、目录选择、源文件再核验）阶段请求取消。最终原生写入授权后、启动备份/候选生成前，主进程同步将 `manualExportCommitInProgress` 设为真，`scenario:cancel` 改为返回 `EXPORT_WRITE_ALREADY_STARTED`，不再错误承诺能取消已有新文件。原始用户脚本仍不会被自动覆盖。Windows 真 Electron renderer→preload→IPC smoke 检验了模拟活动阶段中 UI 启用取消、提交前取消信号及文件创建阶段拒绝取消。该 smoke 未实际创建备份文件，不证明真实 Tampermonkey、GM、业务恢复、完整 TEST-022 或 Stable GATE。
+
+## （7）TASK-007：有限 GM 诊断路线变更失效保护（2026-10-20）
+
+- 依据 REQ-017/018、TEST-017/018，PR [#133](https://github.com/devin930906/userscript-auto-healer/pull/133) 续接现有 `src/manager/tampermonkey-gm-probe.ts` 的一次性授权夹具。修复缓存的 `mode` 与后续真实页面地址脱节时继续 DOM 操作和 POST 自报的问题，按 exact `/?mode=broken|fixed` 入口与副作用边界拒绝非授权或变化后的路由；先提供 Windows 失败回归，再提交最小修改。
+- 这是只保护未认证的临时 GM 手动诊断夹具，**不是** Tampermonkey 扩展身份、脚本安装、GM 调用、业务恢复或正式自动修复的证据。TASK-007 仍开发中，TASK-010/011/018 与 TEST-017/018、全部适用 GATE、正式 EXE+ZIP 均按原门槛继续。具体修复验收及整合状态必须复核 PR 当前 SHA、Actions 和 main。
