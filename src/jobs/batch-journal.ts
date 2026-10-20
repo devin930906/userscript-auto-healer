@@ -74,9 +74,13 @@ async function boundedRead(path:string):Promise<{bytes:Buffer;file:Identity}|nul
  * overwrite; no cleanup of unknown crash locks occurs.
  */
 export async function saveReadOnlyBatchJournal(directory:string,coordinator:ReadOnlyBatchCoordinator):Promise<BatchJournalSaveResult>{
- if(!coordinator||Object.getPrototypeOf(coordinator)!==ReadOnlyBatchCoordinator.prototype)
+ // A matching prototype alone is forgeable; Proxy reflection and shadowed
+ // instance methods must never become an authority or an escaping exception.
+ if(!ReadOnlyBatchCoordinator.isNativeInstance(coordinator))
   return deny('INVALID_INPUT');
- const snapshot=coordinator.snapshot();
+ let snapshot:ReturnType<ReadOnlyBatchCoordinator['snapshot']>;
+ try{snapshot=ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator);}
+ catch{return deny('INVALID_INPUT');}
  if(!snapshot.batchFingerprint||!(/^[0-9a-f]{64}$/).test(snapshot.batchFingerprint))
   return deny('INVALID_INPUT');
  if(!validPath(directory))return deny('UNSAFE_PATH');
@@ -110,7 +114,8 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    let parsed:unknown;
    try{parsed=JSON.parse(prior.bytes.toString('utf8'));}
    catch{return deny('INVALID_CHECKPOINT');}
-   if(!coordinator.mayPersistOver(parsed))return deny('INVALID_CHECKPOINT');
+   if(!ReadOnlyBatchCoordinator.prototype.mayPersistOver.call(coordinator,parsed))
+    return deny('INVALID_CHECKPOINT');
   }catch(error){
    if((error as NodeJS.ErrnoException).code!=='ENOENT')return deny('IO_FAILURE');
   }

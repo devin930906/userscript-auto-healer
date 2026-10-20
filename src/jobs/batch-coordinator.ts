@@ -179,6 +179,15 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
  }catch{throw Error('INVALID_BATCH_CHECKPOINT');}
 }
 export class ReadOnlyBatchCoordinator{
+ /** A runtime brand, not a forgeable prototype or TypeScript-only type. */
+ readonly #nativeBrand=true;
+ /** Native journal entrypoints must reject prototype-spoofed objects and
+  * Proxy wrappers without invoking user-defined reflection traps. */
+ static isNativeInstance(value:unknown):value is ReadOnlyBatchCoordinator{
+  return typeof value==='object'&&value!==null&&
+   #nativeBrand in value&&
+   Object.getPrototypeOf(value)===ReadOnlyBatchCoordinator.prototype;
+ }
  private readonly jobs:MutableJob[];
  private readonly maxAttempts:number;
  private readonly concurrency:number;
