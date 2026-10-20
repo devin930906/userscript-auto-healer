@@ -170,3 +170,27 @@ test('TEST-019/026: native file handoff rejects accessors and extra pathname aut
   assert.deepEqual(await readdir(exportDirectory),[]);
  });
 });
+
+test('TEST-019/023/026: native manual export rejects accessor scenarios before touching disk',async()=>{
+ await fixture(async({script,backupDirectory,exportDirectory})=>{
+  let invoked=0;
+  const base=scenario(script.sha256);
+  const hostile={...base};
+  Object.defineProperty(hostile,'userApproved',{
+   enumerable:true,get(){invoked++;return true;}
+  });
+  const hostileRow={...base,assertions:[...base.assertions]};
+  Object.defineProperty(hostileRow.assertions,'0',{
+   enumerable:true,configurable:true,get(){invoked++;return base.assertions[0];}
+  });
+  for(const input of [hostile,hostileRow,{...base,automaticPatchAllowed:true}]){
+   const result=await exportReviewedImportedSelectorOnly(
+    script,input,observation(),{backupDirectory,exportDirectory,userApproved:true});
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   assert.equal(result.automaticPatchAllowed,false);
+  }
+  assert.equal(invoked,0);
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readdir(exportDirectory),[]);
+ });
+});

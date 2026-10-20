@@ -9,7 +9,7 @@
 import type {DynamicObservation} from '../observe/dom-observer';
 import {parseUserscriptMetadata} from '../analyze/metadata-parser';
 import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
-import type {ScenarioInput} from '../scenarios/scenario-registry';
+import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
 import {summarizeReadOnlyScenarioDomSeries} from '../diagnostics/scenario-dom-diagnostic';
 import {
   proposeLiteralSelectorPatch,
@@ -85,10 +85,14 @@ export function proposeFromReadOnlyDomDiagnostic(
 ):DiagnosticCandidateResult{
   try{
     if(userApproved!==true)return blocked('NOT_AUTHORIZED');
-    if(!patch||typeof patch!=='object'||
-       !scenario||typeof scenario!=='object'||Array.isArray(scenario))
+    if(!patch||typeof patch!=='object')
       return blocked('INVALID_SCENARIO_LINK');
-    const s=scenario as ScenarioInput;
+    // The canonical registry copies own data descriptors and array entries.
+    // Never read a caller's scenario getters or infer authority from extras.
+    const checked=preflightScenario(scenario as ScenarioInput);
+    if(checked.state!=='READY_TO_TEST')
+      return blocked('INVALID_SCENARIO_LINK');
+    const s=checked.input;
     if(s.userApproved!==true||s.requiresLogin!==false||
        !ID.test(s.id)||
        !SHA.test(s.scriptSha256)||
