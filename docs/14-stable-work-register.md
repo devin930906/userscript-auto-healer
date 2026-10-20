@@ -1,6 +1,6 @@
 # Stable 剩余工作登记（基线快照）
 
-> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；最近已核对的产品集成基线：`c058e37c148bbc29d1a7e670aab261c396eeea1e`（PR #197 合并提交）。只登记未完成的正式 TASK，不重做 TASK-001..006；前述阶段实证不等于 Stable 产品完整验收。
+> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；最近已核对的产品集成基线：`7868dc28510fc0f4958804414e11937c7d4496e7`（PR #198 squash 合并；此前 PR #197 为 `c058e37c148bbc29d1a7e670aab261c396eeea1e`）。只登记未完成的正式 TASK，不重做 TASK-001..006；前述阶段实证不等于 Stable 产品完整验收。
 
 ## 状态判断
 
@@ -39,3 +39,5 @@
 5. TASK-007/009 产品 AST 候选受控真实管理器对照：PR #197 已合并 main `c058e37c148bbc29d1a7e670aab261c396eeea1e`；PR HEAD `a13550b51a0312385e7c1f809de81ce7e7c13e35` 的 Windows Actions #39503655317 六个独立 Job 均成功（保留四种声明 `@run-at` 基线、另加 `product-original`/`product-candidate` 两份独立 Profile）。产品原始源码经 `analyzeSelectors`、`proposeLiteralSelectorPatch`、`auditProposedLiteralSelectorPatch` 仅改一处 AST 字面选择器并通过原版/候选 SHA 绑定；在同一类型合成目标存在页面上原版 `missing-target`，候选 `recovered/done` 且真实调用 `GM_getValue`；没有对用户文件的写入/安装或自动应用，原 `automaticPatchAllowed=false`。厂商站点解包 Tampermonkey ID 非商店签名身份、缺真实用户业务和安全回滚，正式 TEST/GATE 均未通过。
 6. 不新建与原任务重叠的正式 TASK；缺陷按现有 REQ/TEST/GATE 关联。当前无开放 PR，未来需遵守单一主 PR 原则，不自动清理未知历史分支。
 7. 完整原始决策、旧合并历史、测试细节仍保留在原 docs/09、07、08、10；本登记不替代它们或声称旧证明失效。
+
+8. TASK-009 / REQ-014/019 / TEST-019/026 的本地 AST 审核 Proxy 输入边界已以 [PR #198](https://github.com/devin930906/userscript-auto-healer/pull/198) 追加回归并整合 `main`（squash SHA `7868dc28510fc0f4958804414e11937c7d4496e7`）。先行测试提交 `994477d47f45be0da10c49e111b776921f34508c` 的 [Windows Actions #39505218979](https://github.com/devin930906/userscript-auto-healer/actions/runs/39505218979) 真实失败（409 tests：407 pass / 1 fail / 1 skip，恶意 request Proxy get trap 被触发 1 次）；修复源提交 `43232d7101a36ddb5e460568430209556316468d` 的 [应用工作流 #39505474855](https://github.com/devin930906/userscript-auto-healer/actions/runs/39505474855) 通过（409 tests：408 pass / 0 fail / 1 conditional skip，Electron smoke success），[Windows 候选双包 #39505474830](https://github.com/devin930906/userscript-auto-healer/actions/runs/39505474830) success，仅为开发候选。修复对请求、回执和嵌套 change Proxy 在属性探针前拒绝，保持 `automaticPatchAllowed=false`；**不授予自动修改原脚本或 Tampermonkey 安装权限，不代表完整 TEST-019/026、TASK-009 或 Stable GATE 通过**。合并后的 main 当前 SHA 与文档 CI 须按 GitHub 最新记录重新核验。
