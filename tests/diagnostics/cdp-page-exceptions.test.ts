@@ -99,7 +99,24 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   assert.ok(chrome,'Expected Google Chrome on Windows runner');
   const profileRoot=await mkdtemp(join(tmpdir(),'uah-runtime-fault-'));
   let stopChrome=()=>{};
+  // A matching CDP tab URL does not prove its document finished loading.
+  // Synchronize the isolated fixture itself; never relax production's
+  // ROUTE_CHANGED rejection or count a page signal as GM/user-script proof.
+  const readyResolvers=new Map<string,()=>void>();
+  const readyFault=new Promise<void>(resolve=>readyResolvers.set('fault',resolve));
+  const readyClean=new Promise<void>(resolve=>readyResolvers.set('clean',resolve));
   const server=createHttpServer((req,res)=>{
+    if(req.method==='POST'&&
+       (req.url==='/__fixture_ready/fault'||req.url==='/__fixture_ready/clean')){
+      const label=req.url.slice('/__fixture_ready/'.length);
+      res.writeHead(204,{'Cache-Control':'no-store'}).end();
+      readyResolvers.get(label)?.();
+      return;
+    }
+    if(req.url!=='/fault'&&req.url!=='/clean'){
+      res.writeHead(404).end();
+      return;
+    }
     res.setHeader('Cache-Control','no-store');
     res.setHeader('Content-Type','text/html; charset=utf-8');
     // Deliberate website JS exception in an isolated test page, NOT a
@@ -107,8 +124,16 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
     const script=req.url==='/fault'
       ?'<script>const t=setInterval(()=>{throw Error("SECRET_PAGE_EXCEPTION");},350);setTimeout(()=>clearInterval(t),8000);</script>'
       :'';
+    // The acknowledgement comes only from the real document load event.
+    // It is a test harness readiness signal, not a product business assertion.
+    const readyScript='<script>addEventListener("load",()=>{fetch("/__fixture_ready/'+
+      req.url.slice(1)+'",{method:"POST",cache:"no-store"}).catch(()=>{});},{once:true});</script>';
     res.writeHead(200).end('<!doctype html><html><body><div id="fixture"></div>'+
-      script+'</body></html>');
+      script+readyScript+'</body></html>');
+  });
+  const awaitFixtureReady=(ready:Promise<void>,label:string)=>new Promise<void>((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('FIXTURE_LOAD_NOT_CONFIRMED:'+label)),8000);
+    ready.then(()=>{clearTimeout(timer);resolve();},error=>{clearTimeout(timer);reject(error);});
   });
   await new Promise<void>((resolve,reject)=>{
     server.once('error',reject);server.listen(0,'127.0.0.1',resolve);
@@ -139,6 +164,7 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   const faultTarget=await openApprovedTarget(launched,faultUrl,true);
   assert.equal(faultTarget.ok,true,JSON.stringify(faultTarget));
   if(!faultTarget.ok)return;
+  await awaitFixtureReady(readyFault,'fault');
   const journal=new BoundedFaultLog(4);
   const fault=await inspectAndLogApprovedPageExceptions(
     launched,faultTarget,faultUrl,true,journal,1800);
@@ -157,6 +183,7 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   const cleanTarget=await openApprovedTarget(launched,cleanUrl,true);
   assert.equal(cleanTarget.ok,true,JSON.stringify(cleanTarget));
   if(!cleanTarget.ok)return;
+  await awaitFixtureReady(readyClean,'clean');
   const clean=await inspectApprovedPageExceptions(launched,cleanTarget,cleanUrl,true,500);
   assert.equal(clean.status,'NO_EXCEPTION_IN_WINDOW_ONLY',JSON.stringify(clean));
   assert.equal(clean.triage.status,'INSUFFICIENT_EVIDENCE');
