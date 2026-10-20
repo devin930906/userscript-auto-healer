@@ -38,6 +38,7 @@ interface Window {
       tampermonkeyVerified:false;businessVerified:false}>;
     exportManualScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       backupFileName?:string;candidateFileName?:string;exportFileName?:string;
+      recoveryExportFileName?:string;
       candidateSha256?:string;candidateByteLength?:number;
       tampermonkeyVerified:false;businessVerified:false;automaticPatchAllowed:false}>;
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
@@ -649,7 +650,8 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
    answer.ok&&answer.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'
     ?'已生成本地人工审核候选：'+(answer.exportFileName??'')+
       '（'+(answer.candidateByteLength??0)+' 字节；SHA-256 '+(answer.candidateSha256??'')+
-      '）。独立备份：'+(answer.backupFileName??'')+
+      '）。人工恢复原始版本：'+(answer.recoveryExportFileName??'')+
+       '。独立备份：'+(answer.backupFileName??'')+
       '。原始脚本未被本程序改写；仍需用户自行在真实 Tampermonkey 中审阅、安装、运行并验证业务。'
     :'人工导出未完成：'+(answer.code??'UNKNOWN')+
       '。未取得可用的候选导出回执；可能存在独立暂存文件，须检查所选文件夹。';
