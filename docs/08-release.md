@@ -82,3 +82,10 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 
 ## Tampermonkey 正式发布硬门槛（I-011）
 正式 Stable 必须证明声明支持的真实 Tampermonkey 环境通过 TEST-017/018 与 GATE-004/005。必要证据包括官方扩展身份/版本、浏览器与 Profile、权限、脚本安装及执行、GM API 调用、业务断言、失败回滚和运行记录。Violentmonkey 既有 PoC 仅用于研究。受阻则不得宣布 Stable；EXE+ZIP 发行不变。
+
+## 2026-10-20 Windows ZIP 只读数据写入权限阶段验证（TASK-020/TEST-028）
+
+- [PR #152](https://github.com/devin930906/userscript-auto-healer/pull/152) 已合并 main `961a5d8c230c748d7c12f4aeb8b854c8fc306157`。开发候选 [Windows CI #39373670565](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373670565) 成功，实际检出的 **PR 合成源码** `0e7494233eab668da8d09723213277794ca88142` 不是 main Stable 发布候选。真实 Windows NTFS 继承 ACL 限制 `WD`（文件数据写入/在目录中新建文件）：在 ZIP 解压目录写测试文件被拒绝，Electron `--uahtest-shell-only` 仍可启动且实际 `userData` 在独立 Windows Roaming AppData 目录，合成哨兵保持原样；138 文件的 ZIP 全量 SHA-256 与 138 文件实际安装后 SHA-256 对照均通过。
+- 保留有意义的失败记录：[运行 #39373022139](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373022139) 在对整个目录递归应用 `(W)` ACL 时拒绝访问；[运行 #39373382713](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373382713) 根目录通用 `(W)` ACL 导致 Windows `Start-Process` 拒绝启动。最终通过的方案仅限定禁止写入文件数据／新建文件（`WD`），**不证明阻止修改文件元数据、重命名或删除，也不等于完整只读 filesystem 安全模型**。绝不能把失败记录删除或修改判据以制造通过。
+- 本次独立开发候选 EXE SHA-256 `4f25593c11c3a46d4fb55c8d40fa84afd00d7a79fefe8876d1fa08a4472924f8`、真实 ZIP SHA-256 `05a0df227b108a5bd2d249412d914fc2b20fa98527d51fb823792a4bd0cdf7bd`，仅适用于上述 PR 合成源码临时候选。Actions Artifact `12242089996`，有效期至 2026-10-23 05:16:28 UTC；不是正式 Release。
+- TEST-028、TASK-020、GATE-009 仍**未完成完整验收**：缺真实用户数据持久性/选择路径、完整 Windows 用户／Chrome/Tampermonkey 业务与兼容性矩阵、升级替换、正式同 SHA 双包构建/发行检查及正式用户授权。GATE-001..011 无一可凭此候选检查直接宣布通过。
