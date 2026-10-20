@@ -65,11 +65,14 @@ New-Item -ItemType Directory -Path $temp | Out-Null
 $out=Join-Path $temp 'deliverables'
 $stage=Join-Path $temp 'portable-app'
 New-Item -ItemType Directory -Path $out,$stage | Out-Null
-# Every packaging smoke uses a fresh, disposable roaming profile rather than
-# touching any real runner/user profile or future production app identity.
-$smokeRoaming=Join-Path $temp 'smoke-roaming-appdata'
-New-Item -ItemType Directory -Path $smokeRoaming | Out-Null
-$env:APPDATA=$smokeRoaming
+# Electron resolves Windows AppData via native Known Folder APIs, which
+# may ignore a process-local APPDATA override. Verify the ACTUAL userData
+# against the disposable GitHub-hosted runner's roaming profile instead.
+# Only the separate candidate namespace is permitted; never a Stable path.
+$smokeRoaming=$env:APPDATA
+if (-not $smokeRoaming -or -not [IO.Path]::IsPathRooted($smokeRoaming)) {
+  throw 'Windows hosted runner roaming AppData path unavailable'
+}
 $runtime=Join-Path $root 'node_modules\electron\dist'
 foreach($relative in @('electron.exe','resources')) {
   if (-not (Test-Path (Join-Path $runtime $relative))) { throw "Incomplete Electron runtime: $relative" }
