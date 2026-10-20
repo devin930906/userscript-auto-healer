@@ -162,6 +162,43 @@ test('TEST-011/022/026: isolated worker reply accepts only sanitized preview fie
  }],1),null);
 });
 
+test('TEST-011/026: isolated AST site kinds must agree with reported totals, including truncated previews',()=>{
+ const literal=JSON.parse(JSON.stringify(previewImportedScriptAnalysis(
+   imported(header+'document.querySelector("#private");'))));
+ assert.equal(literal.status,'STATIC_ANALYSIS_ONLY');
+ assert.equal(literal.literalSites,1);
+ assert.equal(literal.runtimeConfirmationSites,0);
+ assert.equal(validateIsolatedPreviewReply([literal],1)?.length,1);
+ // A forged worker response can preserve totalSites while swapping its
+ // kind breakdown or changing the detailed site's kind.
+ assert.equal(validateIsolatedPreviewReply([{
+   ...literal,literalSites:0,runtimeConfirmationSites:1
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...literal,sites:[{...literal.sites[0],kind:'needs-runtime-confirmation'}]
+ }],1),null);
+ assert.equal(validateIsolatedPreviewReply([{
+   ...literal,sites:[{...literal.sites[0],method:'<dynamic-member>'}]
+ }],1),null);
+
+ const many=JSON.parse(JSON.stringify(previewImportedScriptAnalysis(
+   imported(header+'document.querySelector("#private");'.repeat(8)+
+     'document.querySelector(dynamicSelector);'))));
+ assert.equal(many.totalSites,9);
+ assert.equal(many.sites.length,8);
+ assert.equal(many.literalSites,8);
+ assert.equal(many.runtimeConfirmationSites,1);
+ assert.equal(validateIsolatedPreviewReply([many],1)?.length,1,
+   'a valid truncated preview must remain accepted');
+ assert.equal(validateIsolatedPreviewReply([{
+   ...many,literalSites:1,runtimeConfirmationSites:8
+ }],1),null,'visible literals cannot exceed reported literal count');
+ assert.equal(validateIsolatedPreviewReply([{
+   ...many,sites:[{...many.sites[0],kind:'needs-runtime-confirmation'},...many.sites.slice(1)]
+ }],1)?.length,1,
+   'a truncated preview may show only a subset of each category');
+});
+
 test('TEST-026: hostile worker-reply getters, proxies and array slots fail closed',()=>{
  const preview=JSON.parse(JSON.stringify(previewImportedScriptAnalysis(
    imported(header+'document.querySelector("#sensitive");'))));

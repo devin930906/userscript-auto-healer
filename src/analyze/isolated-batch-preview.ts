@@ -109,6 +109,8 @@ export function validateIsolatedPreviewReply(
        x.metadataStatus!=='NOT_CHECKED')return null;
    }
    const sites:ImportAnalysisPreview['sites'][number][]=[];
+   let visibleLiteral=0;
+   let visibleRuntime=0;
    for(const item of sitesRaw){
     const s=replyRecord(item,SITE_KEYS);
     if(!s||!Number.isSafeInteger(s.line)||!(s.line as number>=1)||
@@ -116,13 +118,25 @@ export function validateIsolatedPreviewReply(
        !Number.isSafeInteger(s.column)||!(s.column as number>=1)||
        (s.column as number)>MAX_ANALYSIS_BYTES+1||
        typeof s.method!=='string'||!SELECTOR_METHODS.has(s.method)||
-       (s.kind!=='literal'&&s.kind!=='needs-runtime-confirmation'))
+       (s.kind!=='literal'&&s.kind!=='needs-runtime-confirmation')||
+       (s.method==='<dynamic-member>'&&s.kind!=='needs-runtime-confirmation'))
       return null;
+    if(s.kind==='literal')visibleLiteral++;
+    else visibleRuntime++;
     sites.push(Object.freeze({
      line:s.line as number,column:s.column as number,
      method:s.method,kind:s.kind
     }));
    }
+   // The first eight AST sites are a bounded prefix. Even a partial prefix
+   // cannot contain more sites of a kind than the worker's reported totals.
+   // For an untruncated preview, every site must account for its category.
+   if(visibleLiteral>(x.literalSites as number)||
+      visibleRuntime>(x.runtimeConfirmationSites as number)||
+      ((x.totalSites as number)<=8&&
+       (visibleLiteral!==x.literalSites||
+        visibleRuntime!==x.runtimeConfirmationSites)))
+    return null;
    safe.push(Object.freeze({
     status:x.status as ImportAnalysisPreview['status'],
     metadataStatus:x.metadataStatus as ImportAnalysisPreview['metadataStatus'],
