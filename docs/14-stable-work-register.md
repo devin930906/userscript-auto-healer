@@ -1,6 +1,6 @@
 # Stable 剩余工作登记（基线快照）
 
-> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；经核对的 main 基线：`a5c69bf40fcc93b4b7c96f65dc872305fc938d78`。此文件只登记未完成的正式 TASK，不重新实施 TASK-001..006。TASK-014 新发现缺口标记为代码审查发现，**没有通过实际回归测试**。
+> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；经核对的 main 基线：`a51bc8feafbb0e315d58c78c3e53174bc2055c50`。此文件只登记未完成的正式 TASK，不重新实施 TASK-001..006。TASK-014 本轮 Proxy 输入边界修复已合并并取得当前 PR HEAD 的 Windows CI 证据，**不等于 TASK-014 完整产品功能或 Stable 已验收**。
 
 ## 状态判断
 
@@ -21,7 +21,7 @@
 | TASK-011 | REQ-020/021；TEST-020/021 | 阶段代码已整合，事务能力未完成 | 原字节备份/只读恢复检查与候选暂存已实现；未完成安全原子应用和真实回滚事务 | 源脚本完整性与恢复；GATE-007 | TASK-009/010 | src/version/；docs/09-development-plan.md | 设计且测试原子提交、崩溃/锁/冲突注入与完整回滚 | 真实文件恢复一致，受阻绝不覆盖 |
 | TASK-012 | REQ-023；TEST-023 | 阶段代码已整合，管理器同步未验证 | 只读复核/手动导出不等于 Tampermonkey 已安装版本变更 | 用户升级与导出 | TASK-007/011 | src/export/；docs/09-development-plan.md | 验证授权导出、扩展内版本状态与失配恢复 | TEST-023 在真实 Tampermonkey 环境通过 |
 | TASK-013 | REQ-022；TEST-022 | 阶段代码已整合，持久流程未完成 | 内存队列/只读检查点/会话进度存在；缺真实批处理持久事务与跨启动恢复 | 任务可靠性；GATE-007 | TASK-008..012 | src/jobs/；docs/09-development-plan.md | 连接真实作业并测试崩溃、重复、取消与一致性 | TEST-022 持久恢复和隔离回归通过 |
-| TASK-014 | REQ-015/016；TEST-015/016/026 | 阶段代码及 HTTP 错误响应清理已整合；本轮 Proxy 边界修复待验证 | 原生 AI 网关对配置／授权／证据执行对象反射前未拒绝 JavaScript Proxy，可能调用不可信代理陷阱；PR #195 已添加严格拒绝测试与最小修复，尚须验证当前 HEAD | 可选 AI 的本地输入安全与可靠性 | 既有可选网关，无新增外部授权与依赖 | 已合并 PR #184；本轮 PR #195，关联 src/ai/model-gateway.ts 与 tests/ai/gateway-proxy-boundary.test.ts；原 CI 结果不得用作本轮通过证据 | 核验 PR #195 最终 HEAD 的 Windows TypeScript、Node 回归、Electron smoke 与候选打包结果；保持默认关闭与不可自动应用 | 当前 PR 完整必要回归通过且按现有治理完成整合；TASK-014 产品级全部要求仍须按正式 TEST/GATE 判断 |
+| TASK-014 | REQ-015/016；TEST-015/016/026 | AI 网关阶段代码及输入 Proxy 边界修复已完成并整合；产品级验收未完成 | 本轮 `record()` 对配置／授权／证据反射前增加 `node:util.types.isProxy` 拒绝；严格负例防止触发恶意 Proxy 陷阱及未授权网络调用；尚缺正式可选 AI 接入范围与全量安全/产品实测 | 可选 AI 本地输入边界、安全与可靠性；GATE-006 | 既有可选网关，无新增生产依赖 | PR #195 已合并 main `a51bc8feafbb0e315d58c78c3e53174bc2055c50`；红 CI #39500069104（2 项新增测试失败）；绿 CI #39500385626（408 总计，407 通过、0 失败、1 条条件跳过）；Windows 候选 #39500385634 成功，但不属正式 Stable；main 合并后文档 #39501431043 成功 | 结合 TASK-018 核对全量 AI 网络/隐私安全及可选能力产品实测，不重复本轮已通过的 Proxy 负例 | 已有阶段安全边界修复保持通过；所有关联真实产品与安全 GATE 要求均取得独立验证证据 |
 | TASK-015 | REQ-024；TEST-024 | 阶段代码已整合，正式监控未验证 | 会话内短历史已实现；缺已授权周期复检、持久记录和管理器业务真实性 | 健康监控 | TASK-010/013 | src/health/；docs/09-development-plan.md | 验证明确同意的复检计划、数据生命周期与真实业务信号 | TEST-024 完整正反例和过期恢复通过 |
 | TASK-016 | REQ-025；TEST-025 | 阶段代码已整合，真实兼容回归未验证 | 只读内存兼容层不能证明真实多脚本替换/回滚 | 共享兼容行为 | TASK-009/010/015 | src/compat/；docs/09-development-plan.md | 在独立 Tampermonkey 样本中复核多脚本冲突与回退 | TEST-025 真实多脚本不回归 |
 | TASK-017 | REQ-001..025；TEST-002/022 | 阶段 UI 已整合，完整用户旅程未完成 | 导入/场景/只读检查/手动导出为局部旅程；缺可信修复/批处理/恢复端到端 | 完整 GUI 用户路径 | TASK-013..016 | app/ui/；docs/09-development-plan.md | 组合受支持场景，覆盖异常、取消及权限拒绝 | 完整实际用户流程与关联测试通过 |
@@ -34,6 +34,6 @@
 
 1. 本表是基于上述 main SHA、`docs/09-development-plan.md`、`docs/07-testing.md`、`docs/08-release.md`、公开 Actions 与 Release 现状整理的检查点；若与后续提交冲突，以更新的实际 GitHub SHA、Actions 运行、PR 合并结果为准。
 2. 测试证据每条必须保存：TEST 编号、环境、执行命令/工作流、源码 SHA、运行 ID、结果、证据 URL；尚未实际运行标记为「未执行」，依赖不满足标记为「受阻」。
-3. TASK-014 的历史 HTTP 资源清理已合并（PR #184）。2026-10-21 新增输入反射 Proxy 安全回归（PR #195），已在独立分支提交测试及修复；当前 PR 的 Windows CI 和整合结果仍须按最新 HEAD 另行核实，不能从历史提交推断通过。
+3. TASK-014 历史 HTTP 资源清理已整合（PR #184）。2026-10-21 新增 Proxy 输入反射安全修复 PR #195 并合并 main `a51bc8feafbb0e315d58c78c3e53174bc2055c50`：修复前同分支 CI #39500069104 新增两条负例真实失败，修复后 PR HEAD `f684dd2ad8f20c953fc892805f2d5139e6900751` 的 Windows 应用 CI #39500385626 两 Job success、407 pass/0 fail/1 conditional skip；文档 CI #39500385605、便携 Chrome CI #39500385652 与候选 EXE/ZIP #39500385634 success。合并后 main 的应用 CI #39501430909 须按其最终运行结论单独复核，以上候选和负例验证绝非正式 Stable GATE 完成。
 4. 不新建与原任务重叠的正式 TASK；缺陷按现有 REQ/TEST/GATE 关联。当前无开放 PR，未来需遵守单一主 PR 原则，不自动清理未知历史分支。
 5. 完整原始决策、旧合并历史、测试细节仍保留在原 docs/09、07、08、10；本登记不替代它们或声称旧证明失效。
