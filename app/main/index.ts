@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
-import {previewImportedBatchOffMain} from '../../src/analyze/isolated-batch-preview';
+import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import { join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -131,7 +131,7 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
 }
 async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
   signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
-  const previews=await previewImportedBatchOffMain(result.scripts,signal,onProgress);
+  const previews=await runImportedReadOnlyAnalysisQueue(result.scripts,signal,onProgress);
   return {canceled:result.canceled===true||signal?.aborted===true,
     unprocessed:result.unprocessed??0,
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
@@ -639,7 +639,7 @@ function registerSafeIpc(): void {
       // A dragged .user.js is untrusted even after successful byte import.
       // AST parsing must not block the privileged Electron event loop.
       // No script is executed, applied or sent to the browser/manager.
-      const [analysis]=await previewImportedBatchOffMain([result],controller.signal);
+      const [analysis]=await runImportedReadOnlyAnalysisQueue([result],controller.signal);
       if(win!==mainWindow||win.isDestroyed())
         return {ok:false,code:'WINDOW_CLOSED'};
       // Cancellation only stops optional AST work. Validated imported bytes
