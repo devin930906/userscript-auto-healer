@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,lstat,mkdir,mkdtemp,readdir,readFile,rm,rmdir,symlink,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readdir,readFile,rename,rm,rmdir,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {NativeSourceLockError,withNativeSourceLock} from '../../src/version/native-source-lock';
@@ -163,6 +163,55 @@ test('TEST-020: nested symlink or junction ancestor cannot bypass a native sourc
     assert.equal(executed,false);
     assert.equal(await withNativeSourceLock(canonical,async()=>true),true);
     assert.deepEqual(await readFile(canonical),bytes);
+    assert.deepEqual(await readdir(backups),[]);
+  });
+});
+
+test('TEST-020: ancestor replaced with a junction during a native lock cannot pass as unchanged',async t=>{
+  await fixture(async(_initial,backups,root)=>{
+    const ancestor=join(root,'canonical');
+    const moved=join(root,'canonical-moved');
+    const nested=join(ancestor,'nested');
+    await mkdir(nested,{recursive:true});
+    const source=join(nested,'reviewed.user.js');
+    await writeFile(source,bytes);
+    let unavailable=false;
+    let swapped=false;
+    let failure:unknown;
+    try{
+      await withNativeSourceLock(source,async()=>{
+        // The underlying file AND its immediate parent retain their dev/ino:
+        // only an intermediate ancestor becomes a symlink or junction.
+        try{await rename(ancestor,moved);}
+        catch(error){
+          if(['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code??'')){
+            unavailable=true;return;
+          }
+          throw error;
+        }
+        try{
+          await symlink(moved,ancestor,process.platform==='win32'?'junction':'dir');
+          swapped=true;
+        }catch(error){
+          await rename(moved,ancestor);
+          if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+            unavailable=true;return;
+          }
+          throw error;
+        }
+      });
+    }catch(error){failure=error;}
+    if(unavailable){
+      t.skip('Ancestor rename or junction privileges unavailable');
+      assert.equal(failure,undefined);
+      return;
+    }
+    assert.equal(swapped,true);
+    assert.ok(lockError('SOURCE_CHANGED')(failure),
+      'a redirected ancestor must invalidate the held source lock');
+    assert.deepEqual(await readFile(join(moved,'nested','reviewed.user.js')),bytes);
+    assert.equal((await readdir(join(moved,'nested')))
+      .some(n=>n.startsWith('.uah-source-lock-')),false);
     assert.deepEqual(await readdir(backups),[]);
   });
 });
