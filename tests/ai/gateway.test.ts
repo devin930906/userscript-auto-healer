@@ -305,3 +305,45 @@ test('TEST-016/026: oversized declared response body also requests nonblocking c
  assert.equal(cancelCalls,1,'rejected response must not pin a live stream');
  gateway.disable();
 });
+
+
+test('TEST-016/026: AI request deadline bounds a transport ignoring AbortSignal before headers',async()=>{
+  // Some custom/native transports may ignore an AbortSignal while awaiting headers.
+  // A request must still finish at its own deadline without trusting transport behavior.
+  let calls=0;
+  const transport:typeof fetch=async()=>{
+    calls++;
+    return await new Promise<Response>(()=>{});
+  };
+  const gateway=new OptionalAiGateway({...options(),timeoutMs:500,maxRequests:1},transport);
+  assert.equal(gateway.enable(approval()),true);
+  const result=await Promise.race([
+    gateway.discoverModels(approval()),
+    new Promise<'HEADERS_DEADLINE_STALLED'>(resolve=>
+      setTimeout(()=>resolve('HEADERS_DEADLINE_STALLED'),1800))
+  ]);
+  assert.deepEqual(result,{ok:false,code:'NETWORK_FAILED',automaticPatchAllowed:false});
+  assert.equal(calls,1);
+  assert.equal(gateway.status().remainingRequests,0);
+});
+
+test('TEST-016/026: disabling AI revokes a pending transport that ignores cancellation',async()=>{
+  let entered!:()=>void;
+  const started=new Promise<void>(resolve=>{entered=resolve;});
+  const transport:typeof fetch=async()=>{
+    entered();
+    return await new Promise<Response>(()=>{});
+  };
+  const gateway=new OptionalAiGateway({...options(),maxRequests:1},transport);
+  assert.equal(gateway.enable(approval()),true);
+  const pending=gateway.discoverModels(approval());
+  await started;
+  gateway.disable();
+  const result=await Promise.race([
+    pending,
+    new Promise<'HEADERS_CANCEL_STALLED'>(resolve=>
+      setTimeout(()=>resolve('HEADERS_CANCEL_STALLED'),1500))
+  ]);
+  assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
+  assert.equal(gateway.status().remainingRequests,0);
+});
