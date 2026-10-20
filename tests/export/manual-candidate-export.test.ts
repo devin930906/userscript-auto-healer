@@ -75,7 +75,7 @@ test('TEST-023: export backed-up reviewed bytes without changing original or man
       assert.match(exported.exportFileName,/^UAH-Reviewed-[0-9a-f]{12}-[\w-]+\.user\.js$/);
       assert.deepEqual(await readFile(join(options.exportDirectory,exported.exportFileName)),
         Buffer.from(candidate.candidateSource));
-      assert.match(exported.recoveryExportFileName,/^UAH-Original-[0-9a-f]{12}-[\\w-]+\\.user\\.js$/);
+      assert.match(exported.recoveryExportFileName,/^UAH-Original-[0-9a-f]{12}-[\w-]+\.user\.js$/);
       assert.deepEqual(await readFile(join(options.exportDirectory,exported.recoveryExportFileName)),
         Buffer.from(source),'the independently usable manual recovery file retains original bytes');
       assert.equal(exported.automaticPatchAllowed,false);
