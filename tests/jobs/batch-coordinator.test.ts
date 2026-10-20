@@ -368,7 +368,7 @@ test('TEST-022/026: script identity binding rejects sparse, accessor, duplicate 
   {count:2,jobHashes:[SCRIPT_A,SCRIPT_A]},
   {count:2,jobHashes:[SCRIPT_A,'invalid']},
   {count:2,jobHashes:[SCRIPT_A]},
-  {count:2,jobHashes:[,SCRIPT_B]},
+  {count:2,jobHashes:[,SCRIPT_B] as string[]},
   {count:2,jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]},
  ];
  for(const opts of aliases)assert.throws(()=>new ReadOnlyBatchCoordinator(opts,worker),
