@@ -223,3 +223,48 @@ test('TEST-016: disable cancels an in-flight request; cancellation never authori
   assert.equal(gateway.status().remainingRequests,2);
   assert.equal((await gateway.suggest(approval(),evidence)).ok,false);
 });
+
+test('TEST-016/026: oversized AI reply cannot hang on a never-settling stream cancellation',async()=>{
+ // A malicious or broken provider stream can return a cancel promise that
+ // never settles. The response is already over the 32-KiB limit; neither a
+ // timed-out diagnostic nor disabling AI may leave its caller pending forever.
+ let cancelCalls=0;
+ const body=new ReadableStream<Uint8Array>({
+  start(controller){controller.enqueue(new Uint8Array(32*1024+1));},
+  cancel(){cancelCalls++;return new Promise<void>(()=>{});}
+ });
+ const gateway=new OptionalAiGateway({...options(),maxRequests:1},
+  async()=>new Response(body,{status:200}));
+ assert.equal(gateway.enable(approval()),true);
+ const result=await Promise.race([
+  gateway.discoverModels(approval()),
+  new Promise<'STREAM_CANCEL_STALLED'>(resolve=>
+   setTimeout(()=>resolve('STREAM_CANCEL_STALLED'),250))
+ ]);
+ assert.deepEqual(result,{
+  ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+ });
+ assert.equal(cancelCalls,1,'oversized response must request best-effort cleanup');
+ assert.equal(gateway.status().remainingRequests,0);
+ gateway.disable();
+});
+
+test('TEST-016/026: oversized declared response body also requests nonblocking cleanup',async()=>{
+ let cancelCalls=0;
+ const body=new ReadableStream<Uint8Array>({
+  cancel(){cancelCalls++;return new Promise<void>(()=>{});}
+ });
+ const gateway=new OptionalAiGateway({...options(),maxRequests:1},
+  async()=>new Response(body,{headers:{'content-length':'32769'}}));
+ assert.equal(gateway.enable(approval()),true);
+ const result=await Promise.race([
+  gateway.discoverModels(approval()),
+  new Promise<'STREAM_CANCEL_STALLED'>(resolve=>
+   setTimeout(()=>resolve('STREAM_CANCEL_STALLED'),250))
+ ]);
+ assert.deepEqual(result,{
+  ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+ });
+ assert.equal(cancelCalls,1,'rejected response must not pin a live stream');
+ gateway.disable();
+});
