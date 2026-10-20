@@ -146,6 +146,19 @@ Require-File $exe
 $installedPath=Join-Path $temp 'installed-app'
 $p=Start-Process -FilePath $exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$installedPath") -PassThru -Wait
 if ($p.ExitCode -ne 0) { throw 'Installer execution failed' }
+# A successful installer exit and shell smoke alone cannot prove its payload is complete.
+# Match EVERY staged application file against what Inno Setup actually installed;
+# Inno's own uninstall metadata is intentionally outside the staged manifest.
+foreach($original in $sourceFiles) {
+  $relative=$original.FullName.Substring($stage.Length+1)
+  $installed=Join-Path $installedPath $relative
+  Require-File $installed
+  if ((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash) {
+    throw "Installed application file hash mismatch: $relative"
+  }
+}
+Write-Output "PASS: complete installed application payload SHA-256 parity ($($sourceFiles.Count) files)"
 Smoke (Join-Path $installedPath 'UserscriptAutoHealer.exe') $installedPath 'installed' $temp
 $uninstall=Get-ChildItem -LiteralPath $installedPath -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $uninstall) { throw 'Uninstaller missing' }
