@@ -6,7 +6,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {chmod,mkdtemp,mkdir,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
@@ -113,5 +113,37 @@ test('TEST-020/026: untrusted Proxy and accessors are rejected before any callba
   }
   assert.equal(traps,0);
   assert.deepEqual(await readFile(opts.sourcePath),changed);
+ });
+});
+
+test('TEST-020/026: refuse read-only selected source before creating any recovery side effects',async()=>{
+ await fixture(async opts=>{
+  await chmod(opts.sourcePath,0o444);
+  try{
+   const prior=await readdir(opts.backupDirectory);
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'UNSAFE_PATH',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false});
+   assert.deepEqual(await readFile(opts.sourcePath),changed);
+   assert.deepEqual(await readdir(opts.backupDirectory),prior,
+    'do not publish displaced backups or recovery journals for read-only files');
+  }finally{await chmod(opts.sourcePath,0o666);}
+ });
+});
+test('TEST-020: successful native restore retains selected script permission mode',async()=>{
+ await fixture(async opts=>{
+  await chmod(opts.sourcePath,0o666);
+  const before=(await stat(opts.sourcePath)).mode&0o777;
+  const result=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(result.status,'RESTORED_NATIVE_ONLY',JSON.stringify(result));
+  assert.equal((await stat(opts.sourcePath)).mode&0o777,before,
+   'replace must not silently change the original permission bits');
+  if(result.status==='RESTORED_NATIVE_ONLY'){
+   const journalStat=await stat(join(opts.backupDirectory,result.journalFileName));
+   assert.equal(journalStat.nlink,1,'completed journal must have a single independent path');
+   assert.ok((await readdir(opts.backupDirectory)).every(n=>!n.endsWith('.pending')),
+    'do not leave staging names after successful journal publication');
+  }
  });
 });
