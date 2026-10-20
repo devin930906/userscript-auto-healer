@@ -28,7 +28,10 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
       if(done)break;
       bytes+=value.byteLength;
       if(bytes>limit){
-        await reader.cancel();
+        // Cancellation is best-effort cleanup. A hostile or broken response
+        // may never settle its cancel promise; never block fail-closed size
+        // rejection or the owning Chrome startup on that asynchronous work.
+        void reader.cancel().catch(()=>undefined);
         return null;
       }
       body+=decoder.decode(value,{stream:true});
