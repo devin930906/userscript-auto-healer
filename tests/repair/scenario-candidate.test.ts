@@ -84,7 +84,7 @@ test('TEST-019/026: a detected iframe or shadow subtree blocks incomplete-scope 
       patch,scenario,incomplete,true);
     assert.equal(candidate.status,'BLOCKED',entry.name);
     if(candidate.status==='BLOCKED')
-      assert.equal(candidate.reason,'INCOMPLETE_DOM_COVERAGE',entry.name);
+      assert.equal(String(candidate.reason),'INCOMPLETE_DOM_COVERAGE',entry.name);
     assert.equal(candidate.automaticPatchAllowed,false,entry.name);
     assert.equal('candidateSource' in candidate,false,entry.name);
   }
