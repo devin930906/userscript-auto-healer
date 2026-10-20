@@ -62,6 +62,9 @@ export async function withNativeSourceLock<T>(
     const root=parse(sourcePath).root;
     let cursor=root;
     for(const component of sourcePath.slice(root.length).split(sep).filter(Boolean)){
+      // Block NTFS stream aliases before allocating any lock directory.
+      if(component.includes(':'))
+        throw new NativeSourceLockError('INVALID_SOURCE');
       cursor=join(cursor,component);
       if((await lstat(cursor,{bigint:true})).isSymbolicLink())
         throw new NativeSourceLockError('INVALID_SOURCE');

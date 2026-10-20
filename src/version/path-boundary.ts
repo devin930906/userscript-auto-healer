@@ -13,6 +13,9 @@ export async function hasUnsafePathLink(path:string):Promise<boolean>{
   const root=parse(path).root;
   let current=root;
   for(const component of path.slice(root.length).split(sep).filter(Boolean)){
+    // A colon within a component can name an NTFS stream. A drive letter
+    // is already part of the parsed root and remains valid.
+    if(component.includes(':'))return true;
     current=join(current,component);
     if((await lstat(current,{bigint:true})).isSymbolicLink())return true;
   }
