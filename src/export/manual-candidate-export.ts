@@ -6,7 +6,7 @@
  * install into Tampermonkey, claim business recovery, or authorize auto-apply.
  * Only a privileged native caller may select these filesystem paths.
  */
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {link,lstat,open,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
 import type {BigIntStats} from 'node:fs';
@@ -27,7 +27,7 @@ const noAuthority={
 };
 export type ManualCandidateExportResult=
  |Readonly<{status:'BLOCKED';reason:Reason}&typeof noAuthority>
- |Readonly<{status:'EXPORTED_RUNTIME_UNVERIFIED';exportFileName:string;
+ |Readonly<{status:'EXPORTED_RUNTIME_UNVERIFIED';exportFileName:string;recoveryExportFileName:string;
    candidateSha256:string;byteLength:number}&typeof noAuthority>;
 const block=(reason:Reason):ManualCandidateExportResult=>
  Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
@@ -160,9 +160,63 @@ export async function exportReviewedCandidateForManualInstall(
     // Another process could change the exported bytes during rechecks.
     if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
       return block('EXPORT_FAILED');
+
+    // TASK-011/012: accompany the manually reviewed patch with an independent
+    // original-version recovery export. This is NOT a restore: the installed
+    // userscript, native-selected source and Tampermonkey are never changed.
+    // Source bytes come from the audited original AST request, not from a
+    // caller-supplied backup pathname or a renderer request. They must still
+    // match the separate verified backup checked above.
+    const originalBytes=Buffer.from(request.source,'utf8');
+    if(!originalBytes.length||originalBytes.length>MAX_SCRIPT_BYTES||
+       createHash('sha256').update(originalBytes).digest('hex')!==proposal.originalSha256)
+      return block('RECHECK_FAILED');
+    const recoveryName='UAH-Original-'+proposal.originalSha256.slice(0,12)+'-'+
+      randomUUID()+'.user.js';
+    const recoveryPending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
+    const recoveryFinal=join(options.exportDirectory,recoveryName);
+    let recoveryPendingExists=false;
+    try{
+      const handle=await open(recoveryPending,'wx',0o600);
+      recoveryPendingExists=true;
+      try{await handle.writeFile(originalBytes);await handle.sync();}
+      finally{await handle.close();}
+      if(await verifyExactCandidateBytesReadOnly(recoveryPending,originalBytes)!=='MATCH')
+        return block('EXPORT_FAILED');
+      if(await hasUnsafePathLink(options.exportDirectory))
+        return block('UNSAFE_DESTINATION');
+      const recoveryDirBefore=await lstat(options.exportDirectory,{bigint:true});
+      if(!sameDir(exportBefore,recoveryDirBefore)||
+         recoveryDirBefore.isSymbolicLink())return block('UNSAFE_DESTINATION');
+      // Hard-link publication is no-clobber and keeps the previously staged
+      // candidate intact even if this recovery export fails.
+      await link(recoveryPending,recoveryFinal);
+      await unlink(recoveryPending);
+      recoveryPendingExists=false;
+      if(await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH')
+        return block('EXPORT_FAILED');
+      const afterRecovery=await verifyStagedCandidateReadOnly(
+        request,receipt,nativeOptions);
+      if(afterRecovery.status!=='CANDIDATE_RECHECKED_READ_ONLY'||
+         afterRecovery.candidateSha256!==proposal.candidateSha256||
+         afterRecovery.originalSha256!==proposal.originalSha256)
+        return block('RECHECK_FAILED');
+      if(await hasUnsafePathLink(options.exportDirectory))
+        return block('UNSAFE_DESTINATION');
+      const recoveryDirAfter=await lstat(options.exportDirectory,{bigint:true});
+      if(!sameDir(exportBefore,recoveryDirAfter)||
+         recoveryDirAfter.isSymbolicLink()||
+         await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH'||
+         await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
+        return block('EXPORT_FAILED');
+    }finally{
+      if(recoveryPendingExists)await unlink(recoveryPending).catch(()=>{});
+      // Published but unverified files remain for explicit reconciliation.
+    }
     return Object.freeze({
       status:'EXPORTED_RUNTIME_UNVERIFIED' as const,
-      exportFileName:name,candidateSha256:proposal.candidateSha256,
+      exportFileName:name,recoveryExportFileName:recoveryName,
+      candidateSha256:proposal.candidateSha256,
       byteLength:bytes.length,...noAuthority
     });
   }catch{return block('EXPORT_FAILED');}
