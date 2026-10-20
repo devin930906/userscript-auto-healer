@@ -14,7 +14,7 @@ export type TampermonkeyPreflightCode =
  'VERSION_NOT_REPORTED'|'MANAGER_NOT_ENABLED'|'USERSCRIPTS_PERMISSION_UNKNOWN'|
  'USERSCRIPTS_NOT_ALLOWED'|'SCRIPT_NOT_REPORTED_ENABLED'|'INVALID_SCRIPT_METADATA'|
  'GM_GRANT_NOT_DECLARED'|'MATCH_NOT_CONFIRMED'|'RUN_AT_NOT_CONFIRMED'|
- 'EXTERNAL_RESOURCES_UNVERIFIED';
+ 'INJECTION_CONTEXT_NOT_CONFIRMED'|'EXTERNAL_RESOURCES_UNVERIFIED';
 export type TampermonkeyPreflightResult =
  | {readonly ok:false;readonly status:'BLOCKED';readonly code:TampermonkeyPreflightCode;
     readonly gmApiVerified:false;readonly businessVerified:false}
@@ -98,6 +98,15 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  if(runAt!==undefined&&(!Array.isArray(runAt)||runAt.length!==1||
     !['document-start','document-body','document-end','document-idle'].includes(runAt[0])))
     return blocked('RUN_AT_NOT_CONFIRMED');
+ // This narrowly consented GM diagnostic does not interpret alternate
+ // execution wrappers. @unwrap is a KNOWN tag, so unknownNames cannot
+ // block it. A malformed or duplicated @noframes also leaves iframe
+ // injection semantics uncertain. Neither case can pass even metadata-only
+ // eligibility before actual Tampermonkey sandbox and injection testing.
+ if(metadata.tags.unwrap!==undefined||
+    (metadata.tags.noframes!==undefined&&
+     (metadata.tags.noframes.length!==1||metadata.tags.noframes[0]!=='')))
+    return blocked('INJECTION_CONTEXT_NOT_CONFIRMED');
  // @require and @resource may fetch and execute/use dependencies beyond the
  // isolated test fixture. Do not implicitly approve any remote code/resources
  // on a caller-supplied installation report.
