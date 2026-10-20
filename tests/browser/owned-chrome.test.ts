@@ -132,6 +132,44 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
         assert.equal(observed.userscriptVerified,false);
       }
     }
+    // TEST-010/017/026: consent revoked while a legitimate CDP /json/list
+    // fetch is pending must terminate promptly. This intentionally injects
+    // only a stalled read-only transport, not a forged Chrome endpoint.
+    const realFetch=globalThis.fetch;
+    const controller=new AbortController();
+    let markRequest:()=>void=()=>{};
+    const requestStarted=new Promise<void>(resolve=>{markRequest=resolve;});
+    let observedFetch=false;
+    globalThis.fetch=(input,init)=>{
+      if(typeof input==='string'&&input===
+          'http://127.0.0.1:'+port+'/json/list'){
+        observedFetch=true;markRequest();
+        return new Promise<Response>((_resolve,reject)=>{
+          const onAbort=()=>reject(new DOMException('ABORTED','AbortError'));
+          init?.signal?.addEventListener('abort',onAbort,{once:true});
+          if(init?.signal?.aborted)onAbort();
+        });
+      }
+      return realFetch(input,init);
+    };
+    try{
+      const pending=observeApprovedDom(result,target,site,true,
+        ['#approved-ready'],controller.signal);
+      await Promise.race([requestStarted,delay(5000).then(()=>{
+        throw Error('OWNED_LISTENER_NOT_READY_FOR_REVOCATION_TEST');
+      })]);
+      assert.equal(observedFetch,true);
+      controller.abort();
+      const decision=await Promise.race([
+        pending,
+        delay(450).then(()=>({ok:false as const,code:'CANCELLATION_STALLED' as const}))
+      ]);
+      assert.deepEqual(decision,{ok:false,code:'CANCELLED'},
+        'revoking DOM authorization must abort in-flight /json/list immediately');
+    }finally{
+      globalThis.fetch=realFetch;
+      controller.abort();
+    }
     stop();
     assert.equal(isLiveApprovedChromeSession(result),false);
     await delay(350);
