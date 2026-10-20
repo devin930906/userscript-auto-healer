@@ -206,25 +206,43 @@ async function main(){
   }
   assert.equal(clicked,true,'No visible native manager Install confirmation');
   await sleep(1800);
-  const page=await context.newPage();
-  await page.addInitScript(()=>{
-   document.addEventListener('DOMContentLoaded',()=>{
-    const el=document.createElement('button');el.id='uah-ci-target';
-    document.body?.append(el);
-   },{once:true});
+  const readBusiness=async(page)=>{
+    await page.waitForFunction(
+      ()=>document.documentElement.dataset.uahCiInjected==='yes',{timeout:12000});
+    return page.evaluate(()=>({
+      injected:document.documentElement.dataset.uahCiInjected,
+      gm:document.documentElement.dataset.uahCiGm,
+      business:document.documentElement.dataset.uahCiBusiness,
+      action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
+    }));
+  };
+  // Both pages execute the EXACT SAME installed .user.js; only the
+  // disposable DOM differs. This proves synthetic broken/fixed behavior,
+  // NOT that the product diagnosed or repaired real userscript source.
+  const brokenPage=await context.newPage();
+  await brokenPage.goto('https://example.com/',{
+    waitUntil:'domcontentloaded',timeout:30000});
+  const broken=await readBusiness(brokenPage);
+  console.log('TAMPERMONKEY_SYNTHETIC_BROKEN '+JSON.stringify(broken));
+  assert.deepEqual(broken,{
+    injected:'yes',gm:'true',business:'missing-target',action:null
   });
-  await page.goto('https://example.com/',{waitUntil:'domcontentloaded',timeout:30000});
-  await page.waitForFunction(()=>document.documentElement.dataset.uahCiInjected==='yes',{timeout:12000});
-  const result=await page.evaluate(()=>({
-   injected:document.documentElement.dataset.uahCiInjected,
-   gm:document.documentElement.dataset.uahCiGm,
-   business:document.documentElement.dataset.uahCiBusiness,
-   action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
-  }));
-  console.log('TAMPERMONKEY_GM_AND_SYNTHETIC_BUSINESS '+JSON.stringify(result));
-  assert.deepEqual(result,{injected:'yes',gm:'true',business:'recovered',action:'done'});
-  console.log('PASS: genuine disposable Tampermonkey userscript invoked GM_getValue and synthetic business assertion.');
-  console.log('NOT VERIFIED: program automatic repair, installed extension provenance, user Chrome support matrix and Stable GATE.');
+  const fixedPage=await context.newPage();
+  await fixedPage.addInitScript(()=>{
+    document.addEventListener('DOMContentLoaded',()=>{
+      const el=document.createElement('button');el.id='uah-ci-target';
+      document.body?.append(el);
+    },{once:true});
+  });
+  await fixedPage.goto('https://example.com/',{
+    waitUntil:'domcontentloaded',timeout:30000});
+  const fixed=await readBusiness(fixedPage);
+  console.log('TAMPERMONKEY_SYNTHETIC_FIXED '+JSON.stringify(fixed));
+  assert.deepEqual(fixed,{
+    injected:'yes',gm:'true',business:'recovered',action:'done'
+  });
+  console.log('PASS: vendor-hosted unpacked Tampermonkey GM_getValue and both synthetic DOM/business assertions.');
+  console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
   await new Promise(resolve=>server.close(resolve));
