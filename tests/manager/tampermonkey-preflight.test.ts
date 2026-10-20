@@ -248,3 +248,29 @@ test('TEST-017/026: plausible accessors cannot execute across the metadata-only 
  }
  assert.equal(getterCalls,0,'non-throwing getters cannot run during preflight');
 });
+
+test('TEST-017/026: an extra @match cannot expand a consented GM diagnostic to other sites',()=>{
+ const samples=[
+  ['https://example.com/*','https://bank.example/*'],
+  ['https://bank.example/*','https://example.com/*'],
+  ['*://*/*','https://example.com/*'],
+  ['https://example.com/*','https://example.com/*']
+ ];
+ for(const matches of samples){
+  const parsed=metadata({grant:['GM_getValue'],match:matches});
+  const outcome=inspect(report,parsed,'https://example.com/fixture');
+  assert.deepEqual(outcome,{ok:false,status:'BLOCKED',
+   code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false},
+   'unexpected cross-origin or duplicate @match: '+matches.join(','));
+ }
+ // The same restriction must cover genuine parser output, not only fixtures.
+ const source=['// ==UserScript==','// @name Isolated safety check',
+  '// @match https://example.com/*','// @match https://other.example/*',
+  '// @grant GM_getValue','// ==/UserScript==','void 0;'].join('\\n').replace(/\\n/g,'\n');
+ const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(source),
+  textEncoding:'utf-8'});
+ assert.equal(parsed.status,'OK');
+ const result=inspect(report,parsed,'https://example.com/fixture');
+ assert.equal(result.ok,false);
+ if(!result.ok)assert.equal(result.code,'MATCH_NOT_CONFIRMED');
+});
