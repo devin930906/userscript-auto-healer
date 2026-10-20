@@ -230,3 +230,11 @@ PR [#151](https://github.com/devin930906/userscript-auto-healer/pull/151) 已合
 ## （7）2026-10-20 TASK-020/TEST-028 Windows 只读便携运行阶段续接
 
 [PR #152](https://github.com/devin930906/userscript-auto-healer/pull/152) 已合并 main `961a5d8c230c748d7c12f4aeb8b854c8fc306157`，修改 `scripts/windows-package-candidate.ps1`，在 Windows 临时 ZIP 解压树施加真实 NTFS 可继承的 `WD` 拒绝，确认不能新建测试文件、Electron 候选启动和独立 AppData userData 哨兵数据保持一致、随后移除所加 ACL。实际 Windows 候选 [#39373670565](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373670565) 成功；主应用检查 [#39373670552](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373670552) 成功，350 项 Node 测试 349 pass/0 fail/1 skip。保留先前 `(W)` ACL 递归错误 #39373022139 和无法启动 #39373382713，并注意现在的 `WD` 检查不构成全量文件系统不可变性证明。候选双包仅供开发验证，源为 PR 合成提交 `0e7494233eab668da8d09723213277794ca88142`；正式 Stable EXE/ZIP、Tampermonkey 真 E2E、原子回滚、完整 TEST-028/GATE-009 仍受阻。继续按 docs/09-development-plan.md 从最新主干和 PR 状态审计。
+
+## （7）2026-10-20 TASK-019/TEST-027 开发候选模拟升级验证
+
+[PR #154](https://github.com/devin930906/userscript-auto-healer/pull/154) 已合并至 main `df8bec1e6f962785a3f351bc33cabd659f4e2dac`。仅修改 `scripts/windows-package-candidate.ps1`，在 GitHub Actions 一次性 Windows Runner 中先用当前 Electron 候选源码及相同**开发候选** AppId 创建、真实安装 `AppVersion=0.0.0` 的**合成旧版安装器**，执行旧版应用沙箱启动，写入其独立 AppData 测试哨兵；然后用当前 `0.0.1-dev` 开发候选安装器在同一临时安装路径覆盖升级，运行 Electron 沙箱并验证旧版数据未改变、138 个安装文件与构建源 SHA-256 一致、最终卸载仍保留原有哨兵。合成旧版 EXE 仅存 RUNNER_TEMP，禁止进入发布附件。
+
+[Windows 候选工作流 #39376523388](https://github.com/devin930906/userscript-auto-healer/actions/runs/39376523388) 已完成 success，实际测试合成源码 SHA `8715f3af01cf0be769a2fcaa77ee37ec40ff02e5`；[Application Skeleton Checks #39376523417](https://github.com/devin930906/userscript-auto-healer/actions/runs/39376523417) success（351 项，350 pass/0 fail/1 skip，真实 Electron smoke）。候选 EXE+ZIP Artifact ID `12243552631`，仅临时留存且明确**非 Stable**。日志保留 `PASS: synthetic older Inno installer upgraded to current candidate with AppData intact` 和完整 ZIP／安装文件哈希验证。
+
+本次证据只适用于**合成旧版 → 同源产品候选**的 Inno 安装覆盖语义，无法证明任何真实历史版本迁移、正式升级规则、完整用户设置/业务数据、Windows 用户设备适配、真实 Tampermonkey 或自动修复/回滚。TASK-019／TEST-027／GATE-008 仍属开发中／阻断；TASK-007 真管理器产品级验证、TASK-010/011 可信验收与事务恢复、TASK-018 安全 E2E、TASK-019/020 正式交付、TASK-021 发布验收仍须按实际依赖推进。下一轮首先重新读取最新 main、PR、CI、正式文档和真实可授权环境；不得把本段当作 Stable 发行或使用本轮候选 SHA-256 作为未来正式制品。
