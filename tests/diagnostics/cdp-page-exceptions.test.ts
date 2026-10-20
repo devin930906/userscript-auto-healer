@@ -179,6 +179,44 @@ test('TEST-013: real Windows owned Chrome samples page exceptions without source
   assert.equal(JSON.stringify(fault).includes('SECRET_PAGE_EXCEPTION'),false);
   assert.equal(JSON.stringify(journal.list()).includes('SECRET_PAGE_EXCEPTION'),false);
   assert.equal(JSON.stringify(journal.list()).includes(faultUrl),false);
+  // TASK-008/TEST-013/026: the read-only page-exception inspector must
+  // abort its pending, authenticated target-list HTTP request immediately
+  // when consent is revoked. A fixed network timeout alone is insufficient.
+  const realFetch=globalThis.fetch;
+  const controller=new AbortController();
+  let notifyRequest:()=>void=()=>{};
+  const requestStarted=new Promise<void>(resolve=>{notifyRequest=resolve;});
+  globalThis.fetch=(input,init)=>{
+    if(input==='http://127.0.0.1:'+freeAddress.port+'/json/list'){
+      notifyRequest();
+      return new Promise<Response>((_resolve,reject)=>{
+        const onAbort=()=>reject(new DOMException('ABORTED','AbortError'));
+        init?.signal?.addEventListener('abort',onAbort,{once:true});
+        if(init?.signal?.aborted)onAbort();
+      });
+    }
+    return realFetch(input,init);
+  };
+  try{
+    const pending=inspectApprovedPageExceptions(
+      launched,faultTarget,faultUrl,true,1200,controller.signal);
+    await Promise.race([requestStarted,
+      new Promise<never>((_resolve,reject)=>setTimeout(
+        ()=>reject(Error('EXCEPTION_CDP_TARGET_FETCH_NOT_REACHED')),5000))]);
+    controller.abort();
+    const outcome=await Promise.race([
+      pending,
+      new Promise<never>((_resolve,reject)=>setTimeout(
+        ()=>reject(Error('EXCEPTION_CDP_REVOCATION_STALLED')),500))
+    ]);
+    assert.equal(outcome.code,'CANCELLED',
+      'revocation must interrupt the read-only target-list fetch');
+    assert.equal(outcome.automaticPatchAllowed,false);
+    assert.equal(outcome.businessVerified,false);
+  }finally{
+    globalThis.fetch=realFetch;
+    controller.abort();
+  }
   const cleanUrl='http://127.0.0.1:'+address.port+'/clean';
   const cleanTarget=await openApprovedTarget(launched,cleanUrl,true);
   assert.equal(cleanTarget.ok,true,JSON.stringify(cleanTarget));
