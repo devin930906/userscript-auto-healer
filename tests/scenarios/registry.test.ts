@@ -59,3 +59,52 @@ test('TEST-005: registry is isolated from caller mutation and duplicate IDs',()=
   assert.ok(again.issues.includes('DUPLICATE_ID'));
   assert.equal(registry.list().length,1);
 });
+
+test('TEST-005/026: scenario registry rejects accessor and Proxy traps without invoking getters',()=>{
+  const valid:ScenarioInput={...bare,id:'safe_case',userApproved:true,requiresLogin:false,
+    targetUrl:'https://example.test/app',steps:[{kind:'wait-for',selector:'#ready'}]};
+  const registry=new ScenarioRegistry();
+  let getterCalls=0;
+  const accessor={...valid};
+  Object.defineProperty(accessor,'targetUrl',{enumerable:true,get(){
+    getterCalls++;throw Error('PRIVATE_SCENARIO_URL');
+  }});
+  const nestedStep={kind:'wait-for'};
+  Object.defineProperty(nestedStep,'selector',{enumerable:true,get(){
+    getterCalls++;throw Error('PRIVATE_STEP_SELECTOR');
+  }});
+  const nestedAssertion={kind:'selector-present'};
+  Object.defineProperty(nestedAssertion,'selector',{enumerable:true,get(){
+    getterCalls++;throw Error('PRIVATE_ASSERTION_SELECTOR');
+  }});
+  const blocked=[
+    accessor,
+    {...valid,steps:[nestedStep]},
+    {...valid,assertions:[nestedAssertion]},
+    {...valid,steps:[,]},
+    {...valid,assertions:[{kind:'selector-present',selector:'#ok',unexpected:'secret'}]},
+    new Proxy({...valid},{ownKeys(){throw Error('PRIVATE_PROXY_TRAP');}}),
+    null
+  ];
+  for(const input of blocked){
+    const result=registry.register(input as ScenarioInput);
+    assert.equal(result.state,'INVALID');
+    assert.equal(result.state==='READY_TO_TEST',false);
+    assert.equal(registry.list().length,0);
+  }
+  assert.equal(getterCalls,0,'validation must never evaluate accessor fields');
+  assert.equal(registry.register(valid).state,'READY_TO_TEST');
+  assert.equal(registry.list().length,1);
+  assert.equal(registry.get('safe_case')?.input.targetUrl,'https://example.test/app');
+});
+
+test('TEST-005/026: scenario snapshots capture validated fields without late accessor reads',()=>{
+  const scenario:ScenarioInput={...bare,id:'captured',targetUrl:'https://example.test/app',
+    userApproved:true,requiresLogin:false};
+  const result=preflightScenario(scenario);
+  assert.equal(result.state,'READY_TO_TEST');
+  (scenario.steps[0] as {selector:string}).selector='#mutated';
+  (scenario.assertions[0] as {selector:string}).selector='#mutated';
+  assert.equal(result.input.steps[0].selector,'#content');
+  assert.equal(result.input.assertions[0].selector,'#submit');
+});
