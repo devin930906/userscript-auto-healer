@@ -82,6 +82,29 @@ test('TEST-014/019/020/023: native imported bytes and unique AST site produce a 
  });
 });
 
+test('TEST-005/019/023: malformed login flags cannot stage backups or manual exports',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  const valid=scenario(script.sha256);
+  const invalid=[
+   {...valid,requiresLogin:'false'},
+   {...valid,requiresLogin:'true'},
+   {...valid,requiresLogin:0},
+   {...valid,loginReady:'false'},
+   {...valid,userApproved:'true'}
+  ];
+  for(const payload of invalid){
+   const response=await exportReviewedImportedSelectorOnly(
+    script,payload as unknown as ScenarioInput,observation(),
+    {backupDirectory,exportDirectory,userApproved:true});
+   assert.equal(response.status,'BLOCKED',JSON.stringify(response));
+   if(response.status==='BLOCKED')assert.equal(response.reason,'INVALID_SCENARIO');
+   assert.deepEqual(await readdir(backupDirectory),[]);
+   assert.deepEqual(await readdir(exportDirectory),[]);
+   assert.equal(await readFile(scriptPath,'utf8'),source);
+  }
+ });
+});
+
 test('TEST-019/023: ambiguous, missing and unsupported AST sites leave disk unchanged',async()=>{
  for(const source of [
   header+"document.querySelector('#old');document.querySelector('#old');\n",
