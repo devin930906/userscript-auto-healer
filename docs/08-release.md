@@ -1,6 +1,6 @@
 # 发布策略与最终 Stable 门槛
 
-> 状态：Windows runner 的 CDP、Inno Setup 临时 EXE 构建/安装/卸载及官方 WinRAR 限期评估真 RAR5 创建/解压已通过工具链 PoC；**正式应用 EXE+ZIP 双包、签名及真实运行仍未执行/满足**；既有 RAR5 试用 PoC 为历史证据，已被 ZIP 发行决策取代，不能冒称已发布。
+> 状态：Windows runner 的 CDP、Inno Setup 临时 EXE 构建/安装/卸载及官方 WinRAR 限期评估真 RAR5 创建/解压已通过工具链 PoC；**真实 Electron 应用的开发候选 EXE+ZIP 已在 Windows CI 初步构建并完成局部启动/安装验证，但正式 Stable 双包、升级/数据、完整真实用户环境、签名及全部 GATE 仍未验收**；既有 RAR5 试用 PoC 为历史证据，已被 ZIP 发行决策取代，不能冒称已发布。
 
 ## 支持平台
 目标 Windows x64（起始支持建议，不表示用户确认最低 Windows/Chrome 版本）；应用运行依赖外部所选 Chrome 和授权的真实油猴管理器，Chrome 多便携版兼容范围由 POC-01/02 建立矩阵，不能保证任意 Chrome。
@@ -12,7 +12,7 @@
 采用语义化版本候选，提交 SHA 为不可变来源；正式 tag 与 Release 必须指向通过 GATE 的同一个源提交，Release 不提前发布。
 
 ## 云端构建
-计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、已实证存在的 Inno Setup 候选安装器（NSIS 可保留备选）与 Windows/PowerShell 原生 ZIP 压缩步骤；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量与第三方依赖许可证仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；未创建工作流也未运行。
+计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、已实证存在的 Inno Setup 候选安装器（NSIS 可保留备选）与 Windows/PowerShell 原生 ZIP 压缩步骤；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量与第三方依赖许可证仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；目前仅新增候选双包构建工作流，Stable 正式签名、发布及全量验收流程仍未完成。
 
 ## EXE 安装版
 候选 Inno Setup 6 生成真实 .exe 安装程序（仅临时文本安装/卸载已通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574）；Electron+electron-builder NSIS 作为待验证备选（见 ADR-001/003）。计划每用户安装优先且不强求管理员权限；应用可执行入口/运行资源随包携带，用户选择的 Chrome 外置；可自选安装位置与桌面/开始菜单快捷方式，升级向后兼容，卸载保留用户数据默认应提示并可明确选删除。具体安装器许可/签名方案待核定；未签名文件不得称已签名。干净 Windows VM 实际安装、启动、核心场景、升级、卸载和数据完整性为必备验收。
@@ -28,7 +28,16 @@
 GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部阻断项满足前禁止发布 Stable。测试数据、API Key 和登录资料严禁进入公开 Release 工件。
 
 ## 校验值
-尚无产物，SHA-256 为“未提供”；仅在真实生成每份文件时计算并记录，不能编造。
+正式 Stable 发布产物仍为“未提供”；2026-10-20 Windows 开发候选 EXE/ZIP 的实算 SHA-256 与构建来源另见下节，不能挪用作最终 Release 校验。
+
+## 2026-10-20 Windows 开发候选双包阶段记录（非 Stable）
+
+- TASK-019/TASK-020 经 [PR #146](https://github.com/devin930906/userscript-auto-healer/pull/146) 合并至 main：`e42b6e620bba3ca72f595880c21b27bf6d85345a`。引入 `scripts/windows-package-candidate.ps1` 和 `.github/workflows/windows-candidate-packages.yml`，不执行任何 GitHub Release 发布。
+- [Windows 候选构建运行 39365266655](https://github.com/devin930906/userscript-auto-healer/actions/runs/39365266655) 成功；该 pull_request CI 实际检出的**测试合成提交**为 `7daf063caa9382bfdd52eb5ea5a32613e35a376a`，**不是**合并后 main 提交。原有 [Application Skeleton Checks 39365266617](https://github.com/devin930906/userscript-auto-healer/actions/runs/39365266617) 在此 PR HEAD 也成功。正式发行前必须以最终选定的 main/release 提交重新构建双包并重新验收。
+- Windows CI 已验证：带 Electron 运行时/编译应用/Acorn 依赖的暂存目录实际启动、真 ZIP 的文件头/条目路径、解压后重要文件 SHA-256、解压目录启动、Inno Setup EXE 编译、无声安装启动及卸载。仅验证了脚本预设 `--uahtest-shell-only` 的 sandbox/preload/IPC 安全 smoke；未在真实用户 Chrome/Tampermonkey 下执行完整脚本业务功能。
+- 候选 EXE SHA-256：`908fa0f4553d2af0ce33eeecbcec240d2ba2718ac55318c259bfa8d83981ddc8`，候选 ZIP SHA-256：`654885152defdf5d275467d2e981aa55412ed9022ece23e20c90f845fa61c1b2`（来自同次构建日志和 `SHA256SUMS.txt`，不适用于未来重新构建）。
+- 候选文件暂存于 [GitHub Actions Artifact 12238554892 所属运行](https://github.com/devin930906/userscript-auto-healer/actions/runs/39365266655)，留存期限仅 3 日；这是 **Actions 外层打包工件**，不是 GitHub Releases，也不是可长期引用的 Stable 下载地址。内部 ZIP 文件已单独通过实际 ZIP 格式检查。
+- TASK-018 的真实产品业务验证尚未完成；TEST-027/028 的全部升级/只读目录/数据持久化/用户 Windows 环境矩阵、GATE-008/009/011 仍未通过；全部 GATE-001..011 的 Stable 最终判定仍保持未完成。不可用候选烟测取代这些门槛。签名、许可证决策及正式对外发布仍受独立条件约束。
 
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
