@@ -60,6 +60,8 @@ export type ManagedLaunchResult =
       readonly pid:number;readonly chromeVersion:string;readonly browserWebsocket:string;
       readonly websocketHandshakeVerified:true;readonly targetVerified:false;
       readonly stop:()=>void};
+export type ChromeStartupStage='FETCH_FAILED'|'HTTP_REJECTED'|'BODY_REJECTED'|
+  'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR';
 export interface ChromeLaunchOptions {
   /** Explicit user approval to launch THIS isolated Chrome, not general script consent. */
   readonly userApproved:boolean;
@@ -68,6 +70,9 @@ export interface ChromeLaunchOptions {
   readonly signal?:AbortSignal;
   /** Called only if a verified, still-owned Chrome process exits unexpectedly. */
   readonly onUnexpectedExit?:()=>void;
+  /** Trusted native diagnostics only; emits fixed stage labels, never URL,
+   * profile, PID, response body or transport error text. Non-authoritative. */
+  readonly onStartupStage?:(stage:ChromeStartupStage)=>void;
 }
 /** Only references actually issued by this process can open CDP targets.
  * A serialized/forged success-shaped result is not an authorized session.
@@ -111,6 +116,10 @@ export async function launchApprovedIsolatedChrome(
   child.once('error',()=>{errored=true;});
   child.once('exit',()=>{exited=true;});
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
+  const emitStage=(stage:ChromeStartupStage):void=>{
+    try{options.onStartupStage?.(stage);}
+    catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
+  };
   const pid=child.pid;
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
   const began=Date.now();
@@ -118,12 +127,18 @@ export async function launchApprovedIsolatedChrome(
     while(Date.now()-began<20000){
       if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
+      let phase:'FETCH'|'PROCESS'='FETCH';
       try{
         const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(1500)});
+        phase='PROCESS';
         const payload=await readBoundedCdpJson(response);
+        if(response.status!==200)emitStage('HTTP_REJECTED');
+        else if(payload===null)emitStage('BODY_REJECTED');
         if(payload!==null){
             const inspected=inspectCdpVersion(payload,cfg.remoteDebuggingPort);
+            if(!inspected.ok)emitStage('CDP_VERSION_REJECTED');
             if(inspected.ok){
+              emitStage('CDP_VERSION_PARSED');
               if(inspected.browser!=='Chrome/'+binary.version &&
                  inspected.browser!=='HeadlessChrome/'+binary.version)
                 return {ok:false,code:'VERSION_MISMATCH'};
@@ -156,7 +171,11 @@ export async function launchApprovedIsolatedChrome(
               return verified;
             }
         }
-      }catch{ /* Chrome has not presented an acceptable endpoint yet. */ }
+      }catch{
+        // Distinguish transport failures from later verification faults,
+        // without returning or logging raw untrusted endpoint information.
+        emitStage(phase==='FETCH'?'FETCH_FAILED':'PROBE_ERROR');
+      }
       await delay(250);
     }
     return {ok:false,code:'CDP_TIMEOUT'};

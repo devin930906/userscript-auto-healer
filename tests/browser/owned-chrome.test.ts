@@ -72,9 +72,28 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.equal(prepared.ok,true,JSON.stringify(prepared));
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
     {ok:false,code:'PROFILE_EXISTS'});
-  const result=await launchApprovedIsolatedChrome(configForTest,
-    {userApproved:true,testHeadless:true,onUnexpectedExit:()=>{unexpectedExits++;}});
+  const startupStages:string[]=[];
+  // Pass through a variable so TS can compile this behavioural regression
+  // against the old implementation, before the new optional hook exists.
+  const launchOptions={userApproved:true,testHeadless:true,
+    onUnexpectedExit:()=>{unexpectedExits++;},
+    onStartupStage:(stage:string)=>{startupStages.push(stage);}};
+  const result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+  // Print only fixed stage labels and their counts on failure: no Chrome PID,
+  // profile path, port, endpoint URL, version or returned response body.
+  if(!result.ok){
+    const counts:Record<string,number>={};
+    for(const stage of startupStages)counts[stage]=(counts[stage]??0)+1;
+    t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
+  }
   assert.equal(result.ok,true,JSON.stringify(result));
+  const allowed=new Set(['FETCH_FAILED','HTTP_REJECTED','BODY_REJECTED',
+    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED']);
+  assert.ok(startupStages.every(stage=>allowed.has(stage)),
+    'diagnostic stages must only use fixed redacted labels');
+  assert.ok(startupStages.length<=100,'startup diagnostics must be bounded');
+  assert.ok(startupStages.includes('CDP_VERSION_PARSED'),
+    'a successful Chrome launch must report the parsed CDP version stage');
   if(result.ok) {
     stop=result.stop;
     assert.equal(result.status,'OWNED_CDP_BROWSER_VERIFIED');
