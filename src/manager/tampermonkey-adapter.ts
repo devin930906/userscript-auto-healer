@@ -3,6 +3,7 @@
  * extension authenticity/version, installation, GM APIs or userscript behavior.
  * Do NOT use Runtime.evaluate against extension contexts or userscripts.
  */
+import {types as nodeTypes} from 'node:util';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {verifyWindowsLoopbackListenerPid} from '../browser/cdp-session';
@@ -21,11 +22,14 @@ export type ManagerPresenceResult =
 const acceptedTypes=new Set(['service_worker','background_page']);
 const invalidTargets=():ManagerPresenceResult=>({ok:false,code:'INVALID_CDP_RESPONSE'});
 /** Capture only own data descriptors, never invoke getters, proxies' get traps,
- * or a caller-supplied array iterator. CDP JSON normally has plain objects.
+ * or a caller-supplied array iterator. Refuse Proxy values before any
+ * reflective calls: even getPrototypeOf/ownKeys can invoke attacker traps.
+ * CDP JSON normally has plain objects.
  */
 export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceResult {
  try{
-  if(!Array.isArray(payload)||Object.getPrototypeOf(payload)!==Array.prototype)
+  if(!Array.isArray(payload)||nodeTypes.isProxy(payload)||
+     Object.getPrototypeOf(payload)!==Array.prototype)
     return invalidTargets();
   const length=Object.getOwnPropertyDescriptor(payload,'length')?.value;
   if(!Number.isSafeInteger(length)||length<0||length>512)return invalidTargets();
@@ -38,7 +42,7 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
       return invalidTargets();
     const value:unknown=slot.value;
-    if(!value||typeof value!=='object'||Array.isArray(value))
+    if(!value||typeof value!=='object'||Array.isArray(value)||nodeTypes.isProxy(value))
       return invalidTargets();
     const prototype=Object.getPrototypeOf(value);
     if(prototype!==Object.prototype&&prototype!==null)return invalidTargets();

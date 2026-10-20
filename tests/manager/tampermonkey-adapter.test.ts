@@ -145,3 +145,27 @@ test('TEST-017/026: CDP hint parser does not evaluate hostile getters or iterato
    'extra own iterator metadata must fail closed without invoking it');
  assert.equal(getters,0);
 });
+
+test('TEST-017/026: Proxy-based CDP targets never run reflection traps',()=>{
+ let trapCalls=0;
+ const proxyTarget=new Proxy(worker,{
+   getPrototypeOf(){trapCalls++;return Object.prototype;},
+   ownKeys(){trapCalls++;return Reflect.ownKeys(worker);},
+   getOwnPropertyDescriptor(target,key){
+     trapCalls++;return Reflect.getOwnPropertyDescriptor(target,key);
+   }
+ });
+ const entries=[worker];
+ const proxyList=new Proxy(entries,{
+   getPrototypeOf(){trapCalls++;return Array.prototype;},
+   ownKeys(){trapCalls++;return Reflect.ownKeys(entries);},
+   getOwnPropertyDescriptor(target,key){
+     trapCalls++;return Reflect.getOwnPropertyDescriptor(target,key);
+   }
+ });
+ for(const payload of [proxyList,[proxyTarget]]){
+   assert.deepEqual(inspectTampermonkeyTargetHints(payload),
+     {ok:false,code:'INVALID_CDP_RESPONSE'});
+ }
+ assert.equal(trapCalls,0,'Untrusted Proxy reflection traps must not execute');
+});
