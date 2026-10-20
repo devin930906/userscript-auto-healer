@@ -228,3 +228,10 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - 实际注入时刻观测并未由此证明符合精确模式语义：`document-start` 的 broken/fixed 页面记录 `readyState=complete/interactive`；`document-body` 为 `loading/interactive`；`document-end` 为 `complete/complete`；`document-idle` 为 `complete/complete`。该值可能受受测目标加载、管理器调度及 Chromium 环境影响，不得将单次 `@run-at` 声明通过转换成精确时序 VERIFIED。
 - 解包扩展运行 ID 为 `dkifgonlhleafnmllomljghfcbgaojkl`，**不同于官方商店扩展 ID** `dhdgffkkebhmkfjojejmpbldmpobfkfo`；厂商站点下载不能代替官方商店安装身份或签名验证。其他正式 Chrome/便携版版本、真实用户环境、权限矩阵、安装恢复、失败回滚及脚本真正自动修复前后回归仍待实施。
 - 证据来源：`TEST-017/018` 的有限阶段性真实管理器运行；四 Job 结果、运行时 ID／版本、`@run-at` 声明、`GM_getValue` 与业务输出均在 #39502515449 的独立日志。**正式 TEST-017/018 仍受阻；GATE-004/005 未通过；GATE-001..011 均不应由此判定满足**。
+
+## 2026-10-21 TASK-007/009 产品 AST 审核候选的真实 Tampermonkey 合成业务对照（阶段实证）
+
+- PR [#197](https://github.com/devin930906/userscript-auto-healer/pull/197) 已合并 main `c058e37c148bbc29d1a7e670aab261c396eeea1e`；源 HEAD `a13550b51a0312385e7c1f809de81ce7e7c13e35`。隔离 Windows 2025 [Actions #39503655317](https://github.com/devin930906/userscript-auto-healer/actions/runs/39503655317) 的六个 Job 全部返回 `success`：保留四种不同声明 `@run-at` 的真实管理器基线，再增加两份独立 `document-idle` Profile 进行原版／产品候选对照。
+- 本轮**使用了项目已有产品代码** `src/analyze/selector-analyzer.ts`、`src/repair/patch-planner.ts`，实际执行 `analyzeSelectors` → `proposeLiteralSelectorPatch`（`CANDIDATE_ONLY`）→ `auditProposedLiteralSelectorPatch`（`REVIEWABLE_ONLY`）；只修改一处经过 AST 定位的 `document.querySelector` 字面选择器，保留元数据与剩余代码不变。独立两个 Job 均记录原版 SHA-256 `f564a76620d1aee7b80b12ddea3a92de27cdc6e0eb16e634451ef6d173694103`，候选 SHA-256 `69c1079ef37e55c987bc81fd1696c836e45d50dfb480d5cd3bd831de4f4f0ac4`；`automaticPatchAllowed=false`。
+- 原版在合成按钮实际存在的网页上调用真实 `GM_getValue` 成功，但由于失效选择器返回 `missing-target`、动作标记不存在；产品审核候选在同种页面调用 `GM_getValue` 后返回 `recovered/done`，目标按钮具有预期动作标记。没有通过 Playwright `evaluate` 直接运行用户脚本来冒充 Tampermonkey；管理器中真正安装了受控临时脚本。
+- **证据限制**：仍使用 Chromium 141.0.7390.37 与从厂商网站下载、解包的 Tampermonkey MV3 5.4.1，不是经商店 ID 签名认证的正式安装，也未取得真实用户已登录网站、真正生产故障诊断证据、完整自动应用/事务备份/回滚或跨 Chrome/便携版支持矩阵。此实验只证明单个已审计的**离线候选**在合成业务场景可执行且有效，原文件与用户扩展均未被自动修改。**TEST-017/018/019 尚未完整通过，GATE-001..011 均仍未完整验收**。
