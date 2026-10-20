@@ -200,3 +200,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 
 - [PR #133](https://github.com/devin930906/userscript-auto-healer/pull/133) 在 `tests/manager/tampermonkey-gm-probe.test.ts` 增加非规范测试 URL、延迟 DOMReady 后切换 `broken/fixed` 模式、DOM 读取过程及属性写入过程发生路由变化时的安全失败负例。原实现只在入口读取一次 `mode`，后续仍可在不属于原始授权页面的路由上产生 DOM 操作或自报；回归先于修复在 Windows [#39348815661](https://github.com/devin930906/userscript-auto-healer/actions/runs/39348815661) 观察到新用例失败。
 - 修复限定在受控的一次性测试脚本：入口和 GM 后、DOM 回调、DOM 查询后、属性写入后与回报前再次匹配完整原始 `/?mode=broken|fixed` URL。测试与最终合并需按 PR 最新 HEAD 及对应 Windows Actions 核验；没有授予任意页面脚本执行、自动补丁、回滚或管理器认证权。完整真实 Tampermonkey 注入、GM API/业务断言与 TEST-017/018、GATE-004/005 仍未验收。
+
+## （7）TASK-011 / TEST-020：已变化源文件的恢复前置复核（2026-10-20）
+
+新增 `src/version/changed-source-restore-preflight.ts` 与 `tests/version/changed-source-restore-preflight.test.ts`。当已选择的本地 `.user.js` 字节发生变化时，以当前预期 SHA-256 和历史备份的预期 SHA-256/长度分别对真实磁盘内容进行有界只读复核，拒绝伪造授权、恶意 Getter/Proxy、损坏备份、外部改动与硬链接别名。测试只在临时夹具运行；不会改变用户真实脚本。结果始终拒绝自动应用/回滚或 Tampermonkey/业务认证。TEST-020/021 仍缺事务替换、断电恢复、真实回滚及产品 E2E。CI、SHA 和整合状态须以现行 GitHub 记录核验。

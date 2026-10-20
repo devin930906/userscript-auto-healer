@@ -199,3 +199,7 @@ PR [#101](https://github.com/devin930906/userscript-auto-healer/pull/101) 对 ap
 [PR #102](https://github.com/devin930906/userscript-auto-healer/pull/102) 在已整合的只读导入上统一 SHA-256 原字节身份：不同文件名但字节相同的 native 多选／目录／拖放脚本按重复处理，同文件名但内容确实不同的脚本版本保留为独立只读结果。文件读取预算覆盖已扫描的相同内容／坏编码，而非仅计入最终保留的唯一脚本。TEST-002/003 增补 Windows 文件系统及 Electron 界面回归，主仓库 PR HEAD、CI 和 main 合并结果需以实际 GitHub 记录为准。
 
 此阶段不修改、执行、安装任何脚本，也不会验证真实 Tampermonkey GM、网站业务或自动修复；TASK-007/013/017、正式 Windows 双包及完整 Stable GATE 仍未完成。
+
+## （7）TASK-011 已变化原文件恢复准备交接（2026-10-20）
+
+现有备份、候选与检查点链路新增对“原文件内容已变但独立旧备份仍在”场景的只读恢复前置校验，代码 `src/version/changed-source-restore-preflight.ts`，测试 `tests/version/changed-source-restore-preflight.test.ts`，纳入 Windows npm TEST-020/021 回归。输入需严格描述符安全、用户同意声明、两份独立哈希和旧备份长度；不能把声明当原生授权或未来恢复权限。该阶段不覆盖原文件、不证明业务恢复、不是原子写入/回滚。下一动作仍需真实 Tampermonkey 认证和可恢复写入事务。TASK-011、TEST-020/021、GATE-007 仍未完成，具体集成以 PR/Actions/main 复核。
