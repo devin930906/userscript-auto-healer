@@ -181,12 +181,31 @@ export class OptionalAiGateway {
     const timer=AbortSignal.timeout(this.options.timeoutMs);
     const all=signal?AbortSignal.any([abort.signal,timer,signal]):
       AbortSignal.any([abort.signal,timer]);
+    // AbortSignal alone cannot bound a custom/native fetch transport that
+    // ignores abort while waiting for response headers. Race that phase
+    // independently, just as limitedJson bounds a stalled response body.
+    let onAbort=()=>{};
+    const aborted=new Promise<null>(resolve=>{
+      onAbort=()=>resolve(null);
+      if(all.aborted)onAbort();
+      else all.addEventListener('abort',onAbort,{once:true});
+    });
     try{
-      const response=await this.transport(this.root+path,{
+      const transporting=this.transport(this.root+path,{
         ...init,redirect:'error',credentials:'omit',cache:'no-store',signal:all,
         headers:{'Authorization':'Bearer '+this.options.apiKey,
           'Accept':'application/json',...(init.body?{'Content-Type':'application/json'}:{})}
       });
+      // A late response must not retain a body after its request was revoked.
+      // Cleanup is best effort and must never hold up the cancelled caller.
+      void transporting.then(response=>{
+        if(all.aborted&&response?.body){
+          try{void response.body.cancel().catch(()=>undefined);}catch{/* cleanup only */}
+        }
+      },()=>undefined);
+      const response=await Promise.race([transporting,aborted]);
+      if(response===null)return failure(
+        signal?.aborted||abort.signal.aborted||!this.enabled?'CANCELLED':'NETWORK_FAILED');
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
       if(all.aborted)return failure('NETWORK_FAILED');
       if(!response.ok)return failure(path==='/models'&&
@@ -200,7 +219,10 @@ export class OptionalAiGateway {
     }catch{
       return failure(signal?.aborted||abort.signal.aborted||!this.enabled?
         'CANCELLED':'NETWORK_FAILED');
-    }finally{this.pending.delete(abort);}
+    }finally{
+      all.removeEventListener('abort',onAbort);
+      this.pending.delete(abort);
+    }
   }
   async discoverModels(consent:unknown,signal?:AbortSignal):
       Promise<ModelDiscovery|GatewayFailure>{
