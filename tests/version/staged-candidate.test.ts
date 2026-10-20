@@ -179,3 +179,41 @@ test('TEST-020: staged candidate refuses a nested backup junction and preserves 
     assert.equal(await readFile(paths.sourcePath,'utf8'),original);
   });
 });
+
+test('TEST-020: a candidate changed during the final backup recheck cannot receive a staging receipt',async()=>{
+  await fixture(async paths=>{
+    if(proposal.status!=='CANDIDATE_ONLY')throw Error('INVALID_TEST_PROPOSAL');
+    // Intercept the second, post-publication backup verification instead of
+    // racing filesystem timers. An external editor can change the candidate
+    // while this unrelated asynchronous backup verification is running.
+    const recoveryModule=require('../../src/version/recovery-source') as
+      typeof import('../../src/version/recovery-source');
+    const originalVerify=recoveryModule.verifyBackupRecoverySource;
+    let changed=false;
+    try{
+      recoveryModule.verifyBackupRecoverySource=async input=>{
+        const result=await originalVerify(input);
+        if(result.status==='RECOVERY_SOURCE_VERIFIED_READ_ONLY'&&!changed){
+          const names=await readdir(paths.backupDirectory);
+          const candidateName=names.find(name=>name.endsWith('.candidate.user.js'));
+          if(candidateName){
+            await writeFile(join(paths.backupDirectory,candidateName),
+              proposal.candidateSource.replace('#new','#bad'),'utf8');
+            changed=true;
+          }
+        }
+        return result;
+      };
+      const result=await stageReviewedCandidateOnly(request,proposal,{
+        ...paths,userApproved:true
+      });
+      assert.equal(changed,true,'test must alter the published candidate before the final return');
+      assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+      if(result.status==='BLOCKED')assert.equal(result.reason,'STAGING_FAILED');
+      assert.equal(result.automaticPatchAllowed,false);
+      assert.equal(await readFile(paths.sourcePath,'utf8'),original);
+    }finally{
+      recoveryModule.verifyBackupRecoverySource=originalVerify;
+    }
+  });
+});
