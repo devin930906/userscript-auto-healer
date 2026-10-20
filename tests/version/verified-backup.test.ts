@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
@@ -116,6 +116,47 @@ test('TEST-020: changed, oversized or redirected files block with original untou
   });
 });
 
+
+test('TEST-020/026: a second hard-link source name cannot obtain an independent backup',async()=>{
+  await fixture(async(file,backupDir,dir)=>{
+    const alias=join(dir,'second-source.user.js');
+    await link(file,alias);
+    const request={sourcePath:file,backupDirectory:backupDir,
+      expectedSha256:hash(script),userApproved:true};
+    for(const sourcePath of [file,alias]){
+      const result=await createVerifiedBackupOnly({...request,sourcePath});
+      assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+      if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_PATH');
+    }
+    assert.deepEqual(await readdir(backupDir),[]);
+    assert.deepEqual(await readFile(file),script);
+    assert.deepEqual(await readFile(alias),script);
+  });
+});
+
+test('TEST-020/026: a junction in the selected source path blocks publication',async t=>{
+  await fixture(async(file,backupDir,dir)=>{
+    const junction=join(dir,'source-junction');
+    try{
+      await symlink(dir,junction,process.platform==='win32'?'junction':'dir');
+    }catch(error){
+      if(['EPERM','ENOTSUP','EACCES'].includes((error as NodeJS.ErrnoException).code??'')){
+        t.diagnostic('Junction creation not supported by this runner');return;
+      }
+      throw error;
+    }
+    const redirected=join(junction,'sample.user.js');
+    assert.equal((await lstat(redirected)).isSymbolicLink(),false);
+    const result=await createVerifiedBackupOnly({
+      sourcePath:redirected,backupDirectory:backupDir,
+      expectedSha256:hash(script),userApproved:true
+    });
+    assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+    if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_PATH');
+    assert.deepEqual(await readdir(backupDir),[]);
+    assert.deepEqual(await readFile(file),script);
+  });
+});
 
 test('TEST-020: long ASCII and surrogate-pair filenames remain recoverable on Windows',async()=>{
   for(const stem of ['x'.repeat(210),'🌐'.repeat(120)]){
