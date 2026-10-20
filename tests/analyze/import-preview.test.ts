@@ -67,14 +67,57 @@ test('TEST-004/011/022: native-batch AST results run in an actual isolated Node 
   header+`document.querySelector("#private-selector-${i}");`
  ));
  const actual=await previewImportedBatchOffMain(scripts);
- const expected=previewImportedBatch(scripts);
+ const expected=scripts.map(previewImportedScriptAnalysis);
  assert.deepEqual(actual,expected);
  assert.equal(actual.length,24);
- assert.equal(actual.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,16);
- assert.equal(actual.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,8);
+ assert.equal(actual.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,24);
+ assert.equal(actual.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,0);
  assert.equal(JSON.stringify(actual).includes('private-selector-'),false);
  assert.ok(actual.every(x=>!x.automaticPatchAllowed&&!x.tampermonkeyVerified&&
    !x.businessVerified));
+});
+
+test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{
+ const scripts=Array.from({length:36},(_,i)=>imported(
+  header+'document.querySelector("#private-segment-'+i+'");'
+ ));
+ const results=await previewImportedBatchOffMain(scripts);
+ assert.equal(results.length,36);
+ assert.equal(results.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,36,
+  'files past the first 16 must be processed by later bounded worker segments');
+ assert.equal(results.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,0);
+ assert.equal(JSON.stringify(results).includes('private-segment-'),false);
+ assert.ok(results.every(x=>x.automaticPatchAllowed===false&&
+   x.tampermonkeyVerified===false&&x.businessVerified===false));
+});
+
+test('TEST-022/NFR-009: read-only native AST batch has a hard 64-file ceiling',async()=>{
+ const scripts=Array.from({length:70},(_,i)=>imported(
+  header+'document.querySelector("#not-exposed-'+i+'");'
+ ));
+ const reports=await previewImportedBatchOffMain(scripts);
+ assert.equal(reports.length,70);
+ assert.deepEqual(reports.slice(0,64).map(x=>x.status),
+  Array(64).fill('STATIC_ANALYSIS_ONLY'));
+ assert.deepEqual(reports.slice(64).map(x=>x.status),
+  Array(6).fill('SKIPPED_BATCH_BUDGET'));
+ assert.equal(JSON.stringify(reports).includes('not-exposed-'),false);
+ assert.ok(reports.every(x=>!x.automaticPatchAllowed&&!x.businessVerified&&
+   !x.tampermonkeyVerified));
+});
+
+test('TEST-022/NFR-009: cancellation before batch dispatch marks all eligible segments cancelled',async()=>{
+ const controller=new AbortController();
+ controller.abort();
+ const scripts=Array.from({length:70},(_,i)=>imported(
+  header+'document.querySelector("#do-not-run-'+i+'");'
+ ));
+ const reports=await previewImportedBatchOffMain(scripts,controller.signal);
+ assert.deepEqual(reports.slice(0,64).map(x=>x.status),
+  Array(64).fill('SKIPPED_CANCELLED'));
+ assert.deepEqual(reports.slice(64).map(x=>x.status),
+  Array(6).fill('SKIPPED_BATCH_BUDGET'));
+ assert.equal(JSON.stringify(reports).includes('do-not-run-'),false);
 });
 
 test('TEST-022/NFR-009: already-cancelled worker request cannot start source analysis',async()=>{

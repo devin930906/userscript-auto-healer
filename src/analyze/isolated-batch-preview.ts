@@ -1,8 +1,11 @@
 /** TASK-013 / REQ-022 / NFR-009: bounded, read-only batch AST previews.
  * A worker thread keeps parser work off Electron's privileged event loop.
  * This never executes imported source or supplies repair/manager authority.
- * 16 files / 1 MiB of copied payload per native batch are the existing
- * conservative bounds; larger imports remain imported but unanalysed.
+ * Each isolated worker still receives at most 16 files / 1 MiB.
+ * Native batches now use up to four sequential segments (64 file positions
+ * maximum), then explicitly report the unanalysed remainder without losing
+ * imported file records. Cancellation revokes the current worker and stops
+ * all subsequent segments. No userscript is executed.
  */
 import {Worker} from 'node:worker_threads';
 import {join} from 'node:path';
@@ -157,7 +160,7 @@ export function validateIsolatedPreviewReply(
  * worker. Cancellation revokes the pending preview without discarding imported
  * file records; a worker still running is forcibly terminated, never trusted.
  */
-export async function previewImportedBatchOffMain(
+async function previewImportedChunkOffMain(
  scripts:readonly Script[],signal?:AbortSignal
 ):Promise<ImportAnalysisPreview[]>{
  const selected:Script[]=[];
@@ -220,4 +223,35 @@ export async function previewImportedBatchOffMain(
    return unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED');
   return result?.[slot]??original;
  });
+}
+
+/** Process a real native multi-file/folder import without silently omitting
+ * every script beyond the first 16. Each segment remains a separately bounded
+ * and validated worker. This is an unprivileged read-only preview, not the
+ * durable repair queue or a Tampermonkey/GM business verification.
+ */
+export async function previewImportedBatchOffMain(
+ scripts:readonly Script[],signal?:AbortSignal
+):Promise<ImportAnalysisPreview[]>{
+ const MAX_SEGMENTS=4;
+ const results:ImportAnalysisPreview[]=[];
+ for(let offset=0;offset<scripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
+  const segment=scripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
+  if(offset>=MAX_SEGMENTS*MAX_BATCH_PREVIEW_FILES||signal?.aborted){
+   const status=offset>=MAX_SEGMENTS*MAX_BATCH_PREVIEW_FILES
+    ?'SKIPPED_BATCH_BUDGET' as const:'SKIPPED_CANCELLED' as const;
+   for(const script of segment){
+    const bytes=script?.bytes;
+    results.push(bytes instanceof Uint8Array&&
+      bytes.byteLength<=MAX_ANALYSIS_BYTES
+       ?unavailableImportPreview(status,'NOT_CHECKED')
+       :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
+   }
+   continue;
+  }
+  // No overlapping workers, hidden unbounded queue or user-code execution:
+  // every segment has its own 10s deadline, 16-file/1MiB copied-byte limit.
+  results.push(...await previewImportedChunkOffMain(segment,signal));
+ }
+ return results;
 }
