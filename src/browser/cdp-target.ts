@@ -104,8 +104,11 @@ async function confirmsMainFrameNavigation(
           };
           if(response.id!==1)return;
           const actual=response.result?.frameTree?.frame?.url;
+          // Match canonical URL semantics used by inspectCdpTargetList:
+          // Chrome may normalize host casing or default ports. Do not accept
+          // same-origin but different-path navigation as target readiness.
           finish(!response.error&&typeof actual==='string'&&
-            actual===expectedUrl);
+            actual.length<=4096&&new URL(actual).href===new URL(expectedUrl).href);
         }catch{finish(false);}
       });
       socket.addEventListener('error',()=>finish(false));
