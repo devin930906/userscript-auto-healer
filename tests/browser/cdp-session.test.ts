@@ -64,6 +64,23 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
 
 import { createServer } from 'node:net';
 import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
+test('TEST-009/026: netstat lookup is absolute and cannot search the working directory',()=>{
+  const {resolveWindowsNetstatExecutable}=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  assert.equal(resolveWindowsNetstatExecutable('C:\\Windows'),
+    'C:\\Windows\\System32\\netstat.exe');
+  assert.equal(resolveWindowsNetstatExecutable('D:\\WinRoot'),
+    'D:\\WinRoot\\System32\\netstat.exe');
+  for(const bad of [
+    undefined,'','Windows','netstat.exe','C:\\','C:\\Windows\\..\\temp',
+    'C:\\Windows\\.','C:\\Windows\\\\Temp','C:\\Windows\\',
+    '\\\\server\\share','\\\\?\\C:\\Windows',
+    'C:/Windows','C:\\Windows\\Temp.','C:\\Windows\\Temp ',
+    'C:\\Windows\\evil:stream','%SystemRoot%'
+  ])assert.equal(resolveWindowsNetstatExecutable(bad),null,
+    'never fall back to PATH for an ambiguous or unsafe SystemRoot');
+});
+
 test('TEST-009: OS loopback listener must belong to the expected process PID',async t=>{
   if(process.platform!=='win32')return;
   const server=createServer();
