@@ -46,8 +46,15 @@ export function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  const match=/^(https?):\/\/([a-z0-9.-]+)(\/[^\s]*)$/i.exec(pattern);
  if(!match||match[2].startsWith('.')||match[2].endsWith('.')||match[2].includes('..')||
     match[2].includes('*')||match[2].includes(':'))return false;
- if(target.protocol!==match[1].toLowerCase()+':'||target.hostname!==match[2].toLowerCase()||
-    target.port)return false;
+ if(target.protocol!==match[1].toLowerCase()+':'||
+    target.hostname!==match[2].toLowerCase())return false;
+ // Chrome-style @match patterns contain no port component. Our disposable
+ // GM fixture binds to a random loopback port and performs an independent
+ // exact-origin runtime check; its metadata must not be rejected merely for
+ // that port. Keep remote/non-loopback nonstandard ports fail-closed: this
+ // preflight is not authority to install or execute a userscript.
+ if(target.port&&!(target.protocol==='http:'&&target.hostname==='127.0.0.1'&&
+    match[2].toLowerCase()==='127.0.0.1'))return false;
  // A wildcard at the end of the path is a conservative, literal prefix;
  // other wildcards require true manager-based matching.
  const path=match[3];
