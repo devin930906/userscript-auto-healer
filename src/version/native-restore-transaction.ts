@@ -16,7 +16,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {types as nodeTypes} from 'node:util';
-import {lstat,mkdir,open,rename,rmdir,unlink} from 'node:fs/promises';
+import {link,lstat,mkdir,open,rename,rmdir,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -145,6 +145,7 @@ export async function restoreVerifiedOriginalNativeOnly(
  let owner:BigIntStats|undefined;
  let acquired=false;
  let pending:string|undefined;
+ let journalPending:string|undefined;
  try{
   if(await hasUnsafePathLink(opts.sourcePath)||
      await hasUnsafePathLink(opts.backupDirectory))return block('UNSAFE_PATH');
@@ -155,7 +156,10 @@ export async function restoreVerifiedOriginalNativeOnly(
      !directoryStart.isDirectory()||directoryStart.isSymbolicLink()||
      !sourceStart.isFile()||sourceStart.isSymbolicLink()||
      sourceStart.nlink!==1n||sourceStart.size<=0n||
-     sourceStart.size>BigInt(MAX_SCRIPT_BYTES))return block('UNSAFE_PATH');
+     sourceStart.size>BigInt(MAX_SCRIPT_BYTES)||
+     // Never replace a deliberately read-only source, even if the current
+     // process has elevated rights. Refuse BEFORE creating any backup/journal.
+     (sourceStart.mode&0o222n)===0n)return block('UNSAFE_PATH');
 
   // Lock the CANONICAL PATH, not the inode: a successful atomic rename
   // necessarily changes the inode and must not change the lock identity.
@@ -207,8 +211,15 @@ export async function restoreVerifiedOriginalNativeOnly(
 
   pending=join(parent,'.uah-restore-'+randomUUID()+'.pending');
   const handle=await open(pending,'wx',0o600);
-  try{await handle.writeFile(bytes);await handle.sync();}
-  finally{await handle.close();}
+  try{
+   await handle.writeFile(bytes);
+   // A 0600 temp could silently strip the selected script's permission
+   // mode after rename. Preserve the original source mode on the staged
+   // inode, before fsync and verification. This does not assert NTFS ACL
+   // parity, which still requires independent Windows security review.
+   await handle.chmod(Number(sourceStart.mode&0o777n));
+   await handle.sync();
+  }finally{await handle.close();}
   if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
 
@@ -225,9 +236,24 @@ export async function restoreVerifiedOriginalNativeOnly(
    displacedBackupFileName:displaced.backupFileName,
    automaticPatchAllowed:false,automaticRollbackAllowed:false
   })+'\n');
-  const j=await open(journalPath,'wx',0o600);
+  // Never expose a partial journal under the final recovery name. A crash
+  // while writing leaves at most a clearly uncommitted .pending file; only a
+  // completely fsynced and byte-verified record is published by a no-clobber
+  // same-directory hard link. This is NOT a full power-loss fsync guarantee.
+  journalPending=join(opts.backupDirectory,'.uah-restore-'+randomUUID()+'.pending');
+  const j=await open(journalPending,'wx',0o600);
   try{await j.writeFile(journal);await j.sync();}
   finally{await j.close();}
+  if(await verifyExactCandidateBytesReadOnly(journalPending,journal)!=='MATCH')
+   return block('RECOVERY_SAFETY_FAILED');
+  if(await hasUnsafePathLink(opts.backupDirectory))return block('UNSAFE_PATH');
+  const journalDirectory=await lstat(opts.backupDirectory,{bigint:true});
+  if(!journalDirectory.isDirectory()||journalDirectory.isSymbolicLink()||
+     !sameDirectory(directoryStart,journalDirectory))
+   return block('UNSAFE_PATH');
+  await link(journalPending,journalPath);
+  await unlink(journalPending);
+  journalPending=undefined;
   if(await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
 
@@ -262,7 +288,10 @@ export async function restoreVerifiedOriginalNativeOnly(
    sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
    userApproved:true
   });
+  const restoredMode=await lstat(opts.sourcePath,{bigint:true});
   if(restored.status!=='MATCHED_READ_ONLY'||
+     restoredMode.isSymbolicLink()||!restoredMode.isFile()||
+     (restoredMode.mode&0o777n)!==(sourceStart.mode&0o777n)||
      (await verifyBackupRecoverySource({
        ...displacedInput,sourcePath:opts.sourcePath
      })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
@@ -277,6 +306,7 @@ export async function restoreVerifiedOriginalNativeOnly(
  }catch{return block('IO_FAILURE');}
  finally{
   if(pending)await unlink(pending).catch(()=>undefined);
+  if(journalPending)await unlink(journalPending).catch(()=>undefined);
   if(acquired){
    // Never remove somebody else's replacement lock object or any
    // nonempty crash evidence; manual recovery may be required.
