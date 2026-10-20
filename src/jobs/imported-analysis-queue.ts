@@ -5,7 +5,8 @@
  * resume across process restarts still requires a separate trusted workflow.
  */
 import {createHash} from 'node:crypto';
-import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
+import {MAX_SCRIPT_BYTES,MAX_TOTAL_IMPORTED_BYTES,MAX_SELECTED_FILES,
+ type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
 import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
@@ -20,21 +21,38 @@ const ENCODINGS=new Set<ImportedScript['textEncoding']>([
 const unavailable=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
  'ISOLATED_ANALYSIS_FAILED')=>unavailableImportPreview(status,'NOT_CHECKED');
 
-function validateNativeScripts(scripts:readonly ImportedScript[]):boolean{
+type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
+
+/** Bind the source bytes and ordered hashes to the SAME private native
+ * snapshot. The native importer hands us Uint8Arrays, which remain mutable
+ * even after their SHA-256 was checked. A later segment must not read bytes
+ * modified by the caller while earlier workers/progress handlers run.
+ */
+function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundScript[]|null{
  try{
   const seen=new Set<string>();
+  const copies:BoundScript[]=[];
+  let totalBytes=0;
   for(const item of scripts){
-   if(!item||!(item.bytes instanceof Uint8Array)||
-      !Number.isSafeInteger(item.byteLength)||
-      item.byteLength!==item.bytes.byteLength||
-      !SHA256.test(item.sha256)||!ENCODINGS.has(item.textEncoding)||
-      seen.has(item.sha256)||
-      createHash('sha256').update(item.bytes).digest('hex')!==item.sha256)
-    return false;
-   seen.add(item.sha256);
+   const original=item?.bytes;
+   const sha=item?.sha256;
+   const encoding=item?.textEncoding;
+   if(!(original instanceof Uint8Array)||!Number.isSafeInteger(item.byteLength)||
+      item.byteLength!==original.byteLength||
+      original.byteLength>MAX_SCRIPT_BYTES||
+      totalBytes+original.byteLength>MAX_TOTAL_IMPORTED_BYTES||
+      typeof sha!=='string'||!SHA256.test(sha)||!ENCODINGS.has(encoding)||
+      seen.has(sha))return null;
+   // Copy before hashing. A racing SharedArrayBuffer/write cannot substitute
+   // unchecked bytes after the hash check; only the validated copy is used.
+   const bytes=Uint8Array.from(original);
+   if(createHash('sha256').update(bytes).digest('hex')!==sha)return null;
+   totalBytes+=bytes.byteLength;
+   seen.add(sha);
+   copies.push(Object.freeze({bytes,sha256:sha,textEncoding:encoding}));
   }
-  return true;
- }catch{return false;}
+  return copies;
+ }catch{return null;}
 }
 
 /** Only explicitly native-imported byte identities can enter this worker.
@@ -49,13 +67,13 @@ export async function runImportedReadOnlyAnalysisQueue(
  const count=scripts.length;
  if(count===0)return [];
  if(count>MAX_SELECTED_FILES)return scripts.map(()=>unavailable('SKIPPED_BATCH_BUDGET'));
- if(!validateNativeScripts(scripts))
-  return scripts.map(()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
+ const boundScripts=snapshotNativeScripts(scripts);
+ if(!boundScripts)return scripts.map(()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  if(signal?.aborted)return scripts.map(()=>unavailable('SKIPPED_CANCELLED'));
  const segmentCount=Math.ceil(count/MAX_BATCH_PREVIEW_FILES);
  const groups=Array.from({length:segmentCount},(_,index)=>{
   const offset=index*MAX_BATCH_PREVIEW_FILES;
-  const list=scripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
+  const list=boundScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
   const hash=createHash('sha256');
   hash.update('uah-native-readonly-ast-segment-v1\0');
   hash.update(String(index));hash.update('\0');
