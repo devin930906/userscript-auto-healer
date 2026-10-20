@@ -15,7 +15,7 @@ import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {MAX_ANALYSIS_BYTES} from '../analyze/import-preview';
 import type {ImportedScript} from '../import/import-service';
 import type {DynamicObservation} from '../observe/dom-observer';
-import type {ScenarioInput} from '../scenarios/scenario-registry';
+import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
 import {prepareManualRepairExportOnly,type ManualRepairFlowResult}
  from './manual-repair-flow';
 import type {LiteralPatchRequest} from './patch-planner';
@@ -94,8 +94,12 @@ export async function exportReviewedImportedSelectorOnly(
      typeof opts.exportDirectory!=='string'||
      typeof opts.userApproved!=='boolean')
    return block('INVALID_NATIVE_OPTIONS');
-  const scenario=untrustedScenario as ScenarioInput;
-  if(!scenario||typeof scenario!=='object'||
+  // Reuse the strict native scenario contract before any property access.
+  // A result is a normalized data-only copy; getters, sparse assertion arrays
+  // and undeclared capability fields must not reach disk staging.
+  const checked=preflightScenario(untrustedScenario as ScenarioInput);
+  const scenario=checked.input;
+  if(checked.state!=='READY_TO_TEST'||
      scenario.userApproved!==true||scenario.requiresLogin!==false||
      scenario.scriptSha256!==script.sha256||
      !Array.isArray(scenario.steps)||scenario.steps.length!==0||
