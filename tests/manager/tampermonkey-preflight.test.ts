@@ -215,3 +215,36 @@ test('TEST-017: malicious runtime reports and serialized metadata must fail clos
    code:'INVALID_INPUT',gmApiVerified:false,businessVerified:false});
  }
 });
+
+test('TEST-017/026: plausible accessors cannot execute across the metadata-only trust boundary',()=>{
+ let getterCalls=0;
+ const observed=()=>{getterCalls++;return true;};
+ const apparentReport={...report};
+ Object.defineProperty(apparentReport,'enabled',{enumerable:true,
+  get:observed});
+ const apparentRuntime={...runtime};
+ Object.defineProperty(apparentRuntime,'extensionId',{enumerable:true,
+  get(){getterCalls++;return TAMPERMONKEY_EXTENSION_ID;}});
+ const apparentMetadata={...normal};
+ Object.defineProperty(apparentMetadata,'tags',{enumerable:true,
+  get(){getterCalls++;return normal.tags;}});
+ const apparentTags={...normal.tags};
+ Object.defineProperty(apparentTags,'grant',{enumerable:true,
+  get(){getterCalls++;return ['GM_getValue'];}});
+ const apparentGrant=['GM_getValue'];
+ Object.defineProperty(apparentGrant,'0',{enumerable:true,
+  get(){getterCalls++;return 'GM_getValue';}});
+ for(const variant of [
+  {runtime,report:apparentReport,metadata:normal},
+  {runtime:apparentRuntime,report,metadata:normal},
+  {runtime,report,metadata:apparentMetadata},
+  {runtime,report,metadata:{...normal,tags:apparentTags}},
+  {runtime,report,metadata:{...normal,tags:{...normal.tags,grant:apparentGrant}}}
+ ]){
+  const result=inspectReportedTampermonkeyPreflight(
+   variant.runtime,variant.report,variant.metadata,'https://example.com/',true);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',code:'INVALID_INPUT',
+   gmApiVerified:false,businessVerified:false});
+ }
+ assert.equal(getterCalls,0,'non-throwing getters cannot run during preflight');
+});
