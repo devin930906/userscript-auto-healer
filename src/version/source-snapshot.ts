@@ -6,6 +6,7 @@
  * Never expose this arbitrary-path entry point over renderer IPC.
  */
 import {createHash} from 'node:crypto';
+import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
 import {lstat, open} from 'node:fs/promises';
 import {basename, isAbsolute} from 'node:path';
@@ -37,7 +38,8 @@ function sameIdentity(a:FileIdentity,b:FileIdentity):boolean{
  */
 export async function verifyApprovedSourceFingerprint(input:unknown):Promise<SourceFingerprintResult>{
   try{
-    if(!input||typeof input!=='object'||Array.isArray(input))return blocked('INVALID_REQUEST');
+    if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+       Array.isArray(input))return blocked('INVALID_REQUEST');
     const proto=Object.getPrototypeOf(input);
     if(proto!==Object.prototype&&proto!==null)return blocked('INVALID_REQUEST');
     const descriptors=Object.getOwnPropertyDescriptors(input);

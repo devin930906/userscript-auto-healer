@@ -4,6 +4,7 @@
  */
 import {createHash} from 'node:crypto';
 import {parse} from 'acorn';
+import {types as utilTypes} from 'node:util';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {parseUserscriptMetadata} from '../analyze/metadata-parser';
 
@@ -167,7 +168,8 @@ function headerEnd(source:string):number|null{
  */
 export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPatchResult{
   try{
-    if(!input||typeof input!=='object'||typeof input.source!=='string'||
+    if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+       typeof input.source!=='string'||
        Buffer.byteLength(input.source,'utf8')>MAX_SOURCE_BYTES||
        !SHA256.test(input.expectedSourceSha256)||
        !Number.isSafeInteger(input.callOffset)||input.callOffset<0||
@@ -282,7 +284,7 @@ export function auditProposedLiteralSelectorPatch(
    const expected=proposeLiteralSelectorPatch(request);
    if(expected.status!=='CANDIDATE_ONLY')return blockedAudit('PLANNER_REJECTED');
    if(!untrustedCandidate||typeof untrustedCandidate!=='object'||
-      Array.isArray(untrustedCandidate))
+      utilTypes.isProxy(untrustedCandidate)||Array.isArray(untrustedCandidate))
      return blockedAudit('UNTRUSTED_CANDIDATE');
    // Read own data descriptors, not getters. Symbols, extra approval fields,
    // prototype tricks and unknown fields are never admitted as audit input.
@@ -303,7 +305,8 @@ export function auditProposedLiteralSelectorPatch(
      return d.value;
    };
    const change=field('change');
-   if(!change||typeof change!=='object'||Array.isArray(change))
+   if(!change||typeof change!=='object'||utilTypes.isProxy(change)||
+      Array.isArray(change))
      return blockedAudit('UNTRUSTED_CANDIDATE');
    const changeProto=Object.getPrototypeOf(change);
    if(changeProto!==Object.prototype&&changeProto!==null)

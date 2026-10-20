@@ -11,6 +11,7 @@
  * prerequisites for any future mutating transaction. The observations below
  * are NOT held under a durable filesystem lock.
  */
+import {types as utilTypes} from 'node:util';
 import {assessLocalAcceptancePreflight} from './acceptance-gate';
 import type {LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyApprovedSourceFingerprint} from '../version/source-snapshot';
@@ -42,7 +43,8 @@ function blocked(reason:PreparationBlockReason):LocalBackupPreparationResult{
 function parseOptions(input:unknown):{
  sourcePath:string;backupDirectory:string;userApproved:boolean
 }|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+    Array.isArray(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
  const desc=Object.getOwnPropertyDescriptors(input);
@@ -78,6 +80,7 @@ export async function prepareReviewedLocalBackupOnly(
   const options=parseOptions(untrustedOptions);
   if(!options)return blocked('INVALID_REQUEST');
   if(!options.userApproved)return blocked('NOT_AUTHORIZED');
+  if(utilTypes.isProxy(request))return blocked('INVALID_REQUEST');
   // Validate AST patch and its exact proposed bytes before touching disk.
   const sourceHash:unknown=request?.expectedSourceSha256;
   const review=assessLocalAcceptancePreflight(request,candidate,{

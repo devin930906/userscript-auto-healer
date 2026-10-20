@@ -6,6 +6,7 @@
  * to the consented script/version. userApproved is only an untrusted claim.
  */
 import {createHash} from 'node:crypto';
+import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
 import {lstat,open} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
@@ -65,7 +66,8 @@ export async function verifyBackupRecoverySource(
  input:unknown
 ):Promise<RecoverySourceVerificationResult>{
  try{
-  if(!input||typeof input!=='object'||Array.isArray(input))return deny('INVALID_REQUEST');
+  if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+     Array.isArray(input))return deny('INVALID_REQUEST');
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return deny('INVALID_REQUEST');
   const desc=Object.getOwnPropertyDescriptors(input);
