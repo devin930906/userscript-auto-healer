@@ -678,3 +678,25 @@ test('TEST-022/026: foreign or forged native script hashes are rejected before a
  assert.deepEqual(previews.map(x=>x.status),['ISOLATED_ANALYSIS_FAILED']);
  assert.equal(previews[0].automaticPatchAllowed,false);
 });
+
+test('TEST-022/026: later native AST segments cannot be swapped after script identity validation',async()=>{
+ const scripts=Array.from({length:34},(_,i)=>realNativeScript(i));
+ const expected=scripts.map(previewImportedScriptAnalysis);
+ let mutationApplied=false;
+ const actual=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
+  processed=>{
+   if(processed===16){
+    // This is a real byte mutation, after the batch has already bound
+    // script SHA-256 identities but before the second worker starts.
+    scripts[17].bytes.fill(0x78);
+    mutationApplied=true;
+   }
+  });
+ assert.equal(mutationApplied,true);
+ assert.equal(previewImportedScriptAnalysis(scripts[17]).status,'INVALID_METADATA',
+  'the caller did mutate the original byte buffer');
+ assert.deepEqual(actual,expected,
+  'isolated AST evidence must describe the validated bytes, not a later caller mutation');
+ assert.ok(actual.every(x=>!x.automaticPatchAllowed&&!x.businessVerified&&
+  !x.tampermonkeyVerified));
+});
