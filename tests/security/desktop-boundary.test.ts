@@ -66,6 +66,39 @@ test('TASK-001: reject invalid input shape and unrecognized options', () => {
   }
 });
 
+test('TASK-001/TEST-026: config preflight ignores accessors and rejects hidden properties and hostile Proxies', () => {
+  let accessed = 0;
+  for (const field of ['executablePath', 'userDataDir', 'remoteDebuggingPort', 'bindAddress']) {
+    const hostile = {...allowed};
+    Object.defineProperty(hostile, field, {
+      enumerable: true,
+      get() { accessed++; throw Error('PRIVATE_BROWSER_CONFIG_GETTER'); }
+    });
+    assert.deepEqual(validateBrowserConfig(hostile), {ok:false, code:'INVALID_SHAPE'});
+  }
+  assert.equal(accessed, 0, 'configuration accessors must never run');
+
+  const invisible = {...allowed};
+  Object.defineProperty(invisible, 'hiddenPermission', {value:true});
+  assert.deepEqual(validateBrowserConfig(invisible), {ok:false, code:'INVALID_SHAPE'});
+  assert.deepEqual(validateBrowserConfig({...allowed, [Symbol('secret')]:true}),
+    {ok:false, code:'INVALID_SHAPE'});
+  const inherited = Object.assign(Object.create({danger:true}), allowed);
+  assert.deepEqual(validateBrowserConfig(inherited), {ok:false, code:'INVALID_SHAPE'});
+
+  for (const trap of [
+    {getPrototypeOf() {throw Error('PRIVATE_CONFIG_PROXY');}},
+    {ownKeys() {throw Error('PRIVATE_CONFIG_PROXY');}},
+    {getOwnPropertyDescriptor() {throw Error('PRIVATE_CONFIG_PROXY');}}
+  ]) {
+    const hostile = new Proxy({...allowed}, trap);
+    assert.deepEqual(validateBrowserConfig(hostile), {ok:false, code:'INVALID_SHAPE'});
+  }
+  const plainNullPrototype = Object.assign(Object.create(null), allowed);
+  assert.deepEqual(validateBrowserConfig(plainNullPrototype),
+    {ok:true, config:allowed, verifiedOnDisk:false});
+});
+
 test('TASK-001: reject executable path injection and non-Chrome binaries', () => {
   for (const path of ['chrome.exe', String.raw`\\server\share\chrome.exe`,
     String.raw`C:\Apps\firefox.exe`, String.raw`C:\Apps\..\chrome.exe`,
