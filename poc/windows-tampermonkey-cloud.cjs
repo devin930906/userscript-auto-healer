@@ -11,6 +11,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const http=require('node:http');
+const {createHash}=require('node:crypto');
 const dir=process.env.UAH_TM_EXTENSION_DIR;
 const profile=process.env.UAH_TM_PROFILE_DIR;
 if(!dir||!profile||!path.isAbsolute(dir)||!path.isAbsolute(profile))
@@ -23,9 +24,13 @@ const RUN_AT_MODES=Object.freeze([
  'document-start','document-body','document-end','document-idle'
 ]);
 const runAt=process.env.UAH_TM_RUN_AT;
+const variant=process.env.UAH_TM_VARIANT;
+assert.ok(['baseline','product-original','product-candidate'].includes(variant),
+  'Unreviewed fixture variant is forbidden');
+if(variant!=='baseline')assert.equal(runAt,'document-idle');
 assert.ok(RUN_AT_MODES.includes(runAt),
   'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
-const source=[
+let source=[
  '// ==UserScript==',
  '// @name UAH disposable Tampermonkey CI fixture '+runAt,
  '// @namespace https://userscript-auto-healer.invalid/',
@@ -53,6 +58,44 @@ const source=[
  'if(document.readyState==="complete")report();',
  'else window.addEventListener("load",report,{once:true});'
 ].join('\n');
+// Only a disposable selector source is ever handed to the application's
+// existing AST planner. Neither the real user's scripts nor site data are read.
+if(variant!=='baseline'){
+  const original=source.replace(
+    'document.querySelector("#uah-ci-target")',
+    'document.querySelector("#uah-ci-stale-target")');
+  assert.notEqual(original,source,'Original fixture must contain exactly one selector');
+  const {analyzeSelectors}=require('../dist/src/analyze/selector-analyzer.js');
+  const {proposeLiteralSelectorPatch,auditProposedLiteralSelectorPatch}=
+    require('../dist/src/repair/patch-planner.js');
+  const ast=analyzeSelectors(original);
+  assert.equal(ast.status,'OK','Application AST analyzer must parse the original');
+  const sites=ast.sites.filter(site=>site.method==='querySelector'&&
+    site.selector==='#uah-ci-stale-target'&&site.kind==='literal');
+  assert.equal(sites.length,1,'Exactly one unambiguous AST site is required');
+  const sha=value=>createHash('sha256').update(value,'utf8').digest('hex');
+  const request={
+    source:original,expectedSourceSha256:sha(original),callOffset:sites[0].offset,
+    method:'querySelector',originalSelector:'#uah-ci-stale-target',
+    replacementSelector:'#uah-ci-target',faultEvidenceId:'disposable-selector-fixture'
+  };
+  const proposal=proposeLiteralSelectorPatch(request);
+  assert.equal(proposal.status,'CANDIDATE_ONLY',
+    'Native application must produce an AST-bound review-only patch');
+  const audit=auditProposedLiteralSelectorPatch(request,proposal);
+  assert.equal(audit.status,'REVIEWABLE_ONLY',
+    'Native application must independently audit its candidate');
+  assert.equal(proposal.automaticPatchAllowed,false,
+    'The offline proposal grants no automatic application permission');
+  assert.equal(proposal.candidateSource,source,
+    'No unrelated source or metadata edits are allowed');
+  console.log('APPLICATION_GENERATED_CANDIDATE_RECEIPT '+JSON.stringify({
+    variant,runAt,originalSha256:sha(original),
+    candidateSha256:sha(proposal.candidateSource),audit:audit.status,
+    automaticPatchAllowed:proposal.automaticPatchAllowed
+  }));
+  source=variant==='product-candidate'?proposal.candidateSource:original;
+}
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function extensionCards(context){
  const page=await context.newPage();
@@ -267,10 +310,15 @@ async function main(){
     'Actual userscript injection readyState must be recorded');
   assert.deepEqual({
     injected:fixed.injected,gm:fixed.gm,business:fixed.business,action:fixed.action
-  },{
-    injected:'yes',gm:'true',business:'recovered',action:'done'
-  });
-  console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+' GM_getValue and both synthetic DOM/business assertions.');
+  },variant==='product-original'
+    ?{injected:'yes',gm:'true',business:'missing-target',action:null}
+    :{injected:'yes',gm:'true',business:'recovered',action:'done'});
+  console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
+    ' fixture variant '+variant+' GM_getValue and expected business assertions.');
+  if(variant==='product-original')
+    console.log('EXPECTED_PRODUCT_ORIGINAL_FAILURE: unchanged selector fails on target-present page');
+  if(variant==='product-candidate')
+    console.log('PRODUCT_AST_CANDIDATE_RUNTIME_RECOVERY_ONLY: reviewed candidate worked in disposable manager; never applied to original files');
   console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
