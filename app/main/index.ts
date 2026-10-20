@@ -21,11 +21,15 @@ import {inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries} fro
 import {observeApprovedDomSeries} from '../../src/observe/dom-observer';
 import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
+import {LimitedHealthRegistry} from '../../src/health/health-registry';
+import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+// No disk persistence, no manager or business authority, fresh per window.
+let limitedScenarioHistory=new LimitedHealthRegistry();
 // Native-picked paths stay strictly in the privileged process. A renderer
 // may only refer to an already registered scenario ID, never a source path.
 const nativeImportedPaths=new Map<string,string>();
@@ -682,7 +686,26 @@ function registerSafeIpc(): void {
       // combined result; earlier DOM counts must not imply a successful visit.
       if(page.status==='BLOCKED')
         return {ok:false,code:page.code,...unverified};
+      // Record ONLY sanitized read-only observations. This cannot attest
+      // Tampermonkey, user-script execution, business health, or repair.
+      // History errors must not turn an otherwise valid DOM receipt into a
+      // claim that the inspected web page or script failed.
+      let sessionHealthStatus:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'|'UNAVAILABLE'='UNAVAILABLE';
+      let sessionHealthEventCount=0;
+      try {
+        const snapshot=recordLimitedScenarioInspection(limitedScenarioHistory,{
+          scriptHash:selected.scenario.scriptSha256,
+          checkedAssertions:result.checkedAssertions,
+          triageStatus:result.triage.status,
+          pageRuntimeStatus:page.status,
+          pageExceptionCount:page.observedCount
+        });
+        sessionHealthStatus=snapshot.status==='ELEMENT_FOUND_ONLY'?
+          'ELEMENT_FOUND_ONLY':'INDETERMINATE';
+        sessionHealthEventCount=snapshot.history.length;
+      } catch { /* capacity/clock failure: history unavailable, no fake success */ }
       return {ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',
+        sessionHealthStatus,sessionHealthEventCount,
         checkedAssertions:result.checkedAssertions,
         triageStatus:result.triage.status,
         faultCategory:result.triage.category,
@@ -865,6 +888,7 @@ async function createMainWindow(): Promise<void> {
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
       scenarioSession=new DesktopScenarioSession();
+      limitedScenarioHistory=new LimitedHealthRegistry();
       nativeImportedPaths.clear();
     }
   });
