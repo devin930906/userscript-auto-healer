@@ -107,6 +107,19 @@ test('TASK-001: reject executable path injection and non-Chrome binaries', () =>
   }
 });
 
+test('TASK-005/TEST-026: reject NTFS alternate data stream path aliases', () => {
+  for (const path of [String.raw`C:\Portable Apps:sidecar\Chrome\chrome.exe`,
+    String.raw`C:\Portable Apps\Chrome:sidecar\chrome.exe`]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, executablePath: path}),
+      {ok:false, code:'INVALID_EXECUTABLE'});
+  }
+  for (const path of [String.raw`D:\Authorized\UAH-Test-Profile:sidecar`,
+    String.raw`D:\Authorized:sidecar\UAH-Test-Profile`]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, userDataDir: path}),
+      {ok:false, code:'UNSAFE_PROFILE'});
+  }
+});
+
 test('TASK-001: reject daily Chrome User Data, drive roots and traversal', () => {
   for (const path of [String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data`,
     String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data\Default`,

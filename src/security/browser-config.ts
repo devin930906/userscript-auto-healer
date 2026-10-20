@@ -20,6 +20,9 @@ function safeWindowsDrivePath(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 4096 || value.length < 4) return false;
   if (!/^[A-Za-z]:\\/.test(value) || !win32.isAbsolute(value)) return false;
   if (/[\u0000-\u001f<>|"*?%]/.test(value) || value.includes('/')) return false;
+  // Windows permits NTFS alternate-data-stream syntax with extra colons.
+  // A path is only allowed its drive-letter colon (for example, C:\\).
+  if (value.slice(2).includes(':')) return false;
   if (value.split('\\').some(part => part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' '))) return false;
   return true;
 }
