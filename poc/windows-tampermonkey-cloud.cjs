@@ -195,7 +195,7 @@ async function main(){
   }
   tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
   console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(tabs.map(p=>p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]'))));
-  const confirmation=tabs.find(p=>/confirm|install/i.test(p.url()));
+  const confirmation=tabs.find(p=>/confirm|install|\/ask\.html(?:\?|$)/i.test(p.url()));
   assert.ok(confirmation,'Manager script installation confirmation did not appear');
   let clicked=false;
   for(const selector of ['#confirm','#install','#btnInstall','button:has-text("Install")','input[value="Install"]']){
