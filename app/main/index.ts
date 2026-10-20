@@ -1171,7 +1171,10 @@ async function createMainWindow(): Promise<void> {
       shell: 'development-skeleton',
       preloadIpcVerified: true,
       rendererSandboxVerified: true,
-      automaticRepairAvailable: false
+      automaticRepairAvailable: false,
+      // For isolated packaging smoke only: verify actual Electron userData
+      // identity, portability and uninstall retention. Not exposed over IPC.
+      userDataDirectory: app.getPath('userData')
     }), { encoding: 'utf-8', flag: 'wx' });
     app.exit(0);
     return;
