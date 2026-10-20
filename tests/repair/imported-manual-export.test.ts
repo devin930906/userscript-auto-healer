@@ -66,6 +66,8 @@ test('TEST-014/019/020/023: native imported bytes and unique AST site produce a 
   if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')return;
   const expected=header+'const target=document.querySelector("#new");\n';
   assert.equal(await readFile(join(exportDirectory,result.exportFileName),'utf8'),expected);
+  assert.equal(await readFile(join(exportDirectory,result.recoveryExportFileName),'utf8'),source);
+  assert.notEqual(result.recoveryExportFileName,result.exportFileName);
   assert.equal(await readFile(join(backupDirectory,result.candidateFileName),'utf8'),expected);
   assert.equal(await readFile(join(backupDirectory,result.backupFileName),'utf8'),source);
   assert.equal(await readFile(scriptPath,'utf8'),source);
