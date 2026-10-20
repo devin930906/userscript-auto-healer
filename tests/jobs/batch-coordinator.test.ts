@@ -440,3 +440,123 @@ test('TEST-022/026: timeout checkpoint accessor and hostile deadline fail closed
    {...checkpoint,timeoutMs}),/INVALID_BATCH_CHECKPOINT/);
  }
 });
+
+
+import {mkdtemp,readFile,writeFile,rm,symlink} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal,loadReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
+
+test('TEST-022: native durable read-only checkpoint restores matching batch after process restart',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-journal-'));
+ try{
+  const opts={count:2,jobHashes:[SCRIPT_A,SCRIPT_B],timeoutMs:100};
+  const source=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE');
+  assert.deepEqual((await source.run()).jobs.map(x=>x.state),['SUCCEEDED','SUCCEEDED']);
+  const written=await saveReadOnlyBatchJournal(root,source);
+  assert.equal(written.status,'CHECKPOINT_SAVED_UNVERIFIED',JSON.stringify(written));
+  if(written.status!=='CHECKPOINT_SAVED_UNVERIFIED')return;
+  const text=await readFile(join(root,BATCH_JOURNAL_FILENAME),'utf8');
+  assert.ok(!text.includes(root),'persisted scheduling hint must never expose disk paths');
+  const saved=JSON.parse(text) as Record<string,unknown>;
+  assert.equal(saved.automaticPatchAllowed,false);
+  assert.equal(saved.automaticRollbackAllowed,false);
+  assert.equal(saved.tampermonkeyVerified,false);
+  assert.equal(saved.businessVerified,false);
+  let dispatched=0;
+  const loaded=await loadReadOnlyBatchJournal(root,opts,async()=>{dispatched++;return 'DONE';});
+  assert.equal(loaded.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY',JSON.stringify(loaded));
+  if(loaded.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
+  assert.deepEqual((await loaded.coordinator.run()).jobs.map(x=>x.state),['SUCCEEDED','SUCCEEDED']);
+  assert.equal(dispatched,0,'completed read-only work must not be silently dispatched again');
+  const wrong=await loadReadOnlyBatchJournal(root,
+   {...opts,jobHashes:[SCRIPT_B,SCRIPT_A]},async()=>{dispatched++;return 'DONE';});
+  assert.deepEqual(wrong,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.equal(dispatched,0,'replayed checkpoint cannot mark another batch complete');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TEST-022/026: malformed, stale and legacy journals never skip work',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-invalid-'));
+ const opts={count:1,jobHashes:[SCRIPT_A]};
+ let dispatched=0;
+ try{
+  const base=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE');
+  const written=await saveReadOnlyBatchJournal(root,base);
+  assert.equal(written.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const path=join(root,BATCH_JOURNAL_FILENAME);
+  const valid=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;
+  for(const damaged of [
+   '{bad json',
+   JSON.stringify({...valid,schema:'uah-readonly-batch-v1'}),
+   JSON.stringify({...valid,automaticPatchAllowed:true}),
+   JSON.stringify({...valid,batchFingerprint:'0'.repeat(64)}),
+   ' '.repeat(250000)
+  ]){
+   await writeFile(path,damaged);
+   const result=await loadReadOnlyBatchJournal(root,opts,async()=>{dispatched++;return 'DONE';});
+   assert.deepEqual(result,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  }
+  assert.equal(dispatched,0);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TEST-022/026: refuse unbound, symlinked and non-native checkpoint directory',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-linked-'));
+ const queue=new ReadOnlyBatchCoordinator({count:1},async()=> 'DONE');
+ try{
+  assert.deepEqual(await saveReadOnlyBatchJournal(root,queue),
+    {status:'BLOCKED',reason:'INVALID_INPUT'});
+  const bound=new ReadOnlyBatchCoordinator({count:1,jobHashes:[SCRIPT_A]},async()=> 'DONE');
+  assert.deepEqual(await saveReadOnlyBatchJournal('relative-directory',bound),
+    {status:'BLOCKED',reason:'UNSAFE_PATH'});
+  const target=join(root,'target');
+  const linked=join(root,'linked');
+  await (await import('node:fs/promises')).mkdir(target);
+  try{await symlink(target,linked,'junction');}
+  catch{t.diagnostic('Symlink creation unavailable; platform-specific assertion skipped');return;}
+  assert.deepEqual(await saveReadOnlyBatchJournal(linked,bound),
+    {status:'BLOCKED',reason:'UNSAFE_PATH'});
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('TEST-022: persisted in-flight read-only task resumes within original attempt limit',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-interrupted-'));
+ const opts={count:2,jobHashes:[SCRIPT_A,SCRIPT_B],maxAttempts:2,timeoutMs:2000};
+ let notify!:()=>void;
+ const started=new Promise<void>(resolve=>{notify=resolve;});
+ let release!:()=>void;
+ const hanging=new Promise<void>(resolve=>{release=resolve;});
+ const source=new ReadOnlyBatchCoordinator(opts,async ordinal=>{
+  if(ordinal===0)return 'DONE';
+  notify();
+  await hanging;
+  return 'DONE';
+ });
+ try{
+  const oldRun=source.run();
+  await started;
+  assert.deepEqual(source.snapshot().jobs.map(j=>j.state),['SUCCEEDED','RUNNING']);
+  assert.deepEqual(source.snapshot().jobs.map(j=>j.attempts),[1,1]);
+  const stored=await saveReadOnlyBatchJournal(root,source);
+  assert.equal(stored.status,'CHECKPOINT_SAVED_UNVERIFIED',JSON.stringify(stored));
+  source.cancel();
+  release();
+  await oldRun;
+  const visited:number[]=[];
+  const restored=await loadReadOnlyBatchJournal(root,opts,async ordinal=>{
+   visited.push(ordinal);return 'DONE';
+  });
+  assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+  if(restored.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
+  assert.deepEqual(restored.coordinator.snapshot().jobs.map(j=>j.state),['SUCCEEDED','QUEUED']);
+  assert.deepEqual(restored.coordinator.snapshot().jobs.map(j=>j.attempts),[1,1]);
+  const final=await restored.coordinator.run();
+  assert.deepEqual(visited,[1]);
+  assert.deepEqual(final.jobs.map(j=>j.state),['SUCCEEDED','SUCCEEDED']);
+  assert.deepEqual(final.jobs.map(j=>j.attempts),[1,2]);
+  assert.equal(final.automaticPatchAllowed,false);
+  assert.equal(final.automaticRollbackAllowed,false);
+ }finally{release();await rm(root,{recursive:true,force:true});}
+});
