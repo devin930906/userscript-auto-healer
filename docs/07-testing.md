@@ -220,3 +220,11 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 ## （7）TASK-019/020 / TEST-027/028 候选双包安全增量（2026-10-20）
 
 [PR #147](https://github.com/devin930906/userscript-auto-healer/pull/147) 在现有候选 Windows 打包脚本上隔离 Inno 安装标识、默认目录、快捷方式及 Electron 用户数据命名，并扩展便携 ZIP 校验至 138 个条目的完整文件集。Windows [Actions #39366563301](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563301) 在 PR 合成提交 `712d6ff95ec097910a1df6f58812b54426e98e22` 完成实际候选 Electron 启动、安装、ZIP 解压和卸载回归（全部文件 SHA-256 逐一对比）；345 个 npm case 为 344 pass、0 fail、1 skip。相应应用检查 [#39366563208](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563208) 成功，合并 SHA `f5ad55ce7fda0f9c3319c1547f6394305b3bac42`。**这仍非正式 Stable 或全量 TEST-027/028 通过**，最低 Windows、升级数据、完整便携只读行为、Tampermonkey 业务回归与 GATE-008/009/011 未验证。
+
+## 2026-10-21 TASK-007 四种 `@run-at` 声明模式 Windows 实证增量（仍非正式验收）
+
+- 已合并 [PR #196](https://github.com/devin930906/userscript-auto-healer/pull/196) 到 main `dc62043be15c4732b1b60484b8338ae709fa5acf`；源 HEAD `426a851d5b3a8d4eca6cffc40d28ec210c093145`。独立 Windows 2025 云端矩阵 [Actions #39502515449](https://github.com/devin930906/userscript-auto-healer/actions/runs/39502515449) 的四项工作均为 `success`：`document-start`、`document-body`、`document-end`、`document-idle`。
+- 实际环境限于隔离 Chromium 141.0.7390.37、Tampermonkey 官方站点 CRX 下载后解包加载的 MV3 5.4.1、临时 Profile 和合成网页。每组独立管理器安装临时 `.user.js`，按该组 `@run-at` 声明执行真实 `GM_getValue` 默认值检查，并分别返回 `missing-target`（没有按钮）与 `recovered`／`done`（按钮存在）的合成业务结果。该成功与普通网页 `evaluate` 不同，但**仍然没有任何产品生成或应用补丁**。
+- 实际注入时刻观测并未由此证明符合精确模式语义：`document-start` 的 broken/fixed 页面记录 `readyState=complete/interactive`；`document-body` 为 `loading/interactive`；`document-end` 为 `complete/complete`；`document-idle` 为 `complete/complete`。该值可能受受测目标加载、管理器调度及 Chromium 环境影响，不得将单次 `@run-at` 声明通过转换成精确时序 VERIFIED。
+- 解包扩展运行 ID 为 `dkifgonlhleafnmllomljghfcbgaojkl`，**不同于官方商店扩展 ID** `dhdgffkkebhmkfjojejmpbldmpobfkfo`；厂商站点下载不能代替官方商店安装身份或签名验证。其他正式 Chrome/便携版版本、真实用户环境、权限矩阵、安装恢复、失败回滚及脚本真正自动修复前后回归仍待实施。
+- 证据来源：`TEST-017/018` 的有限阶段性真实管理器运行；四 Job 结果、运行时 ID／版本、`@run-at` 声明、`GM_getValue` 与业务输出均在 #39502515449 的独立日志。**正式 TEST-017/018 仍受阻；GATE-004/005 未通过；GATE-001..011 均不应由此判定满足**。
