@@ -248,6 +248,9 @@ export async function previewImportedBatchOffMain(
        ?unavailableImportPreview(status,'NOT_CHECKED')
        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
    }
+   // Skipped positions are still accounted for in the progress denominator.
+   try{onProgress?.(results.length,scripts.length);}
+   catch{/* advisory progress only */}
    continue;
   }
   // No overlapping workers, hidden unbounded queue or user-code execution:
