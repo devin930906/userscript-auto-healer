@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   actual-tampermonkey:
-    name: Tampermonkey ${{ matrix.run_at }}
+    name: Tampermonkey ${{ matrix.run_at }} / ${{ matrix.variant }}
     runs-on: windows-2025
     timeout-minutes: 20
     strategy:
@@ -25,11 +25,22 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        run_at:
-          - document-start
-          - document-body
-          - document-end
-          - document-idle
+        include:
+          - run_at: document-start
+            variant: baseline
+          - run_at: document-body
+            variant: baseline
+          - run_at: document-end
+            variant: baseline
+          - run_at: document-idle
+            variant: baseline
+          # Real application AST planner creates a review-only candidate.
+          # Two independent managers assert the stale original does not work
+          # and the exact audited candidate restores a disposable fixture.
+          - run_at: document-idle
+            variant: product-original
+          - run_at: document-idle
+            variant: product-candidate
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -93,10 +104,19 @@ jobs:
           & (Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules\.bin\playwright.cmd') install chromium
           if ($LASTEXITCODE -ne 0) { throw 'Disposable Chromium download failed' }
           "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
+      - name: Build native product AST planner for product candidate cases
+        if: matrix.variant != 'baseline'
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Locked application dependency installation failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Native product AST planner build failed' }
       - name: Execute real extension manager + GM API + synthetic business assertions
         shell: pwsh
         env:
           UAH_TM_RUN_AT: ${{ matrix.run_at }}
+          UAH_TM_VARIANT: ${{ matrix.variant }}
         run: |
           $env:NODE_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules'
           node ./poc/windows-tampermonkey-cloud.cjs
