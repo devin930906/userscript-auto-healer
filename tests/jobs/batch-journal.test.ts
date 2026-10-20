@@ -120,3 +120,47 @@ test('TASK-013/TEST-022: missing journal and unapproved directory fail closed',a
     {status:'BLOCKED',reason:'UNSAFE_PATH'});
  });
 });
+
+
+test('TASK-013/TEST-022/026: native journal refuses forged instances and Proxy traps',async()=>{
+ await withJournal(async directory=>{
+  let invoked=0;
+  const fake=Object.create(ReadOnlyBatchCoordinator.prototype) as ReadOnlyBatchCoordinator;
+  Object.defineProperty(fake,'snapshot',{get(){
+   invoked++;throw Error('PRIVATE_SOURCE_MUST_NOT_ESCAPE');
+  }});
+  const proxied=new Proxy(new ReadOnlyBatchCoordinator(options,completed),{
+   getPrototypeOf(){invoked++;throw Error('PRIVATE_PROXY_TRAP');},
+   get(){invoked++;throw Error('PRIVATE_PROXY_GET');}
+  });
+  for(const input of [fake,proxied]){
+   assert.deepEqual(await saveReadOnlyBatchJournal(directory,input),
+    {status:'BLOCKED',reason:'INVALID_INPUT'});
+  }
+  assert.equal(invoked,0,'reject malformed native instances without trap access');
+  await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),
+   {code:'ENOENT'},'rejected inputs must not create a journal');
+ });
+});
+
+test('TASK-013/TEST-022/026: shadowed instance methods cannot forge checkpoint writes',async()=>{
+ await withJournal(async directory=>{
+  const valid=new ReadOnlyBatchCoordinator(options,completed);
+  Object.defineProperty(valid,'snapshot',{value:()=>{
+   throw Error('OVERRIDDEN_SNAPSHOT_MUST_NOT_RUN');
+  }});
+  const written=await saveReadOnlyBatchJournal(directory,valid);
+  assert.equal(written.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  const original=await readFile(file);
+  const saved=JSON.parse(original.toString('utf8')) as Record<string,unknown>;
+  assert.equal(saved.automaticPatchAllowed,false);
+  assert.equal(saved.automaticRollbackAllowed,false);
+  const foreign=new ReadOnlyBatchCoordinator({...options,jobHashes:[...hashes].reverse()},completed);
+  Object.defineProperty(foreign,'mayPersistOver',{value:()=>true});
+  assert.deepEqual(await saveReadOnlyBatchJournal(directory,foreign),
+   {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(file),original,
+   'shadowed monotonicity check must not overwrite a different batch');
+ });
+});
