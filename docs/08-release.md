@@ -54,6 +54,14 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - 此次候选安装 EXE 的 SHA-256：`1aacb997a23d6fb1cea3b4ed65d179da67ba1fcbb3cea9c8116614a984849e52`；候选便携 ZIP 的 SHA-256：`88ce3ff0662ef183e9bbc640256fc5cc87bfbcadce8f471102928ee90f1080c4`。两项校验值只对应前述 PR 合成源码的临时构建，**不可作为正式 main Stable 双包校验**。
 - TASK-019/020 与 TEST-027/028 仍未完整验收；独立真实用户 Windows、Chrome/Tampermonkey/业务断言、升级／配置保留、只读便携路径、完整 GATE 与候选主干重新构建仍是发布阻断。没有正式 Stable Release。
 
+## 2026-10-20 TASK-019/020 候选用户数据隔离与卸载保留实测
+
+- [PR #149](https://github.com/devin930906/userscript-auto-healer/pull/149) 已合并至 main SHA `d090ea074143e4e0ed31832281b134cd796500ac`。测试用 Electron `--uahtest-shell-only` 回执增加 `app.getPath('userData')`，仅供临时 Windows runner 校验；正式渲染器 IPC 不暴露该字段。候选 Windows 打包脚本核验运行器原生 Roaming AppData 下的独立 `candidate` 用户数据目录，使用合成内容哨兵验证暂存版、ZIP 解压版及安装版启动均对应同一用户数据身份，且 Inno Setup 卸载后哨兵文件内容不变；**不是**正式版本升级／完整业务数据持久化验收。
+- 最新 [Windows Candidate EXE and ZIP 运行 #39369480855](https://github.com/devin930906/userscript-auto-healer/actions/runs/39369480855) success，真实构建检出 PR **测试合成源码** `28ff09c93324aa244e700ed241d25c150c854029`，不是 PR HEAD `1260a0a7d1e1e197657861c6144032250876ca22`，亦不是 main merge SHA。日志显示 344 pass / 0 fail / 1 conditional skip、实际 ZIP 138 文件逐一 SHA-256 一致、安装后 138 文件逐一 SHA-256 一致、候选用户数据身份与卸载保留成功，并完成开发候选暂存/解压/安装 Electron smoke、卸载流程。相同 PR HEAD 的 [Application Skeleton Checks #39369480904](https://github.com/devin930906/userscript-auto-healer/actions/runs/39369480904) 亦 success。
+- 保留失败证据：[#39369061023](https://github.com/devin930906/userscript-auto-healer/actions/runs/39369061023) attempt 1 曾在真 Chrome/CDP 负例返回 `CDP_FAILED`（同 SHA 的独立应用回归成功，按环境时序异常处理）；attempt 2 通过 Node 回归，但实际候选用户数据路径未位于进程临时覆盖的 APPDATA 下，暴露 Windows Known Folder 验证假设不可靠；后续改为检查真实 Windows runner AppData，最终 #39369480855 success，未删除任何失败记录。
+- 本轮临时候选 EXE SHA-256：`7e0c9e41b87d5c5e225fb22f6e078a1b00696f9d7a6fb48881dd96ae80b51eec`；真实便携 ZIP SHA-256：`91ff610ec11aad484e971b1fa866d965417e18b962eec85253b06f8f76bb22e1`。Actions Artifact `12240308520`（有效期至 2026-10-23 04:29 UTC）；这些只是短期开发候选及 PR 合成提交证据，**不是**正式 Stable 双包或 Release。
+- TASK-019/020、TEST-027/028 和 GATE-008/009/011 保持未完整通过：尚缺升级、真实用户业务与完整数据持久化、只读目录、支持矩阵、真实 Tampermonkey E2E 与正式候选源提交复建/发行文件下载验收。GATE-001..011 均不得因该有限候选成功而被判通过。
+
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
 |---|---|---|---|---|---|---|---|

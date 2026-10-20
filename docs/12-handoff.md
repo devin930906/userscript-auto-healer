@@ -211,3 +211,7 @@ PR [#101](https://github.com/devin930906/userscript-auto-healer/pull/101) 对 ap
 ## （7）TASK-015/017 当前窗口历史查询阶段（2026-10-20）
 
 新增 `src/health/session-history.ts`、`tests/health/session-history.test.ts` 和严格白名单 `scenario:history` 原生 IPC，按已导入并登记的只读场景 ID 提供最多 32 条时间与保守状态记录；桌面可在没有 Chrome 运行时查看本窗口历史。绝不向 renderer 公开用户原始脚本路径／内容、SHA／证据哈希，不授予自动补丁、回滚、Tampermonkey/GM/业务 VERIFIED。PR、合并提交及 CI 以 GitHub 最新证据为准；阶段性历史查询不构成完整 TEST-024。下一优先 TASK-007 真 Tampermonkey 产品 E2E 与 TASK-010/011 的授权可信事务阻断，完成前不得宣布 Stable，EXE/ZIP 未交付。
+
+## （7）2026-10-20 TASK-019/020 候选用户数据路径及卸载保留交接
+
+PR [#149](https://github.com/devin930906/userscript-auto-healer/pull/149) 已合并 main `d090ea074143e4e0ed31832281b134cd796500ac`。Windows [候选构建 #39369480855](https://github.com/devin930906/userscript-auto-healer/actions/runs/39369480855) 在 PR 合成源码 `28ff09c93324aa244e700ed241d25c150c854029` 验证 138 文件真实 ZIP 完整性、138 文件安装完整性、Electron 暂存/解压/安装启动和候选 userData 合成哨兵在卸载后的保留；独立 [应用检查 #39369480904](https://github.com/devin930906/userscript-auto-healer/actions/runs/39369480904) 成功。首次失败 #39369061023 的 Chrome/CDP 及错误 APPDATA 假设已保留，不应删除失败证据。本阶段未验证真实用户 Windows 升级、真实业务数据迁移/回滚、只读 ZIP 目录或正式 Tampermonkey 修复与自动回滚，TASK-019/020、TEST-027/028、GATE-008/009/011 仍未完成，**不是 Stable**。下一优先仍是 TASK-007 实际授权 Tampermonkey 产品级 E2E、TASK-010/011 真实事务门槛，之后继续 TASK-018..021；每轮从 GitHub 最新 main/PR/Actions 恢复。

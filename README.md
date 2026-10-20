@@ -1,6 +1,6 @@
 # Userscript Auto Healer
 
-> 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007..011 有独立阶段代码成果，但真实 Tampermonkey 产品级业务验收、完整自动应用和恢复事务仍未闭环。TASK-011 的备份-only、恢复来源身份检查及原生协作式文件互斥已通过 Windows 局部测试（PR #44–53，详见 docs/07-testing.md、docs/09-development-plan.md）。**没有正式产品成品（完整自动修复尚未交付），尚无正式 Windows EXE 安装版或 ZIP 便携版，也没有 Stable Release**。
+> 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007..011 有独立阶段代码成果，但真实 Tampermonkey 产品级业务验收、完整自动应用和恢复事务仍未闭环。TASK-011 的备份-only、恢复来源身份检查及原生协作式文件互斥已通过 Windows 局部测试（PR #44–53，详见 docs/07-testing.md、docs/09-development-plan.md）。**正式 Stable 尚未完成；真实自动修复/回滚仍未交付，没有经完整验收的正式 EXE、ZIP 或 GitHub Release**。Windows runner 已构建并验证有限开发候选 EXE+真实 ZIP 的安装/解压与候选数据保留（PR #146–149；见 docs/08-release.md），不得当作正式交付。
 
 ## 项目用途
 针对目标网站 DOM、Selector 和页面运行机制变化导致的 `.user.js` 油猴脚本失效，设计 Windows 本地优先、CDP 诊断、保守自动修复与可验证回滚的工具。用户可指定 Chrome/便携版路径、专用调试 Profile、默认 9223 端口，批量导入脚本，必要时启用自定义 AI 服务。
@@ -12,7 +12,7 @@
 见 [docs/00-intake.md](docs/00-intake.md)、[docs/11-readiness.md](docs/11-readiness.md)、[docs/12-handoff.md](docs/12-handoff.md)。需求权威来源为 `docs/00-intake.md` 与 `docs/02-requirements.md`；任务位于 `docs/09-development-plan.md`；架构与发布证据分别在 `docs/04-architecture.md`、`docs/08-release.md`。
 
 ## 运行与发布状态
-已有 Electron+TypeScript 开发入口、11 项自动化安全配置测试，并在 Windows runner 完成真实 Electron 桌面启动及受限 IPC 验证（仍非完整功能验收）；尚无安装程序、便携包或正式 Release。不得将开发骨架当作已交付软件。
+已有 Electron+TypeScript 开发入口、11 项自动化安全配置测试，并在 Windows runner 完成真实 Electron 桌面启动及受限 IPC 验证（仍非完整功能验收）；已有 Windows 临时开发候选安装 EXE 与真实便携 ZIP 的受限 CI 验证（见 docs/08-release.md），但尚无经完整 Stable 验收的正式安装程序、正式便携包或 Release；不得将开发候选当作已交付软件。
 
 ## 2026-10-18 开发前实测状态
 
