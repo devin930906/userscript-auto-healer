@@ -199,3 +199,31 @@ test('TEST-019: @include and @exclude precedence cannot silently authorize a can
     assert.equal('candidateSource' in result,false);
   }
 });
+
+test('TEST-019/026: hostile scenario getters and forged fields never enter the candidate gate',()=>{
+ let invoked=0;
+ const maliciousApproval={...scenario};
+ Object.defineProperty(maliciousApproval,'userApproved',{
+  enumerable:true,get(){invoked++;return true;}
+ });
+ const maliciousRows={...scenario,assertions:[...scenario.assertions]};
+ Object.defineProperty(maliciousRows.assertions,'0',{
+  enumerable:true,configurable:true,get(){invoked++;return scenario.assertions[0];}
+ });
+ const maliciousUrl={...scenario};
+ Object.defineProperty(maliciousUrl,'targetUrl',{
+  enumerable:true,get(){invoked++;return 'https://example.com/';}
+ });
+ for(const input of [
+  maliciousApproval,maliciousRows,maliciousUrl,
+  {...scenario,automaticPatchAllowed:true},
+  {...scenario,assertions:[...scenario.assertions,].concat([]).map((row,i)=>
+   i===0?{...row,unexpectedAuthority:true}:row)}
+ ]){
+  const result=proposeFromReadOnlyDomDiagnostic(patch,input,series(),true);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ assert.equal(invoked,0,'no untrusted scenario accessor may execute');
+});
