@@ -100,12 +100,22 @@ function decode(raw: Uint8Array, allowGb18030: boolean):
 function fromBytes(name: string, bytes: Uint8Array, allowGb18030 = false):
   ImportedScript | ImportFailure {
   if (!validName(name)) return failure(name, 'NOT_USER_SCRIPT');
-  if (bytes.length > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
-  const encoding = decode(bytes, allowGb18030);
+  // Snapshot before *all* decoding and hashing. Untrusted typed-array
+  // subclasses can override subarray/iteration, and shared backing stores
+  // can change between validation and a later copy. The native constructor
+  // copies the typed-array bytes without calling overridden JS methods.
+  let copied:Uint8Array;
+  try {
+    if (bytes.byteLength > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
+    copied = new Uint8Array(bytes);
+  } catch {
+    return failure(name, 'INVALID_DRAG_DATA');
+  }
+  if (copied.byteLength > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
+  const encoding = decode(copied, allowGb18030);
   if (encoding === 'INVALID_ENCODING' || encoding === 'EMPTY_FILE' || encoding === 'BINARY_CONTENT') {
     return failure(name, encoding);
   }
-  const copied = Uint8Array.from(bytes);
   return {
     filename: name,
     bytes: copied,
@@ -118,8 +128,14 @@ function fromBytes(name: string, bytes: Uint8Array, allowGb18030 = false):
 /** Safe pure input for future drag-and-drop: imports supplied bytes, never arbitrary renderer paths. */
 export function importDroppedBytes(name: unknown, bytes: unknown): ImportedScript | ImportFailure {
   if (!validName(name)) return failure(typeof name === 'string' ? name : '(invalid)', 'NOT_USER_SCRIPT');
-  if (!(bytes instanceof Uint8Array)) return failure(name, 'INVALID_DRAG_DATA');
-  return fromBytes(name, bytes);
+  try {
+    if (!(bytes instanceof Uint8Array)) return failure(name, 'INVALID_DRAG_DATA');
+    return fromBytes(name, bytes);
+  } catch {
+    // instanceof on a revoked Proxy can throw; it must not escape the IPC
+    // import boundary or crash an otherwise independent import batch.
+    return failure(name, 'INVALID_DRAG_DATA');
+  }
 }
 
 /** Compare native identities before and after a bounded disk read.
