@@ -22,6 +22,7 @@ const same=(a:BigIntStats,b:BigIntStats)=>
 export async function verifyExactCandidateBytesReadOnly(
   path:string,expected:Buffer
 ):Promise<CandidateBytesCheck>{
+  try{
   if(!Buffer.isBuffer(expected)||!expected.length||
      expected.length>MAX_SCRIPT_BYTES)return 'CHANGED';
   if(await hasUnsafePathLink(path))return 'CHANGED';
@@ -56,4 +57,10 @@ export async function verifyExactCandidateBytesReadOnly(
       return 'CHANGED';
     return equal?'MATCH':'MISMATCH';
   }finally{await handle.close();}
+  }catch{
+    // A staged review receipt may outlive its file or containing directory.
+    // A racing rename, deletion or denied read must never escape as a
+    // usable candidate; no path, bytes or OS error details are returned.
+    return 'CHANGED';
+  }
 }
