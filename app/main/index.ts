@@ -1015,14 +1015,17 @@ async function createMainWindow(): Promise<void> {
        "const blockedDropDuringBrowserPicker=await a.importDropped('no-peek.user.js',new Uint8Array([47,47])); " +
        "const browserPickerFinished=await pendingBrowserPicker; " +
        "const noNativeCancel=await a.cancelNativeImport(); " +
+      "const idleNativeProgress=await a.getNativeImportProgress(); " +
       "const pendingNativeFiles=a.chooseFiles(); " +
       "await new Promise(resolve=>setTimeout(resolve,10)); " +
+      "const pickingProgress=await a.getNativeImportProgress(); " +
       "const rejectedOverlap=await a.chooseFolder(); " +
        "const blockedBrowserDuringNativePicker=await a.chooseProfile(); " +
        "const blockedLaunchDuringNativePicker=await a.startBrowser(9223); " +
        "const blockedDroppedOverlap=await a.importDropped('parallel.user.js',new Uint8Array([47,47,32,105,112,99])); " +
       "const requestedNativeCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFiles=await pendingNativeFiles; " +
+      "const settledProgress=await a.getNativeImportProgress(); " +
       "const pendingNativeFolder=a.chooseFolder(); " +
       "await new Promise(resolve=>setTimeout(resolve,10)); " +
       "const requestedFolderCancel=await a.cancelNativeImport(); " +
@@ -1153,7 +1156,11 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
-      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && " +
+      "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && idleNativeProgress.active === false && " +
+      "pickingProgress.active === true && pickingProgress.phase === 'PICKING' && " +
+      "pickingProgress.processed === 0 && pickingProgress.total === 0 && " +
+      "Object.keys(pickingProgress).every(k=>['active','phase','processed','total','accepted','duplicates','failed'].includes(k)) && " +
+      "settledProgress.active === false && rejectedOverlap.errors[0].code === 'IMPORT_BUSY' && " +
        "blockedImportDuringBrowserPicker.errors[0].code === 'IMPORT_BUSY' && " +
        "blockedDropDuringBrowserPicker.code === 'IMPORT_BUSY' && " +
        "browserPickerFinished.ok === true && " +
@@ -1173,7 +1180,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
