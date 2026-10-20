@@ -149,6 +149,28 @@ foreach($original in $sourceFiles) {
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
 $expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
 Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+# TEST-028: exercise an actual portable directory MOVE (not a second copy
+# built in the original path). Spaces and Unicode path components must not
+# break Electron's packaged resource lookup or redirect persistent userData.
+# Recheck the entire moved payload before any subsequent read-only ACL test.
+$moved=Join-Path $temp 'relocated portable 路径'
+if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated test directory' }
+Move-Item -LiteralPath $expanded -Destination $moved -ErrorAction Stop
+$expanded=$moved
+$movedFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
+if ($movedFiles.Count -ne $sourceFiles.Count) { throw 'Relocated ZIP payload file count changed' }
+foreach($original in $sourceFiles) {
+  $relative=$original.FullName.Substring($stage.Length+1)
+  $relocated=Join-Path $expanded $relative
+  Require-File $relocated
+  if ((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $relocated -Algorithm SHA256).Hash) {
+    throw "Relocated portable payload hash mismatch: $relative"
+  }
+}
+$movedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'relocated' $temp
+Assert-RetainedData $movedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+Write-Output 'PASS: moved portable ZIP payload in Unicode/space path launches with all hashes and external userData intact'
 # REQ-028/TEST-028: a read-only extracted application directory must NOT be
 # required for data writes. Use real Windows NTFS ACLs (not merely the
 # directory ReadOnly attribute, which does not deny file creation).
