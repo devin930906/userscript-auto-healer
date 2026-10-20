@@ -6,6 +6,7 @@
 import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
 import {basename,isAbsolute} from 'node:path';
+import {types as nodeTypes} from 'node:util';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
 import {backupPrefix} from './verified-backup';
@@ -37,7 +38,8 @@ const sameFile=(a:BigIntStats,b:BigIntStats)=>
 const sameDir=(a:BigIntStats,b:BigIntStats)=>
   a.dev===b.dev&&a.ino===b.ino;
 function plainValues(input:unknown,names:readonly string[]):Record<string,unknown>|null{
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  if(!input||typeof input!=='object'||Array.isArray(input)||
+     nodeTypes.isProxy(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const d=Object.getOwnPropertyDescriptors(input);
