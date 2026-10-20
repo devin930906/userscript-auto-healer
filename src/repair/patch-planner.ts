@@ -3,6 +3,7 @@
  * are accessed; a proposal is NEVER evidence of a repaired script.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {parse} from 'acorn';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {parseUserscriptMetadata} from '../analyze/metadata-parser';
@@ -167,6 +168,9 @@ function headerEnd(source:string):number|null{
  */
 export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPatchResult{
   try{
+    // A Proxy can execute hostile traps even during an otherwise read-only
+    // integrity check. Reject it before reading any source or descriptor.
+    if(nodeTypes.isProxy(input))return blocked('INVALID_INPUT');
     if(!input||typeof input!=='object'||typeof input.source!=='string'||
        Buffer.byteLength(input.source,'utf8')>MAX_SOURCE_BYTES||
        !SHA256.test(input.expectedSourceSha256)||
@@ -281,6 +285,7 @@ export function auditProposedLiteralSelectorPatch(
  try{
    const expected=proposeLiteralSelectorPatch(request);
    if(expected.status!=='CANDIDATE_ONLY')return blockedAudit('PLANNER_REJECTED');
+   if(nodeTypes.isProxy(untrustedCandidate))return blockedAudit('UNTRUSTED_CANDIDATE');
    if(!untrustedCandidate||typeof untrustedCandidate!=='object'||
       Array.isArray(untrustedCandidate))
      return blockedAudit('UNTRUSTED_CANDIDATE');
@@ -303,6 +308,7 @@ export function auditProposedLiteralSelectorPatch(
      return d.value;
    };
    const change=field('change');
+   if(nodeTypes.isProxy(change))return blockedAudit('UNTRUSTED_CANDIDATE');
    if(!change||typeof change!=='object'||Array.isArray(change))
      return blockedAudit('UNTRUSTED_CANDIDATE');
    const changeProto=Object.getPrototypeOf(change);

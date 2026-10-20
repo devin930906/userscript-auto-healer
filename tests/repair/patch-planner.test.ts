@@ -298,3 +298,40 @@ test('TEST-019: stale inputs and malformed or hostile receipts fail closed',()=>
     });
   }
 });
+
+
+test('TEST-019/026: hostile Proxy inputs cannot run traps during local patch planning or audit',()=>{
+  const req=request();
+  const candidate=proposeLiteralSelectorPatch(req);
+  assert.equal(candidate.status,'CANDIDATE_ONLY');
+  if(candidate.status!=='CANDIDATE_ONLY')return;
+
+  function trapped<T extends object>(target:T){
+    let traps=0;
+    const value=new Proxy(target,{
+      get(){traps++;throw Error('UNTRUSTED_PROXY_GET');},
+      getPrototypeOf(){traps++;throw Error('UNTRUSTED_PROXY_PROTOTYPE');},
+      ownKeys(){traps++;throw Error('UNTRUSTED_PROXY_KEYS');},
+      getOwnPropertyDescriptor(){traps++;throw Error('UNTRUSTED_PROXY_DESCRIPTOR');}
+    });
+    return {value,trapCount:()=>traps};
+  }
+
+  const proxyRequest=trapped(req);
+  assert.equal(proposeLiteralSelectorPatch(proxyRequest.value).status,'BLOCKED');
+  assert.equal(proxyRequest.trapCount(),0,'request Proxy traps must never execute');
+
+  const proxyCandidate=trapped({...candidate});
+  assert.equal(auditProposedLiteralSelectorPatch(req,proxyCandidate.value).status,'BLOCKED');
+  assert.equal(proxyCandidate.trapCount(),0,'receipt Proxy traps must never execute');
+
+  const proxyChange=trapped({...candidate.change});
+  assert.equal(auditProposedLiteralSelectorPatch(req,{
+    ...candidate,change:proxyChange.value
+  }).status,'BLOCKED');
+  assert.equal(proxyChange.trapCount(),0,'nested change Proxy traps must never execute');
+
+  const revoked=Proxy.revocable({...candidate},{});
+  revoked.revoke();
+  assert.equal(auditProposedLiteralSelectorPatch(req,revoked.proxy).status,'BLOCKED');
+});
