@@ -229,7 +229,7 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
          ['PICKING','SCANNING','IMPORTING','ANALYZING'].includes(result.phase)&&
          [result.processed,result.total,result.accepted,result.duplicates,result.failed]
            .every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1000)&&
-         result.processed!<=result.total!){
+         result.processed! <= result.total!){
         liveNativeImportProgress=result;
         updateImportSummary();
       }
