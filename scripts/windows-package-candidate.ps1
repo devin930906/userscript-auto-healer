@@ -215,13 +215,48 @@ $sourceLine='Source: "' + $stage + '\*"; DestDir: "{app}"; Flags: ignoreversion 
  'Name: "{group}\Userscript Auto Healer Candidate"; Filename: "{app}\UserscriptAutoHealer.exe"'
  'Name: "{autodesktop}\Userscript Auto Healer Candidate"; Filename: "{app}\UserscriptAutoHealer.exe"; Tasks: desktopicon'
 ) | Set-Content -LiteralPath $iss -Encoding utf8
+# TEST-027 (limited): exercise the REAL Inno same-AppId upgrade path from
+# a disposable, synthetic 0.0.0 installer built from this SAME application.
+# This is NOT an actual released predecessor or a data migration test.
+# Never publish or upload the synthetic prior-version fixture.
+$priorOutput=Join-Path $temp 'prior-version-fixture'
+New-Item -ItemType Directory -Path $priorOutput | Out-Null
+$priorName='UAH-SYNTHETIC-OLD-VERSION-TEST-ONLY'
+$priorIss=Join-Path $temp 'prior-version-fixture.iss'
+$priorLines=@(Get-Content -LiteralPath $iss | ForEach-Object {
+  if($_ -cmatch '^AppVersion=') {'AppVersion=0.0.0'}
+  elseif($_ -cmatch '^OutputDir=') {"OutputDir=$priorOutput"}
+  elseif($_ -cmatch '^OutputBaseFilename=') {"OutputBaseFilename=$priorName"}
+  else {$_}
+})
+if (@($priorLines | Where-Object {$_ -ceq 'AppVersion=0.0.0'}).Count -ne 1 -or
+    @($priorLines | Where-Object {$_ -ceq "OutputDir=$priorOutput"}).Count -ne 1 -or
+    @($priorLines | Where-Object {$_ -ceq "OutputBaseFilename=$priorName"}).Count -ne 1) {
+  throw 'Unable to isolate synthetic prior installer settings'
+}
+$priorLines | Set-Content -LiteralPath $priorIss -Encoding utf8
+& $inno $priorIss
+if ($LASTEXITCODE -ne 0) { throw 'Synthetic prior Inno compiler failed' }
+$priorExe=Join-Path $priorOutput "$priorName.exe"
+Require-File $priorExe
+$installedPath=Join-Path $temp 'installed-app'
+$p=Start-Process -FilePath $priorExe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$installedPath") -PassThru -Wait
+if ($p.ExitCode -ne 0) { throw 'Synthetic prior installer failed' }
+$priorReceipt=Smoke (Join-Path $installedPath 'UserscriptAutoHealer.exe') $installedPath 'prior-version' $temp
+Assert-RetainedData $priorReceipt $userDataRoot $canary $canaryText $smokeRoaming
+$upgradeCanary=Join-Path $userDataRoot 'candidate-upgrade-retention-only.txt'
+if(Test-Path -LiteralPath $upgradeCanary){throw 'Refusing to overwrite old-version test user data'}
+$upgradeCanaryValue="synthetic-prior-$sha-$env:GITHUB_RUN_ID"
+[IO.File]::WriteAllText($upgradeCanary,$upgradeCanaryValue)
+Require-File $upgradeCanary
+# The candidate installer uses the exact same disposable AppId. The explicit
+# temp path prevents touching any real or future Stable installation.
 & $inno $iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler exit: $LASTEXITCODE" }
 $exe=Join-Path $out "$setupName.exe"
 Require-File $exe
-$installedPath=Join-Path $temp 'installed-app'
 $p=Start-Process -FilePath $exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$installedPath") -PassThru -Wait
-if ($p.ExitCode -ne 0) { throw 'Installer execution failed' }
+if ($p.ExitCode -ne 0) { throw 'Candidate upgrade installer execution failed' }
 # A successful installer exit and shell smoke alone cannot prove its payload is complete.
 # Match EVERY staged application file against what Inno Setup actually installed;
 # Inno's own uninstall metadata is intentionally outside the staged manifest.
@@ -237,6 +272,11 @@ foreach($original in $sourceFiles) {
 Write-Output "PASS: complete installed application payload SHA-256 parity ($($sourceFiles.Count) files)"
 $installedReceipt=Smoke (Join-Path $installedPath 'UserscriptAutoHealer.exe') $installedPath 'installed' $temp
 Assert-RetainedData $installedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+if (-not (Test-Path -LiteralPath $upgradeCanary -PathType Leaf) -or
+    [IO.File]::ReadAllText($upgradeCanary) -cne $upgradeCanaryValue) {
+  throw 'Candidate upgrade deleted or altered prior-version user data'
+}
+Write-Output 'PASS: synthetic older Inno installer upgraded to current candidate with AppData intact (not real historical-version migration)'
 $uninstall=Get-ChildItem -LiteralPath $installedPath -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $uninstall) { throw 'Uninstaller missing' }
 $p=Start-Process -FilePath $uninstall.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
@@ -246,8 +286,10 @@ if ($p.ExitCode -ne 0 -or (Test-Path (Join-Path $installedPath 'UserscriptAutoHe
 # Uninstalling the candidate must not remove this unrelated, isolated
 # per-user test file. This is NOT a Stable migration/upgrade certification.
 if (-not (Test-Path -LiteralPath $canary -PathType Leaf) -or
-    [IO.File]::ReadAllText($canary) -cne $canaryText) {
-  throw 'Candidate uninstall deleted or altered independent user data'
+    [IO.File]::ReadAllText($canary) -cne $canaryText -or
+    -not (Test-Path -LiteralPath $upgradeCanary -PathType Leaf) -or
+    [IO.File]::ReadAllText($upgradeCanary) -cne $upgradeCanaryValue) {
+  throw 'Candidate uninstall deleted or altered independent or prior-version user data'
 }
 Write-Output 'PASS: disposable candidate userData identity and uninstall retention'
 $sum=Join-Path $out 'SHA256SUMS.txt'
