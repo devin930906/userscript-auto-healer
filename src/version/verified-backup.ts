@@ -186,8 +186,15 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     }
     });
   }catch(error){
-    if(error instanceof NativeSourceLockError&&error.code==='SOURCE_LOCKED')
-      return deny('SOURCE_LOCKED');
+    if(error instanceof NativeSourceLockError){
+      // The shared native lock already rejects aliased, junction-backed and
+      // multiply-linked sources before the backup callback executes. Preserve
+      // the precise refusal so a caller cannot mistake unsafe selection for
+      // a transient disk error or retry the same invalid source.
+      if(error.code==='SOURCE_LOCKED')return deny('SOURCE_LOCKED');
+      if(error.code==='INVALID_SOURCE')return deny('INVALID_PATH');
+      if(error.code==='SOURCE_CHANGED')return deny('SOURCE_CHANGED');
+    }
     return deny('IO_FAILURE');
   }
 }
