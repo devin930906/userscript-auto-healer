@@ -11,7 +11,7 @@
 export type GatewayCode =
   'DISABLED' | 'NOT_AUTHORIZED' | 'INVALID_EVIDENCE' |
   'MODEL_NOT_SELECTED' | 'REQUEST_LIMIT' | 'NETWORK_FAILED' |
-  'HTTP_REJECTED' | 'INVALID_RESPONSE' | 'CANCELLED';
+  'HTTP_REJECTED' | 'MODEL_LIST_UNAVAILABLE' | 'INVALID_RESPONSE' | 'CANCELLED';
 export type GatewayFailure = Readonly<{ok:false;code:GatewayCode;automaticPatchAllowed:false}>;
 export type ModelDiscovery = Readonly<{ok:true;status:'MODELS_DISCOVERED'|'MANUAL_MODEL_FALLBACK';
   models:readonly string[];manualModelAvailable:boolean;automaticPatchAllowed:false}>;
@@ -159,7 +159,9 @@ export class OptionalAiGateway {
           'Accept':'application/json',...(init.body?{'Content-Type':'application/json'}:{})}
       });
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
-      if(!response.ok)return failure('HTTP_REJECTED');
+      if(!response.ok)return failure(path==='/models'&&
+        (response.status===404||response.status===405)
+        ?'MODEL_LIST_UNAVAILABLE':'HTTP_REJECTED');
       const value=await limitedJson(response);
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
       if(value===null)return failure('INVALID_RESPONSE');
@@ -175,8 +177,7 @@ export class OptionalAiGateway {
     if(refused)return refused;
     const fetched=await this.request('/models',{method:'GET'},signal);
     if('ok' in fetched&&fetched.ok===false){
-      if(fetched.code==='HTTP_REJECTED'||fetched.code==='INVALID_RESPONSE'||
-         fetched.code==='NETWORK_FAILED')
+      if(fetched.code==='MODEL_LIST_UNAVAILABLE')
         return Object.freeze({ok:true,status:'MANUAL_MODEL_FALLBACK' as const,
           models:Object.freeze([] as string[]),
           manualModelAvailable:this.options.manualModel!==null,automaticPatchAllowed:false as const});

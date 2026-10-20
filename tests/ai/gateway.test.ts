@@ -118,13 +118,32 @@ test('TEST-016: no selected model, network status failures and request cap',asyn
   const modelMissing=await gateway.suggest(approval(),evidence);
   assert.deepEqual(modelMissing,{ok:false,code:'MODEL_NOT_SELECTED',automaticPatchAllowed:false});
   assert.equal(called,0);
-  const fallback=await gateway.discoverModels(approval());
-  assert.equal(fallback.ok,true);
-  if(fallback.ok)assert.equal(fallback.manualModelAvailable,false);
+  const rejected=await gateway.discoverModels(approval());
+  assert.deepEqual(rejected,{ok:false,code:'HTTP_REJECTED',automaticPatchAllowed:false});
   const limited=await gateway.discoverModels(approval());
   assert.deepEqual(limited,{ok:false,code:'REQUEST_LIMIT',automaticPatchAllowed:false});
   assert.equal(called,1);
   assert.equal(gateway.status().remainingRequests,0);
+});
+
+test('TEST-016: model discovery never hides unauthorized, throttled or unhealthy endpoints as fallback',async()=>{
+  for(const status of [401,403,429,500,503]){
+    const gateway=new OptionalAiGateway(options(),async()=>new Response('rejected',{status}));
+    assert.equal(gateway.enable(approval()),true);
+    assert.deepEqual(await gateway.discoverModels(approval()),
+      {ok:false,code:'HTTP_REJECTED',automaticPatchAllowed:false},String(status));
+  }
+  const network=new OptionalAiGateway(options(),async()=>{throw Error('offline');});
+  assert.equal(network.enable(approval()),true);
+  assert.deepEqual(await network.discoverModels(approval()),
+    {ok:false,code:'NETWORK_FAILED',automaticPatchAllowed:false});
+  for(const status of [404,405]){
+    const noList=new OptionalAiGateway(options(),async()=>new Response('',{status}));
+    assert.equal(noList.enable(approval()),true);
+    const result=await noList.discoverModels(approval());
+    assert.equal(result.ok,true);
+    if(result.ok)assert.equal(result.status,'MANUAL_MODEL_FALLBACK');
+  }
 });
 
 test('TEST-015: untrusted response cannot grant repairs, tools or oversized data',async()=>{
