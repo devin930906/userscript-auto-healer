@@ -213,6 +213,31 @@ export class ReadOnlyBatchCoordinator{
    ...authority
   });
  }
+ /** Native journal write guard: never allow an older or foreign batch
+  * snapshot to overwrite a later persisted scheduling hint.
+  * This is NOT checkpoint authentication and grants no script authority.
+  * Existing RUNNING entries are normalized by the checkpoint validator so a
+  * restarted, still-retryable job can return to QUEUED with its old attempts.
+  */
+ mayPersistOver(previous:unknown):boolean{
+  let persisted:MutableJob[];
+  try{
+   persisted=validateCheckpoint(previous,{
+    count:this.jobs.length,
+    maxAttempts:this.maxAttempts,concurrency:this.concurrency,
+    timeoutMs:this.timeoutMs,batchFingerprint:this.batchFingerprint
+   });
+  }catch{return false;}
+  return persisted.every((old,i)=>{
+   const current=this.jobs[i];
+   if(current.attempts<old.attempts)return false;
+   // Once a job has a persisted terminal outcome, a stale process must
+   // never erase it, change its outcome, or replay its attempt count.
+   if(old.state==='SUCCEEDED'||old.state==='FAILED'||old.state==='CANCELLED')
+    return current.state===old.state&&current.attempts===old.attempts;
+   return true;
+  });
+ }
  cancel():void{
   this.controller?.abort();
   for(const job of this.jobs){
