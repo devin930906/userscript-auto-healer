@@ -195,3 +195,8 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 ## （7）TASK-017 / TEST-022/026 手动导出准备取消及文件写入边界（2026-10-19）
 
 已实现的 `scenario:export-manual` 与普通 DOM 检查共用 AbortController，但原有界面仅在普通检查过程中提供取消。现在也允许在人工候选导出的**写入前**准备（原生授权、页面只读观察、目录选择、源文件再核验）阶段请求取消。最终原生写入授权后、启动备份/候选生成前，主进程同步将 `manualExportCommitInProgress` 设为真，`scenario:cancel` 改为返回 `EXPORT_WRITE_ALREADY_STARTED`，不再错误承诺能取消已有新文件。原始用户脚本仍不会被自动覆盖。Windows 真 Electron renderer→preload→IPC smoke 检验了模拟活动阶段中 UI 启用取消、提交前取消信号及文件创建阶段拒绝取消。该 smoke 未实际创建备份文件，不证明真实 Tampermonkey、GM、业务恢复、完整 TEST-022 或 Stable GATE。
+
+## （7）TEST-017/018：一次性 GM 夹具跨路由错误归属回归（2026-10-20）
+
+- [PR #133](https://github.com/devin930906/userscript-auto-healer/pull/133) 在 `tests/manager/tampermonkey-gm-probe.test.ts` 增加非规范测试 URL、延迟 DOMReady 后切换 `broken/fixed` 模式、DOM 读取过程及属性写入过程发生路由变化时的安全失败负例。原实现只在入口读取一次 `mode`，后续仍可在不属于原始授权页面的路由上产生 DOM 操作或自报；回归先于修复在 Windows [#39348815661](https://github.com/devin930906/userscript-auto-healer/actions/runs/39348815661) 观察到新用例失败。
+- 修复限定在受控的一次性测试脚本：入口和 GM 后、DOM 回调、DOM 查询后、属性写入后与回报前再次匹配完整原始 `/?mode=broken|fixed` URL。测试与最终合并需按 PR 最新 HEAD 及对应 Windows Actions 核验；没有授予任意页面脚本执行、自动补丁、回滚或管理器认证权。完整真实 Tampermonkey 注入、GM API/业务断言与 TEST-017/018、GATE-004/005 仍未验收。
