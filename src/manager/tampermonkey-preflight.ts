@@ -128,6 +128,50 @@ function inspectReportedTampermonkeyPreflightUnchecked(
    scriptInstallationVerified:false,gmApiVerified:false,businessVerified:false};
 }
 
+
+/** Copy only plain own data descriptors at the untrusted IPC/report boundary.
+ * In particular, a nonthrowing getter cannot become a valid manager report.
+ * Reject proxies before reflecting their keys (proxy traps can have effects).
+ */
+import {types as nodeTypes} from 'node:util';
+
+function plainDataSnapshot(input:unknown):Record<string,unknown>|null {
+ if(!input||typeof input!=='object'||Array.isArray(input)||nodeTypes.isProxy(input))
+  return null;
+ const prototype=Object.getPrototypeOf(input);
+ if(prototype!==Object.prototype&&prototype!==null)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ const names=Reflect.ownKeys(descriptors);
+ if(names.length>128||names.some(name=>typeof name!=='string'))return null;
+ const result:Record<string,unknown>=Object.create(null);
+ for(const name of names){
+  const descriptor=descriptors[name as string];
+  if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))
+   return null;
+  result[name as string]=descriptor.value;
+ }
+ return result;
+}
+/** @grant, @match and the unknown-tag list are arrays supplied by metadata.
+ * Snapshot each string slot without iterating or invoking index getters.
+ */
+function stringListSnapshot(input:unknown):string[]|null {
+ if(!Array.isArray(input)||nodeTypes.isProxy(input)||
+    Object.getPrototypeOf(input)!==Array.prototype)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ const count=descriptors.length?.value;
+ if(!Number.isSafeInteger(count)||count<0||count>8192||
+    Reflect.ownKeys(descriptors).length!==count+1)return null;
+ const values:string[]=[];
+ for(let i=0;i<count;i++){
+  const descriptor=descriptors[String(i)];
+  if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value')||
+     typeof descriptor.value!=='string')return null;
+  values.push(descriptor.value);
+ }
+ return values;
+}
+
 /** Fail closed on hostile accessors or revoked proxies passed through a
  * serialized report boundary. A malformed report grants no browser action.
  */
@@ -139,7 +183,25 @@ export function inspectReportedTampermonkeyPreflight(
  userApproved:boolean
 ):TampermonkeyPreflightResult {
  if(userApproved!==true)return blocked('NOT_AUTHORIZED');
- try{return inspectReportedTampermonkeyPreflightUnchecked(
-  runtime,report,metadata,targetUrl,true);
+ try{
+  const safeRuntime=plainDataSnapshot(runtime);
+  const safeReport=plainDataSnapshot(report);
+  const safeMetadata=plainDataSnapshot(metadata);
+  if(!safeRuntime||!safeReport||!safeMetadata)
+   return blocked('INVALID_INPUT');
+  const rawTags=plainDataSnapshot(safeMetadata.tags);
+  const unknownNames=stringListSnapshot(safeMetadata.unknownNames);
+  if(!rawTags||!unknownNames)return blocked('INVALID_INPUT');
+  const tags:Record<string,string[]>=Object.create(null);
+  for(const [name,rawValues] of Object.entries(rawTags)){
+   const values=stringListSnapshot(rawValues);
+   if(!values)return blocked('INVALID_INPUT');
+   tags[name]=values;
+  }
+  return inspectReportedTampermonkeyPreflightUnchecked(
+   safeRuntime as unknown as ManagerPresenceResult,
+   safeReport as unknown as ReportedTampermonkeyState,
+   {...safeMetadata,tags,unknownNames} as unknown as MetadataResult,
+   targetUrl,true);
  }catch{return blocked('INVALID_INPUT');}
 }
