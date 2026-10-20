@@ -149,6 +149,40 @@ foreach($original in $sourceFiles) {
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
 $expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
 Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+# REQ-028/TEST-028: a read-only extracted application directory must NOT be
+# required for data writes. Use real Windows NTFS ACLs (not merely the
+# directory ReadOnly attribute, which does not deny file creation).
+# Deny only Windows FILE_WRITE_DATA / directory FILE_ADD_FILE, not generic
+# Write (W), which also prevents CreateProcess from starting the runtime.
+# Everything here is disposable runner-local candidate content; never alter
+# user-provided paths or an installed Stable location.
+$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if($sid -notmatch '^S-1-[0-9-]+$') { throw 'Unable to identify Windows test principal' }
+$denyRule='*'+$sid+':(OI)(CI)(WD)'
+$removeRule='*'+$sid
+& icacls.exe $expanded /deny $denyRule | Out-Null
+if($LASTEXITCODE -ne 0) { throw 'Unable to make candidate extraction read-only' }
+try {
+  $unexpectedWrite=Join-Path $expanded 'uah-candidate-readonly-write-probe.tmp'
+  if(Test-Path -LiteralPath $unexpectedWrite) { throw 'Unexpected test probe already exists' }
+  $permissionDenied=$false
+  try {
+    [IO.File]::WriteAllText($unexpectedWrite,'not permitted')
+  } catch [UnauthorizedAccessException] {
+    $permissionDenied=$true
+  }
+  if(-not $permissionDenied -or (Test-Path -LiteralPath $unexpectedWrite)) {
+    throw 'Read-only portable path still permits application-directory writes'
+  }
+  $readonlyReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted-readonly' $temp
+  Assert-RetainedData $readonlyReceipt $userDataRoot $canary $canaryText $smokeRoaming
+} finally {
+  # Restore only the denial added to the disposable expanded candidate tree,
+  # inherited by children, so runner cleanup is not impaired.
+  & icacls.exe $expanded /remove:d $removeRule | Out-Null
+  if($LASTEXITCODE -ne 0) { throw 'Failed to restore candidate directory permissions' }
+}
+Write-Output 'PASS: actual Windows ACL read-only ZIP extraction denies writes and starts Electron using retained external userData'
 # Inno Setup's compiler is checked; never substitute a renamed EXE.
 $inno=@(
  (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'),
