@@ -175,6 +175,27 @@ test('TEST-009: CDP response enforces actual streamed byte limit without Content
     headers:{'content-length':'17000'}})),null);
   assert.equal(await readBoundedCdpJson(new Response('{}',{status:403})),null);
 });
+test('TEST-009/026: oversized CDP body cannot be held hostage by a pending stream cancellation',async()=>{
+ let cancelCalled=false;
+ // An untrusted HTTP body may never finish cancellation. Size rejection must
+ // return promptly instead of awaiting an unbounded external cleanup promise.
+ const stream=new ReadableStream<Uint8Array>({
+  start(controller){controller.enqueue(new Uint8Array(17000));},
+  cancel(){cancelCalled=true;return new Promise<void>(()=>{});}
+ });
+ let timeout:NodeJS.Timeout|undefined;
+ try{
+  const outcome=await Promise.race([
+   readBoundedCdpJson(new Response(stream)),
+   new Promise<never>((_resolve,reject)=>{
+    timeout=setTimeout(()=>reject(Error('CDP_STREAM_CANCEL_STALLED')),1000);
+   })
+  ]);
+  assert.equal(outcome,null);
+  assert.equal(cancelCalled,true,'oversized response still requests body cancellation');
+ }finally{if(timeout)clearTimeout(timeout);}
+});
+
 test('TEST-009: CDP JSON accepts split chunks but rejects malformed UTF-8',async()=>{
   const encoded=new TextEncoder().encode('{"Browser":"Chrome/155.0.1.1"}');
   const split=new Response(new ReadableStream<Uint8Array>({
