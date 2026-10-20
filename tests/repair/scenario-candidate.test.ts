@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {proposeFromReadOnlyDomDiagnostic} from '../../src/repair/scenario-candidate';
+import {summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 
@@ -53,6 +54,38 @@ test('TEST-014: stable old-absent/new-present DOM signals produce only a local c
   assert.equal(result.reason,'REQUIRES_REAL_MANAGER_AND_BUSINESS_VALIDATION');
   assert.equal(result.candidateSource,header+"const target=document.querySelector(\"#new\");\n");
   assert.notEqual(result.candidateSha256,result.originalSha256);
+});
+
+test('TEST-019/026: incomplete iframe, shadow and blind-spot coverage cannot produce a repair candidate',()=>{
+  const complete=series();
+  const cases=[
+    {name:'same-origin or unverified iframe subtree',summary:{
+      elementCount:4,iframeCount:1,visibleShadowRoots:0,
+      blindSpots:['IFRAME_CONTENT_UNVERIFIED']}},
+    {name:'visible shadow subtree outside top-level selectors',summary:{
+      elementCount:4,iframeCount:0,visibleShadowRoots:1,blindSpots:[]}},
+    {name:'closed shadow root explicitly unknown',summary:{
+      elementCount:4,iframeCount:0,visibleShadowRoots:0,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']}}
+  ];
+  // A diagnostic is still valid limited evidence; only escalation to a
+  // reviewable patch must be denied until the actual selector scope is known.
+  for(const entry of cases){
+    const samples=complete.samples.map(sample=>({
+      ...sample,summary:entry.summary
+    }));
+    const incomplete={...complete,samples};
+    const observation=summarizeReadOnlyScenarioDomSeries(
+      scenario,incomplete,true);
+    assert.equal(observation.status,'LIMITED_DOM_SIGNAL_ONLY',entry.name);
+    const candidate=proposeFromReadOnlyDomDiagnostic(
+      patch,scenario,incomplete,true);
+    assert.equal(candidate.status,'BLOCKED',entry.name);
+    if(candidate.status==='BLOCKED')
+      assert.equal(candidate.reason,'INCOMPLETE_DOM_COVERAGE',entry.name);
+    assert.equal('candidateSource' in candidate,false,entry.name);
+    assert.equal(candidate.automaticPatchAllowed,false,entry.name);
+  }
 });
 
 test('TEST-019: a missing new selector or a clean old selector cannot produce a candidate',()=>{
