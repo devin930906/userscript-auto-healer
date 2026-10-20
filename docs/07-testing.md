@@ -216,3 +216,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 继续在既有会话记录上加入只读原生 `scenario:history` IPC：renderer 只能传递先前已导入且已登记、符合只读资格的场景 ID；主进程独立解析对应脚本身份，最多返回 32 条观察时间与 `ELEMENT_FOUND_ONLY`／`INDETERMINATE`，不回传 SHA、脚本源码、URL、文件路径、DOM、凭据和证据原文，不支持任意路径／散列查找，不触发网页访问或系统文件更改。独立窗口仍有独立历史，关闭即清除。新增历史查询安全单测及实际 Electron sandbox/preload/renderer 交互回归，并将 IPC 纳入严格通道白名单；测试结果以最新 PR/Actions/main SHA 核验，不冒充真实 Tampermonkey/业务验证。
 
 **TEST-024 仍为部分实现**：真实管理员确认后的周期复检与持久化、真实脚本/业务验收尚未具备；GATE-004/005/007/010 等保持未完成。
+
+## （7）TASK-019/020 / TEST-027/028 候选双包安全增量（2026-10-20）
+
+[PR #147](https://github.com/devin930906/userscript-auto-healer/pull/147) 在现有候选 Windows 打包脚本上隔离 Inno 安装标识、默认目录、快捷方式及 Electron 用户数据命名，并扩展便携 ZIP 校验至 138 个条目的完整文件集。Windows [Actions #39366563301](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563301) 在 PR 合成提交 `712d6ff95ec097910a1df6f58812b54426e98e22` 完成实际候选 Electron 启动、安装、ZIP 解压和卸载回归（全部文件 SHA-256 逐一对比）；345 个 npm case 为 344 pass、0 fail、1 skip。相应应用检查 [#39366563208](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563208) 成功，合并 SHA `f5ad55ce7fda0f9c3319c1547f6394305b3bac42`。**这仍非正式 Stable 或全量 TEST-027/028 通过**，最低 Windows、升级数据、完整便携只读行为、Tampermonkey 业务回归与 GATE-008/009/011 未验证。

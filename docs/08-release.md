@@ -39,6 +39,13 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - 候选文件暂存于 [GitHub Actions Artifact 12238554892 所属运行](https://github.com/devin930906/userscript-auto-healer/actions/runs/39365266655)，留存期限仅 3 日；这是 **Actions 外层打包工件**，不是 GitHub Releases，也不是可长期引用的 Stable 下载地址。内部 ZIP 文件已单独通过实际 ZIP 格式检查。
 - TASK-018 的真实产品业务验证尚未完成；TEST-027/028 的全部升级/只读目录/数据持久化/用户 Windows 环境矩阵、GATE-008/009/011 仍未通过；全部 GATE-001..011 的 Stable 最终判定仍保持未完成。不可用候选烟测取代这些门槛。签名、许可证决策及正式对外发布仍受独立条件约束。
 
+## 2026-10-20 候选安装隔离与完整 ZIP 复核（TASK-019/020）
+
+- [PR #147](https://github.com/devin930906/userscript-auto-healer/pull/147) 已合并，main 合并提交 `f5ad55ce7fda0f9c3319c1547f6394305b3bac42`。此前候选安装器 `AppId` 和默认安装目录接近正式应用，存在与未来 Stable 安装/卸载命名空间冲突风险。本轮将候选 Inno Setup AppId、默认目录、快捷方式以及内置 Electron 应用 `name/productName` 改为独立开发候选身份；仍未实施正式版升级策略。
+- [Windows CI 39366563301](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563301) 的实际 PR 测试合成源码 `712d6ff95ec097910a1df6f58812b54426e98e22`：全部 138 个 ZIP 文件以相对路径逐一 SHA-256 与解压后文件校验，拒绝条目重复、条目路径不安全、数量或内容不符；候选 Inno EXE 实际安装／启动／卸载及 ZIP 解压启动通过。独立 [Application Skeleton Checks 39366563208](https://github.com/devin930906/userscript-auto-healer/actions/runs/39366563208) 成功，npm 测试 345 项中 344 通过、0 失败、1 跳过。
+- 此次开发候选 EXE SHA-256 `c68a38e39f2b0a7929116c283cb51ee688a1378954cbe1fa0d85117bba537e7a`；开发候选 ZIP SHA-256 `95015e017bdc032232cb10f2485193084842dcd74b8ba4007352c122b5918b02`。Artifact `12239458338`（3 日留存），位于同次工作流。上述两个 SHA-256 仅适用于该临时合成提交的构建产物，**不是 main 正式 Stable 发行**。
+- TASK-019/020 仍为开发中；完整 TEST-027/028、最低系统矩阵、升级及数据保留、真实 Tampermonkey/业务修复、签名与 GATE-001..011 仍待独立验收。不得因本轮安装隔离或完整 ZIP 哈希通过而发正式 Release。
+
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
 |---|---|---|---|---|---|---|---|
