@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {importApprovedPaths,type ImportedScript} from '../../src/import/import-service';
 import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
@@ -217,5 +217,33 @@ test('TEST-019/023/026: native manual export rejects accessor scenarios before t
   assert.equal(invoked,0);
   assert.deepEqual(await readdir(backupDirectory),[]);
   assert.deepEqual(await readdir(exportDirectory),[]);
+ });
+});
+
+test('TEST-020/023/026: manual export binds displayed native filename to the selected on-disk source',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  // Identical bytes and SHA-256 do not prove WHICH path the user selected.
+  // An untrusted/cross-batch handoff must never back up or export a different
+  // same-content file while the UI still identifies the originally imported one.
+  const otherPath=join(dirname(scriptPath),'different.user.js');
+  await writeFile(otherPath,source);
+  const altered=[
+   {...script,filename:'different.user.js'},
+   {...script,sourcePath:otherPath}
+  ];
+  for(const candidate of altered){
+   const result=await exportReviewedImportedSelectorOnly(candidate,
+    scenario(script.sha256),observation(),
+    {backupDirectory,exportDirectory,userApproved:true});
+   assert.deepEqual(result,{
+    status:'BLOCKED',reason:'INVALID_IMPORT',automaticPatchAllowed:false,
+    automaticRollbackAllowed:false,tampermonkeyVerified:false,
+    managerInstalled:false,businessVerified:false
+   });
+   assert.deepEqual(await readdir(backupDirectory),[]);
+   assert.deepEqual(await readdir(exportDirectory),[]);
+   assert.equal(await readFile(scriptPath,'utf8'),source);
+   assert.equal(await readFile(otherPath,'utf8'),source);
+  }
  });
 });
