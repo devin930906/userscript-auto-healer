@@ -229,14 +229,24 @@ export async function observeApprovedDom(
      !Number.isInteger(port)||port<1024||port>65535)
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const owner=await verifyWindowsLoopbackListenerPid(port,session.pid);
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!owner.ok||!isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   let json:unknown;
   try{
+    // Revocation must abort the bounded target-list HTTP transport itself,
+    // not merely the later page WebSocket / DOM commands. A timeout alone
+    // can leave a cancelled, consent-sensitive observation waiting on I/O.
+    const requestSignal=signal
+      ?AbortSignal.any([signal,AbortSignal.timeout(1600)])
+      :AbortSignal.timeout(1600);
     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
-      redirect:'error',signal:AbortSignal.timeout(1600)});
+      redirect:'error',signal:requestSignal});
     json=await readBoundedCdpJson(response);
-  }catch{return {ok:false,code:'CDP_FAILED'};}
+  }catch{
+    return {ok:false,code:signal?.aborted?'CANCELLED':'CDP_FAILED'};
+  }
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!Array.isArray(json))return {ok:false,code:'UNVERIFIED_TARGET'};
   const item=json.find(x=>record(x)&&x.id===target.targetId);
   if(!record(item)||typeof item.url!=='string')
