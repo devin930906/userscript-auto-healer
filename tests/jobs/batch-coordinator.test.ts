@@ -627,7 +627,7 @@ import {importDroppedBytes} from '../../src/import/import-service';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import {previewImportedScriptAnalysis} from '../../src/analyze/import-preview';
 
-const QUEUE_HEADER='// ==UserScript==\\n// @name actual-native-queue\\n// @match https://example.org/*\\n// ==/UserScript==\\n';
+const QUEUE_HEADER=['// ==UserScript==','// @name actual-native-queue','// @match https://example.org/*','// ==/UserScript==',''].join(String.fromCharCode(10));
 function realNativeScript(index:number){
  const bytes=new TextEncoder().encode(QUEUE_HEADER+
   'document.querySelector("#private-script-'+index+'");');
