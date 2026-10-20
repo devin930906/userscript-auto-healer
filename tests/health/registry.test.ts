@@ -93,3 +93,19 @@ test('TEST-024: reject invalid time, do not mutate historical events', () => {
   assert.throws(() => { (one.history as unknown as unknown[]).push('fake'); });
   assert.equal(limited.snapshot(A).history.length, 1);
 });
+
+test('TEST-024/NFR-002: hostile Proxy errors never escape the health input boundary', () => {
+  const registry = new LimitedHealthRegistry(() => 15);
+  const secret = 'PRIVATE_HEALTH_PROXY_ERROR_MUST_NOT_ESCAPE';
+  const observation = unknown();
+  const hostile = [
+    new Proxy(observation, {getPrototypeOf() {throw Error(secret);}}),
+    new Proxy(observation, {ownKeys() {throw Error(secret);}}),
+    new Proxy(observation, {getOwnPropertyDescriptor() {throw Error(secret);}})
+  ];
+  for (const input of hostile) {
+    assert.throws(() => registry.record(input), (error: unknown) =>
+      error instanceof Error && error.message === 'INVALID_HEALTH_OBSERVATION');
+  }
+  assert.equal(registry.snapshot(A).status, 'UNTESTED');
+});
