@@ -23,6 +23,7 @@ import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manu
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
+import {readLimitedSessionHistory} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
@@ -628,6 +629,13 @@ function registerSafeIpc(): void {
   ipcMain.handle('scenario:register',(event,input:unknown)=>{
     authorizeSender(event);
     return scenarioSession.register(input);
+  });
+
+  // Read-only history of a staged/imported scenario. This never visits a site,
+  // accepts a file path/hash from renderer, or returns raw evidence/hash data.
+  ipcMain.handle('scenario:history',(event,id:unknown)=>{
+    authorizeSender(event);
+    return readLimitedSessionHistory(scenarioSession,limitedScenarioHistory,id);
   });
 
   // Fresh native consent, verified owned Chrome process and a scenario ID from
