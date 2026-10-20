@@ -25,13 +25,29 @@ function safeWindowsDrivePath(value: unknown): value is string {
 }
 
 export function validateBrowserConfig(input: unknown): ConfigValidation {
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
-    return { ok: false, code: 'INVALID_SHAPE' };
-  }
-  const record = input as Record<string, unknown>;
-  const allowed = ['executablePath', 'userDataDir', 'remoteDebuggingPort', 'bindAddress'];
-  if (Object.keys(record).some(key => !allowed.includes(key)) ||
-      allowed.some(key => !Object.prototype.hasOwnProperty.call(record, key))) {
+  // Renderer-supplied IPC objects have no authority to run getters or carry
+  // hidden/symbol properties. Snapshot exact own DATA descriptors first;
+  // revoked/hostile Proxies fail closed without leaking their error text.
+  let record: Record<string, unknown>;
+  try {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      return { ok: false, code: 'INVALID_SHAPE' };
+    }
+    const proto = Object.getPrototypeOf(input);
+    if (proto !== Object.prototype && proto !== null) {
+      return { ok: false, code: 'INVALID_SHAPE' };
+    }
+    const allowed = ['executablePath', 'userDataDir', 'remoteDebuggingPort', 'bindAddress'];
+    const descriptors = Object.getOwnPropertyDescriptors(input);
+    const own = Reflect.ownKeys(descriptors);
+    if (own.length !== allowed.length || own.some(key => typeof key !== 'string') ||
+        allowed.some(key => !Object.prototype.hasOwnProperty.call(descriptors, key) ||
+          !Object.prototype.hasOwnProperty.call(descriptors[key], 'value'))) {
+      return { ok: false, code: 'INVALID_SHAPE' };
+    }
+    record = Object.create(null) as Record<string, unknown>;
+    for (const key of allowed) record[key] = descriptors[key].value;
+  } catch {
     return { ok: false, code: 'INVALID_SHAPE' };
   }
   if (!safeWindowsDrivePath(record.executablePath) ||
