@@ -295,3 +295,11 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 ## （7）TASK-011 已变化原文件恢复前置复核增量（2026-10-20）
 
 作为原 TASK-011（REQ-020/021、TEST-020/021）的开发中子阶段，新增 native-only changed-source restore preflight，核查更改后的源文件及完整独立旧备份，严格拒绝路径别名、意外修改和未经授权的请求。不实现原文件写入、可恢复事务、用户一键回滚或真实 Tampermonkey 验收。TASK-011 仍为“开发中”，TASK-018～021 与 Stable GATE 均不视为完成。本阶段 PR、CI 和合并 SHA 以 GitHub 当前状态为准。
+
+## （7）2026-10-20 TASK-013 / TEST-022 分段 AST 只读预览超过 64 份的覆盖
+
+PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用已有分支，修复原生批量导入最多 1000 份 .user.js、但孤立 AST Worker 只分析前 64 份的覆盖缺口。当前代码按 16 份/每段及 1 MiB/每段串行预览，单 Worker 最长 10 秒，并对全批施加 120 秒总预算；超时或超过导入上限的输入保守返回 `SKIPPED_BATCH_BUDGET`，取消后按 `SKIPPED_CANCELLED` 记录，原脚本字节不修改，不执行用户脚本，所有 Tampermonkey / 业务 / 自动应用权限继续为 false。此处不声称完整 1000 份性能基准或可信持久批处理已经验收。
+
+测试先行源码 `2cbc8941a48d50070311d0c6329d096f7477680c` 的 [Windows CI #39405858361](https://github.com/devin930906/userscript-auto-healer/actions/runs/39405858361) 实际失败：364 项中 361 pass、2 fail、1 skip，两项 TEST-022 均为超过原 64 份界限的断言；修复源码 `001b90f3bc466ac6760667ac6070666f44006e03` 的 [Application Checks #39406194800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39406194800) success：364 项，363 pass、0 fail、1 skip，实际 Windows Electron sandbox/preload smoke 成功。已核验 70 份实际 Worker 预览和预先取消；完整 1000 份用户业务与性能基线尚未测试。
+
+[Windows 开发候选 EXE+ZIP #39406194811](https://github.com/devin930906/userscript-auto-healer/actions/runs/39406194811) 第一次测试因不涉及本次 AST 改动的 Chrome/CDP `CDP_TIMEOUT` 失败，保留失败证据；仅重跑一次后 attempt 2 success：同样 364 项回归、ZIP 138 文件哈希往返、只读路径启动、EXE 138 文件安装完整性、合成升级及卸载数据保留均通过。该候选构建实际 PR 测试合成源码为 `b2a7b1736c514fbb6e11fd648b3b3c3aa4023371`，不是 PR HEAD 或 main；Artifact ID `12257896775`，2026-10-23 到期，明确 CANDIDATE ONLY / NOT STABLE。候选 EXE SHA-256 `c8827b2c209d38da498091614fc63fb178250212a39a63bcc19ef9ed2c5572a5`、候选 ZIP SHA-256 `6ea313e15d7227f66c7d65bd05fa290d26d52e4060a2a796688e41224b9df462`，不能挪用为正式 Release 校验。本轮 TASK-013/TEST-022 仍是开发中，持久恢复、真实 Tampermonkey/GM/业务及最终 Stable GATE 未完成；合并状态及 main SHA 需独立复核。
