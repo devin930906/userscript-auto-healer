@@ -249,6 +249,43 @@ test('TEST-016/026: oversized AI reply cannot hang on a never-settling stream ca
  gateway.disable();
 });
 
+test('TEST-016/026: cancelling a stalled provider response body settles even when stream ignores cancellation',async()=>{
+  let reading!:()=>void;
+  const didRead=new Promise<void>(resolve=>{reading=resolve;});
+  let cancelCalls=0;
+  const body=new ReadableStream<Uint8Array>({
+    pull(){reading();return new Promise<void>(()=>{});},
+    cancel(){cancelCalls++;return new Promise<void>(()=>{});}
+  });
+  const gateway=new OptionalAiGateway({...options(),maxRequests:1},
+    async()=>new Response(body,{status:200}));
+  assert.equal(gateway.enable(approval()),true);
+  const pending=gateway.discoverModels(approval());
+  await didRead;
+  gateway.disable();
+  const result=await Promise.race([
+    pending,
+    new Promise<'BODY_READ_STALLED'>(resolve=>setTimeout(()=>resolve('BODY_READ_STALLED'),1500))
+  ]);
+  assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
+  assert.ok(cancelCalls>=1);
+});
+
+test('TEST-016/026: response body with no chunks respects the configured request deadline',async()=>{
+  const body=new ReadableStream<Uint8Array>({
+    pull(){return new Promise<void>(()=>{});},
+    cancel(){return new Promise<void>(()=>{});}
+  });
+  const gateway=new OptionalAiGateway({...options(),timeoutMs:500,maxRequests:1},
+    async()=>new Response(body,{status:200}));
+  assert.equal(gateway.enable(approval()),true);
+  const result=await Promise.race([
+    gateway.discoverModels(approval()),
+    new Promise<'BODY_DEADLINE_STALLED'>(resolve=>setTimeout(()=>resolve('BODY_DEADLINE_STALLED'),2000))
+  ]);
+  assert.deepEqual(result,{ok:false,code:'NETWORK_FAILED',automaticPatchAllowed:false});
+});
+
 test('TEST-016/026: oversized declared response body also requests nonblocking cleanup',async()=>{
  let cancelCalls=0;
  const body=new ReadableStream<Uint8Array>({
