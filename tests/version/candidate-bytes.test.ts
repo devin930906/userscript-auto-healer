@@ -66,3 +66,19 @@ test('TEST-020: symlink and ancestor junction cannot receive matching receipt',a
    join(dirAlias,'candidate.user.js'),expected),'CHANGED');
  });
 });
+
+test('TEST-020: removed or unavailable staged candidate fails closed as CHANGED',async()=>{
+ await inTemporaryDirectory(async root=>{
+  const expected=Buffer.from('trusted-review-bytes');
+  const candidate=join(root,'reviewed.candidate.user.js');
+  // A receipt can outlive its staged candidate: never throw or elevate it.
+  assert.equal(await verifyExactCandidateBytesReadOnly(candidate,expected),'CHANGED');
+  await writeFile(candidate,expected);
+  assert.equal(await verifyExactCandidateBytesReadOnly(candidate,expected),'MATCH');
+  await unlink(candidate);
+  assert.equal(await verifyExactCandidateBytesReadOnly(candidate,expected),'CHANGED');
+  // An absent ancestor is also a revoked candidate, not an uncaught IO error.
+  assert.equal(await verifyExactCandidateBytesReadOnly(
+   join(root,'removed','reviewed.candidate.user.js'),expected),'CHANGED');
+ });
+});
