@@ -121,8 +121,11 @@ function inspectReportedTampermonkeyPreflightUnchecked(
     (metadata.tags.exclude?.length??0)>0||
     (metadata.tags['exclude-match']?.length??0)>0)
     return blocked('MATCH_NOT_CONFIRMED');
- const pattern=metadata.tags.match.find(value=>matchingExactOriginPattern(value,target));
- if(!pattern)return blocked('MATCH_NOT_CONFIRMED');
+ // This explicitly consented GM fixture must not silently inject on extra
+ // sites. Even one matching entry cannot bless a second @match (or duplicate).
+ if(metadata.tags.match.length!==1)return blocked('MATCH_NOT_CONFIRMED');
+ const pattern=metadata.tags.match[0];
+ if(!matchingExactOriginPattern(pattern,target))return blocked('MATCH_NOT_CONFIRMED');
  return {ok:true,status:'METADATA_ELIGIBLE_ONLY',
    extensionId:TAMPERMONKEY_EXTENSION_ID,reportedVersion:report.version,
    scriptMatchPattern:pattern,extensionAuthenticityVerified:false,
