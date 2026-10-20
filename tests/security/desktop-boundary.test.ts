@@ -120,6 +120,24 @@ test('TASK-005/TEST-026: reject NTFS alternate data stream path aliases', () => 
   }
 });
 
+test('TASK-005/TEST-007/026: reject Windows DOS device aliases in Chrome and profile paths', () => {
+  // Win32 reserves these component names even with filename extensions.
+  for (const path of [String.raw`C:\CON\Chrome\chrome.exe`, String.raw`C:\Portable Apps\PRN.txt\chrome.exe`,
+    String.raw`C:\AUX.log\Chrome\chrome.exe`, String.raw`C:\COM²\Chrome\chrome.exe`]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, executablePath: path}),
+      {ok:false, code:'INVALID_EXECUTABLE'});
+  }
+  for (const path of [String.raw`D:\Authorized\NUL\UAH-Test-Profile`,
+    String.raw`D:\Authorized\COM1\UAH-Test-Profile`,
+    String.raw`D:\Authorized\lpt9.txt`]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, userDataDir: path}),
+      {ok:false, code:'UNSAFE_PROFILE'});
+  }
+  assert.deepEqual(validateBrowserConfig({
+    ...allowed, userDataDir:String.raw`D:\Authorized\COM10\UAH-Test-Profile`
+  }).ok, true, 'non-reserved multi-digit components remain allowed');
+});
+
 test('TASK-001: reject daily Chrome User Data, drive roots and traversal', () => {
   for (const path of [String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data`,
     String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data\Default`,
