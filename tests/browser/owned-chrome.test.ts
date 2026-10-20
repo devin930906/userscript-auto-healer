@@ -6,6 +6,7 @@ import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
 import { openApprovedTarget } from '../../src/browser/cdp-target';
+import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
 
@@ -85,7 +86,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     assert.match(result.chromeVersion,/^\d+\.\d+\.\d+\.\d+$/);
     const fixture=createServer((_req,res)=>{
       res.writeHead(200,{'Content-Type':'text/html'});
-      res.end('<!doctype html><title>Approved local test</title>');
+      res.end('<!doctype html><title>Approved local test</title><main id="approved-ready">ok</main>');
     });
     await new Promise<void>((resolve,reject)=>{
       fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
@@ -101,6 +102,15 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     if(target.ok){
       assert.equal(target.status,'TARGET_ID_AND_URL_MATCH_ONLY');
       assert.equal(target.businessVerified,false);
+      // TEST-009/010: opening a target must wait for its own Page frame to
+      // leave about:blank; DOM read must not need an app-side navigation retry.
+      const observed=await observeApprovedDom(result,target,site,true,['#approved-ready']);
+      assert.equal(observed.ok,true,JSON.stringify(observed));
+      if(observed.ok){
+        assert.equal(observed.selectorCounts['#approved-ready'],1);
+        assert.equal(observed.fullPageVerified,false);
+        assert.equal(observed.userscriptVerified,false);
+      }
     }
     stop();
     assert.equal(isLiveApprovedChromeSession(result),false);
