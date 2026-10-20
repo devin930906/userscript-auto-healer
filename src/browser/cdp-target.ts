@@ -64,6 +64,56 @@ async function requestNewTab(
     }catch{finish(null);}
   });
 }
+
+/** A target-list URL can advance ahead of the page's CDP main frame during
+ * navigation. Only consider a newly opened tab ready once its own read-only
+ * Page.getFrameTree agrees with the approved URL. This never observes DOM,
+ * executes page JS, or elevates userscript/business trust.
+ */
+async function confirmsMainFrameNavigation(
+  wsUrl:string,expectedUrl:string,signal?:AbortSignal
+):Promise<boolean>{
+  if(signal?.aborted)return false;
+  return new Promise(resolve=>{
+    let socket:WebSocket|undefined,done=false;
+    const finish=(confirmed:boolean)=>{
+      if(done)return;
+      done=true;clearTimeout(timer);
+      signal?.removeEventListener('abort',onAbort);
+      try{socket?.close();}catch{/* socket may still be connecting */}
+      resolve(confirmed&&!signal?.aborted);
+    };
+    const onAbort=()=>finish(false);
+    const timer=setTimeout(()=>finish(false),1500);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    if(signal?.aborted){finish(false);return;}
+    try{
+      socket=new WebSocket(wsUrl);
+      socket.addEventListener('open',()=>{
+        if(done||signal?.aborted){finish(false);return;}
+        try{socket?.send(JSON.stringify({id:1,method:'Page.getFrameTree'}));}
+        catch{finish(false);}
+      });
+      socket.addEventListener('message',event=>{
+        if(done||signal?.aborted){finish(false);return;}
+        try{
+          const raw=String(event.data);
+          if(raw.length>16384){finish(false);return;}
+          const response=JSON.parse(raw) as {
+            id?:unknown;result?:{frameTree?:{frame?:{url?:unknown}}};error?:unknown
+          };
+          if(response.id!==1)return;
+          const actual=response.result?.frameTree?.frame?.url;
+          finish(!response.error&&typeof actual==='string'&&
+            actual===expectedUrl);
+        }catch{finish(false);}
+      });
+      socket.addEventListener('error',()=>finish(false));
+      socket.addEventListener('close',()=>finish(false));
+    }catch{finish(false);}
+  });
+}
+
 /** Never accept a raw third-party CDP socket or an unapproved website. */
 export async function openApprovedTarget(
   session:ManagedLaunchResult,targetUrl:string,userApproved:boolean,
@@ -103,7 +153,8 @@ export async function openApprovedTarget(
       const json=await readBoundedCdpJson(response);
       if(signal?.aborted)return {ok:false,code:'CANCELLED'};
       const inspected=inspectCdpTargetList(json,port,targetUrl);
-      if(inspected.ok&&inspected.targetId===created) {
+      if(inspected.ok&&inspected.targetId===created&&
+         await confirmsMainFrameNavigation(inspected.websocketUrl,targetUrl,signal)) {
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
