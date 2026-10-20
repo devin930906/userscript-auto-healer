@@ -203,3 +203,7 @@ PR [#101](https://github.com/devin930906/userscript-auto-healer/pull/101) 对 ap
 ## （7）TASK-011 已变化原文件恢复准备交接（2026-10-20）
 
 现有备份、候选与检查点链路新增对“原文件内容已变但独立旧备份仍在”场景的只读恢复前置校验，代码 `src/version/changed-source-restore-preflight.ts`，测试 `tests/version/changed-source-restore-preflight.test.ts`，纳入 Windows npm TEST-020/021 回归。输入需严格描述符安全、用户同意声明、两份独立哈希和旧备份长度；不能把声明当原生授权或未来恢复权限。该阶段不覆盖原文件、不证明业务恢复、不是原子写入/回滚。下一动作仍需真实 Tampermonkey 认证和可恢复写入事务。TASK-011、TEST-020/021、GATE-007 仍未完成，具体集成以 PR/Actions/main 复核。
+
+## （7）TASK-015/017 有限健康历史接入续接点（2026-10-20）
+
+最新分支 `feat/task015-session-dom-health-bridge` 基于当时 `main@1a99091414ed8cb269927ad3bd9df9518432a8f8` 连接现有内存 `LimitedHealthRegistry` 与本应用自管 Chrome 中的场景只读 DOM + 被动页面异常检查，仅将通过授权且完整完成的有限摘要登记至当前桌面窗口会话。断言缺失、异常信号记录不确定；窗口关闭后清空。新增 TEST-024 负例及 UI 语义约束。**这个阶段既不验证 Tampermonkey/GM/业务，也不能授权自动应用或回滚**。实际源提交、PR、Windows CI、整合状态需按远程最新记录重新核验；PR 未合并不得当成已入 main。下一优先仍为 TASK-007 的真实 Tampermonkey 产品验收、TASK-010/011 的可信验收/事务恢复依赖，TASK-017 完整旅程和 TASK-018..021/EXE/ZIP/GATE 不得标完成。

@@ -48,6 +48,8 @@ interface Window {
         'NO_SELECTOR_MISSING_IN_WINDOW'|'INCONCLUSIVE_OR_OTHER_SIGNAL';
       pageRuntimeStatus?:'PAGE_EXCEPTION_SIGNAL_ONLY'|'NO_EXCEPTION_IN_WINDOW_ONLY';
       pageExceptionCount?:number;
+      sessionHealthStatus?:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'|'UNAVAILABLE';
+      sessionHealthEventCount?:number;
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
@@ -579,7 +581,15 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
         :result.pageRuntimeStatus==='NO_EXCEPTION_IN_WINDOW_ONLY'
           ?'1.2 秒窗口未观察到（不代表没有异常）'
           :'未取得可靠的页面异常观察')+
-      '。仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
+      '；当前会话有限观察历史：'+(
+        result.sessionHealthStatus==='ELEMENT_FOUND_ONLY'?
+          '只观察到目标元素存在（不是脚本正常或业务恢复）':
+        result.sessionHealthStatus==='INDETERMINATE'?
+          '证据不足，不能判断脚本状态':
+          '记录不可用')+
+      '；记录 '+(result.sessionHealthEventCount??0)+
+      ' 条（最多 32 条，关闭窗口即清除）。'+
+      '仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
    :'场景检查未通过：'+(result.code??'UNKNOWN')+
       '。没有获得 Tampermonkey 或业务验证结果。';
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
