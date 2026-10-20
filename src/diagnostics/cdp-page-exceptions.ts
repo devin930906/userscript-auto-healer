@@ -262,10 +262,16 @@ export async function inspectApprovedPageExceptions(
     return blocked('UNVERIFIED_BROWSER');
   let list:unknown;
   try{
+    // Consent revocation must abort target discovery HTTP itself, not just
+    // subsequent CDP event monitoring. Keep the existing transport deadline.
+    const requestSignal=signal
+      ?AbortSignal.any([signal,AbortSignal.timeout(1600)])
+      :AbortSignal.timeout(1600);
     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
-      redirect:'error',signal:AbortSignal.timeout(1600)});
+      redirect:'error',signal:requestSignal});
     list=await readBoundedCdpJson(response);
-  }catch{return blocked('CDP_FAILED');}
+  }catch{return blocked(signal?.aborted?'CANCELLED':'CDP_FAILED');}
+  if(signal?.aborted)return blocked('CANCELLED');
   const tab=inspectCdpTargetList(list,port,expectedUrl);
   if(!tab.ok||tab.targetId!==target.targetId)return blocked('UNVERIFIED_TARGET');
   if(signal?.aborted)return blocked('CANCELLED');
