@@ -311,3 +311,38 @@ test('TEST-017/026: GM-only Tampermonkey preflight rejects unreviewed execution-
  assert.equal(actual.ok,false);
  if(!actual.ok)assert.equal(actual.code,'INJECTION_CONTEXT_NOT_CONFIRMED');
 });
+
+test('TEST-017: exact 127.0.0.1 userscript match supports disposable fixture ports without granting runtime proof',()=>{
+ const fixture=metadata({grant:['GM_getValue'],
+   match:['http://127.0.0.1/*'],'run-at':['document-start'],noframes:['']});
+ for(const url of [
+   'http://127.0.0.1:41235/?mode=broken',
+   'http://127.0.0.1:41235/?mode=fixed'
+ ]){
+   const outcome=inspect(report,fixture,url);
+   assert.equal(outcome.ok,true,JSON.stringify(outcome));
+   if(outcome.ok){
+     assert.equal(outcome.status,'METADATA_ELIGIBLE_ONLY');
+     assert.equal(outcome.extensionAuthenticityVerified,false);
+     assert.equal(outcome.scriptInstallationVerified,false);
+     assert.equal(outcome.gmApiVerified,false);
+     assert.equal(outcome.businessVerified,false);
+   }
+ }
+ // Permit only the exact loopback IP used by the disposable fixture.
+ for(const url of [
+   'http://localhost:41235/?mode=fixed',
+   'http://127.0.0.2:41235/?mode=fixed',
+   'https://127.0.0.1:41235/?mode=fixed'
+ ]){
+   const denied=inspect(report,fixture,url);
+   assert.deepEqual(denied,{ok:false,status:'BLOCKED',
+     code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false});
+ }
+ // Nonstandard remote origins remain outside this *metadata-only* exception.
+ const remote=metadata({grant:['GM_getValue'],match:['https://example.com/*']});
+ assert.equal(inspect(report,remote,'https://example.com:8443/').ok,false);
+ // Browsers do not accept port syntax in Chrome-style @match metadata.
+ const forged=metadata({grant:['GM_getValue'],match:['http://127.0.0.1:41235/*']});
+ assert.equal(inspect(report,forged,'http://127.0.0.1:41235/').ok,false);
+});
