@@ -103,21 +103,47 @@ function validateSelectors(value:unknown):value is string[]{
     value.every(s=>typeof s==='string'&&s.length>=1&&s.length<=256&&
       s.trim()===s&&!/[\u0000-\u001f]/.test(s))&&new Set(value).size===value.length;
 }
+/**
+ * TASK-006/007 / TEST-010/017: cancellation-aware CDP socket handshake.
+ * A late OPEN after abort/timeout cannot make the caller send Page/DOM
+ * commands. This is only a transport gate, NEVER browser ownership evidence.
+ */
+export function awaitReadOnlyCdpSocketOpen(
+  socket:WebSocket,signal?:AbortSignal
+):Promise<boolean>{
+  return new Promise(resolve=>{
+    let settled=false;
+    const settle=(opened:boolean)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort',onAbort);
+      socket.removeEventListener('open',onOpen);
+      socket.removeEventListener('error',onFailure);
+      socket.removeEventListener('close',onFailure);
+      resolve(opened&&!signal?.aborted);
+    };
+    const onOpen=()=>settle(true);
+    const onFailure=()=>settle(false);
+    const onAbort=()=>settle(false);
+    const timer=setTimeout(()=>settle(false),4000);
+    socket.addEventListener('open',onOpen);
+    socket.addEventListener('error',onFailure);
+    socket.addEventListener('close',onFailure);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    if(signal?.aborted)settle(false);
+  });
+}
 async function pageCdp(url:string,selectors:string[],approvedOrigin:string,
   signal?:AbortSignal):Promise<{summary:DomSummary;selectorCounts:Record<string,number>;
     observedTopUrl:string}|null>{
   if(signal?.aborted)return null;
   const ws=new WebSocket(url);
   let id=0;
-  const opened=await new Promise<boolean>(resolve=>{
-    let done=false;
-    const settle=(value:boolean)=>{if(done)return;done=true;clearTimeout(timer);resolve(value);};
-    const timer=setTimeout(()=>settle(false),4000);
-    ws.addEventListener('open',()=>settle(true),{once:true});
-    ws.addEventListener('error',()=>settle(false),{once:true});
-    ws.addEventListener('close',()=>settle(false),{once:true});
-  });
-  if(!opened){ws.close();return null;}
+  // Opening a WebSocket can take several seconds. Revoked consent must
+  // interrupt this phase too, before ANY read-only CDP command is sent.
+  const opened=await awaitReadOnlyCdpSocketOpen(ws,signal);
+  if(!opened){try{ws.close();}catch{/* connection may still be opening */}return null;}
   const query=(method:string,params:Record<string,unknown>={}):Promise<Record<string,unknown>|null>=>{
     const commandId=++id;
     return new Promise(resolve=>{
