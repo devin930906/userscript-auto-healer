@@ -23,6 +23,7 @@ import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manu
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
+import {readLimitedSessionHistory} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
@@ -630,6 +631,13 @@ function registerSafeIpc(): void {
     return scenarioSession.register(input);
   });
 
+  // Read-only history of a staged/imported scenario. This never visits a site,
+  // accepts a file path/hash from renderer, or returns raw evidence/hash data.
+  ipcMain.handle('scenario:history',(event,id:unknown)=>{
+    authorizeSender(event);
+    return readLimitedSessionHistory(scenarioSession,limitedScenarioHistory,id);
+  });
+
   // Fresh native consent, verified owned Chrome process and a scenario ID from
   // this window are all required. The renderer cannot supply navigation URL,
   // CSS selector, browser endpoint, script source or approval for this action.
@@ -945,6 +953,8 @@ async function createMainWindow(): Promise<void> {
       "const dualScenario=await a.registerScenario({...scenarioInput,id:'smoke_dual',selector:'#obsolete',replacementSelector:'#current'}); " +
       "const badDualScenario=await a.registerScenario({...scenarioInput,id:'smoke_bad_dual',replacementSelector:'#submit'}); " +
       "const noScenarioInspect=await a.inspectScenario('smoke_scenario'); " +
+      "const noHistory=await a.readScenarioHistory('smoke_scenario'); " +
+      "const invalidHistory=await a.readScenarioHistory('foreign'); " +
       "const noNativeExport=await a.exportManualScenario('smoke_dual'); " +
       "const singleSelectorExport=await a.exportManualScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
@@ -1064,6 +1074,12 @@ async function createMainWindow(): Promise<void> {
       "const options=Array.from(document.getElementById('scenario-inspect-id').options); " +
       "if(listed)resolve(!options.some(x=>x.value==='smoke_login_unknown')); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const historyButton=document.getElementById('scenario-history'); " +
+      "const uiHistoryAvailable=!historyButton.disabled; historyButton.click(); " +
+      "const uiHistoryShown=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
+      "const summary=document.getElementById('scenario-history-summary').textContent; " +
+      "if(summary.includes('尚未观察') && summary.includes('不证明脚本'))resolve(true); " +
+      "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
@@ -1084,9 +1100,11 @@ async function createMainWindow(): Promise<void> {
       "stagedScenario.tampermonkeyVerified === false && dualScenario.readOnlyDomEligible === true && " +
       "dualScenario.automaticPatchAllowed === false && badDualScenario.code === 'INVALID_REQUEST' && " +
       "noScenarioInspect.code === 'BROWSER_NOT_RUNNING' && " +
+      "noHistory.ok === true && noHistory.currentStatus === 'UNTESTED' && noHistory.events.length === 0 && " +
+      "noHistory.automaticPatchAllowed === false && invalidHistory.code === 'SCENARIO_NOT_FOUND' && " +
       "noNativeExport.code === 'NO_NATIVE_SOURCE' && singleSelectorExport.code === 'TWO_SELECTORS_REQUIRED' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
-      "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && " +
+      "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && uiHistoryAvailable && uiHistoryShown && " +
       "uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
@@ -1117,7 +1135,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
