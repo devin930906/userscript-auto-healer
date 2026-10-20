@@ -8,6 +8,8 @@
  * restore must hold its own transaction lock and revalidate every byte.
  * Native-only: no arbitrary filesystem path IPC is provided to the renderer.
  */
+import type {BigIntStats} from 'node:fs';
+import {lstat} from 'node:fs/promises';
 import {basename,isAbsolute} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -30,6 +32,13 @@ export type ChangedSourceRestorePreflightResult=
 const deny=(reason:Reason):ChangedSourceRestorePreflightResult=>
  Object.freeze({status:'BLOCKED' as const,reason,...flags});
 const SHA256=/^[0-9a-f]{64}$/;
+// Hash equality alone cannot detect a same-byte inode or directory swap
+// between independently valid read-only checks.
+const sameSource=(a:BigIntStats,b:BigIntStats)=>
+ a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
+ a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
+const sameDirectory=(a:BigIntStats,b:BigIntStats)=>
+ a.dev===b.dev&&a.ino===b.ino;
 const fields=[
  'sourcePath','backupDirectory','backupFileName',
  'expectedCurrentSha256','expectedOriginalSha256',
@@ -100,6 +109,11 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   if(await hasUnsafePathLink(options.sourcePath)||
      await hasUnsafePathLink(options.backupDirectory))
    return deny('UNSAFE_PATH');
+  const sourceBefore=await lstat(options.sourcePath,{bigint:true});
+  const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
+  if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
+     sourceBefore.nlink!==1n||!directoryBefore.isDirectory()||
+     directoryBefore.isSymbolicLink())return deny('UNSAFE_PATH');
   const before=await verifyApprovedSourceFingerprint(sourceInput);
   if(before.status!=='MATCHED_READ_ONLY')return deny('SOURCE_UNVERIFIED');
   const verifiedBackup=await verifyBackupRecoverySource(backupInput);
@@ -116,6 +130,14 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
    return deny('BACKUP_UNVERIFIED');
   if(await hasUnsafePathLink(options.sourcePath)||
      await hasUnsafePathLink(options.backupDirectory))
+   return deny('UNSAFE_PATH');
+  const sourceAfter=await lstat(options.sourcePath,{bigint:true});
+  const directoryAfter=await lstat(options.backupDirectory,{bigint:true});
+  if(!sourceAfter.isFile()||sourceAfter.isSymbolicLink()||
+     sourceAfter.nlink!==1n||!sameSource(sourceBefore,sourceAfter))
+   return deny('SOURCE_UNVERIFIED');
+  if(!directoryAfter.isDirectory()||directoryAfter.isSymbolicLink()||
+     !sameDirectory(directoryBefore,directoryAfter))
    return deny('UNSAFE_PATH');
   return Object.freeze({
    status:'RESTORE_PREFLIGHT_READ_ONLY' as const,
