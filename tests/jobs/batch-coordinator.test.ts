@@ -622,3 +622,59 @@ test('TEST-022: readers do not accept a checkpoint while native writer lock exis
    'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+import {importDroppedBytes} from '../../src/import/import-service';
+import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
+import {previewImportedScriptAnalysis} from '../../src/analyze/import-preview';
+
+const QUEUE_HEADER=['// ==UserScript==','// @name actual-native-queue','// @match https://example.org/*','// ==/UserScript==',''].join(String.fromCharCode(10));
+function realNativeScript(index:number){
+ const bytes=new TextEncoder().encode(QUEUE_HEADER+
+  'document.querySelector("#private-script-'+index+'");');
+ const imported=importDroppedBytes('actual-'+index+'.user.js',bytes);
+ assert.equal('code' in imported,false);
+ if('code' in imported)throw Error(imported.code);
+ return imported;
+}
+
+test('TEST-022: actual native imported scripts run through identity-bound read-only queue and isolated AST',async()=>{
+ const imported=Array.from({length:34},(_,i)=>realNativeScript(i));
+ const progress:Array<[number,number]>=[];
+ const hashes=imported.map(x=>x.sha256);
+ const previews=await runImportedReadOnlyAnalysisQueue(imported,undefined,
+  (done,total)=>progress.push([done,total]));
+ assert.deepEqual(progress,[[16,34],[32,34],[34,34]]);
+ assert.deepEqual(previews,imported.map(previewImportedScriptAnalysis));
+ assert.deepEqual(imported.map(x=>x.sha256),hashes,
+  'queue may not edit imported bytes, identity or original script');
+ assert.equal(JSON.stringify(previews).includes('private-script-'),false);
+ assert.ok(previews.every(x=>x.automaticPatchAllowed===false&&
+  x.tampermonkeyVerified===false&&x.businessVerified===false));
+});
+
+test('TEST-022: native scheduling abort revokes all later script segments without discarding earlier evidence',async()=>{
+ const imported=Array.from({length:34},(_,i)=>realNativeScript(i));
+ const controller=new AbortController();
+ const counts:number[]=[];
+ const previews=await runImportedReadOnlyAnalysisQueue(imported,controller.signal,
+  (done,total)=>{assert.equal(total,34);counts.push(done);
+   if(done===16)controller.abort();
+  });
+ assert.deepEqual(counts,[16]);
+ assert.deepEqual(previews.slice(0,16).map(x=>x.status),
+  Array(16).fill('STATIC_ANALYSIS_ONLY'));
+ assert.deepEqual(previews.slice(16).map(x=>x.status),
+  Array(18).fill('SKIPPED_CANCELLED'));
+ assert.ok(previews.every(x=>!x.automaticPatchAllowed));
+});
+
+test('TEST-022/026: foreign or forged native script hashes are rejected before any analysis dispatch',async()=>{
+ const script=realNativeScript(1);
+ const forged={...script,sha256:'0'.repeat(64)};
+ const progress:number[]=[];
+ const previews=await runImportedReadOnlyAnalysisQueue([forged],undefined,
+  (done)=>progress.push(done));
+ assert.deepEqual(progress,[]);
+ assert.deepEqual(previews.map(x=>x.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.equal(previews[0].automaticPatchAllowed,false);
+});
