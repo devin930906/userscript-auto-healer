@@ -11,6 +11,7 @@ import {createHash} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import {lstat,mkdir,rmdir} from 'node:fs/promises';
 import {dirname,isAbsolute,join,parse,resolve,sep} from 'node:path';
+import {hasUnsafePathLink} from './path-boundary';
 
 export type NativeSourceLockFailure=
   'INVALID_SOURCE'|'SOURCE_LOCKED'|'SOURCE_CHANGED'|'IO_FAILURE';
@@ -89,6 +90,10 @@ export async function withNativeSourceLock<T>(
     acquired=await lstat(lockPath,{bigint:true});
     if(acquired.isSymbolicLink()||!acquired.isDirectory())
       throw new NativeSourceLockError('SOURCE_CHANGED');
+    // A concurrent directory rename can install an intermediate junction
+    // to the SAME underlying parent. Inode checks alone would miss it.
+    if(await hasUnsafePathLink(sourcePath))
+      throw new NativeSourceLockError('SOURCE_CHANGED');
     const afterLock=await lstat(sourcePath,{bigint:true});
     const parentAfterLock=await lstat(parent,{bigint:true});
     if(afterLock.isSymbolicLink()||!afterLock.isFile()||
@@ -98,6 +103,9 @@ export async function withNativeSourceLock<T>(
       throw new NativeSourceLockError('SOURCE_CHANGED');
 
     const result=await action();
+    // Recheck every path component: a lock does not pin ancestor names.
+    if(await hasUnsafePathLink(sourcePath))
+      throw new NativeSourceLockError('SOURCE_CHANGED');
     const afterWork=await lstat(sourcePath,{bigint:true});
     const parentAfterWork=await lstat(parent,{bigint:true});
     if(afterWork.isSymbolicLink()||!afterWork.isFile()||
