@@ -291,3 +291,7 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 
 - 依据 REQ-017/018、TEST-017/018，PR [#133](https://github.com/devin930906/userscript-auto-healer/pull/133) 续接现有 `src/manager/tampermonkey-gm-probe.ts` 的一次性授权夹具。修复缓存的 `mode` 与后续真实页面地址脱节时继续 DOM 操作和 POST 自报的问题，按 exact `/?mode=broken|fixed` 入口与副作用边界拒绝非授权或变化后的路由；先提供 Windows 失败回归，再提交最小修改。
 - 这是只保护未认证的临时 GM 手动诊断夹具，**不是** Tampermonkey 扩展身份、脚本安装、GM 调用、业务恢复或正式自动修复的证据。TASK-007 仍开发中，TASK-010/011/018 与 TEST-017/018、全部适用 GATE、正式 EXE+ZIP 均按原门槛继续。具体修复验收及整合状态必须复核 PR 当前 SHA、Actions 和 main。
+
+## （7）TASK-011 已变化原文件恢复前置复核增量（2026-10-20）
+
+作为原 TASK-011（REQ-020/021、TEST-020/021）的开发中子阶段，新增 native-only changed-source restore preflight，核查更改后的源文件及完整独立旧备份，严格拒绝路径别名、意外修改和未经授权的请求。不实现原文件写入、可恢复事务、用户一键回滚或真实 Tampermonkey 验收。TASK-011 仍为“开发中”，TASK-018～021 与 Stable GATE 均不视为完成。本阶段 PR、CI 和合并 SHA 以 GitHub 当前状态为准。
