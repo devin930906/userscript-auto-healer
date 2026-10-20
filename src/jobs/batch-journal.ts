@@ -21,6 +21,14 @@ export type BatchJournalLoadResult=
  |Readonly<{status:'CHECKPOINT_RESTORED_SCHEDULING_ONLY';coordinator:ReadOnlyBatchCoordinator}>
  |Readonly<{status:'BLOCKED';reason:BatchJournalFailure}>;
 export const BATCH_JOURNAL_FILENAME='uah-readonly-batch-v2.json';
+const BATCH_JOURNAL_LOCK_FILENAME='.uah-readonly-batch-v2.lock';
+async function writerLockExists(directory:string):Promise<boolean>{
+ try{await lstat(join(directory,BATCH_JOURNAL_LOCK_FILENAME));return true;}
+ catch(e){
+  if((e as NodeJS.ErrnoException).code==='ENOENT')return false;
+  throw e;
+ }
+}
 const MAX_JOURNAL_BYTES=160000;
 const deny=(reason:BatchJournalFailure)=>Object.freeze({status:'BLOCKED' as const,reason});
 type Identity={dev:bigint;ino:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint};
@@ -78,7 +86,7 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
  const bytes=Buffer.from(JSON.stringify(snapshot),'utf8');
  if(bytes.length===0||bytes.length>MAX_JOURNAL_BYTES)return deny('INVALID_INPUT');
  const target=join(directory,BATCH_JOURNAL_FILENAME);
- const lock=join(directory,'.uah-readonly-batch-v2.lock');
+ const lock=join(directory,BATCH_JOURNAL_LOCK_FILENAME);
  let acquired=false,staging:string|undefined;
  try{
   try{await mkdir(lock,{mode:0o700});acquired=true;}
@@ -92,6 +100,17 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    const existing=await lstat(target,{bigint:true});
    if(!existing.isFile()||existing.isSymbolicLink()||existing.nlink!==1n)
     return deny('INVALID_CHECKPOINT');
+   // An existing checkpoint is untrusted. Never clobber another batch or
+   // rewind completed jobs: verify exact schema/identity and monotonicity
+   // while holding the native single-writer lock.
+   const prior=await boundedRead(target);
+   const now=await lstat(target,{bigint:true});
+   if(!prior||!sameFile(existing,prior.file)||!sameFile(prior.file,now))
+    return deny('INVALID_CHECKPOINT');
+   let parsed:unknown;
+   try{parsed=JSON.parse(prior.bytes.toString('utf8'));}
+   catch{return deny('INVALID_CHECKPOINT');}
+   if(!coordinator.mayPersistOver(parsed))return deny('INVALID_CHECKPOINT');
   }catch(error){
    if((error as NodeJS.ErrnoException).code!=='ENOENT')return deny('IO_FAILURE');
   }
@@ -127,6 +146,9 @@ export async function loadReadOnlyBatchJournal(
  if(!parent)return deny('UNSAFE_PATH');
  const target=join(directory,BATCH_JOURNAL_FILENAME);
  try{
+  // Do not consume an old snapshot while a different native process holds
+  // the writer lock; a previous fully valid version could be superseded.
+  if(await writerLockExists(directory))return deny('BUSY');
   const before=await lstat(target,{bigint:true});
   if(before.isSymbolicLink()||!before.isFile()||before.nlink!==1n)
    return deny('INVALID_CHECKPOINT');
@@ -134,6 +156,7 @@ export async function loadReadOnlyBatchJournal(
   const after=await lstat(target,{bigint:true});
   const parentAfter=await checkedDirectory(directory);
   if(!parentAfter||!sameDir(parent,parentAfter))return deny('UNSAFE_PATH');
+  if(await writerLockExists(directory))return deny('BUSY');
   if(!loaded||!sameFile(before,loaded.file)||!sameFile(loaded.file,after))
    return deny('INVALID_CHECKPOINT');
   let parsed:unknown;
