@@ -210,3 +210,9 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 在原有 `LimitedHealthRegistry` 的最多 32 条内存历史基础上，将桌面场景完成原生授权、自有 Chrome 的只读 DOM 连续采样与限定页面 JavaScript 异常观察后取得的**安全摘要**送入独立 `recordLimitedScenarioInspection` 映射；只有所有已批准选择器在检查窗口均存在、且窗口未观察到页面异常时才记录 `ELEMENT_FOUND_ONLY`，其他已完成但存在缺失/异常的结果均为 `INDETERMINATE`。阻断、取消、来源变化的结果不新增记录，主进程容量/时钟失败不伪报健康。证据散列只来自本地缩减摘要，不含 URL/脚本源码、路径、页面异常正文或凭据；关闭窗口即清除。可见 UI 明确提示不代表 Tampermonkey/GM/业务或自动修复验证。
 
 新增 `tests/health/scenario-inspection.test.ts` 的正常、异常、过期、容量边界及恶意 getter/Proxy 拒绝回归，并加入 Windows `npm test`；实际测试通过状态必须读取对应 Commit SHA 的 Actions，不能仅因文件存在即认定通过。**TEST-024 仍未完整完成**：缺真实授权周期性复检、持久历史/数据恢复方案与真正 Tampermonkey 业务验收；全部 Stable GATE 保持未通过。
+
+## （7）TASK-015/017 · TEST-024/026 有限观察历史可见性（2026-10-20）
+
+继续在既有会话记录上加入只读原生 `scenario:history` IPC：renderer 只能传递先前已导入且已登记、符合只读资格的场景 ID；主进程独立解析对应脚本身份，最多返回 32 条观察时间与 `ELEMENT_FOUND_ONLY`／`INDETERMINATE`，不回传 SHA、脚本源码、URL、文件路径、DOM、凭据和证据原文，不支持任意路径／散列查找，不触发网页访问或系统文件更改。独立窗口仍有独立历史，关闭即清除。新增历史查询安全单测及实际 Electron sandbox/preload/renderer 交互回归，并将 IPC 纳入严格通道白名单；测试结果以最新 PR/Actions/main SHA 核验，不冒充真实 Tampermonkey/业务验证。
+
+**TEST-024 仍为部分实现**：真实管理员确认后的周期复检与持久化、真实脚本/业务验收尚未具备；GATE-004/005/007/010 等保持未完成。
