@@ -184,9 +184,20 @@ export class OptionalAiGateway {
     // AbortSignal alone cannot bound a custom/native fetch transport that
     // ignores abort while waiting for response headers. Race that phase
     // independently, just as limitedJson bounds a stalled response body.
+    // An abort can land after headers arrive but before the body reader is
+    // installed. Retain that response so the revoked request still attempts
+    // nonblocking cleanup in this narrow handoff window.
+    let observedResponse:Response|undefined;
+    const cancelObservedResponse=()=>{
+      if(!observedResponse?.body)return;
+      try{void observedResponse.body.cancel().catch(()=>undefined);}catch{/* reader owns cleanup */}
+    };
     let onAbort=()=>{};
     const aborted=new Promise<null>(resolve=>{
-      onAbort=()=>resolve(null);
+      onAbort=()=>{
+        cancelObservedResponse();
+        resolve(null);
+      };
       if(all.aborted)onAbort();
       else all.addEventListener('abort',onAbort,{once:true});
     });
@@ -199,9 +210,8 @@ export class OptionalAiGateway {
       // A late response must not retain a body after its request was revoked.
       // Cleanup is best effort and must never hold up the cancelled caller.
       void transporting.then(response=>{
-        if(all.aborted&&response?.body){
-          try{void response.body.cancel().catch(()=>undefined);}catch{/* cleanup only */}
-        }
+        observedResponse=response;
+        if(all.aborted)cancelObservedResponse();
       },()=>undefined);
       const response=await Promise.race([transporting,aborted]);
       if(response===null)return failure(
