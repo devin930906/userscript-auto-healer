@@ -141,6 +141,7 @@ test('TEST-017/026: CDP hint parser does not evaluate hostile getters or iterato
    getters++;throw Error('PRIVATE_ITERATOR');
  }});
  const result=inspectTampermonkeyTargetHints(customIterator);
- assert.equal(result.ok,true,'iteration must use captured array data slots');
+ assert.deepEqual(result,{ok:false,code:'INVALID_CDP_RESPONSE'},
+   'extra own iterator metadata must fail closed without invoking it');
  assert.equal(getters,0);
 });
