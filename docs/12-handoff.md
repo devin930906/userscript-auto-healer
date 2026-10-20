@@ -220,3 +220,9 @@ PR [#149](https://github.com/devin930906/userscript-auto-healer/pull/149) 已合
 
 PR [#150](https://github.com/devin930906/userscript-auto-healer/pull/150) 已合并 main `30d716eafe9a97edf05f4ab00558baefeecfa9b0`，修复只读调度检查点原先未绑定 `timeoutMs` 的策略漂移：新 `uah-readonly-batch-v2` 快照包含原始超时值，仅允许完全一致的超时配置恢复；旧 `uah-readonly-batch-v1`、更短/更长超时、伪造值与访问器一律拒绝而非继续跳过工作。变更范围 `src/jobs/batch-coordinator.ts` 和 `tests/jobs/batch-coordinator.test.ts`；新增两项 TEST-022/NFR-009/TEST-026 负例与同策略成功恢复。
 [Windows 应用回归 #39370945409](https://github.com/devin930906/userscript-auto-healer/actions/runs/39370945409) 与 [开发候选双包 #39370945321](https://github.com/devin930906/userscript-auto-healer/actions/runs/39370945321) 都成功（347 测试：346 pass / 0 fail / 1 skip）；双包工作流实际测试 PR 合成提交 `99dac866f466d6589d5659fa898f077cdf19d124`，不能作为最终 main Stable 发布证据。本次是非授权、内存只读调度提示格式升级，并未保存/恢复真实用户任务、修改脚本、验证 Tampermonkey/GM/业务、实现原子修复或回滚。TASK-013、TEST-022、GATE-007 仍为开发中/阻断；下一优先 TASK-007 的受授权真实管理器验证，未满足时执行其他无依赖的既定安全功能任务。
+
+## （7）2026-10-20 TASK-006/007 CDP 诊断连接中撤销权限修复（局部）
+
+PR [#151](https://github.com/devin930906/userscript-auto-healer/pull/151) 已合并 main `09acca1e46ce0ab8d141809ec7ea04a508a32ca3`。此前 `src/observe/dom-observer.ts` 的只读页面 CDP WebSocket 在 CONNECTING 阶段不监听用户取消信号，可一直等待 4 秒，并在迟到 OPEN 时进入后续查询流程；现已将 OPEN/error/close/timeout/abort 统一为可取消握手，失败安全关闭套接字、清理监听器，且不发送后续 Page/DOM 命令。新增 `tests/observe/dom-observer.test.ts` 三项 TEST-010/017 负例／正常回归。独立 [Windows 应用回归 #39372158090](https://github.com/devin930906/userscript-auto-healer/actions/runs/39372158090) 与 [开发候选 EXE+ZIP #39372158077](https://github.com/devin930906/userscript-auto-healer/actions/runs/39372158077) 均通过；350 项 Node 测试中 349 通过、0 失败、1 跳过。候选双包实际 PR 合成源码为 `a48bc08eb8aa75af7f695774176512d7eaa34ff9`，不是正式 Stable 发行基线。
+
+本项只证明诊断传输层撤销权限边界，不证明 Tampermonkey 扩展身份、实际脚本运行、GM API、业务恢复或自动补丁／回滚；TASK-007、TEST-017/018、GATE-004/005 仍未完成。下一步仍优先争取真实授权的独立 Tampermonkey 产品级 E2E，或在受阻时继续其它已批准、依赖满足的必要代码工作。
