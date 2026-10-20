@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { inspectCdpVersion } from '../../src/browser/cdp-session';
+import { inspectCdpVersion, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 
 const envelope={Browser:'Chrome/154.0.8037.57',
   webSocketDebuggerUrl:'ws://127.0.0.1:9223/devtools/browser/18ed998f-2182-41b5-9203-a6c2f45b7ccb'};
@@ -64,6 +64,21 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
 
 import { createServer } from 'node:net';
 import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
+test('TEST-009/026: netstat lookup is absolute and cannot search the working directory',()=>{
+  assert.equal(resolveWindowsNetstatExecutable('C:\\Windows'),
+    'C:\\Windows\\System32\\netstat.exe');
+  assert.equal(resolveWindowsNetstatExecutable('D:\\WinRoot'),
+    'D:\\WinRoot\\System32\\netstat.exe');
+  for(const bad of [
+    undefined,'','Windows','netstat.exe','C:\\','C:\\Windows\\..\\temp',
+    'C:\\Windows\\.','C:\\Windows\\\\Temp','C:\\Windows\\',
+    '\\\\server\\share','\\\\?\\C:\\Windows',
+    'C:/Windows','C:\\Windows\\Temp.','C:\\Windows\\Temp ',
+    'C:\\Windows\\evil:stream','%SystemRoot%'
+  ])assert.equal(resolveWindowsNetstatExecutable(bad),null,
+    'never fall back to PATH for an ambiguous or unsafe SystemRoot');
+});
+
 test('TEST-009: OS loopback listener must belong to the expected process PID',async t=>{
   if(process.platform!=='win32')return;
   const server=createServer();
@@ -85,6 +100,15 @@ test('TEST-009: OS loopback listener must belong to the expected process PID',as
   assert.deepEqual(await verifyWindowsLoopbackListenerPid(0,process.pid),
     {ok:false,code:'INVALID_ARGUMENTS'});
   assert.equal(server.listening,true);
+});
+
+test('TEST-009/026: a forged non-LISTENING loopback row is never accepted as ownership',()=>{
+  const rows=[
+    'TCP 127.0.0.1:9223 0.0.0.0:0 CLOSE_WAIT 9999',
+    'TCP 127.0.0.1:9223 0.0.0.0:0 LISTENING 2345',
+    'TCP 127.0.0.1:9223 0.0.0.0:0 ESTABLISHED 4444'
+  ].join('\r\n');
+  assert.deepEqual(parseWindowsLoopbackListeners(rows,9223),[2345]);
 });
 
 test('TEST-009: listener netstat parsing excludes wildcard and connected remote sockets',()=>{

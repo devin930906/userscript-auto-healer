@@ -85,6 +85,9 @@ export function inspectCdpTargetList(
  */
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
+import {lstat} from 'node:fs/promises';
+import {win32} from 'node:path';
+import {hasUnsafePathLink} from '../version/path-boundary';
 const execFileAsync=promisify(execFileCallback);
 export type ListenerOwnerResult =
   | {readonly ok:true; readonly status:'LISTENER_PID_MATCH_ONLY'; readonly pid:number;
@@ -101,10 +104,26 @@ export function parseWindowsLoopbackListeners(output:string,port:number):number[
   for(const line of output.split(/\r?\n/)){
     const cols=line.trim().split(/\s+/);
     if(cols.length!==5||cols[0].toUpperCase()!=='TCP' ||
-       cols[1]!=='127.0.0.1:'+port||cols[2]!=='0.0.0.0:0')continue;
+       cols[1]!=='127.0.0.1:'+port||cols[2]!=='0.0.0.0:0'||
+       cols[3].toUpperCase()!=='LISTENING')continue;
     selected.push(/^\d+$/.test(cols[4])?Number(cols[4]):NaN);
   }
   return selected;
+}
+/** Resolve the Windows OS netstat by an absolute path, never via CWD/PATH.
+ * SystemRoot is process-owned environment configuration, not a cryptographic
+ * attestation; a compromised parent process could still forge it. Refuse
+ * relative/UNC/namespace/alias paths instead of guessing another executable.
+ */
+export function resolveWindowsNetstatExecutable(systemRoot:unknown):string|null{
+  if(typeof systemRoot!=='string'||systemRoot.length<4||
+     systemRoot.length>220||!/^[A-Za-z]:\\/.test(systemRoot)||
+     systemRoot!==win32.normalize(systemRoot))return null;
+  const components=systemRoot.slice(3).split('\\');
+  if(components.some(component=>!component||component==='.'||
+      component==='..'||/[<>:"|?*\u0000-\u001f]/.test(component)||
+      /[. ]$/.test(component)))return null;
+  return win32.join(systemRoot,'System32','netstat.exe');
 }
 export async function verifyWindowsLoopbackListenerPid(
   port:number, expectedPid:number
@@ -113,11 +132,16 @@ export async function verifyWindowsLoopbackListenerPid(
   if(!Number.isInteger(port)||port<1024||port>65535 ||
      !Number.isSafeInteger(expectedPid)||expectedPid<1)
     return {ok:false,code:'INVALID_ARGUMENTS'};
-  // netstat avoids repeated, expensive PowerShell NetTCP module startup in
-  // concurrent Windows tests and in the actual app; no shell interpolation.
+  // No PATH or current-directory executable search: an imported or adjacent
+  // untrusted "netstat.exe" must never run during Chrome ownership checks.
+  // A reparse-point ancestor or missing native binary fails closed.
   let output:string;
   try {
-    const result=await execFileAsync('netstat.exe',['-ano','-p','TCP'],
+    const binary=resolveWindowsNetstatExecutable(process.env.SystemRoot);
+    if(!binary||await hasUnsafePathLink(binary)||
+       !(await lstat(binary)).isFile())
+      return {ok:false,code:'LISTENER_UNAVAILABLE'};
+    const result=await execFileAsync(binary,['-ano','-p','TCP'],
       {windowsHide:true,timeout:12000,maxBuffer:8*1024*1024});
     output=result.stdout;
   }catch{
