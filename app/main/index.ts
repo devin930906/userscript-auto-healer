@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
-import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript } from '../../src/import/import-service';
+import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {previewImportedBatchOffMain} from '../../src/analyze/isolated-batch-preview';
 import { join, win32 } from 'node:path';
@@ -64,6 +64,12 @@ let nativeSelectionInProgress = false;
 // Only one native picker/import batch can own this cancellation capability.
 // It never authorizes a script change, a Chrome launch, or privileged file IPC.
 let nativeImportController: AbortController | null = null;
+type NativeImportCounters=Readonly<{
+  phase:'PICKING'|'SCANNING'|'IMPORTING'|'ANALYZING';
+  processed:number;total:number;accepted:number;duplicates:number;failed:number;
+}>;
+// No paths, source data, digest, browser state or authorization is exposed.
+let nativeImportCounters:NativeImportCounters|null=null;
 // The renderer can cancel its current read-only dropped-file AST preview.
 // Never grant arbitrary-path, manager or script-write authority through this.
 let droppedImportController: AbortController | null = null;
@@ -124,8 +130,8 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     analysis};
 }
 async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
-  signal?:AbortSignal) {
-  const previews=await previewImportedBatchOffMain(result.scripts,signal);
+  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
+  const previews=await previewImportedBatchOffMain(result.scripts,signal,onProgress);
   return {canceled:result.canceled===true||signal?.aborted===true,
     unprocessed:result.unprocessed??0,
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
@@ -555,6 +561,7 @@ function registerSafeIpc(): void {
     if(!win||win.isDestroyed()) throw new Error('NO_WINDOW');
     const controller=new AbortController();
     nativeImportController=controller;
+    nativeImportCounters={phase:'PICKING',processed:0,total:0,accepted:0,duplicates:0,failed:0};
     try {
       const choice=await dialog.showOpenDialog(win,kind==='files'
         ? {title:'选择 .user.js 文件',properties:['openFile','multiSelections'],
@@ -564,9 +571,18 @@ function registerSafeIpc(): void {
         controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
         return {canceled:true,scripts:[],errors:[],duplicates:0,
           unprocessed:controller.signal.aborted?choice.filePaths.length:0};
+      nativeImportCounters={phase:kind==='folder'?'SCANNING':'IMPORTING',
+        processed:0,total:kind==='files'?choice.filePaths.length:0,
+        accepted:0,duplicates:0,failed:0};
+      const progress=(snapshot:ReadOnlyImportProgress)=>{
+        if(nativeImportController!==controller||controller.signal.aborted)return;
+        nativeImportCounters={phase:'IMPORTING',processed:snapshot.processed,
+          total:snapshot.total,accepted:snapshot.accepted,
+          duplicates:snapshot.duplicates,failed:snapshot.failed};
+      };
       const result=kind==='files'
-        ? await importApprovedPaths(choice.filePaths,controller.signal)
-        : await scanApprovedDirectory(choice.filePaths[0],controller.signal);
+        ? await importApprovedPaths(choice.filePaths,controller.signal,progress)
+        : await scanApprovedDirectory(choice.filePaths[0],controller.signal,progress);
       // Only validated content hashes, never source paths or bytes, bind
       // subsequently staged scenarios to this window's import session.
       if(win===mainWindow&&!win.isDestroyed())
@@ -576,11 +592,30 @@ function registerSafeIpc(): void {
             nativeImportedPaths.set(script.sha256,script.sourcePath);
         }
       // Cancellation during processing retains successful earlier imports.
-      return await summarizeResult(result,controller.signal);
+      if(nativeImportController===controller){
+        nativeImportCounters={phase:'ANALYZING',processed:0,total:result.scripts.length,
+          accepted:result.scripts.length,duplicates:result.duplicates,failed:result.errors.length};
+      }
+      return await summarizeResult(result,controller.signal,(processed,total)=>{
+        if(nativeImportController!==controller||controller.signal.aborted)return;
+        nativeImportCounters={phase:'ANALYZING',processed,total,
+          accepted:result.scripts.length,duplicates:result.duplicates,
+          failed:result.errors.length};
+      });
     } finally {
-      if(nativeImportController===controller)nativeImportController=null;
+      if(nativeImportController===controller){
+        nativeImportController=null;
+        nativeImportCounters=null;
+      }
     }
   };
+  ipcMain.handle('import:get-progress',event=>{
+    authorizeSender(event);
+    // No user data: only counters associated with the current native picker.
+    return nativeImportController&&nativeImportCounters
+      ?Object.freeze({active:true as const,...nativeImportCounters})
+      :Object.freeze({active:false as const});
+  });
   ipcMain.handle('import:files', event=>runNativeImport(event,'files'));
   ipcMain.handle('import:folder', event=>runNativeImport(event,'folder'));
   ipcMain.handle('import:cancel-native', event=>{
