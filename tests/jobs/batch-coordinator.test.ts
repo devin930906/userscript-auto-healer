@@ -700,3 +700,22 @@ test('TEST-022/026: later native AST segments cannot be swapped after script ide
  assert.ok(actual.every(x=>!x.automaticPatchAllowed&&!x.businessVerified&&
   !x.tampermonkeyVerified));
 });
+
+test('TEST-022: expired global AST deadline is distinguished from user cancellation',async()=>{
+ // Shorten only the production 120s global batch budget. The real isolated
+ // worker still runs; this test must not sleep 120s or execute a userscript.
+ const script=realNativeScript(900);
+ const nativeTimeout=globalThis.setTimeout;
+ globalThis.setTimeout=((
+  callback:(...args:unknown[])=>void,delay?:number,...args:unknown[]
+ )=>nativeTimeout(callback,delay===120000?0:delay,...args)) as typeof setTimeout;
+ try{
+  const results=await runImportedReadOnlyAnalysisQueue([script]);
+  assert.deepEqual(results.map(item=>item.status),['SKIPPED_BATCH_BUDGET']);
+  assert.equal(results[0].automaticPatchAllowed,false);
+  assert.equal(results[0].tampermonkeyVerified,false);
+  assert.equal(results[0].businessVerified,false);
+ }finally{
+  globalThis.setTimeout=nativeTimeout;
+ }
+});
