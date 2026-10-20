@@ -87,6 +87,15 @@ test('TEST-009: OS loopback listener must belong to the expected process PID',as
   assert.equal(server.listening,true);
 });
 
+test('TEST-009/026: a forged non-LISTENING loopback row is never accepted as ownership',()=>{
+  const rows=[
+    'TCP 127.0.0.1:9223 0.0.0.0:0 CLOSE_WAIT 9999',
+    'TCP 127.0.0.1:9223 0.0.0.0:0 LISTENING 2345',
+    'TCP 127.0.0.1:9223 0.0.0.0:0 ESTABLISHED 4444'
+  ].join('\r\n');
+  assert.deepEqual(parseWindowsLoopbackListeners(rows,9223),[2345]);
+});
+
 test('TEST-009: listener netstat parsing excludes wildcard and connected remote sockets',()=>{
   const sample=[
     'Proto   Local Address          Foreign Address        State           PID',
