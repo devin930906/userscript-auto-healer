@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {importApprovedPaths,type ImportedScript} from '../../src/import/import-service';
 import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
@@ -225,7 +225,7 @@ test('TEST-020/023/026: manual export binds displayed native filename to the sel
   // Identical bytes and SHA-256 do not prove WHICH path the user selected.
   // An untrusted/cross-batch handoff must never back up or export a different
   // same-content file while the UI still identifies the originally imported one.
-  const otherPath=join(scriptPath,'..','different.user.js');
+  const otherPath=join(dirname(scriptPath),'different.user.js');
   await writeFile(otherPath,source);
   const altered=[
    {...script,filename:'different.user.js'},
