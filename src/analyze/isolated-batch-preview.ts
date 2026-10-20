@@ -2,14 +2,14 @@
  * A worker thread keeps parser work off Electron's privileged event loop.
  * This never executes imported source or supplies repair/manager authority.
  * Each isolated worker still receives at most 16 files / 1 MiB.
- * Native batches now use up to four sequential segments (64 file positions
- * maximum), then explicitly report the unanalysed remainder without losing
- * imported file records. Cancellation revokes the current worker and stops
- * all subsequent segments. No userscript is executed.
+ * Native batches cover up to the importer's 1000-file cap in finite, sequential
+ * worker segments with a separate total time budget. Any unanalysed remainder
+ * is reported as skipped without losing file records. Cancellation revokes
+ * the active worker and stops all subsequent segments. No userscript is executed.
  */
 import {Worker} from 'node:worker_threads';
 import {join} from 'node:path';
-import type {ImportedScript} from '../import/import-service';
+import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {
  MAX_ANALYSIS_BYTES,MAX_BATCH_PREVIEW_BYTES,MAX_BATCH_PREVIEW_FILES,
  previewImportedScriptAnalysis,unavailableImportPreview,
@@ -18,6 +18,8 @@ import {
 
 type Script=Pick<ImportedScript,'bytes'|'textEncoding'>;
 const WORKER_DEADLINE_MS=10000;
+// A pathological 1000-file batch must not consume up to 63 * 10 seconds.
+const MAX_TOTAL_PREVIEW_MS=120000;
 
 /** Treat worker messages as untrusted, even though today's worker is ours.
  * No unexpected field (in particular source, paths or selector text) may
@@ -161,7 +163,8 @@ export function validateIsolatedPreviewReply(
  * file records; a worker still running is forcibly terminated, never trusted.
  */
 async function previewImportedChunkOffMain(
- scripts:readonly Script[],signal?:AbortSignal
+ scripts:readonly Script[],signal?:AbortSignal,
+ workerDeadlineMs=WORKER_DEADLINE_MS
 ):Promise<ImportAnalysisPreview[]>{
  const selected:Script[]=[];
  const slots:(number|null)[]=[];
@@ -213,7 +216,7 @@ async function previewImportedChunkOffMain(
   worker.on('error',()=>finish(null,true));
   worker.on('exit',()=>finish(null,false));
   signal?.addEventListener('abort',cancel,{once:true});
-  timer=setTimeout(()=>finish(null,true),WORKER_DEADLINE_MS);
+  timer=setTimeout(()=>finish(null,true),workerDeadlineMs);
   if(signal?.aborted)cancel();
  });
  return output.map((original,i)=>{
@@ -234,13 +237,22 @@ export async function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void
 ):Promise<ImportAnalysisPreview[]>{
- const MAX_SEGMENTS=4;
  const results:ImportAnalysisPreview[]=[];
+ // Only the native importer may create a 1000-file batch. Direct callers
+ // exceeding that contract fail closed; no unbounded worker chain starts.
+ if(scripts.length>MAX_SELECTED_FILES){
+  const status=signal?.aborted?'SKIPPED_CANCELLED':'SKIPPED_BATCH_BUDGET';
+  const skipped=scripts.map(()=>unavailableImportPreview(status,'NOT_CHECKED'));
+  try{onProgress?.(skipped.length,scripts.length);}
+  catch{/* advisory progress only */}
+  return skipped;
+ }
+ const stopAt=Date.now()+MAX_TOTAL_PREVIEW_MS;
  for(let offset=0;offset<scripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
   const segment=scripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
-  if(offset>=MAX_SEGMENTS*MAX_BATCH_PREVIEW_FILES||signal?.aborted){
-   const status=offset>=MAX_SEGMENTS*MAX_BATCH_PREVIEW_FILES
-    ?'SKIPPED_BATCH_BUDGET' as const:'SKIPPED_CANCELLED' as const;
+  if(signal?.aborted||Date.now()>=stopAt){
+   const status=signal?.aborted
+    ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
    for(const script of segment){
     const bytes=script?.bytes;
     results.push(bytes instanceof Uint8Array&&
@@ -254,8 +266,11 @@ export async function previewImportedBatchOffMain(
    continue;
   }
   // No overlapping workers, hidden unbounded queue or user-code execution:
-  // every segment has its own 10s deadline, 16-file/1MiB copied-byte limit.
-  results.push(...await previewImportedChunkOffMain(segment,signal));
+  // every segment has at most 10s, with a 120s total batch deadline.
+  // The 16-file/1MiB copied-byte limit remains unchanged.
+  const remainingMs=Math.max(1,stopAt-Date.now());
+  results.push(...await previewImportedChunkOffMain(segment,signal,
+   Math.min(WORKER_DEADLINE_MS,remainingMs)));
   // A native import's UI may show finite, scalar-only AST progress.
   // No source bytes, file names or selective-analysis results cross this callback.
   try{onProgress?.(results.length,scripts.length);}
