@@ -5,6 +5,7 @@ import {link,lstat,mkdir,mkdtemp,readdir,readFile,rename,rm,rmdir,symlink,writeF
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {NativeSourceLockError,withNativeSourceLock} from '../../src/version/native-source-lock';
+import {hasUnsafePathLink} from '../../src/version/path-boundary';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 const bytes=Buffer.from('// ==UserScript==\n// @name mutex\n// ==/UserScript==\n');
@@ -22,6 +23,21 @@ async function fixture(run:(source:string,backups:string,root:string)=>Promise<v
 function lockError(code:string){
   return (e:unknown)=>e instanceof NativeSourceLockError&&e.code===code;
 }
+
+
+test('TEST-020/026: NTFS stream aliases are refused before native source locking',async()=>{
+  await fixture(async(source,backups,root)=>{
+    const alias=join(root,'sample.user.js:other.user.js');
+    assert.equal(await hasUnsafePathLink(source),false);
+    assert.equal(await hasUnsafePathLink(alias),true);
+    await assert.rejects(withNativeSourceLock(alias,async()=>{
+      throw Error('unsafe action executed');
+    }),lockError('INVALID_SOURCE'));
+    assert.equal((await readdir(root)).some(n=>n.startsWith('.uah-source-lock-')),false);
+    assert.deepEqual(await readFile(source),bytes);
+    assert.deepEqual(await readdir(backups),[]);
+  });
+});
 
 test('TEST-020: same-source concurrent backups fail closed and release after owner returns',async()=>{
   await fixture(async(source,backups,root)=>{

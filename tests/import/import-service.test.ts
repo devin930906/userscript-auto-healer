@@ -132,6 +132,22 @@ test('TEST-002: drag bytes need valid name and byte buffer, no disk read', () =>
   assert.equal('code' in importDroppedBytes('oversize.user.js', new Uint8Array(MAX_SCRIPT_BYTES + 1)), true);
 });
 
+
+test('TEST-001/026: reject Windows device filenames and NTFS stream aliases',()=>{
+  const bytes=new TextEncoder().encode(script);
+  for(const name of [
+    'sample.user.js:alternate.user.js','CON.user.js','nul.user.js',
+    'COM1.user.js','LPT9.user.js','COM\u00b9.user.js',
+    'unsafe?.user.js','unsafe|pipe.user.js','unsafe<name>.user.js'
+  ]){
+    const result=importDroppedBytes(name,bytes);
+    assert.ok('code' in result,'Unexpected imported Windows alias: '+name);
+    if('code' in result)assert.equal(result.code,'NOT_USER_SCRIPT');
+  }
+  const safe=importDroppedBytes('normal-script.user.js',bytes);
+  assert.equal('code' in safe,false);
+});
+
 test('TEST-003: nested directory skips non-scripts and avoids outside roots', async t => {
   const root = await workspace(t);
   const nested = join(root, 'nested');
