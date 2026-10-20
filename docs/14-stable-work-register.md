@@ -1,6 +1,6 @@
 # Stable 剩余工作登记（基线快照）
 
-> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；经核对的 main 基线：`a51bc8feafbb0e315d58c78c3e53174bc2055c50`。此文件只登记未完成的正式 TASK，不重新实施 TASK-001..006。TASK-014 本轮 Proxy 输入边界修复已合并并取得当前 PR HEAD 的 Windows CI 证据，**不等于 TASK-014 完整产品功能或 Stable 已验收**。
+> 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；最近已核对的产品集成基线：`dc62043be15c4732b1b60484b8338ae709fa5acf`（PR #196 合并提交）。此文件登记未完成的正式 TASK，不重做 TASK-001..006。PR #195 的 AI 输入 Proxy 安全修复已整合；PR #196 仅补充隔离测试矩阵证据，**二者都不等于 Stable 产品完整验收**。
 
 ## 状态判断
 
@@ -14,7 +14,7 @@
 
 | 任务编号 | 关联需求 | 当前状态 | 实际缺口 | 影响范围 | 前置依赖 | 已有证据 | 下一执行动作 | 完成条件 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TASK-007 | REQ-017/018；TEST-017/018 | 已新增隔离 Windows 真 Tampermonkey 5.4.1 合成场景阶段验证；完整产品级验收仍受阻 | 下载自 Tampermonkey 官方站点的 CRX 解包运行时 ID 与商店官方 ID 不一致，不能作为已验签的商店安装；尚缺正式受支持 Chrome/Tampermonkey 版本矩阵、四种注入时机、真实产品诊断→补丁→GM/业务回归与失败恢复 | 管理器适配；GATE-004/005 | TASK-004..006；独立授权测试环境 | PR #194；Windows Actions #39498875934（源 HEAD 36c1bd9e34fcaf41ef6bac4aae2cee0bd94c81f5）：在隔离 Chromium 141、官方站点 CRX 解包 Tampermonkey MV3 5.4.1 中实际启用 userScripts、安装临时 .user.js、调用 GM_getValue，固定/缺失 DOM 的合成业务断言均通过；历史失败 #39497777447/#39498126036/#39498389936 保留 | 用可信商店身份与经声明支持的实际版本补齐矩阵、注入时机和产品生成补丁的业务回归，不得复用合成夹具证明自动修复 | TEST-017/018 在声明矩阵内完成可复核的真实产品正反验证，当前阶段成功不得升级 GATE |
+| TASK-007 | REQ-017/018；TEST-017/018 | 阶段四种 `@run-at` 声明模式真实 Tampermonkey 5.4.1 合成脚本/GM 断言已通过并整合；完整产品级验收仍受阻 | 官方站点 CRX 解包后运行 ID 不等于官方商店 ID，未取得商店签名身份；`document-start` 实际注入时页面 readyState 在 broken/fixed 分别为 `complete`／`interactive`，其他模式也不证明精确注入时机；缺受支持 Chrome/扩展正式版本矩阵、产品真正生成与应用的补丁、真实业务回归及失败恢复 | 管理器适配；GATE-004/005 | TASK-004..006；独立授权测试环境 | PR #194 和 #196 已合并；PR #196 HEAD `426a851d5b3a8d4eca6cffc40d28ec210c093145`，Windows Actions #39502515449（四个各自独立 Windows Job success；Chromium 141.0.7390.37、站点 CRX 解包 Tampermonkey MV3 5.4.1，四声明模式均实际安装临时脚本、调用 GM_getValue 并通过合成 broken/fixed；各模式 readyState 已独立记录）；main 合并 `dc62043be15c4732b1b60484b8338ae709fa5acf` | 先确认可信商店来源的真实扩展身份与精确模式语义，再在获授权环境中实施产品诊断→候选补丁→实际脚本业务回归和失败恢复，补齐受支持矩阵；不得把合成测试升级为产品 VERIFIED | TEST-017/018 在声明正式矩阵内通过真实产品正反、恢复及版本/权限验证；GATE-004/005 另行完整验收 |
 | TASK-008 | REQ-013；TEST-013 | 阶段代码已整合，集成未完成 | 只读 DOM/JS 信号已存在，但可信 Tampermonkey 故障归因与完整日志链未验证 | 故障诊断与后续修复 | TASK-007 | docs/09-development-plan.md；src/diagnostics/ | 以实际失败脚本场景完成归因、误判和脱敏验证 | TEST-013 产品级正反例与回归证据通过 |
 | TASK-009 | REQ-014/019；TEST-014/019 | 阶段代码已整合，真实修复未验证 | 审计候选/人工导出不等于可信自动修复；缺扩展端业务恢复与安全应用 | 核心修复 | TASK-007/008/010/011 | docs/09-development-plan.md；src/repair/ | 先完成可信管理器证据和备份门控，再测试最小安全补丁 | 真实修复/拒绝扩权/失败恢复通过，绝不扩大授权 |
 | TASK-010 | REQ-018/021；TEST-018/021 | 阶段代码已整合，产品门槛未完成 | 离线审计与阻断逻辑不提供可信管理器/业务/备份证明 | 自动验收 | TASK-007/009/011 | src/acceptance/；docs/09-development-plan.md | 增加独立真实业务前后验收及可信备份绑定 | 可信正反证据可重演且未知状态安全拒绝 |
@@ -35,5 +35,6 @@
 1. 本表是基于上述 main SHA、`docs/09-development-plan.md`、`docs/07-testing.md`、`docs/08-release.md`、公开 Actions 与 Release 现状整理的检查点；若与后续提交冲突，以更新的实际 GitHub SHA、Actions 运行、PR 合并结果为准。
 2. 测试证据每条必须保存：TEST 编号、环境、执行命令/工作流、源码 SHA、运行 ID、结果、证据 URL；尚未实际运行标记为「未执行」，依赖不满足标记为「受阻」。
 3. TASK-014 历史 HTTP 资源清理已整合（PR #184）。2026-10-21 新增 Proxy 输入反射安全修复 PR #195 并合并 main `a51bc8feafbb0e315d58c78c3e53174bc2055c50`：修复前同分支 CI #39500069104 新增两条负例真实失败，修复后 PR HEAD `f684dd2ad8f20c953fc892805f2d5139e6900751` 的 Windows 应用 CI #39500385626 两 Job success、407 pass/0 fail/1 conditional skip；文档 CI #39500385605、便携 Chrome CI #39500385652 与候选 EXE/ZIP #39500385634 success。合并后 main 的应用 CI #39501430909 须按其最终运行结论单独复核，以上候选和负例验证绝非正式 Stable GATE 完成。
+4. TASK-007 真管理器四声明模式专项证据：PR #196 合并 main `dc62043be15c4732b1b60484b8338ae709fa5acf`；PR HEAD `426a851d5b3a8d4eca6cffc40d28ec210c093145` 的 Windows Actions #39502515449 有 4 个独立 Job `success`（`document-start/body/end/idle`），均在隔离 Chromium 141.0.7390.37 与官方站点下载、解包运行的 Tampermonkey MV3 5.4.1 中完成临时脚本、GM_getValue、合成 broken/fixed。扩展 ID `dkifgonlhleafnmllomljghfcbgaojkl` 非商店正式 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`，不构成商店签名认证；`document-start` 的 broken/fixed 实际 readyState 为 `complete/interactive`，未确认预期最早注入时机，不能将通过的合成行为称作准确时序或产品自动修复。正式 TEST-017/018、GATE-004/005 仍受阻。
 4. 不新建与原任务重叠的正式 TASK；缺陷按现有 REQ/TEST/GATE 关联。当前无开放 PR，未来需遵守单一主 PR 原则，不自动清理未知历史分支。
-5. 完整原始决策、旧合并历史、测试细节仍保留在原 docs/09、07、08、10；本登记不替代它们或声称旧证明失效。
+6. 完整原始决策、旧合并历史、测试细节仍保留在原 docs/09、07、08、10；本登记不替代它们或声称旧证明失效。
