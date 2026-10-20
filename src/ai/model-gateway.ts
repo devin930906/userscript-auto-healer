@@ -88,9 +88,16 @@ function validateEvidence(input:unknown):SafeEvidence|null{
   return {diagnosticCode:r.diagnosticCode,scenarioHash:r.scenarioHash,selectorHash:r.selectorHash};
 }
 async function limitedJson(response:Response):Promise<unknown|null>{
-  if(!response.ok||!response.body)return null;
+  // Disposal is best-effort: an untrusted upstream ReadableStream may return
+  // a cancel() promise that never settles. It must never hold the bounded AI
+  // request open beyond rejection of invalid/oversized provider output.
+  const discard=():null=>{
+    if(response.body)void response.body.cancel().catch(()=>undefined);
+    return null;
+  };
+  if(!response.ok||!response.body)return discard();
   const claimed=response.headers.get('content-length');
-  if(claimed!==null&&(!/^\d+$/.test(claimed)||Number(claimed)>MAX_REPLY))return null;
+  if(claimed!==null&&(!/^\d+$/.test(claimed)||Number(claimed)>MAX_REPLY))return discard();
   const reader=response.body.getReader();const bytes:Uint8Array[]=[];let count=0;
   try{
     while(true){
@@ -104,7 +111,12 @@ async function limitedJson(response:Response):Promise<unknown|null>{
     const data=new Uint8Array(count);let off=0;
     for(const part of bytes){data.set(part,off);off+=part.byteLength;}
     return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data)) as unknown;
-  }catch{return null;}finally{try{await reader.cancel();}catch{}reader.releaseLock();}
+  }catch{return null;}finally{
+    // Never await a hostile cancel hook. No read is pending at this point;
+    // release the reader while abort/cleanup continues independently.
+    try{void reader.cancel().catch(()=>undefined);}catch{/* cleanup only */}
+    reader.releaseLock();
+  }
 }
 export class OptionalAiGateway {
   private enabled=false;
