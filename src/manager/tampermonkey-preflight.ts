@@ -4,6 +4,7 @@
  * Chrome extension, GM_getValue invocation, or website business behavior.
  * Actual TEST-017/018 must use independently observed browser execution.
  */
+import {types as nodeTypes} from 'node:util';
 import type {MetadataResult} from '../analyze/metadata-parser';
 import type {ManagerPresenceResult} from './tampermonkey-adapter';
 import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
@@ -133,8 +134,6 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  * In particular, a nonthrowing getter cannot become a valid manager report.
  * Reject proxies before reflecting their keys (proxy traps can have effects).
  */
-import {types as nodeTypes} from 'node:util';
-
 function plainDataSnapshot(input:unknown):Record<string,unknown>|null {
  if(!input||typeof input!=='object'||Array.isArray(input)||nodeTypes.isProxy(input))
   return null;
@@ -159,7 +158,7 @@ function stringListSnapshot(input:unknown):string[]|null {
  if(!Array.isArray(input)||nodeTypes.isProxy(input)||
     Object.getPrototypeOf(input)!==Array.prototype)return null;
  const descriptors=Object.getOwnPropertyDescriptors(input);
- const count=descriptors.length?.value;
+ const count=Object.getOwnPropertyDescriptor(input,'length')?.value;
  if(!Number.isSafeInteger(count)||count<0||count>8192||
     Reflect.ownKeys(descriptors).length!==count+1)return null;
  const values:string[]=[];
