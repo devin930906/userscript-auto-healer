@@ -73,9 +73,12 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
     {ok:false,code:'PROFILE_EXISTS'});
   const startupStages:string[]=[];
-  const result=await launchApprovedIsolatedChrome(configForTest,
-    {userApproved:true,testHeadless:true,onUnexpectedExit:()=>{unexpectedExits++;},
-     onStartupStage:(stage:string)=>{startupStages.push(stage);}});
+  // Pass through a variable so TS can compile this behavioural regression
+  // against the old implementation, before the new optional hook exists.
+  const launchOptions={userApproved:true,testHeadless:true,
+    onUnexpectedExit:()=>{unexpectedExits++;},
+    onStartupStage:(stage:string)=>{startupStages.push(stage);}};
+  const result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
   // Print only fixed stage labels and their counts on failure: no Chrome PID,
   // profile path, port, endpoint URL, version or returned response body.
   if(!result.ok){
