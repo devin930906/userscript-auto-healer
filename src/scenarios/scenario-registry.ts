@@ -5,7 +5,7 @@ export type ScenarioState = 'INVALID' | 'UNKNOWN' | 'READY_TO_TEST';
 export type ScenarioIssue =
   'INVALID_ID' | 'INVALID_SCRIPT_HASH' | 'DUPLICATE_ID' | 'INVALID_URL' |
   'MISSING_TARGET_URL' | 'NOT_AUTHORIZED' | 'LOGIN_NOT_READY' |
-  'MISSING_ASSERTIONS' | 'INVALID_STEP' | 'INVALID_ASSERTION';
+  'MISSING_ASSERTIONS' | 'INVALID_STEP' | 'INVALID_ASSERTION' | 'INVALID_FLAGS';
 export interface SiteHint {
   readonly source: 'match' | 'include';
   readonly pattern: string;
@@ -128,6 +128,14 @@ export function preflightScenario(input:ScenarioInput,metadata?:MetadataResult):
     invalid.push('INVALID_ID');
   if(typeof data?.scriptSha256!=='string'||!/^[a-f0-9]{64}$/i.test(data.scriptSha256))
     invalid.push('INVALID_SCRIPT_HASH');
+  // Required authorization and login flags must be exact booleans. Coercing
+  // malformed requiresLogin to false would create an unauthorized no-login
+  // scenario for native services which consume this registry directly.
+  if(typeof data?.userApproved!=='boolean'||
+     typeof data?.requiresLogin!=='boolean'||
+     (data!==null&&Object.prototype.hasOwnProperty.call(data,'loginReady')&&
+      typeof data.loginReady!=='boolean'))
+    invalid.push('INVALID_FLAGS');
   const hasTarget=typeof data?.targetUrl==='string'&&data.targetUrl.trim().length>0;
   const url=hasTarget?normalizeUrl(data!.targetUrl):null;
   if(hasTarget&&!url)invalid.push('INVALID_URL');
