@@ -139,8 +139,42 @@ async function main(){
   const port=server.address().port;
   await installerPage.goto('http://127.0.0.1:'+port+'/',{waitUntil:'domcontentloaded'});
   await installerPage.locator('#install').click();
-  await sleep(2400);
-  const tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
+  await sleep(1800);
+  // Tampermonkey MV3 may use an intermediate vendor-hosted page or a
+  // browser download, especially for loopback URLs. Never promote either
+  // to installed-script evidence. Try the documented direct URL next.
+  const displayPages=()=>context.pages().map(p=>({
+    url:p.url().replace(/([?&](?:url|token|key)=)[^&]+/gi,'$1[redacted]').slice(0,220)
+  }));
+  console.log('POST_LINK_NAVIGATION '+JSON.stringify(displayPages()));
+  if(!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
+    const direct=await context.newPage();
+    try{await direct.goto('http://127.0.0.1:'+port+'/test.user.js',{timeout:12000});}
+    catch(error){console.log('DIRECT_SCRIPT_NAVIGATION '+String(error).slice(0,130));}
+    await sleep(2200);
+    console.log('POST_DIRECT_NAVIGATION '+JSON.stringify(displayPages()));
+  }
+  let tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
+  if(!tabs.some(p=>/confirm|install/i.test(p.url()))){
+    // The vendor documents "Options > Utilities > Import from URL" as
+    // an alternative when automatic URL detection does not fire.
+    const optionsPage=manifest.options_ui?.page||manifest.options_page;
+    console.log('MANAGER_OPTIONS_ENTRY '+JSON.stringify(optionsPage||null));
+    if(typeof optionsPage==='string'&&optionsPage.length<160){
+      const settings=await context.newPage();
+      try{
+        await settings.goto('chrome-extension://'+id+'/'+optionsPage,{
+          waitUntil:'domcontentloaded',timeout:15000
+        });
+        await sleep(1200);
+        console.log('OPTIONS_UI_TEXT '+JSON.stringify(
+          (await settings.locator('body').innerText()).slice(0,1500)));
+      }catch(error){
+        console.log('OPTIONS_PAGE_UNAVAILABLE '+String(error).slice(0,210));
+      }
+    }
+  }
+  tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
   console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(tabs.map(p=>p.url().replace(/([?&](?:url|token|key)=)[^&]+/gi,'$1[redacted]'))));
   const confirmation=tabs.find(p=>/confirm|install/i.test(p.url()));
   assert.ok(confirmation,'Manager script installation confirmation did not appear');
