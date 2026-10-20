@@ -204,3 +204,9 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 ## （7）TASK-011 / TEST-020：已变化源文件的恢复前置复核（2026-10-20）
 
 新增 `src/version/changed-source-restore-preflight.ts` 与 `tests/version/changed-source-restore-preflight.test.ts`。当已选择的本地 `.user.js` 字节发生变化时，以当前预期 SHA-256 和历史备份的预期 SHA-256/长度分别对真实磁盘内容进行有界只读复核，拒绝伪造授权、恶意 Getter/Proxy、损坏备份、外部改动与硬链接别名。测试只在临时夹具运行；不会改变用户真实脚本。结果始终拒绝自动应用/回滚或 Tampermonkey/业务认证。TEST-020/021 仍缺事务替换、断电恢复、真实回滚及产品 E2E。CI、SHA 和整合状态须以现行 GitHub 记录核验。
+
+## （7）TASK-015/017 · TEST-024 本地有限 DOM 健康观察接入（2026-10-20）
+
+在原有 `LimitedHealthRegistry` 的最多 32 条内存历史基础上，将桌面场景完成原生授权、自有 Chrome 的只读 DOM 连续采样与限定页面 JavaScript 异常观察后取得的**安全摘要**送入独立 `recordLimitedScenarioInspection` 映射；只有所有已批准选择器在检查窗口均存在、且窗口未观察到页面异常时才记录 `ELEMENT_FOUND_ONLY`，其他已完成但存在缺失/异常的结果均为 `INDETERMINATE`。阻断、取消、来源变化的结果不新增记录，主进程容量/时钟失败不伪报健康。证据散列只来自本地缩减摘要，不含 URL/脚本源码、路径、页面异常正文或凭据；关闭窗口即清除。可见 UI 明确提示不代表 Tampermonkey/GM/业务或自动修复验证。
+
+新增 `tests/health/scenario-inspection.test.ts` 的正常、异常、过期、容量边界及恶意 getter/Proxy 拒绝回归，并加入 Windows `npm test`；实际测试通过状态必须读取对应 Commit SHA 的 Actions，不能仅因文件存在即认定通过。**TEST-024 仍未完整完成**：缺真实授权周期性复检、持久历史/数据恢复方案与真正 Tampermonkey 业务验收；全部 Stable GATE 保持未通过。
