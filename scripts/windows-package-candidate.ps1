@@ -8,6 +8,31 @@ Set-StrictMode -Version Latest
 function Require-File([string]$path) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required file missing: $path" }
 }
+function Assert-IsolatedDataRoot([object]$receipt,[string]$roamingRoot) {
+  if($null -eq $receipt -or $receipt.userDataDirectory -isnot [string] -or
+     [string]::IsNullOrWhiteSpace($receipt.userDataDirectory) -or
+     -not [IO.Path]::IsPathRooted($receipt.userDataDirectory)) {
+    throw 'Electron smoke did not report an absolute userData directory'
+  }
+  $actual=[IO.Path]::GetFullPath([string]$receipt.userDataDirectory).TrimEnd([char[]]@('\','/'))
+  $root=[IO.Path]::GetFullPath($roamingRoot).TrimEnd([char[]]@('\','/'))
+  if (-not $actual.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),
+                              [StringComparison]::OrdinalIgnoreCase) -or
+      -not (Split-Path -Leaf $actual).ToLowerInvariant().Contains('candidate')) {
+    throw 'Electron userData is not isolated to the disposable candidate namespace'
+  }
+  return $actual
+}
+function Assert-RetainedData([object]$receipt,[string]$expectedRoot,
+                             [string]$canary,[string]$value,[string]$roamingRoot) {
+  $actual=Assert-IsolatedDataRoot $receipt $roamingRoot
+  if (-not [string]::Equals($actual,$expectedRoot,
+                           [StringComparison]::OrdinalIgnoreCase) -or
+      -not (Test-Path -LiteralPath $canary -PathType Leaf) -or
+      [IO.File]::ReadAllText($canary) -cne $value) {
+    throw 'Candidate userData identity/retention changed between launches'
+  }
+}
 function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
   Require-File $exe
   $receipt=Join-Path $temp "shell-$name.json"
@@ -24,6 +49,7 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
   if ($r.shell -ne 'development-skeleton' -or
       $r.preloadIpcVerified -ne $true -or $r.rendererSandboxVerified -ne $true -or
       $r.automaticRepairAvailable -ne $false) { throw "Unsafe shell receipt: $name" }
+  return $r
 }
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $pkg=Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json
@@ -39,6 +65,11 @@ New-Item -ItemType Directory -Path $temp | Out-Null
 $out=Join-Path $temp 'deliverables'
 $stage=Join-Path $temp 'portable-app'
 New-Item -ItemType Directory -Path $out,$stage | Out-Null
+# Every packaging smoke uses a fresh, disposable roaming profile rather than
+# touching any real runner/user profile or future production app identity.
+$smokeRoaming=Join-Path $temp 'smoke-roaming-appdata'
+New-Item -ItemType Directory -Path $smokeRoaming | Out-Null
+$env:APPDATA=$smokeRoaming
 $runtime=Join-Path $root 'node_modules\electron\dist'
 foreach($relative in @('electron.exe','resources')) {
   if (-not (Test-Path (Join-Path $runtime $relative))) { throw "Incomplete Electron runtime: $relative" }
@@ -60,7 +91,14 @@ Copy-Item -LiteralPath (Join-Path $root 'node_modules\acorn') -Destination (Join
   "Source Git commit: $sha",
   'No real Tampermonkey business recovery, automatic repair/rollback, upgrade or user-device GATE certification.') |
  Set-Content -LiteralPath (Join-Path $stage 'CANDIDATE-NOT-STABLE.txt') -Encoding utf8
-Smoke (Join-Path $stage 'UserscriptAutoHealer.exe') $stage 'staged' $temp
+$stagedReceipt=Smoke (Join-Path $stage 'UserscriptAutoHealer.exe') $stage 'staged' $temp
+$userDataRoot=Assert-IsolatedDataRoot $stagedReceipt $smokeRoaming
+New-Item -ItemType Directory -Path $userDataRoot -Force | Out-Null
+$canary=Join-Path $userDataRoot 'candidate-smoke-retention-only.txt'
+if (Test-Path -LiteralPath $canary) { throw 'Refusing to replace existing smoke user data' }
+$canaryText="candidate-retention-$sha-$env:GITHUB_RUN_ID"
+[IO.File]::WriteAllText($canary,$canaryText)
+Require-File $canary
 # Create a TRUE portable ZIP containing runtime, compiled app and runtime dependencies.
 $zip=Join-Path $out "$prefix-Portable.zip"
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
@@ -106,7 +144,8 @@ foreach($original in $sourceFiles) {
   }
 }
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
-Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
+$expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
+Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
 # Inno Setup's compiler is checked; never substitute a renamed EXE.
 $inno=@(
  (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'),
@@ -159,13 +198,21 @@ foreach($original in $sourceFiles) {
   }
 }
 Write-Output "PASS: complete installed application payload SHA-256 parity ($($sourceFiles.Count) files)"
-Smoke (Join-Path $installedPath 'UserscriptAutoHealer.exe') $installedPath 'installed' $temp
+$installedReceipt=Smoke (Join-Path $installedPath 'UserscriptAutoHealer.exe') $installedPath 'installed' $temp
+Assert-RetainedData $installedReceipt $userDataRoot $canary $canaryText $smokeRoaming
 $uninstall=Get-ChildItem -LiteralPath $installedPath -Filter 'unins*.exe' | Select-Object -First 1
 if (-not $uninstall) { throw 'Uninstaller missing' }
 $p=Start-Process -FilePath $uninstall.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
 if ($p.ExitCode -ne 0 -or (Test-Path (Join-Path $installedPath 'UserscriptAutoHealer.exe'))) {
   throw 'Uninstall failed'
 }
+# Uninstalling the candidate must not remove this unrelated, isolated
+# per-user test file. This is NOT a Stable migration/upgrade certification.
+if (-not (Test-Path -LiteralPath $canary -PathType Leaf) -or
+    [IO.File]::ReadAllText($canary) -cne $canaryText) {
+  throw 'Candidate uninstall deleted or altered independent user data'
+}
+Write-Output 'PASS: disposable candidate userData identity and uninstall retention'
 $sum=Join-Path $out 'SHA256SUMS.txt'
 @(
  ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $exe)),
