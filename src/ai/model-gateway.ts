@@ -87,35 +87,52 @@ function validateEvidence(input:unknown):SafeEvidence|null{
     return null;
   return {diagnosticCode:r.diagnosticCode,scenarioHash:r.scenarioHash,selectorHash:r.selectorHash};
 }
-async function limitedJson(response:Response):Promise<unknown|null>{
-  // Disposal is best-effort: an untrusted upstream ReadableStream may return
-  // a cancel() promise that never settles. It must never hold the bounded AI
-  // request open beyond rejection of invalid/oversized provider output.
+async function limitedJson(response:Response,signal:AbortSignal):Promise<unknown|null>{
+  // A provider may send response headers but never finish its body. A fetch
+  // implementation (or native mock transport) may also ignore cancellation
+  // while ReadableStreamDefaultReader.read() remains pending. The combined
+  // request deadline must bound this phase independently of that behavior.
   const discard=():null=>{
     if(response.body)void response.body.cancel().catch(()=>undefined);
     return null;
   };
-  if(!response.ok||!response.body)return discard();
+  if(signal.aborted||!response.ok||!response.body)return discard();
   const claimed=response.headers.get('content-length');
   if(claimed!==null&&(!/^\d+$/.test(claimed)||Number(claimed)>MAX_REPLY))return discard();
-  const reader=response.body.getReader();const bytes:Uint8Array[]=[];let count=0;
+  const reader=response.body.getReader();
+  const readBody=async():Promise<unknown|null>=>{
+    const bytes:Uint8Array[]=[];let count=0;
+    try{
+      while(!signal.aborted){
+        const {done,value}=await reader.read();
+        if(done)break;
+        count+=value.byteLength;
+        if(count>MAX_REPLY)return null;
+        bytes.push(value);
+      }
+      if(signal.aborted||count===0)return null;
+      const data=new Uint8Array(count);let off=0;
+      for(const part of bytes){data.set(part,off);off+=part.byteLength;}
+      return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data)) as unknown;
+    }catch{return null;}
+  };
+  let onAbort=()=>{};
+  const cancelled=new Promise<null>(resolve=>{
+    onAbort=()=>{
+      // A malicious cancel() implementation may never settle. Neither the
+      // caller nor the request deadline may await its completion.
+      try{void reader.cancel().catch(()=>undefined);}catch{/* cleanup only */}
+      resolve(null);
+    };
+    if(signal.aborted)onAbort();
+    else signal.addEventListener('abort',onAbort,{once:true});
+  });
   try{
-    while(true){
-      const {done,value}=await reader.read();
-      if(done)break;
-      count+=value.byteLength;
-      if(count>MAX_REPLY)return null;
-      bytes.push(value);
-    }
-    if(count===0)return null;
-    const data=new Uint8Array(count);let off=0;
-    for(const part of bytes){data.set(part,off);off+=part.byteLength;}
-    return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data)) as unknown;
-  }catch{return null;}finally{
-    // Never await a hostile cancel hook. No read is pending at this point;
-    // release the reader while abort/cleanup continues independently.
+    return await Promise.race([readBody(),cancelled]);
+  }finally{
+    signal.removeEventListener('abort',onAbort);
     try{void reader.cancel().catch(()=>undefined);}catch{/* cleanup only */}
-    reader.releaseLock();
+    try{reader.releaseLock();}catch{/* pending read can be revoked */}
   }
 }
 export class OptionalAiGateway {
@@ -171,11 +188,13 @@ export class OptionalAiGateway {
           'Accept':'application/json',...(init.body?{'Content-Type':'application/json'}:{})}
       });
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
+      if(all.aborted)return failure('NETWORK_FAILED');
       if(!response.ok)return failure(path==='/models'&&
         (response.status===404||response.status===405)
         ?'MODEL_LIST_UNAVAILABLE':'HTTP_REJECTED');
-      const value=await limitedJson(response);
+      const value=await limitedJson(response,all);
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
+      if(all.aborted)return failure('NETWORK_FAILED');
       if(value===null)return failure('INVALID_RESPONSE');
       return {response,value};
     }catch{
