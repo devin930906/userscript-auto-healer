@@ -89,7 +89,7 @@ test('TEST-005/026: scenario registry rejects accessor and Proxy traps without i
   for(const input of blocked){
     const result=registry.register(input as ScenarioInput);
     assert.equal(result.state,'INVALID');
-    assert.equal(result.state==='READY_TO_TEST',false);
+    assert.ok(result.issues.length>0);
     assert.equal(registry.list().length,0);
   }
   assert.equal(getterCalls,0,'validation must never evaluate accessor fields');
