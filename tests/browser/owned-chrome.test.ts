@@ -87,8 +87,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
   }
   assert.equal(result.ok,true,JSON.stringify(result));
-  const allowed=new Set(['FETCH_FAILED','HTTP_REJECTED','BODY_REJECTED',
-    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED']);
+  const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
+    'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED',
+    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP']);
   assert.ok(startupStages.every(stage=>allowed.has(stage)),
     'diagnostic stages must only use fixed redacted labels');
   assert.ok(startupStages.length<=100,'startup diagnostics must be bounded');
@@ -310,4 +311,29 @@ test('TEST-006/007/008/009: signed Chrome from an independent application path',
   if(page.ok)assert.equal(page.businessVerified,false);
   stop();
   assert.equal(isLiveApprovedChromeSession(session),false);
+});
+
+
+// A failing Windows runner must identify the transport class without leaking
+// OS errors, profile locations, URLs, ports, or private Chrome output.
+import * as ownedChromeDiagnostics from '../../src/browser/owned-chrome';
+test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful and non-secret',()=>{
+  const classify=(ownedChromeDiagnostics as unknown as {
+    classifyCdpStartupTransportFailure?: (e:unknown)=>string
+  }).classifyCdpStartupTransportFailure;
+  assert.equal(typeof classify,'function','production diagnosis must exist');
+  if(!classify)return;
+  const error=(code:string)=>Object.assign(new Error('fetch failed'),{
+    cause:Object.assign(new Error('private URL http://127.0.0.1:9223'),{code})
+  });
+  assert.equal(classify(error('ECONNREFUSED')),'FETCH_REFUSED');
+  assert.equal(classify(error('UND_ERR_CONNECT_TIMEOUT')),'FETCH_TIMEOUT');
+  assert.equal(classify(error('ETIMEDOUT')),'FETCH_TIMEOUT');
+  assert.equal(classify(error('ECONNRESET')),'FETCH_RESET');
+  assert.equal(classify({name:'TimeoutError'}),'FETCH_TIMEOUT');
+  for(const bad of [
+    error('EPRIVATE_SCRIPT_CONTENT'),new Error('secret path C:/data/source.user.js'),
+    Object.defineProperty({},'cause',{get(){throw Error('PRIVATE_DETAILS');}}),
+    Object.defineProperty({},'code',{get(){throw Error('PRIVATE_DETAILS');}})
+  ])assert.equal(classify(bad),'FETCH_FAILED');
 });

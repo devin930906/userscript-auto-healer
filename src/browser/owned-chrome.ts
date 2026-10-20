@@ -60,8 +60,36 @@ export type ManagedLaunchResult =
       readonly pid:number;readonly chromeVersion:string;readonly browserWebsocket:string;
       readonly websocketHandshakeVerified:true;readonly targetVerified:false;
       readonly stop:()=>void};
-export type ChromeStartupStage='FETCH_FAILED'|'HTTP_REJECTED'|'BODY_REJECTED'|
+export type ChromeStartupStage='FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
+  'FETCH_RESET'|'CHILD_RUNNING_NO_CDP'|'HTTP_REJECTED'|'BODY_REJECTED'|
   'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR';
+
+/** Only fixed, redacted transport labels. Never serialize an underlying
+ * fetch/undici error, socket address, Chrome profile, process or user script.
+ * Ignore arbitrary getters, prototype chains and hostile Proxy failures.
+ */
+export function classifyCdpStartupTransportFailure(error:unknown):
+ 'FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|'FETCH_RESET' {
+ let current:unknown=error;
+ for(let depth=0;depth<3;depth++){
+  if(!current||typeof current!=='object')break;
+  let desc:PropertyDescriptorMap;
+  try{desc=Object.getOwnPropertyDescriptors(current);}
+  catch{return 'FETCH_FAILED';}
+  const code=desc.code?.value;
+  if(code==='ECONNREFUSED')return 'FETCH_REFUSED';
+  if(code==='ECONNRESET'||code==='EPIPE')return 'FETCH_RESET';
+  if(code==='ETIMEDOUT'||code==='UND_ERR_CONNECT_TIMEOUT'||
+     code==='UND_ERR_HEADERS_TIMEOUT')return 'FETCH_TIMEOUT';
+  if(desc.name?.value==='TimeoutError')return 'FETCH_TIMEOUT';
+  current=desc.cause?.value;
+ }
+ // AbortSignal.timeout() rejects with a native DOMException whose name
+ // may be inherited, rather than an own property descriptor.
+ if(typeof DOMException!=='undefined'&&error instanceof DOMException&&
+    error.name==='TimeoutError')return 'FETCH_TIMEOUT';
+ return 'FETCH_FAILED';
+}
 export interface ChromeLaunchOptions {
   /** Explicit user approval to launch THIS isolated Chrome, not general script consent. */
   readonly userApproved:boolean;
@@ -171,13 +199,18 @@ export async function launchApprovedIsolatedChrome(
               return verified;
             }
         }
-      }catch{
-        // Distinguish transport failures from later verification faults,
-        // without returning or logging raw untrusted endpoint information.
-        emitStage(phase==='FETCH'?'FETCH_FAILED':'PROBE_ERROR');
+      }catch(error){
+        // Fixed labels only. Raw transport errors may disclose loopback
+        // addresses, user paths or Chrome runtime details.
+        emitStage(phase==='FETCH'
+          ?classifyCdpStartupTransportFailure(error):'PROBE_ERROR');
       }
       await delay(250);
     }
+    // A child can stay alive without ever exposing the required owned
+    // listener. Record only that boundary, not process/profile/port data.
+    if(!exited&&!errored&&child.exitCode===null&&!child.killed)
+      emitStage('CHILD_RUNNING_NO_CDP');
     return {ok:false,code:'CDP_TIMEOUT'};
   }finally{
     if(!retained)stopOwnChild(child);
