@@ -231,7 +231,8 @@ async function previewImportedChunkOffMain(
  * durable repair queue or a Tampermonkey/GM business verification.
  */
 export async function previewImportedBatchOffMain(
- scripts:readonly Script[],signal?:AbortSignal
+ scripts:readonly Script[],signal?:AbortSignal,
+ onProgress?:(processed:number,total:number)=>void
 ):Promise<ImportAnalysisPreview[]>{
  const MAX_SEGMENTS=4;
  const results:ImportAnalysisPreview[]=[];
@@ -252,6 +253,10 @@ export async function previewImportedBatchOffMain(
   // No overlapping workers, hidden unbounded queue or user-code execution:
   // every segment has its own 10s deadline, 16-file/1MiB copied-byte limit.
   results.push(...await previewImportedChunkOffMain(segment,signal));
+  // A native import's UI may show finite, scalar-only AST progress.
+  // No source bytes, file names or selective-analysis results cross this callback.
+  try{onProgress?.(results.length,scripts.length);}
+  catch{/* progress is advisory; it cannot affect isolated parsing */}
  }
  return results;
 }
