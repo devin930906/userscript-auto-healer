@@ -1,4 +1,6 @@
 # TASK-019/020 / REQ-027/028 / TEST-027/028.
+# Candidate namespace is deliberately different from any production installation
+# and Electron userData identity; never upgrade/overwrite future Stable users.
 # ACTUAL compiled Electron Windows EXE/ZIP development candidates only.
 # This does NOT certify Tampermonkey, script repair or Stable acceptance.
 $ErrorActionPreference = 'Stop'
@@ -52,7 +54,7 @@ New-Item -ItemType Directory -Path (Join-Path $app 'dist'),(Join-Path $app 'node
 Copy-Item -LiteralPath (Join-Path $root 'dist\app') -Destination (Join-Path $app 'dist\app') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'dist\src') -Destination (Join-Path $app 'dist\src') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'node_modules\acorn') -Destination (Join-Path $app 'node_modules\acorn') -Recurse
-@{name='userscript-auto-healer';version=$version;main='dist/app/main/index.js';private=$true} |
+@{name='userscript-auto-healer-candidate';productName='Userscript Auto Healer Candidate';version=$version;main='dist/app/main/index.js';private=$true} |
  ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'package.json') -Encoding utf8
 @('DEVELOPMENT CANDIDATE - NOT STABLE / NOT RELEASED',
   "Source Git commit: $sha",
@@ -71,21 +73,39 @@ Add-Type -AssemblyName System.IO.Compression
 $archive=[IO.Compression.ZipFile]::OpenRead($zip)
 try {
   if ($archive.Entries.Count -lt 10) { throw 'ZIP unexpectedly sparse' }
+  $zipFileNames=[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
   foreach($entry in $archive.Entries) {
     $n=$entry.FullName.Replace([char]92,[char]47)
     if ($n.StartsWith('/') -or $n -match '^[A-Za-z]:' -or $n -match '(^|/)\.\.(/|$)' -or
-        $n.Contains([char]0)) { throw "Unsafe ZIP member: $n" }
+        $n.Contains([char]0) -or $n.Contains(':') -or $n.Contains('//') -or
+        $n -match '(^|/)[^/]*[. ](/|$)') { throw "Unsafe ZIP member: $n" }
+    if (-not $n.EndsWith('/')) {
+      if (-not $zipFileNames.Add($n)) { throw "Duplicate ZIP file entry: $n" }
+    }
   }
 } finally { $archive.Dispose() }
 $expanded=Join-Path $temp 'expanded'
 Expand-Archive -LiteralPath $zip -DestinationPath $expanded -ErrorAction Stop
-foreach($relative in @('UserscriptAutoHealer.exe','resources\app\dist\app\main\index.js',
-                        'resources\app\dist\app\ui\index.html','resources\app\node_modules\acorn\package.json')) {
-  $a=Join-Path $stage $relative; $b=Join-Path $expanded $relative
-  Require-File $b
-  if ((Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash -ne
-      (Get-FileHash -LiteralPath $b -Algorithm SHA256).Hash) { throw "ZIP extracted file mismatch: $relative" }
+# Compare EVERY file by its relative name and SHA-256, not just selected
+# entry points. A missing runtime DLL or locale must fail before artifact upload.
+$sourceFiles=@(Get-ChildItem -LiteralPath $stage -File -Recurse -Force)
+$extractedFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
+if ($sourceFiles.Count -ne $extractedFiles.Count -or
+    $zipFileNames.Count -ne $sourceFiles.Count) {
+  throw 'ZIP source/archive/extracted file counts differ'
 }
+foreach($original in $sourceFiles) {
+  $relative=$original.FullName.Substring($stage.Length+1)
+  $zipName=$relative.Replace([char]92,[char]47)
+  if (-not $zipFileNames.Contains($zipName)) { throw "ZIP member missing: $zipName" }
+  $extracted=Join-Path $expanded $relative
+  Require-File $extracted
+  if ((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $extracted -Algorithm SHA256).Hash) {
+    throw "ZIP file hash mismatch: $zipName"
+  }
+}
+Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
 Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
 # Inno Setup's compiler is checked; never substitute a renamed EXE.
 $inno=@(
@@ -99,11 +119,12 @@ $iss=Join-Path $temp 'candidate.iss'
 $sourceLine='Source: "' + $stage + '\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs'
 @(
  '[Setup]'
- 'AppId=UserscriptAutoHealer'
+ 'AppId=UserscriptAutoHealerDevelopmentCandidate'
  'AppName=Userscript Auto Healer (Development Candidate)'
  "AppVersion=$version"
- 'DefaultDirName={localappdata}\Programs\UserscriptAutoHealer'
- 'DefaultGroupName=Userscript Auto Healer (Candidate)'
+ 'DefaultDirName={localappdata}\Programs\UserscriptAutoHealerCandidate'
+ 'DefaultGroupName=Userscript Auto Healer Candidate'
+ 'UsePreviousAppDir=no'
  'PrivilegesRequired=lowest'
  'UninstallDisplayIcon={app}\UserscriptAutoHealer.exe'
  "OutputDir=$out"
@@ -115,8 +136,8 @@ $sourceLine='Source: "' + $stage + '\*"; DestDir: "{app}"; Flags: ignoreversion 
  '[Files]'
  $sourceLine
  '[Icons]'
- 'Name: "{group}\Userscript Auto Healer"; Filename: "{app}\UserscriptAutoHealer.exe"'
- 'Name: "{autodesktop}\Userscript Auto Healer"; Filename: "{app}\UserscriptAutoHealer.exe"; Tasks: desktopicon'
+ 'Name: "{group}\Userscript Auto Healer Candidate"; Filename: "{app}\UserscriptAutoHealer.exe"'
+ 'Name: "{autodesktop}\Userscript Auto Healer Candidate"; Filename: "{app}\UserscriptAutoHealer.exe"; Tasks: desktopicon'
 ) | Set-Content -LiteralPath $iss -Encoding utf8
 & $inno $iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler exit: $LASTEXITCODE" }
