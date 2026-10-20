@@ -13,11 +13,18 @@ import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWe
  */
 export async function readBoundedCdpJson(response:Response):Promise<unknown|null> {
   const limit=16384;
-  if(response.status!==200)return null;
+  // An early status/header rejection must not leave an unread HTTP response
+  // pinned to the loopback connection. Cleanup is best-effort and must never
+  // hold the security rejection open if an untrusted stream cannot cancel.
+  const rejectUnread=():null=>{
+    if(response.body)void response.body.cancel().catch(()=>undefined);
+    return null;
+  };
+  if(response.status!==200)return rejectUnread();
   const length=response.headers.get('content-length');
   if(length!==null &&
      (!/^[0-9]+$/.test(length) || !Number.isSafeInteger(Number(length)) ||
-      Number(length)>limit))return null;
+      Number(length)>limit))return rejectUnread();
   if(!response.body)return null;
   const reader=response.body.getReader();
   const decoder=new TextDecoder('utf-8',{fatal:true});
