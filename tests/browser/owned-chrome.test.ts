@@ -196,6 +196,30 @@ test('TEST-009/026: oversized CDP body cannot be held hostage by a pending strea
  }finally{if(timeout)clearTimeout(timeout);}
 });
 
+test('TEST-009/026: rejected CDP HTTP/status headers close untrusted response streams without waiting',async()=>{
+ for(const reason of ['http-error','oversized-header','invalid-header'] as const){
+  let cancelCalls=0;
+  const stream=new ReadableStream<Uint8Array>({
+   start(controller){controller.enqueue(new TextEncoder().encode('{}'));},
+   cancel(){cancelCalls++;return new Promise<void>(()=>{});}
+  });
+  const options=reason==='http-error'?{status:503}:reason==='oversized-header'
+   ?{headers:{'content-length':'17000'}}:{headers:{'content-length':'invalid'}};
+  const response=new Response(stream,options);
+  let timer:NodeJS.Timeout|undefined;
+  try{
+   const outcome=await Promise.race([
+    readBoundedCdpJson(response),
+    new Promise<never>((_resolve,reject)=>{
+     timer=setTimeout(()=>reject(Error('CDP_EARLY_REJECTION_STALLED_'+reason)),1000);
+    })
+   ]);
+   assert.equal(outcome,null,reason);
+   assert.equal(cancelCalls,1,'Rejected '+reason+' response must release its unread body');
+  }finally{if(timer)clearTimeout(timer);}
+ }
+});
+
 test('TEST-009: CDP JSON accepts split chunks but rejects malformed UTF-8',async()=>{
   const encoded=new TextEncoder().encode('{"Browser":"Chrome/155.0.1.1"}');
   const split=new Response(new ReadableStream<Uint8Array>({
