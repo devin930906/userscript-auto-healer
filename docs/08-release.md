@@ -46,6 +46,14 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - 此次开发候选 EXE SHA-256 `c68a38e39f2b0a7929116c283cb51ee688a1378954cbe1fa0d85117bba537e7a`；开发候选 ZIP SHA-256 `95015e017bdc032232cb10f2485193084842dcd74b8ba4007352c122b5918b02`。Artifact `12239458338`（3 日留存），位于同次工作流。上述两个 SHA-256 仅适用于该临时合成提交的构建产物，**不是 main 正式 Stable 发行**。
 - TASK-019/020 仍为开发中；完整 TEST-027/028、最低系统矩阵、升级及数据保留、真实 Tampermonkey/业务修复、签名与 GATE-001..011 仍待独立验收。不得因本轮安装隔离或完整 ZIP 哈希通过而发正式 Release。
 
+## 2026-10-20 候选安装内容完整性复核（TASK-019/TEST-027）
+
+- [PR #148](https://github.com/devin930906/userscript-auto-healer/pull/148) 已通过成功的 Windows 验证合并到 `main`，合并 SHA `e885e72cec2de903531c6d65ced39f9cbabad69f`；仅修改 `scripts/windows-package-candidate.ps1`，为候选 Inno Setup 静默安装后的每个应用文件增加原始暂存文件 SHA-256 对照，发现缺失或不一致就拒绝候选打包。
+- [候选打包运行 39367606351](https://github.com/devin930906/userscript-auto-healer/actions/runs/39367606351) 为 success；实际构建源码是 PR 测试合成提交 `3a285557231a55be16d4d0673f8beb68043656c3`，与 PR head `abeb2d6da59e7afd8e627a0a0a52df3ff260c00f`、合并后的 main SHA **不同**。日志确认 138 个 ZIP 文件及 138 个安装后的应用文件各自 SHA-256 完整比对通过，暂存／解压／安装 Electron smoke、安装与卸载检查通过。
+- 同一 PR head 的 [Application Skeleton Checks 39367606357](https://github.com/devin930906/userscript-auto-healer/actions/runs/39367606357) 成功：Node 345 项，344 pass、0 fail、1 conditional skip，Windows Electron sandbox/preload IPC smoke 成功。临时 Artifact `12240217885` 仅为 Actions 开发候选归档（到期 2026-10-23 UTC），并非 GitHub Release。
+- 此次候选安装 EXE 的 SHA-256：`1aacb997a23d6fb1cea3b4ed65d179da67ba1fcbb3cea9c8116614a984849e52`；候选便携 ZIP 的 SHA-256：`88ce3ff0662ef183e9bbc640256fc5cc87bfbcadce8f471102928ee90f1080c4`。两项校验值只对应前述 PR 合成源码的临时构建，**不可作为正式 main Stable 双包校验**。
+- TASK-019/020 与 TEST-027/028 仍未完整验收；独立真实用户 Windows、Chrome/Tampermonkey/业务断言、升级／配置保留、只读便携路径、完整 GATE 与候选主干重新构建仍是发布阻断。没有正式 Stable Release。
+
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
 |---|---|---|---|---|---|---|---|
