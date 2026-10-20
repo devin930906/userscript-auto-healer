@@ -369,8 +369,8 @@ test('TEST-002/026: dropped input snapshots bytes before decoding and rejects ho
   // An Uint8Array subclass may override ordinary methods. The previous
   // implementation decoded via subarray() and *then* copied different bytes.
   class MutatingBytes extends Uint8Array {
-    override subarray(start?:number,end?:number):Uint8Array {
-      const saved=Uint8Array.from(super.subarray(start,end));
+    override subarray(start?:number,end?:number) {
+      const saved=new Uint8Array(super.subarray(start,end));
       this.fill(0);
       return saved;
     }
