@@ -40,12 +40,15 @@
       <label for="scenario-inspect-id">只读检查已登记场景：</label>
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
       <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
+      <button id="scenario-history" type="button" disabled>查看此场景脚本的当前会话观察历史</button>
+      <p id="scenario-history-summary" role="status" aria-live="polite">尚未查询观察历史；此功能不需要启动 Chrome。</p>
+      <ol id="scenario-history-entries" aria-live="polite"></ol>
       <button id="scenario-export-manual" type="button" disabled>单独授权实时 DOM 复核并导出人工候选（不改原脚本）</button>
       <p>人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
       <button id="scenario-cancel" type="button" disabled>取消 DOM 检查或人工导出准备（写入前）</button>
       <p>人工导出在最终系统写入确认之前可以取消；开始创建独立备份／候选之后不能撤销既有文件，原始脚本仍不被覆盖。若中断请检查所选输出目录。</p>
       <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
-      <p>每次通过授权的完整只读 DOM 与短时异常检查后，仅在内存中登记该脚本的有限观察历史（最多 32 条，关闭窗口即清除）。元素存在不代表油猴脚本运行正常；异常或选择器缺失只记为证据不足，不表示自动修复或恢复。未授权、取消或失败的检查不写入历史。</p>
+      <p>每次通过授权的完整只读 DOM 与短时异常检查后，仅在内存中登记该脚本的有限观察历史（最多 32 条，关闭窗口即清除）。可随时查看逐次观察时间与保守结果；此界面不显示脚本路径、源码或证据哈希。元素存在不代表油猴脚本运行正常；异常或选择器缺失只记为证据不足，不表示自动修复或恢复。未授权、取消或失败的检查不写入历史。</p>
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
       <ul id="scenario-list" aria-live="polite"></ul>
     </section>
