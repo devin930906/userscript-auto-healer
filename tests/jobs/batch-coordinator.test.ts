@@ -560,3 +560,65 @@ test('TEST-022: persisted in-flight read-only task resumes within original attem
   assert.equal(final.automaticRollbackAllowed,false);
  }finally{release();await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TEST-022: native durable journal refuses overwriting a foreign-batch checkpoint',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-no-foreign-overwrite-'));
+ try{
+  const originalOpts={count:1,jobHashes:[SCRIPT_A]};
+  const original=new ReadOnlyBatchCoordinator(originalOpts,async()=> 'DONE');
+  await original.run();
+  assert.equal((await saveReadOnlyBatchJournal(root,original)).status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const path=join(root,BATCH_JOURNAL_FILENAME);
+  const originalBytes=await readFile(path);
+  const different=new ReadOnlyBatchCoordinator({count:1,jobHashes:[SCRIPT_B]},
+    async()=> 'DONE');
+  assert.deepEqual(await saveReadOnlyBatchJournal(root,different),
+    {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(path),originalBytes,'foreign batch must not lose prior resume data');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TEST-022: stale checkpoints cannot regress persisted completion or attempts',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-monotonic-'));
+ const opts={count:2,maxAttempts:2,jobHashes:[SCRIPT_A,SCRIPT_B]};
+ try{
+  const stale=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE');
+  assert.equal((await saveReadOnlyBatchJournal(root,stale)).status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const completed=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE');
+  await completed.run();
+  assert.equal((await saveReadOnlyBatchJournal(root,completed)).status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const path=join(root,BATCH_JOURNAL_FILENAME);
+  const saved=await readFile(path);
+  assert.deepEqual(await saveReadOnlyBatchJournal(root,stale),
+   {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(path),saved);
+  const partiallyDone=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE',{
+   ...completed.snapshot(),
+   jobs:[{ordinal:0,state:'SUCCEEDED',attempts:1},
+         {ordinal:1,state:'QUEUED',attempts:0}]
+  });
+  assert.deepEqual(await saveReadOnlyBatchJournal(root,partiallyDone),
+   {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(path),saved);
+  assert.equal((await saveReadOnlyBatchJournal(root,completed)).status,
+    'CHECKPOINT_SAVED_UNVERIFIED','saving identical verified state is idempotent');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TEST-022: readers do not accept a checkpoint while native writer lock exists',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-busy-reader-'));
+ const opts={count:1,jobHashes:[SCRIPT_A]};
+ try{
+  const queue=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE');
+  assert.equal((await saveReadOnlyBatchJournal(root,queue)).status,
+    'CHECKPOINT_SAVED_UNVERIFIED');
+  const lock=join(root,'.uah-readonly-batch-v2.lock');
+  await (await import('node:fs/promises')).mkdir(lock);
+  assert.deepEqual(await loadReadOnlyBatchJournal(root,opts,async()=> 'DONE'),
+   {status:'BLOCKED',reason:'BUSY'});
+  await rm(lock,{recursive:true,force:true});
+  assert.equal((await loadReadOnlyBatchJournal(root,opts,async()=> 'DONE')).status,
+   'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
