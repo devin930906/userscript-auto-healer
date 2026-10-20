@@ -362,3 +362,33 @@ test('TEST-001/003: native paths with dot components never select a different fi
   assert.deepEqual(await readFile(other,'utf8'),
     script.replace('console.log(1)', 'console.log(9)'));
 });
+
+
+test('TEST-002/026: dropped input snapshots bytes before decoding and rejects hostile views', () => {
+  const original=Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),Buffer.from(script)]);
+  // An Uint8Array subclass may override ordinary methods. The previous
+  // implementation decoded via subarray() and *then* copied different bytes.
+  class MutatingBytes extends Uint8Array {
+    override subarray(start?:number,end?:number):Uint8Array {
+      const saved=Uint8Array.from(super.subarray(start,end));
+      this.fill(0);
+      return saved;
+    }
+  }
+  const hostile=new MutatingBytes(original);
+  const imported=importDroppedBytes('snapshot.user.js',hostile);
+  assert.ok('bytes' in imported,'valid source must remain importable');
+  if('bytes' in imported){
+    assert.deepEqual(Buffer.from(imported.bytes),original,
+      'decoded contents, saved bytes and digest must describe one snapshot');
+    assert.equal(imported.sha256,createHash('sha256').update(original).digest('hex'));
+    assert.equal(imported.textEncoding,'utf-8-bom');
+  }
+  const proxy=new Proxy(new Uint8Array(original),{});
+  assert.deepEqual(importDroppedBytes('proxy.user.js',proxy),
+    {filename:'proxy.user.js',code:'INVALID_DRAG_DATA'});
+  const revoked=Proxy.revocable(new Uint8Array(original),{});
+  revoked.revoke();
+  assert.deepEqual(importDroppedBytes('revoked.user.js',revoked.proxy),
+    {filename:'revoked.user.js',code:'INVALID_DRAG_DATA'});
+});
