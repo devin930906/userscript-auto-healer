@@ -9,6 +9,7 @@
  * Native-only: no arbitrary filesystem path IPC is provided to the renderer.
  */
 import type {BigIntStats} from 'node:fs';
+import {types as utilTypes} from 'node:util';
 import {lstat} from 'node:fs/promises';
 import {basename,isAbsolute} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -51,7 +52,8 @@ type Data={
 };
 function parse(input:unknown):Data|null {
  try{
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+     Array.isArray(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const descriptors=Object.getOwnPropertyDescriptors(input);

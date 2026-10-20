@@ -6,6 +6,7 @@
  * gives permission to write. A caller-provided hash/consent flag is only a
  * preliminary claim. A real trusted E2E + atomic backup gate is still needed.
  */
+import {types as utilTypes} from 'node:util';
 import {
   auditProposedLiteralSelectorPatch,
   type LiteralPatchRequest
@@ -52,7 +53,8 @@ export function assessLocalAcceptancePreflight(
   options:unknown
 ):LocalAcceptancePreflightResult{
   try{
-    if(!options||typeof options!=='object'||Array.isArray(options))
+    if(!options||typeof options!=='object'||utilTypes.isProxy(options)||
+       Array.isArray(options))
       return blocked('INVALID_OPTIONS');
     const proto=Object.getPrototypeOf(options);
     if(proto!==Object.prototype&&proto!==null)
@@ -70,7 +72,7 @@ export function assessLocalAcceptancePreflight(
     if(fields.userApproved.value!==true)return blocked('NOT_AUTHORIZED');
     const diskSourceSha256:unknown=fields.diskSourceSha256.value;
     if(typeof diskSourceSha256!=='string'||!SHA256.test(diskSourceSha256)||
-       !request||typeof request!=='object'||
+       !request||typeof request!=='object'||utilTypes.isProxy(request)||
        diskSourceSha256!==request.expectedSourceSha256)
       return blocked('SOURCE_IDENTITY_UNCONFIRMED');
 

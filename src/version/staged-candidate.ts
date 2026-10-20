@@ -8,6 +8,7 @@
  * Do not expose arbitrary filesystem paths to renderer IPC.
  */
 import {randomUUID} from 'node:crypto';
+import {types as utilTypes} from 'node:util';
 import {lstat,link,open,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {
@@ -43,7 +44,8 @@ const block=(reason:Failure):StagedCandidateResult=>
   Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
 type Options={sourcePath:string;backupDirectory:string;userApproved:boolean};
 function parseOptions(input:unknown):Options|null{
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+    Array.isArray(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const desc=Object.getOwnPropertyDescriptors(input);

@@ -5,6 +5,7 @@
  * DO NOT expose user-supplied arbitrary paths through renderer IPC.
  */
 import {createHash,randomUUID} from 'node:crypto';
+import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
 import {link,lstat,open,unlink} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
@@ -73,7 +74,8 @@ export function backupPrefix(sourcePath:string):string {
  */
 export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBackupResult>{
   try {
-    if(!input||typeof input!=='object'||Array.isArray(input))return deny('INVALID_REQUEST');
+    if(!input||typeof input!=='object'||utilTypes.isProxy(input)||
+       Array.isArray(input))return deny('INVALID_REQUEST');
     const proto=Object.getPrototypeOf(input);
     if(proto!==Object.prototype&&proto!==null)return deny('INVALID_REQUEST');
     const desc=Object.getOwnPropertyDescriptors(input);
