@@ -1,0 +1,89 @@
+name: TASK-007 Official Tampermonkey isolated Windows experiment (NOT STABLE)
+
+on:
+  pull_request:
+    paths:
+      - 'poc/windows-tampermonkey-cloud.cjs'
+      - '.github/workflows/task007-tampermonkey-cloud.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task007-tampermonkey-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actual-tampermonkey:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Download official-hosted MV3 CRX and validate disposable extraction boundaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $base = Join-Path $env:RUNNER_TEMP "uah-tampermonkey-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath $base) { throw 'Disposable directory already exists' }
+          New-Item -ItemType Directory -Path $base | Out-Null
+          $crx = Join-Path $base 'tampermonkey_stable.crx'
+          $zip = Join-Path $base 'tampermonkey.zip'
+          $extension = Join-Path $base 'extension'
+          # This URL is listed in the vendor's Q406 official-version FAQ.
+          # This download is not a claim to have verified a Chrome Web Store signature.
+          Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 120
+          $inputBytes = [IO.File]::ReadAllBytes($crx)
+          if ($inputBytes.Length -lt 64 -or $inputBytes.Length -gt 15000000) { throw 'Unexpected official package size' }
+          if ([Text.Encoding]::ASCII.GetString($inputBytes, 0, 4) -ne 'Cr24' -or [BitConverter]::ToUInt32($inputBytes, 4) -ne 3) {
+            throw 'Official-hosted package is not a CRX3 extension'
+          }
+          $headerLength = [BitConverter]::ToUInt32($inputBytes, 8)
+          $offset = 12 + [int64]$headerLength
+          if ($headerLength -lt 16 -or $offset + 4 -ge $inputBytes.Length) { throw 'CRX3 header bounds invalid' }
+          $stream = [IO.File]::Create($zip)
+          try { $stream.Write($inputBytes, [int]$offset, $inputBytes.Length - [int]$offset) }
+          finally { $stream.Dispose() }
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            if ($archive.Entries.Count -lt 10 -or $archive.Entries.Count -gt 10000) { throw 'Invalid CRX entry count' }
+            $total = [long]0
+            foreach ($entry in $archive.Entries) {
+              $name = $entry.FullName
+              if ($name.StartsWith('/') -or $name.Contains('\') -or
+                  $name -match '(^|/)\.\.(/|$)' -or $name.Contains(':')) {
+                throw 'Unsafe extension archive path'
+              }
+              $total += $entry.Length
+              if ($total -gt 134217728) { throw 'Extension extraction byte limit exceeded' }
+            }
+          } finally { $archive.Dispose() }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extension -Force
+          $manifestFile = Join-Path $extension 'manifest.json'
+          if (!(Test-Path -LiteralPath $manifestFile)) { throw 'Missing root manifest' }
+          $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+          if ($manifest.manifest_version -ne 3) { throw 'Expected official MV3 package' }
+          Write-Host ("Official-hosted CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
+          Write-Host ("MV3 manifest version: " + $manifest.version)
+          "UAH_TM_EXTENSION_DIR=$extension" >> $env:GITHUB_ENV
+          "UAH_TM_PROFILE_DIR=$(Join-Path $base 'profile')" >> $env:GITHUB_ENV
+          "UAH_TM_TOOLING_DIR=$(Join-Path $base 'tooling')" >> $env:GITHUB_ENV
+      - name: Install isolated pinned browser testing tooling
+        shell: pwsh
+        run: |
+          npm install --prefix $env:UAH_TM_TOOLING_DIR --no-audit --no-fund --ignore-scripts playwright@1.56.0
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Playwright toolchain install failed' }
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'browsers'
+          & (Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules\.bin\playwright.cmd') install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Disposable Chromium download failed' }
+          "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
+      - name: Execute real extension manager + GM API + synthetic business assertions
+        shell: pwsh
+        run: |
+          $env:NODE_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules'
+          node ./poc/windows-tampermonkey-cloud.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Official Tampermonkey experimental verification incomplete; TEST-017/018 still blocked' }
