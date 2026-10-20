@@ -181,6 +181,12 @@ export async function stageReviewedCandidateOnly(
       });
       if(finalBackup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
         return block('BACKUP_UNVERIFIED');
+      // The candidate's first post-publication check preceded asynchronous
+      // source and backup reads. A separate editor can replace its bytes
+      // during those reads; never return a stale staged-pair receipt.
+      // This last check is only a snapshot, never authority to apply.
+      if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
+        return block('STAGING_FAILED');
       return Object.freeze({
         status:'CANDIDATE_STAGED_RUNTIME_UNVERIFIED' as const,
         backupFileName:backup.backupFileName,candidateFileName,
