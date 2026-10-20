@@ -113,6 +113,24 @@ test('TEST-023: unauthorized and forged receipts must not create export files',a
   });
 });
 
+test('TEST-023: protected backup descendants are never manual export destinations',async()=>{
+  await fixture(async options=>{
+    const {staged}=await stage(options);
+    if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+    const nested=join(options.backupDirectory,'manual-export-inside-backups');
+    await mkdir(nested);
+    const backupsBefore=(await readdir(options.backupDirectory)).sort();
+    const denied=await exportReviewedCandidateForManualInstall(request,staged,{
+      ...options,exportDirectory:nested
+    });
+    assert.equal(denied.status,'BLOCKED');
+    if(denied.status==='BLOCKED')assert.equal(denied.reason,'UNSAFE_DESTINATION');
+    assert.deepEqual(await readdir(nested),[]);
+    assert.deepEqual((await readdir(options.backupDirectory)).sort(),backupsBefore);
+    assert.equal(await readFile(options.sourcePath,'utf8'),source);
+  });
+});
+
 test('TEST-023: source/candidate changes block a new manual export',async()=>{
   await fixture(async options=>{
     const {staged}=await stage(options);

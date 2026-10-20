@@ -8,7 +8,7 @@
  */
 import {randomUUID} from 'node:crypto';
 import {link,lstat,open,unlink} from 'node:fs/promises';
-import {basename,dirname,isAbsolute,join} from 'node:path';
+import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
 import type {BigIntStats} from 'node:fs';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -63,6 +63,16 @@ function absolute(value:unknown):value is string{
 function sameDir(a:BigIntStats,b:BigIntStats):boolean{
  return a.isDirectory()&&b.isDirectory()&&a.dev===b.dev&&a.ino===b.ino;
 }
+/** A manually installable candidate must not be placed anywhere inside the
+ * protected backup store, including a child directory. Compare complete path
+ * components, not string prefixes (which would reject unrelated siblings).
+ * Symlink/junction ancestry is separately rejected before any file write.
+ */
+function insideProtectedBackup(backup:string,destination:string):boolean{
+ const suffix=relative(backup,destination);
+ return suffix===''||
+   (suffix!=='..'&&!suffix.startsWith('..'+sep)&&!isAbsolute(suffix));
+}
 /** A successful receipt establishes only a separately readable export;
  * the user still must deliberately install/update the userscript and test
  * its behavior inside the real Tampermonkey environment.
@@ -84,6 +94,8 @@ export async function exportReviewedCandidateForManualInstall(
     sourcePath:raw.sourcePath,backupDirectory:raw.backupDirectory,
     exportDirectory:raw.exportDirectory,userApproved:true
   };
+  if(insideProtectedBackup(options.backupDirectory,options.exportDirectory))
+    return block('UNSAFE_DESTINATION');
   const request=requestFields as unknown as LiteralPatchRequest;
   const proposal=proposeLiteralSelectorPatch(request);
   if(proposal.status!=='CANDIDATE_ONLY')return block('REVIEW_REJECTED');
