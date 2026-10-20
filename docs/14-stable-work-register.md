@@ -21,7 +21,7 @@
 | TASK-011 | REQ-020/021；TEST-020/021 | 阶段代码已整合，事务能力未完成 | 原字节备份/只读恢复检查与候选暂存已实现；未完成安全原子应用和真实回滚事务 | 源脚本完整性与恢复；GATE-007 | TASK-009/010 | src/version/；docs/09-development-plan.md | 设计且测试原子提交、崩溃/锁/冲突注入与完整回滚 | 真实文件恢复一致，受阻绝不覆盖 |
 | TASK-012 | REQ-023；TEST-023 | 阶段代码已整合，管理器同步未验证 | 只读复核/手动导出不等于 Tampermonkey 已安装版本变更 | 用户升级与导出 | TASK-007/011 | src/export/；docs/09-development-plan.md | 验证授权导出、扩展内版本状态与失配恢复 | TEST-023 在真实 Tampermonkey 环境通过 |
 | TASK-013 | REQ-022；TEST-022 | 阶段代码已整合，持久流程未完成 | 内存队列/只读检查点/会话进度存在；缺真实批处理持久事务与跨启动恢复 | 任务可靠性；GATE-007 | TASK-008..012 | src/jobs/；docs/09-development-plan.md | 连接真实作业并测试崩溃、重复、取消与一致性 | TEST-022 持久恢复和隔离回归通过 |
-| TASK-014 | REQ-015/016；TEST-015/016/026 | 阶段代码已整合，新增资源清理缺口待验证 | 审查发现 HTTP 非成功响应体未主动释放；修复提交被连接器安全检查阻断，未执行回归 | 可选 AI 网络资源；安全与可靠性 | 既有可选网关，无新增产品依赖 | src/ai/model-gateway.ts；tests/ai/gateway.test.ts；main f36c40b7 | 在授权可写环境补 HTTP 4xx/5xx 非阻塞响应体清理及测试；维持不可自动应用 | 对应当前 SHA 的 TypeScript、Node、Windows CI 通过，接口与额度行为保持一致 |
+| TASK-014 | REQ-015/016；TEST-015/016/026 | 阶段代码已整合，新增资源清理缺口待验证 | 审查发现 HTTP 非成功响应体未主动释放；本分支已提交最小清理实现及独立回归，当前 CI 结果待核验 | 可选 AI 网络资源；安全与可靠性 | 既有可选网关，无新增产品依赖 | src/ai/model-gateway.ts；tests/ai/gateway.test.ts；main f36c40b7 | 审核同分支代码差异，在 PR 当前 SHA 执行 Node/TypeScript/Windows CI；维持不可自动应用 | 对应当前 SHA 的 TypeScript、Node、Windows CI 通过，接口与额度行为保持一致 |
 | TASK-015 | REQ-024；TEST-024 | 阶段代码已整合，正式监控未验证 | 会话内短历史已实现；缺已授权周期复检、持久记录和管理器业务真实性 | 健康监控 | TASK-010/013 | src/health/；docs/09-development-plan.md | 验证明确同意的复检计划、数据生命周期与真实业务信号 | TEST-024 完整正反例和过期恢复通过 |
 | TASK-016 | REQ-025；TEST-025 | 阶段代码已整合，真实兼容回归未验证 | 只读内存兼容层不能证明真实多脚本替换/回滚 | 共享兼容行为 | TASK-009/010/015 | src/compat/；docs/09-development-plan.md | 在独立 Tampermonkey 样本中复核多脚本冲突与回退 | TEST-025 真实多脚本不回归 |
 | TASK-017 | REQ-001..025；TEST-002/022 | 阶段 UI 已整合，完整用户旅程未完成 | 导入/场景/只读检查/手动导出为局部旅程；缺可信修复/批处理/恢复端到端 | 完整 GUI 用户路径 | TASK-013..016 | app/ui/；docs/09-development-plan.md | 组合受支持场景，覆盖异常、取消及权限拒绝 | 完整实际用户流程与关联测试通过 |
@@ -34,6 +34,6 @@
 
 1. 本表是基于上述 main SHA、`docs/09-development-plan.md`、`docs/07-testing.md`、`docs/08-release.md`、公开 Actions 与 Release 现状整理的检查点；若与后续提交冲突，以更新的实际 GitHub SHA、Actions 运行、PR 合并结果为准。
 2. 测试证据每条必须保存：TEST 编号、环境、执行命令/工作流、源码 SHA、运行 ID、结果、证据 URL；尚未实际运行标记为「未执行」，依赖不满足标记为「受阻」。
-3. TASK-014 中本轮修复代码写入遭连接器安全拦截；分支创建不等于代码提交。`TEST-016/026` 新回归未执行。不可在没有对应 CI 的情况下将其标记为完成。
+3. TASK-014 中原有整文件测试更新曾被连接器安全检查拦截；随后已通过独立回归文件及最小源代码改动记录修复提交。当前 `TEST-016/026` 新回归未取得 CI 结果；不得直接标记为完成。
 4. 不新建与原任务重叠的正式 TASK；缺陷按现有 REQ/TEST/GATE 关联。当前无开放 PR，未来需遵守单一主 PR 原则，不自动清理未知历史分支。
 5. 完整原始决策、旧合并历史、测试细节仍保留在原 docs/09、07、08、10；本登记不替代它们或声称旧证明失效。
