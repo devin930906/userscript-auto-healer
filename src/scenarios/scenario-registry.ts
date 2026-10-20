@@ -72,38 +72,99 @@ export function suggestSites(metadata?:MetadataResult):SiteHint[] {
   }
   return hints;
 }
+/** Capture data descriptors without evaluating user-supplied accessors.
+ * Proxy traps are caught and treated as malformed input, never surfaced.
+ * A scenario contract does not admit unknown fields or sparse arrays.
+ */
+function ownData(input:unknown, required:readonly string[], optional:readonly string[]=[]):
+    Record<string,unknown>|null {
+  try {
+    if(!input||typeof input!=='object'||Array.isArray(input))return null;
+    const proto=Object.getPrototypeOf(input);
+    if(proto!==Object.prototype&&proto!==null)return null;
+    const descriptors=Object.getOwnPropertyDescriptors(input);
+    const keys=Reflect.ownKeys(descriptors);
+    if(keys.some(key=>typeof key!=='string'||
+       (!required.includes(key)&&!optional.includes(key)))||
+       required.some(key=>!Object.prototype.hasOwnProperty.call(descriptors,key))||
+       keys.some(key=>!Object.prototype.hasOwnProperty.call(
+         descriptors[key as string],'value')))return null;
+    const captured:Record<string,unknown>=Object.create(null);
+    for(const key of keys)captured[key as string]=descriptors[key as string].value;
+    return captured;
+  }catch{return null;}
+}
+function ownRows(input:unknown,max:number,required:readonly string[],
+    optional:readonly string[]=[]):Record<string,unknown>[]|null {
+  try {
+    if(!Array.isArray(input)||Object.getPrototypeOf(input)!==Array.prototype)
+      return null;
+    const length=Object.getOwnPropertyDescriptor(input,'length')?.value;
+    if(!Number.isSafeInteger(length)||length<0||length>max)return null;
+    const slots=Object.getOwnPropertyDescriptors(input);
+    if(Reflect.ownKeys(slots).length!==length+1)return null;
+    const rows:Record<string,unknown>[]=[];
+    for(let index=0;index<length;index++){
+      const slot=slots[String(index)];
+      if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
+        return null;
+      const row=ownData(slot.value,required,optional);
+      if(!row)return null;
+      rows.push(row);
+    }
+    return rows;
+  }catch{return null;}
+}
 export function preflightScenario(input:ScenarioInput,metadata?:MetadataResult):RegisteredScenario {
+  // This lower-level registry also validates untrusted runtime values; the
+  // Electron IPC sanitization is not its only line of defense.
+  const data=ownData(input,
+    ['id','scriptSha256','userApproved','requiresLogin','steps','assertions'],
+    ['targetUrl','loginReady']);
+  const steps=data?ownRows(data.steps,100,['kind','selector']):null;
+  const assertions=data?ownRows(data.assertions,100,['kind','selector'],['expectedText']):null;
   const invalid:ScenarioIssue[]=[];
-  if(typeof input.id!=='string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
+  if(typeof data?.id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(data.id))
     invalid.push('INVALID_ID');
-  if(typeof input.scriptSha256!=='string' || !/^[a-f0-9]{64}$/i.test(input.scriptSha256))
+  if(typeof data?.scriptSha256!=='string'||!/^[a-f0-9]{64}$/i.test(data.scriptSha256))
     invalid.push('INVALID_SCRIPT_HASH');
-  const hasTarget=typeof input.targetUrl==='string' && input.targetUrl.trim().length>0;
-  const url=hasTarget?normalizeUrl(input.targetUrl):null;
-  if(hasTarget && !url)invalid.push('INVALID_URL');
-  if(!Array.isArray(input.steps) || input.steps.length>100 ||
-     !input.steps.every(step=>step && ['click','wait-for'].includes(step.kind) && validSelector(step.selector)))
+  const hasTarget=typeof data?.targetUrl==='string'&&data.targetUrl.trim().length>0;
+  const url=hasTarget?normalizeUrl(data!.targetUrl):null;
+  if(hasTarget&&!url)invalid.push('INVALID_URL');
+  if(!steps||!steps.every(step=>
+      (step.kind==='click'||step.kind==='wait-for')&&validSelector(step.selector)))
     invalid.push('INVALID_STEP');
-  if(!Array.isArray(input.assertions) || input.assertions.length>100 ||
-     !input.assertions.every(rule=>rule && ['selector-present','text-contains'].includes(rule.kind) &&
-        validSelector(rule.selector) &&
-        (rule.kind!=='text-contains' || (typeof rule.expectedText==='string' && rule.expectedText.length<=4096))))
+  if(!assertions||!assertions.every(rule=>
+      (rule.kind==='selector-present'||rule.kind==='text-contains')&&
+      validSelector(rule.selector)&&
+      (rule.kind!=='text-contains'||
+        (typeof rule.expectedText==='string'&&rule.expectedText.length<=4096))))
     invalid.push('INVALID_ASSERTION');
   const issues:ScenarioIssue[]=[...invalid];
-  if(!invalid.length) {
+  if(!invalid.length){
     if(!url)issues.push('MISSING_TARGET_URL');
-    if(input.userApproved!==true)issues.push('NOT_AUTHORIZED');
-    if(input.requiresLogin && input.loginReady!==true)issues.push('LOGIN_NOT_READY');
-    if(input.assertions.length===0)issues.push('MISSING_ASSERTIONS');
+    if(data!.userApproved!==true)issues.push('NOT_AUTHORIZED');
+    if(data!.requiresLogin===true&&data!.loginReady!==true)
+      issues.push('LOGIN_NOT_READY');
+    if(assertions!.length===0)issues.push('MISSING_ASSERTIONS');
   }
   const clean:ScenarioInput={
-    id:input.id,scriptSha256:input.scriptSha256,
+    id:typeof data?.id==='string'?data.id:'',
+    scriptSha256:typeof data?.scriptSha256==='string'?data.scriptSha256:'',
     ...(url?{targetUrl:url}:{}),
-    userApproved:input.userApproved===true,
-    requiresLogin:input.requiresLogin===true,
-    loginReady:input.loginReady===true,
-    steps:Array.isArray(input.steps)?input.steps.map(step=>({...step})):[],
-    assertions:Array.isArray(input.assertions)?input.assertions.map(rule=>({...rule})):[]
+    userApproved:data?.userApproved===true,
+    requiresLogin:data?.requiresLogin===true,
+    loginReady:data?.loginReady===true,
+    steps:steps?steps.map(step=>({
+      kind:step.kind as ScenarioStep['kind'],
+      selector:step.selector as string
+    })):[],
+    assertions:assertions?assertions.map(rule=>({
+      kind:rule.kind as ScenarioAssertion['kind'],
+      selector:rule.selector as string,
+      ...(Object.prototype.hasOwnProperty.call(rule,'expectedText')
+        ?{expectedText:rule.expectedText as string}:{})
+    })):[]
   };
   return {
     input:clean,hints:suggestSites(metadata),
@@ -116,9 +177,10 @@ export class ScenarioRegistry {
   private readonly scenarios=new Map<string,RegisteredScenario>();
   register(input:ScenarioInput,metadata?:MetadataResult):RegisteredScenario {
     const result=preflightScenario(input,metadata);
-    if(this.scenarios.has(input.id))
+    if(result.state==='INVALID')return structuredClone(result);
+    if(this.scenarios.has(result.input.id))
       return {...result,state:'INVALID',issues:[...result.issues,'DUPLICATE_ID']};
-    if(result.state!=='INVALID')this.scenarios.set(input.id,structuredClone(result));
+    this.scenarios.set(result.input.id,structuredClone(result));
     return structuredClone(result);
   }
   get(id:string):RegisteredScenario|null {
