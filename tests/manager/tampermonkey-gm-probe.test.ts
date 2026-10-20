@@ -552,4 +552,19 @@ test('TEST-017/018: fixture rejects noncanonical route and delayed route drift',
  });
  assert.deepEqual(during,{gm:1,query:1,action:0,report:0},
    'A route change during DOM lookup must not mutate the stale target');
+ const afterSet={gm:0,query:0,action:0,read:0,report:0};
+ location.href=probe.origin+'/?mode=fixed';
+ runInNewContext(probe.source,{
+   Date:clock,URL,location,
+   document:{readyState:'complete',querySelector:()=>{
+     afterSet.query++;
+     return {setAttribute:()=>{
+       afterSet.action++;location.href=probe.origin+'/?mode=broken';
+     },getAttribute:()=>{afterSet.read++;return 'done';}};
+   }},
+   GM_getValue:(_key:string,fallback:string)=>{afterSet.gm++;return fallback;},
+   fetch:()=>{afterSet.report++;return Promise.resolve();}
+ });
+ assert.deepEqual(afterSet,{gm:1,query:1,action:1,read:0,report:0},
+   'A route change during DOM action must not yield a stale success report');
 });
