@@ -94,7 +94,7 @@ test('TEST-022/017: native batch previews 36 scripts across bounded isolated wor
    x.tampermonkeyVerified===false&&x.businessVerified===false));
 });
 
-test('TEST-022/NFR-009: read-only native AST batch has a hard 64-file ceiling',async()=>{
+test('TEST-022/NFR-009: read-only native AST batch continues beyond 64 files with bounded worker segments',async()=>{
  const scripts=Array.from({length:70},(_,i)=>imported(
   header+'document.querySelector("#not-exposed-'+i+'");'
  ));
@@ -107,10 +107,9 @@ test('TEST-022/NFR-009: read-only native AST batch has a hard 64-file ceiling',a
  assert.deepEqual(progress,[16,32,48,64,70],
    'even budget-skipped files must complete the finite UI counter');
  assert.equal(reports.length,70);
- assert.deepEqual(reports.slice(0,64).map(x=>x.status),
-  Array(64).fill('STATIC_ANALYSIS_ONLY'));
- assert.deepEqual(reports.slice(64).map(x=>x.status),
-  Array(6).fill('SKIPPED_BATCH_BUDGET'));
+ assert.deepEqual(reports.map(x=>x.status),
+  Array(70).fill('STATIC_ANALYSIS_ONLY'),
+  'eligible scripts after position 64 must not silently lose static AST analysis');
  assert.equal(JSON.stringify(reports).includes('not-exposed-'),false);
  assert.ok(reports.every(x=>!x.automaticPatchAllowed&&!x.businessVerified&&
    !x.tampermonkeyVerified));
@@ -123,10 +122,9 @@ test('TEST-022/NFR-009: cancellation before batch dispatch marks all eligible se
   header+'document.querySelector("#do-not-run-'+i+'");'
  ));
  const reports=await previewImportedBatchOffMain(scripts,controller.signal);
- assert.deepEqual(reports.slice(0,64).map(x=>x.status),
-  Array(64).fill('SKIPPED_CANCELLED'));
- assert.deepEqual(reports.slice(64).map(x=>x.status),
-  Array(6).fill('SKIPPED_BATCH_BUDGET'));
+ assert.deepEqual(reports.map(x=>x.status),
+  Array(70).fill('SKIPPED_CANCELLED'),
+  'cancelled files beyond the old segment cap are still counted as cancelled');
  assert.equal(JSON.stringify(reports).includes('do-not-run-'),false);
 });
 
