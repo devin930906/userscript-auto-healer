@@ -84,7 +84,13 @@ export async function runImportedReadOnlyAnalysisQueue(
  const parent=new AbortController();
  const cancel=()=>parent.abort();
  signal?.addEventListener('abort',cancel,{once:true});
- const deadline=setTimeout(cancel,GLOBAL_ANALYSIS_DEADLINE_MS);
+ // A global analysis budget expiry is not a user cancellation. Keep
+ // the source explicit so all unprocessed segments retain the right status.
+ let deadlineExpired=false;
+ const deadline=setTimeout(()=>{
+  deadlineExpired=true;
+  cancel();
+ },GLOBAL_ANALYSIS_DEADLINE_MS);
  if(signal?.aborted)cancel();
  let processed=0;
  try{
@@ -112,6 +118,7 @@ export async function runImportedReadOnlyAnalysisQueue(
   signal?.removeEventListener('abort',cancel);
  }
  return results.map(value=>value??unavailable(
-  parent.signal.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED'
+  signal?.aborted?'SKIPPED_CANCELLED':
+  deadlineExpired?'SKIPPED_BATCH_BUDGET':'ISOLATED_ANALYSIS_FAILED'
  ));
 }
