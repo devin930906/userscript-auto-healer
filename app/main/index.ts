@@ -806,7 +806,7 @@ function registerSafeIpc(): void {
       if(backup.canceled||backup.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
       const destination=await dialog.showOpenDialog(win,{
-        title:'选择独立的人工候选导出文件夹（不得与备份相同）',
+        title:'选择独立的人工候选及原始恢复版本导出文件夹（不得与备份相同）',
         properties:['openDirectory']
       });
       if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
@@ -821,13 +821,14 @@ function registerSafeIpc(): void {
          current.scripts[0].sha256!==selected.scenario.scriptSha256)
         return {ok:false,code:'SOURCE_CHANGED_OR_UNREADABLE',...unverified};
       const approved=await dialog.showMessageBox(win,{
-        type:'question',buttons:['创建备份并导出人工候选','取消'],
+        type:'question',buttons:['创建备份、候选及原始恢复版本','取消'],
         defaultId:1,cancelId:1,noLink:true,
-        message:'确认写入独立的备份和人工候选文件？',
+        message:'确认写入备份、人工候选及独立的原始恢复文件？',
         detail:'脚本：'+current.scripts[0].filename+
           '\n备份文件夹：'+backup.filePaths[0]+
           '\n候选文件夹：'+destination.filePaths[0]+
-          '\n不会覆盖原始脚本或安装/更新浏览器扩展。'+
+          '\n导出目录将生成修复候选和保留原字节的人工恢复脚本，均不会自动安装。' +
+           '\n不会覆盖原始脚本或安装/更新浏览器扩展。'+
           '\n新文件一旦开始创建，不能用取消观察来撤销；请自行检查导出版本。'+
           '\n只读 DOM 信号不是 Tampermonkey/GM/业务验证。'
       });
@@ -848,6 +849,7 @@ function registerSafeIpc(): void {
         backupFileName:result.backupFileName,
         candidateFileName:result.candidateFileName,
         exportFileName:result.exportFileName,
+        recoveryExportFileName:result.recoveryExportFileName,
         candidateSha256:result.candidateSha256,
         candidateByteLength:result.candidateByteLength,
         ...unverified};

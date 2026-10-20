@@ -26,6 +26,7 @@ export type ManualRepairFlowResult=
  |Readonly<{status:'BLOCKED';reason:Reason}&typeof noAuthority>
  |Readonly<{status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED';
    backupFileName:string;candidateFileName:string;exportFileName:string;
+   recoveryExportFileName:string;
    sourceSha256:string;candidateSha256:string;candidateByteLength:number
   }&typeof noAuthority>;
 const block=(reason:Reason):ManualRepairFlowResult=>
@@ -97,6 +98,7 @@ export async function prepareManualRepairExportOnly(
     backupFileName:staged.backupFileName,
     candidateFileName:staged.candidateFileName,
     exportFileName:exported.exportFileName,
+    recoveryExportFileName:exported.recoveryExportFileName,
     sourceSha256:staged.originalSha256,
     candidateSha256:staged.candidateSha256,
     candidateByteLength:exported.byteLength,
