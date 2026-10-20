@@ -125,7 +125,7 @@ export function proposeFromReadOnlyDomDiagnostic(
     // CLOSED_SHADOW_ROOT_UNKNOWN alone: the DOM observer always reports it,
     // even when no shadow root is detected; doing so would disable the
     // existing, explicitly review-only flow on every ordinary page.
-    const samples=(observation as DynamicObservation).samples;
+    const samples=(observation as Extract<DynamicObservation,{ok:true}>).samples;
     if(samples.some(sample=>sample.ok===true&&
        (sample.summary.iframeCount!==0||
         sample.summary.visibleShadowRoots!==0)))
