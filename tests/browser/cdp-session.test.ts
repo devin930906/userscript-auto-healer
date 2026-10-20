@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { inspectCdpVersion } from '../../src/browser/cdp-session';
+import { inspectCdpVersion, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 
 const envelope={Browser:'Chrome/154.0.8037.57',
   webSocketDebuggerUrl:'ws://127.0.0.1:9223/devtools/browser/18ed998f-2182-41b5-9203-a6c2f45b7ccb'};
@@ -65,8 +65,6 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
 import { createServer } from 'node:net';
 import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
 test('TEST-009/026: netstat lookup is absolute and cannot search the working directory',()=>{
-  const {resolveWindowsNetstatExecutable}=require('../../src/browser/cdp-session') as
-    typeof import('../../src/browser/cdp-session');
   assert.equal(resolveWindowsNetstatExecutable('C:\\Windows'),
     'C:\\Windows\\System32\\netstat.exe');
   assert.equal(resolveWindowsNetstatExecutable('D:\\WinRoot'),
