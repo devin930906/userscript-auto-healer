@@ -78,6 +78,9 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' if(location.origin!=='+JSON.stringify(origin)+')return;',
  " const mode=new URL(location.href).searchParams.get('mode');",
  " if(mode!=='broken'&&mode!=='fixed')return;",
+  // A self-reported fixture action belongs only to the exact owned test page.
+  ' const expectedUrl='+JSON.stringify(origin+'/?mode=')+'+mode;',
+  ' if(location.href!==expectedUrl)return;',
  ' let gmMatched=false;',
  ' try{gmMatched=GM_getValue('+JSON.stringify('uah-gm-probe-'+token)+','+
     JSON.stringify(PROBE_DEFAULT)+')==='+JSON.stringify(PROBE_DEFAULT)+';}',
@@ -85,20 +88,25 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // A synchronous GM getter, DOM query or setter can cross the consent
  // deadline. Abort before every subsequent side effect, not only at entry.
  ' if(Date.now()>='+expiresAt+')return;',
+  ' if(location.href!==expectedUrl)return;',
  // document-start can run before the target exists; GM is still called at
  // the selected injection point, but DOM work waits for parsing to finish.
  ' const checkDomAndReport=()=>{',
  ' if(Date.now()>='+expiresAt+')return;',
+  ' if(location.href!==expectedUrl)return;',
  " const selector=mode==='broken'?'#obsolete-target':'#current-target';",
  ' const target=document.querySelector(selector);',
  ' if(Date.now()>='+expiresAt+')return;',
+  ' if(location.href!==expectedUrl)return;',
  ' let actionConfirmed=false;',
  ' if(target){',
  "  target.setAttribute('data-uah-probe-action','done');",
  '  if(Date.now()>='+expiresAt+')return;',
+  '  if(location.href!==expectedUrl)return;',
  "  actionConfirmed=target.getAttribute('data-uah-probe-action')==='done';",
  ' }',
  ' if(Date.now()>='+expiresAt+')return;',
+  ' if(location.href!==expectedUrl)return;',
  ' void fetch('+JSON.stringify(origin+'/receipt')+',',
  " {method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},",
  ' body:JSON.stringify({token:'+JSON.stringify(token)+',mode,',
