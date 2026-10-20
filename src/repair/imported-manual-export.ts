@@ -11,6 +11,7 @@
  * and obtain explicit consent before calling this function.
  */
 import {createHash} from 'node:crypto';
+import {basename,isAbsolute} from 'node:path';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {MAX_ANALYSIS_BYTES} from '../analyze/import-preview';
 import type {ImportedScript} from '../import/import-service';
@@ -70,7 +71,12 @@ export async function exportReviewedImportedSelectorOnly(
   ]);
   if(!script||typeof script.filename!=='string'||
      !FILE.test(script.filename)||!SHA.test(script.sha256 as string)||
-     typeof script.sourcePath!=='string'||
+     typeof script.sourcePath!=='string'||script.sourcePath.length===0||
+     script.sourcePath.length>4096||script.sourcePath.includes('\0')||
+     !isAbsolute(script.sourcePath)||
+     // Content identity alone does not bind a different same-byte file to
+     // the filename shown to the user for this native import.
+     basename(script.sourcePath)!==script.filename||
      !(script.bytes instanceof Uint8Array)||
      typeof script.byteLength!=='number'||
      !Number.isSafeInteger(script.byteLength)||
