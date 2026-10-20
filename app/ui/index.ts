@@ -52,6 +52,12 @@ interface Window {
       sessionHealthEventCount?:number;
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
+    readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
+      currentStatus?:'UNTESTED'|'ELEMENT_FOUND_ONLY'|'INDETERMINATE';
+      events?:readonly {observedAtMs:number;
+        status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[];
+      tampermonkeyVerified:false;businessVerified:false;
+      automaticPatchAllowed:false;automaticRollbackAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
@@ -101,6 +107,10 @@ const scenarioRegister = document.getElementById('scenario-register') as HTMLBut
 const scenarioStatus = document.getElementById('scenario-status');
 const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTMLSelectElement | null;
 const scenarioInspectButton = document.getElementById('scenario-inspect') as HTMLButtonElement | null;
+const scenarioHistoryButton = document.getElementById('scenario-history') as HTMLButtonElement | null;
+const scenarioHistorySummary = document.getElementById('scenario-history-summary');
+const scenarioHistoryEntries = document.getElementById('scenario-history-entries');
+let scenarioHistoryBusy=false;
 const scenarioExportButton = document.getElementById('scenario-export-manual') as HTMLButtonElement | null;
 const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
@@ -533,6 +543,8 @@ function browserControls():void{
  if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
+ if(scenarioHistoryButton)scenarioHistoryButton.disabled=scenarioHistoryBusy||
+   (scenarioInspectId?.options.length??0)<=1;
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||browserBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
  if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
@@ -553,6 +565,33 @@ async function browserAction(fn:()=>Promise<void>):Promise<void>{
  catch{setBrowserStatus('浏览器操作受阻；没有获得验证成功的结果。');}
  finally{browserBusy=false;browserControls();}
 }
+scenarioHistoryButton?.addEventListener('click',()=>{
+ if(scenarioHistoryBusy)return;
+ const id=scenarioInspectId?.value??'';
+ if(!id){if(scenarioHistorySummary)scenarioHistorySummary.textContent='请先登记并选择一个只读场景。';return;}
+ scenarioHistoryBusy=true;browserControls();
+ scenarioHistoryEntries?.replaceChildren();
+ if(scenarioHistorySummary)scenarioHistorySummary.textContent='正在读取本窗口的有限观察记录；不会访问浏览器或磁盘。';
+ void window.healer.readScenarioHistory(id).then(view=>{
+  if(!view.ok||view.status!=='UNVERIFIED_SESSION_HISTORY_ONLY'||!Array.isArray(view.events)){
+   if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史不可用：'+(view.code??'UNKNOWN');
+   return;
+  }
+  if(scenarioHistorySummary)scenarioHistorySummary.textContent='当前状态：'+(
+   view.currentStatus==='ELEMENT_FOUND_ONLY'?'仅观察到元素存在':
+   view.currentStatus==='INDETERMINATE'?'证据不足／已过期':'尚未观察')+
+   '；本窗口保留 '+view.events.length+' 条（最多 32 条）。这不证明脚本或业务正常。';
+  for(const event of view.events){
+   const row=document.createElement('li');
+   row.textContent=new Date(event.observedAtMs).toLocaleString()+' — '+(
+    event.status==='ELEMENT_FOUND_ONLY'?'只读 DOM 元素存在（未经验证）':
+    '证据不足（未经验证）');
+   scenarioHistoryEntries?.append(row);
+  }
+ }).catch(()=>{
+  if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史读取失败；不推断脚本状态。';
+ }).finally(()=>{scenarioHistoryBusy=false;browserControls();});
+});
 scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const id=scenarioInspectId?.value??'';
  if(!id){
