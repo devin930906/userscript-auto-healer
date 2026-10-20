@@ -23,7 +23,7 @@ import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manu
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
-import {readLimitedSessionHistory} from '../../src/health/session-history';
+import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 
 let mainWindow: BrowserWindow | null = null;
@@ -702,7 +702,8 @@ function registerSafeIpc(): void {
       let sessionHealthEventCount=0;
       try {
         const snapshot=recordLimitedScenarioInspection(limitedScenarioHistory,{
-          scriptHash:selected.scenario.scriptSha256,
+          scriptHash:limitedScenarioHistoryKey(
+            selected.scenario.scriptSha256,selected.scenario.id),
           checkedAssertions:result.checkedAssertions,
           triageStatus:result.triage.status,
           pageRuntimeStatus:page.status,
