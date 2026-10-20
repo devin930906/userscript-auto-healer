@@ -77,6 +77,20 @@ test('TEST-004/011/022: native-batch AST results run in an actual isolated Node 
    !x.businessVerified));
 });
 
+test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{
+ const scripts=Array.from({length:36},(_,i)=>imported(
+  header+'document.querySelector("#private-segment-'+i+'");'
+ ));
+ const results=await previewImportedBatchOffMain(scripts);
+ assert.equal(results.length,36);
+ assert.equal(results.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,36,
+  'files past the first 16 must be processed by later bounded worker segments');
+ assert.equal(results.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,0);
+ assert.equal(JSON.stringify(results).includes('private-segment-'),false);
+ assert.ok(results.every(x=>x.automaticPatchAllowed===false&&
+   x.tampermonkeyVerified===false&&x.businessVerified===false));
+});
+
 test('TEST-022/NFR-009: already-cancelled worker request cannot start source analysis',async()=>{
  const controller=new AbortController();
  controller.abort();
