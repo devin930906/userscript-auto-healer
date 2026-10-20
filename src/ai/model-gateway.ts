@@ -8,6 +8,8 @@
  * Persistent credential storage, arbitrary source/DOM transfer, and product
  * repair integration require separate native authorization and verification.
  */
+import {types as nodeTypes} from 'node:util';
+
 export type GatewayCode =
   'DISABLED' | 'NOT_AUTHORIZED' | 'INVALID_EVIDENCE' |
   'MODEL_NOT_SELECTED' | 'REQUEST_LIMIT' | 'NETWORK_FAILED' |
@@ -33,7 +35,8 @@ const failure=(code:GatewayCode):GatewayFailure=>
 /** Access only own data descriptors; no user-created getters or hidden fields. */
 function record(input:unknown,keys:readonly string[]):Record<string,unknown>|null{
   try{
-    if(!input||typeof input!=='object'||Array.isArray(input))return null;
+    if(!input||typeof input!=='object'||Array.isArray(input)||nodeTypes.isProxy(input))
+      return null;
     const proto=Object.getPrototypeOf(input);
     if(proto!==Object.prototype&&proto!==null)return null;
     const fields=Object.getOwnPropertyDescriptors(input);
