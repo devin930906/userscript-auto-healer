@@ -19,23 +19,39 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'),'utf8')
 assert.equal(manifest.manifest_version,3,'Official current Tampermonkey must be MV3');
 assert.ok(/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(manifest.version),'Unknown manager version');
 const EXPECTED_ID='dhdgffkkebhmkfjojejmpbldmpobfkfo';
+const RUN_AT_MODES=Object.freeze([
+ 'document-start','document-body','document-end','document-idle'
+]);
+const runAt=process.env.UAH_TM_RUN_AT;
+assert.ok(RUN_AT_MODES.includes(runAt),
+  'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
 const source=[
  '// ==UserScript==',
- '// @name UAH disposable Tampermonkey CI fixture',
+ '// @name UAH disposable Tampermonkey CI fixture '+runAt,
  '// @namespace https://userscript-auto-healer.invalid/',
  '// @version 0.0.1',
  '// @match https://example.com/*',
  '// @grant GM_getValue',
- '// @run-at document-idle',
+ '// @run-at '+runAt,
  '// ==/UserScript==',
- 'document.documentElement.dataset.uahCiInjected="yes";',
+ 'const injectedReadyState=document.readyState;',
  'let gm=false;',
  'try { gm=typeof GM_getValue==="function"&&',
  'GM_getValue("__uah_ci_missing_key__","ci-default")==="ci-default"; }catch(e){}',
- 'document.documentElement.dataset.uahCiGm=String(gm);',
- 'const anchor=document.querySelector("#uah-ci-target");',
- 'if(anchor&&gm)anchor.setAttribute("data-uah-ci-action","done");',
- 'document.documentElement.dataset.uahCiBusiness=anchor&&gm?"recovered":"missing-target";'
+ 'const report=()=>{',
+ ' if(!document.documentElement)throw Error("Missing fixture root");',
+ ' document.documentElement.dataset.uahCiInjected="yes";',
+ ' document.documentElement.dataset.uahCiRunAt='+JSON.stringify(runAt)+';',
+ ' document.documentElement.dataset.uahCiInjectionReadyState=injectedReadyState;',
+ ' document.documentElement.dataset.uahCiGm=String(gm);',
+ ' const anchor=document.querySelector("#uah-ci-target");',
+ ' if(anchor&&gm)anchor.setAttribute("data-uah-ci-action","done");',
+ ' document.documentElement.dataset.uahCiBusiness=anchor&&gm?"recovered":"missing-target";',
+ '};',
+ // For document-start/body, the root/fixture target can be unavailable until load.
+ // Never report a business result before the real test page finishes loading.
+ 'if(document.readyState==="complete")report();',
+ 'else window.addEventListener("load",report,{once:true});'
 ].join('\n');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function extensionCards(context){
@@ -113,6 +129,7 @@ async function main(){
  });
  try{
   context=await launch();
+  console.log('TESTED_DECLARED_RUN_AT '+runAt);
   const cards=await extensionCards(context);
   const manager=cards.find(x=>/tampermonkey/i.test(x.name)&&
     !/beta|legacy/i.test(x.name));
@@ -211,6 +228,8 @@ async function main(){
       ()=>document.documentElement.dataset.uahCiInjected==='yes',{timeout:12000});
     return page.evaluate(()=>({
       injected:document.documentElement.dataset.uahCiInjected,
+      runAt:document.documentElement.dataset.uahCiRunAt,
+      injectionReadyState:document.documentElement.dataset.uahCiInjectionReadyState,
       gm:document.documentElement.dataset.uahCiGm,
       business:document.documentElement.dataset.uahCiBusiness,
       action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
@@ -224,7 +243,12 @@ async function main(){
     waitUntil:'domcontentloaded',timeout:30000});
   const broken=await readBusiness(brokenPage);
   console.log('TAMPERMONKEY_SYNTHETIC_BROKEN '+JSON.stringify(broken));
-  assert.deepEqual(broken,{
+  assert.equal(broken.runAt,runAt,'Manager ran the declared injection mode');
+  assert.ok(['loading','interactive','complete'].includes(broken.injectionReadyState),
+    'Actual userscript injection readyState must be recorded');
+  assert.deepEqual({
+    injected:broken.injected,gm:broken.gm,business:broken.business,action:broken.action
+  },{
     injected:'yes',gm:'true',business:'missing-target',action:null
   });
   const fixedPage=await context.newPage();
@@ -238,10 +262,15 @@ async function main(){
     waitUntil:'domcontentloaded',timeout:30000});
   const fixed=await readBusiness(fixedPage);
   console.log('TAMPERMONKEY_SYNTHETIC_FIXED '+JSON.stringify(fixed));
-  assert.deepEqual(fixed,{
+  assert.equal(fixed.runAt,runAt,'Manager ran the declared injection mode');
+  assert.ok(['loading','interactive','complete'].includes(fixed.injectionReadyState),
+    'Actual userscript injection readyState must be recorded');
+  assert.deepEqual({
+    injected:fixed.injected,gm:fixed.gm,business:fixed.business,action:fixed.action
+  },{
     injected:'yes',gm:'true',business:'recovered',action:'done'
   });
-  console.log('PASS: vendor-hosted unpacked Tampermonkey GM_getValue and both synthetic DOM/business assertions.');
+  console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+' GM_getValue and both synthetic DOM/business assertions.');
   console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
