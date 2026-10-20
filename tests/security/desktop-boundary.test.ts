@@ -21,7 +21,7 @@ const approvedIpcChannels=[
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
- 'import:dropped','import:files','import:folder','scenario:cancel',
+ 'import:dropped','import:files','import:folder','import:get-progress','scenario:cancel',
  'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
@@ -140,6 +140,8 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /ipcMain\.handle\('import:cancel-dropped',event=>/);
   assert.match(main, /authorizeSender\(event\);\s*if\(!droppedImportController\)/);
   assert.match(main, /ipcMain\.handle\('import:cancel-native', event=>/);
+  assert.match(main, /ipcMain\.handle\('import:get-progress',event=>/);
+  assert.match(main, /authorizeSender\(event\);\s*\/\/ No user data/);
   assert.match(main, /authorizeSender\(event\);\s*if\(!nativeImportController\)return/);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
   assert.match(main, /dialog\.showMessageBox/);
@@ -185,6 +187,8 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /cancelDroppedImport: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:cancel-dropped'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-dropped',\s*[^)]/);
   assert.match(preload, /cancelNativeImport: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:cancel-native'\)/);
+  assert.match(preload, /getNativeImportProgress: \(\): Promise<unknown> => ipcRenderer\.invoke\('import:get-progress'\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:get-progress',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
   assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-body' \| 'document-end' \| 'document-idle'\)/);
