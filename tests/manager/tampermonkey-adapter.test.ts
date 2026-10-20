@@ -112,3 +112,36 @@ test('TEST-017 stage: distinct ordinary Chrome targets remain ignorable but cann
   assert.equal(mixed.ok,true);
   if(mixed.ok)assert.equal(mixed.matchedRuntimeTargets,1);
 });
+
+test('TEST-017/026: CDP hint parser does not evaluate hostile getters or iterators',()=>{
+ let getters=0;
+ const accessorTarget={targetId:id,type:'service_worker'};
+ Object.defineProperty(accessorTarget,'url',{enumerable:true,get(){
+   getters++;throw Error('PRIVATE_EXTENSION_DATA');
+ }});
+ const accessorEntries=[worker] as unknown[];
+ Object.defineProperty(accessorEntries,0,{enumerable:true,configurable:true,get(){
+   getters++;throw Error('PRIVATE_TARGET_ENTRY');
+ }});
+ const trapped=[
+   [accessorTarget],
+   accessorEntries,
+   [new Proxy(worker,{ownKeys(){throw Error('PRIVATE_TARGET_PROXY');}})],
+   new Proxy([worker],{ownKeys(){throw Error('PRIVATE_ARRAY_PROXY');}}),
+   [,worker],
+   [{...worker,targetId:id, get url(){getters++;throw Error('PRIVATE_URL');}}]
+ ];
+ for(const sample of trapped){
+   assert.deepEqual(inspectTampermonkeyTargetHints(sample),
+     {ok:false,code:'INVALID_CDP_RESPONSE'});
+ }
+ assert.equal(getters,0,'CDP metadata getters must never be evaluated');
+ const customIterator=[worker];
+ Object.defineProperty(customIterator,Symbol.iterator,{get(){
+   getters++;throw Error('PRIVATE_ITERATOR');
+ }});
+ const result=inspectTampermonkeyTargetHints(customIterator);
+ assert.deepEqual(result,{ok:false,code:'INVALID_CDP_RESPONSE'},
+   'extra own iterator metadata must fail closed without invoking it');
+ assert.equal(getters,0);
+});
