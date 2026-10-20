@@ -68,12 +68,16 @@ test('TEST-023: export backed-up reviewed bytes without changing original or man
     assert.equal(second.status,'EXPORTED_RUNTIME_UNVERIFIED',JSON.stringify(second));
     if(first.status!=='EXPORTED_RUNTIME_UNVERIFIED'||second.status!=='EXPORTED_RUNTIME_UNVERIFIED')return;
     assert.notEqual(first.exportFileName,second.exportFileName);
+    assert.notEqual(first.recoveryExportFileName,second.recoveryExportFileName);
     assert.equal(first.candidateSha256,digest(candidate.candidateSource));
     assert.equal(first.byteLength,Buffer.byteLength(candidate.candidateSource));
     for(const exported of [first,second]){
       assert.match(exported.exportFileName,/^UAH-Reviewed-[0-9a-f]{12}-[\w-]+\.user\.js$/);
       assert.deepEqual(await readFile(join(options.exportDirectory,exported.exportFileName)),
         Buffer.from(candidate.candidateSource));
+      assert.match(exported.recoveryExportFileName,/^UAH-Original-[0-9a-f]{12}-[\\w-]+\\.user\\.js$/);
+      assert.deepEqual(await readFile(join(options.exportDirectory,exported.recoveryExportFileName)),
+        Buffer.from(source),'the independently usable manual recovery file retains original bytes');
       assert.equal(exported.automaticPatchAllowed,false);
       assert.equal(exported.automaticRollbackAllowed,false);
       assert.equal(exported.tampermonkeyVerified,false);
@@ -83,7 +87,7 @@ test('TEST-023: export backed-up reviewed bytes without changing original or man
     }
     assert.deepEqual(await readFile(options.sourcePath,'utf8'),source);
     assert.deepEqual((await readdir(options.backupDirectory)).sort(),beforeBackups);
-    assert.equal((await readdir(options.exportDirectory)).length,2);
+    assert.equal((await readdir(options.exportDirectory)).length,4);
   });
 });
 
