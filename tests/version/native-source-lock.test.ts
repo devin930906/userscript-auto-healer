@@ -202,7 +202,7 @@ test('TEST-020: ancestor replaced with a junction during a native lock cannot pa
       });
     }catch(error){failure=error;}
     if(unavailable){
-      t.diagnostic('Ancestor rename or junction privileges unavailable');
+      t.skip('Ancestor rename or junction privileges unavailable');
       assert.equal(failure,undefined);
       return;
     }
