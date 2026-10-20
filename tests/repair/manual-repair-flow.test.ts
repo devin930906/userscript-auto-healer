@@ -75,7 +75,9 @@ test('TEST-014/019/020/023: stable DOM failure becomes separate reviewed manual 
    assert.deepEqual(await readFile(join(opts.backupDirectory,result.backupFileName),'utf8'),source);
    assert.deepEqual((await readdir(opts.backupDirectory)).sort(),
      [result.backupFileName,result.candidateFileName].sort());
-   assert.equal((await readdir(opts.exportDirectory)).length,1);
+   assert.equal(await readFile(join(opts.exportDirectory,result.recoveryExportFileName),'utf8'),source);
+   assert.notEqual(result.recoveryExportFileName,result.exportFileName);
+   assert.equal((await readdir(opts.exportDirectory)).length,2);
    assert.equal(JSON.stringify(result).includes(opts.sourcePath),false);
  });
 });
