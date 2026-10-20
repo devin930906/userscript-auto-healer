@@ -18,36 +18,59 @@ export type ManagerPresenceResult =
  | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|'UNVERIFIED_BROWSER'|
     'UNOWNED_LISTENER'|'INVALID_CDP_RESPONSE'|'RUNTIME_NOT_OBSERVED'|'CDP_FAILED'};
 
-function object(value:unknown):value is Record<string,unknown>{
- return value!==null&&typeof value==='object'&&!Array.isArray(value);
-}
 const acceptedTypes=new Set(['service_worker','background_page']);
-/** No web-page or renderer-supplied claim can become proof of actual extension execution. */
+const invalidTargets=():ManagerPresenceResult=>({ok:false,code:'INVALID_CDP_RESPONSE'});
+/** Capture only own data descriptors, never invoke getters, proxies' get traps,
+ * or a caller-supplied array iterator. CDP JSON normally has plain objects.
+ */
 export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceResult {
- if(!Array.isArray(payload)||payload.length>512)return {ok:false,code:'INVALID_CDP_RESPONSE'};
- let count=0;
- const ids=new Set<string>();
- for(const value of payload){
-   if(!object(value)||typeof value.type!=='string'||typeof value.url!=='string'||
-      typeof value.targetId!=='string'||value.url.length>8192||
-      !/^[a-zA-Z0-9_-]{8,128}$/.test(value.targetId)||ids.has(value.targetId))
-     return {ok:false,code:'INVALID_CDP_RESPONSE'};
-   // Validate all CDP identities before filtering manager-specific targets.
-   // An unrelated entry with a duplicate or forged ID makes the whole receipt unsafe.
-   ids.add(value.targetId);
-   if(!acceptedTypes.has(value.type))continue;
-   let url:URL;
-   try{url=new URL(value.url);}catch{continue;}
-   if(url.protocol!=='chrome-extension:'||url.hostname!==TAMPERMONKEY_EXTENSION_ID||
-      url.username||url.password||url.port)continue;
-   count++;
- }
- if(count===0)return {ok:false,code:'RUNTIME_NOT_OBSERVED'};
- return {ok:true,status:'RUNTIME_TARGET_HINT_ONLY',manager:'Tampermonkey',
-   extensionId:TAMPERMONKEY_EXTENSION_ID,matchedRuntimeTargets:count,
-   extensionAuthenticityVerified:false,versionVerified:false,permissionVerified:false,
-   scriptInstallationVerified:false,scriptInjectionVerified:false,
-   gmApiVerified:false,businessVerified:false};
+ try{
+  if(!Array.isArray(payload)||Object.getPrototypeOf(payload)!==Array.prototype)
+    return invalidTargets();
+  const length=Object.getOwnPropertyDescriptor(payload,'length')?.value;
+  if(!Number.isSafeInteger(length)||length<0||length>512)return invalidTargets();
+  const entries=Object.getOwnPropertyDescriptors(payload);
+  if(Reflect.ownKeys(entries).length!==length+1)return invalidTargets();
+  let count=0;
+  const ids=new Set<string>();
+  for(let i=0;i<length;i++){
+    const slot=entries[String(i)];
+    if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
+      return invalidTargets();
+    const value:unknown=slot.value;
+    if(!value||typeof value!=='object'||Array.isArray(value))
+      return invalidTargets();
+    const prototype=Object.getPrototypeOf(value);
+    if(prototype!==Object.prototype&&prototype!==null)return invalidTargets();
+    const fields=Object.getOwnPropertyDescriptors(value);
+    const typeField=fields.type,urlField=fields.url,idField=fields.targetId;
+    if(!typeField||!urlField||!idField||
+       !Object.prototype.hasOwnProperty.call(typeField,'value')||
+       !Object.prototype.hasOwnProperty.call(urlField,'value')||
+       !Object.prototype.hasOwnProperty.call(idField,'value'))
+      return invalidTargets();
+    const type:unknown=typeField.value;
+    const urlText:unknown=urlField.value;
+    const targetId:unknown=idField.value;
+    if(typeof type!=='string'||typeof urlText!=='string'||
+       typeof targetId!=='string'||urlText.length>8192||
+       !/^[a-zA-Z0-9_-]{8,128}$/.test(targetId)||ids.has(targetId))
+      return invalidTargets();
+    ids.add(targetId);
+    if(!acceptedTypes.has(type))continue;
+    let url:URL;
+    try{url=new URL(urlText);}catch{continue;}
+    if(url.protocol!=='chrome-extension:'||url.hostname!==TAMPERMONKEY_EXTENSION_ID||
+       url.username||url.password||url.port)continue;
+    count++;
+  }
+  if(count===0)return {ok:false,code:'RUNTIME_NOT_OBSERVED'};
+  return {ok:true,status:'RUNTIME_TARGET_HINT_ONLY',manager:'Tampermonkey',
+    extensionId:TAMPERMONKEY_EXTENSION_ID,matchedRuntimeTargets:count,
+    extensionAuthenticityVerified:false,versionVerified:false,permissionVerified:false,
+    scriptInstallationVerified:false,scriptInjectionVerified:false,
+    gmApiVerified:false,businessVerified:false};
+ }catch{return invalidTargets();}
 }
 async function readBoundedTargets(websocketUrl:string,signal?:AbortSignal):Promise<unknown|null>{
  return new Promise(resolve=>{
