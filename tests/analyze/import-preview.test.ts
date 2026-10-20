@@ -98,7 +98,14 @@ test('TEST-022/NFR-009: read-only native AST batch has a hard 64-file ceiling',a
  const scripts=Array.from({length:70},(_,i)=>imported(
   header+'document.querySelector("#not-exposed-'+i+'");'
  ));
- const reports=await previewImportedBatchOffMain(scripts);
+ const progress:number[]=[];
+ const reports=await previewImportedBatchOffMain(scripts,undefined,
+   (processed,total)=>{
+     assert.equal(total,70);
+     progress.push(processed);
+   });
+ assert.deepEqual(progress,[16,32,48,64,70],
+   'even budget-skipped files must complete the finite UI counter');
  assert.equal(reports.length,70);
  assert.deepEqual(reports.slice(0,64).map(x=>x.status),
   Array(64).fill('STATIC_ANALYSIS_ONLY'));
