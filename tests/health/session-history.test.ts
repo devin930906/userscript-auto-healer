@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
-import {readLimitedSessionHistory} from '../../src/health/session-history';
+import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
 
 const A='a'.repeat(64), B='b'.repeat(64), E='e'.repeat(64);
 const stage=(session:DesktopScenarioSession,id:string,hash:string)=>{
@@ -23,10 +23,10 @@ test('TEST-024/026: only a registered read-only scenario reads its own redacted 
  assert.equal(empty.status,'UNVERIFIED_SESSION_HISTORY_ONLY');
  assert.equal(empty.currentStatus,'UNTESTED');
  assert.deepEqual(empty.events,[]);
- history.record({scriptHash:A,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ history.record({scriptHash:limitedScenarioHistoryKey(A,'first'),kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
  clock=1001;
- history.record({scriptHash:A,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
- history.record({scriptHash:B,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ history.record({scriptHash:limitedScenarioHistoryKey(A,'first'),kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+ history.record({scriptHash:limitedScenarioHistoryKey(B,'other'),kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
  const response=readLimitedSessionHistory(session,history,'first');
  assert.equal(response.ok,true);
  if(!response.ok)return;
@@ -49,13 +49,43 @@ test('TEST-024/026: only a registered read-only scenario reads its own redacted 
    businessVerified:false,automaticPatchAllowed:false,automaticRollbackAllowed:false});
 });
 
+test('TEST-024: different registered scenarios of the same script have isolated histories',()=>{
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>2000);
+ assert.equal(stage(session,'first',A).ok,true);
+ assert.equal(stage(session,'second',A).ok,true);
+ const firstKey=limitedScenarioHistoryKey(A,'first');
+ const secondKey=limitedScenarioHistoryKey(A,'second');
+ assert.notEqual(firstKey,secondKey);
+ assert.match(firstKey,/^[0-9a-f]{64}$/);
+ history.record({scriptHash:firstKey,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const first=readLimitedSessionHistory(session,history,'first');
+ const second=readLimitedSessionHistory(session,history,'second');
+ assert.equal(first.ok,true);
+ assert.equal(second.ok,true);
+ if(!first.ok||!second.ok)return;
+ assert.equal(first.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.equal(first.events.length,1);
+ assert.equal(second.currentStatus,'UNTESTED');
+ assert.deepEqual(second.events,[]);
+ history.record({scriptHash:secondKey,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+ const next=readLimitedSessionHistory(session,history,'second');
+ assert.equal(next.ok,true);
+ if(next.ok)assert.equal(next.currentStatus,'INDETERMINATE');
+ assert.equal(readLimitedSessionHistory(session,history,'first').ok,true);
+ for(const args of [[A,'../first'],['wrong','first'],[A,'']] as const){
+  assert.throws(()=>limitedScenarioHistoryKey(args[0],args[1]),
+   /INVALID_SESSION_HISTORY_SCOPE/);
+ }
+});
+
 test('TEST-024: history is limited to 32 events and expires to INDETERMINATE',()=>{
  let now=1000;
  const session=new DesktopScenarioSession();
  stage(session,'one',A);
  const history=new LimitedHealthRegistry(()=>now);
  for(let i=0;i<36;i++){now++;history.record({
-  scriptHash:A,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});}
+  scriptHash:limitedScenarioHistoryKey(A,'one'),kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});}
  const result=readLimitedSessionHistory(session,history,'one');
  assert.equal(result.ok,true);
  if(!result.ok)return;
