@@ -218,9 +218,17 @@ export class OptionalAiGateway {
         signal?.aborted||abort.signal.aborted||!this.enabled?'CANCELLED':'NETWORK_FAILED');
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
       if(all.aborted)return failure('NETWORK_FAILED');
-      if(!response.ok)return failure(path==='/models'&&
-        (response.status===404||response.status===405)
-        ?'MODEL_LIST_UNAVAILABLE':'HTTP_REJECTED');
+      if(!response.ok){
+        // Rejected HTTP bodies are untrusted and may stream indefinitely.
+        // Request cleanup without awaiting an unresponsive stream provider.
+        if(response.body){
+          try{void response.body.cancel().catch(()=>undefined);}
+          catch{/* cleanup never changes the rejection decision */}
+        }
+        return failure(path==='/models'&&
+          (response.status===404||response.status===405)
+          ?'MODEL_LIST_UNAVAILABLE':'HTTP_REJECTED');
+      }
       const value=await limitedJson(response,all);
       if(!this.enabled||signal?.aborted||abort.signal.aborted)return failure('CANCELLED');
       if(all.aborted)return failure('NETWORK_FAILED');
