@@ -117,3 +117,28 @@ test('TEST-020: invalid claims, unrelated files and oversized folders are bounde
     assert.equal(await readFile(options.sourcePath,'utf8'),source);
   });
 });
+
+test('TEST-020/026: untrusted Proxy claims never execute traps before checkpoint inventory rejection',async()=>{
+  await fixture(async options=>{
+    let traps=0;
+    const hostile=<T extends object>(value:T):T=>new Proxy(value,{
+      getPrototypeOf(){traps++;throw Error('untrusted getPrototypeOf');},
+      ownKeys(){traps++;throw Error('untrusted ownKeys');},
+      get(){traps++;throw Error('untrusted get');}
+    });
+    for(const [candidate,opts] of [
+      [request,hostile(options)],
+      [hostile(request),options]
+    ] as const){
+      const result=await inspectRecoveryCheckpointInventoryReadOnly(candidate,opts);
+      assert.deepEqual(result,{
+        status:'BLOCKED',reason:'INVALID_REQUEST',
+        automaticPatchAllowed:false,automaticRollbackAllowed:false,
+        tampermonkeyVerified:false,businessVerified:false
+      });
+    }
+    assert.equal(traps,0,'reject the Proxy without evaluating its user-defined traps');
+    assert.equal(await readFile(options.sourcePath,'utf8'),source);
+    assert.deepEqual(await readdir(options.backupDirectory),[]);
+  });
+});
