@@ -48,6 +48,8 @@ interface Window {
         'NO_SELECTOR_MISSING_IN_WINDOW'|'INCONCLUSIVE_OR_OTHER_SIGNAL';
       pageRuntimeStatus?:'PAGE_EXCEPTION_SIGNAL_ONLY'|'NO_EXCEPTION_IN_WINDOW_ONLY';
       pageExceptionCount?:number;
+      sessionHealthStatus?:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'|'UNAVAILABLE';
+      sessionHealthEventCount?:number;
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
