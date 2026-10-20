@@ -47,6 +47,34 @@ test('TEST-005: unsafe URL or invalid assertions rejected independently',()=>{
   assert.equal(unknown.state,'UNKNOWN');
   assert.ok(unknown.issues.includes('MISSING_ASSERTIONS'));
 });
+test('TEST-005/026: lower-level scenario flags must be actual booleans, never coerced',()=>{
+  // Native workflows also use preflightScenario directly, not only the desktop
+  // IPC wrapper. Invalid requiresLogin must never become an approved no-login
+  // scenario after normalization.
+  const ready:ScenarioInput={...bare,id:'strict_flags',
+    targetUrl:'https://example.test/app',userApproved:true,
+    requiresLogin:false,loginReady:false};
+  const invalidFlags=[
+    {...ready,requiresLogin:'false'},
+    {...ready,requiresLogin:'true'},
+    {...ready,requiresLogin:0},
+    {...ready,requiresLogin:null},
+    {...ready,userApproved:'true'},
+    {...ready,userApproved:1},
+    {...ready,loginReady:'false'},
+    {...ready,loginReady:1},
+    {...ready,loginReady:null}
+  ];
+  const registry=new ScenarioRegistry();
+  for(const payload of invalidFlags){
+    const checked=preflightScenario(payload as unknown as ScenarioInput);
+    assert.equal(checked.state,'INVALID','untyped flags must not reach READY_TO_TEST');
+    assert.equal(registry.register(payload as unknown as ScenarioInput).state,'INVALID');
+    assert.equal(registry.list().length,0,'invalid contracts must not be staged');
+  }
+  assert.equal(registry.register(ready).state,'READY_TO_TEST');
+});
+
 test('TEST-005: registry is isolated from caller mutation and duplicate IDs',()=>{
   const registry=new ScenarioRegistry();
   const ready={...bare,targetUrl:'https://example.test/app/a',userApproved:true,loginReady:true};
