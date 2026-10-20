@@ -507,9 +507,9 @@ test('TEST-022/026: refuse unbound, symlinked and non-native checkpoint director
  try{
   assert.deepEqual(await saveReadOnlyBatchJournal(root,queue),
     {status:'BLOCKED',reason:'INVALID_INPUT'});
-  assert.deepEqual(await saveReadOnlyBatchJournal('relative-directory',queue),
-    {status:'BLOCKED',reason:'UNSAFE_PATH'});
   const bound=new ReadOnlyBatchCoordinator({count:1,jobHashes:[SCRIPT_A]},async()=> 'DONE');
+  assert.deepEqual(await saveReadOnlyBatchJournal('relative-directory',bound),
+    {status:'BLOCKED',reason:'UNSAFE_PATH'});
   const target=join(root,'target');
   const linked=join(root,'linked');
   await (await import('node:fs/promises')).mkdir(target);
@@ -518,4 +518,45 @@ test('TEST-022/026: refuse unbound, symlinked and non-native checkpoint director
   assert.deepEqual(await saveReadOnlyBatchJournal(linked,bound),
     {status:'BLOCKED',reason:'UNSAFE_PATH'});
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('TEST-022: persisted in-flight read-only task resumes within original attempt limit',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-interrupted-'));
+ const opts={count:2,jobHashes:[SCRIPT_A,SCRIPT_B],maxAttempts:2,timeoutMs:2000};
+ let notify!:()=>void;
+ const started=new Promise<void>(resolve=>{notify=resolve;});
+ let release!:()=>void;
+ const hanging=new Promise<void>(resolve=>{release=resolve;});
+ const source=new ReadOnlyBatchCoordinator(opts,async ordinal=>{
+  if(ordinal===0)return 'DONE';
+  notify();
+  await hanging;
+  return 'DONE';
+ });
+ try{
+  const oldRun=source.run();
+  await started;
+  assert.deepEqual(source.snapshot().jobs.map(j=>j.state),['SUCCEEDED','RUNNING']);
+  assert.deepEqual(source.snapshot().jobs.map(j=>j.attempts),[1,1]);
+  const stored=await saveReadOnlyBatchJournal(root,source);
+  assert.equal(stored.status,'CHECKPOINT_SAVED_UNVERIFIED',JSON.stringify(stored));
+  source.cancel();
+  release();
+  await oldRun;
+  const visited:number[]=[];
+  const restored=await loadReadOnlyBatchJournal(root,opts,async ordinal=>{
+   visited.push(ordinal);return 'DONE';
+  });
+  assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+  if(restored.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
+  assert.deepEqual(restored.coordinator.snapshot().jobs.map(j=>j.state),['SUCCEEDED','QUEUED']);
+  assert.deepEqual(restored.coordinator.snapshot().jobs.map(j=>j.attempts),[1,1]);
+  const final=await restored.coordinator.run();
+  assert.deepEqual(visited,[1]);
+  assert.deepEqual(final.jobs.map(j=>j.state),['SUCCEEDED','SUCCEEDED']);
+  assert.deepEqual(final.jobs.map(j=>j.attempts),[1,2]);
+  assert.equal(final.automaticPatchAllowed,false);
+  assert.equal(final.automaticRollbackAllowed,false);
+ }finally{release();await rm(root,{recursive:true,force:true});}
 });
