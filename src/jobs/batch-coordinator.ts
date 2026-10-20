@@ -6,6 +6,8 @@
  *
  * This checkpoint is a non-authoritative scheduling hint. Neither "DONE"
  * nor a resumed checkpoint verifies a userscript, Tampermonkey, or recovery.
+ * Schema v2 rejects v1 snapshots because v1 did not bind timeoutMs. An
+ * untrusted or obsolete checkpoint must never authorize skipping any job.
  */
 import {createHash} from 'node:crypto';
 
@@ -17,10 +19,12 @@ export interface BatchJobSnapshot{
  readonly attempts:number;
 }
 export interface ReadOnlyBatchSnapshot{
- readonly schema:'uah-readonly-batch-v1';
+ readonly schema:'uah-readonly-batch-v2';
  readonly phase:'SCHEDULING_ONLY_UNVERIFIED';
  readonly maxAttempts:number;
  readonly concurrency:number;
+ /** Native read-only deadline must not silently change during resume. */
+ readonly timeoutMs:number;
  /** A non-authenticating SHA-256 commitment to the ordered imported script identities. */
  readonly batchFingerprint:string|null;
  readonly jobs:readonly BatchJobSnapshot[];
@@ -130,13 +134,14 @@ function validateOptions(options:Options):ValidatedOptions{
 function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
  try{
  const top=exactData(input,[
-  'schema','phase','maxAttempts','concurrency','batchFingerprint','jobs',
+  'schema','phase','maxAttempts','concurrency','timeoutMs','batchFingerprint','jobs',
   'automaticPatchAllowed','automaticRollbackAllowed',
   'tampermonkeyVerified','businessVerified'
  ]);
- if(!top||top.schema!=='uah-readonly-batch-v1'||
+ if(!top||top.schema!=='uah-readonly-batch-v2'||
     top.phase!=='SCHEDULING_ONLY_UNVERIFIED'||
     top.maxAttempts!==opts.maxAttempts||top.concurrency!==opts.concurrency||
+    top.timeoutMs!==opts.timeoutMs||
     opts.batchFingerprint===null||top.batchFingerprint!==opts.batchFingerprint||
     top.automaticPatchAllowed!==false||top.automaticRollbackAllowed!==false||
     top.tampermonkeyVerified!==false||top.businessVerified!==false||
@@ -198,10 +203,11 @@ export class ReadOnlyBatchCoordinator{
  }
  snapshot():ReadOnlyBatchSnapshot{
   return Object.freeze({
-   schema:'uah-readonly-batch-v1' as const,
+   schema:'uah-readonly-batch-v2' as const,
    phase:'SCHEDULING_ONLY_UNVERIFIED' as const,
    maxAttempts:this.maxAttempts,
    concurrency:this.concurrency,
+   timeoutMs:this.timeoutMs,
    batchFingerprint:this.batchFingerprint,
    jobs:Object.freeze(this.jobs.map(job=>Object.freeze({...job}))),
    ...authority

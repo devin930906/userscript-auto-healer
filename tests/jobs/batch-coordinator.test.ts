@@ -390,3 +390,53 @@ test('TEST-022/026: script identity binding rejects sparse, accessor, duplicate 
  assert.throws(()=>new ReadOnlyBatchCoordinator(valid,worker,old),
   /INVALID_BATCH_CHECKPOINT/);
 });
+
+test('TEST-022/NFR-009: restarted batch retains exact timeout policy and rejects legacy checkpoints',async()=>{
+ const hashes=[SCRIPT_A,SCRIPT_B];
+ const opts={count:2,timeoutMs:50,maxAttempts:2,jobHashes:hashes};
+ const completed=await new ReadOnlyBatchCoordinator(opts,async()=> 'DONE').run();
+ assert.equal(completed.schema,'uah-readonly-batch-v2');
+ assert.equal(completed.timeoutMs,50);
+ let resumedWork=0;
+ const samePolicy=new ReadOnlyBatchCoordinator(opts,async()=>{
+  resumedWork++;return 'DONE';
+ },completed);
+ assert.deepEqual(await samePolicy.run(),completed);
+ assert.equal(resumedWork,0,'unchanged completed work is not repeated');
+
+ // Same SHA identities must not permit a different deadline on restart,
+ // even if maxAttempts and concurrency remain unchanged.
+ for(const deadline of [25,100,300000]){
+  assert.throws(()=>new ReadOnlyBatchCoordinator(
+   {...opts,timeoutMs:deadline},async()=>{
+    resumedWork++;return 'DONE';
+   },completed),/INVALID_BATCH_CHECKPOINT/);
+ }
+ assert.equal(resumedWork,0);
+ const legacy={...completed,schema:'uah-readonly-batch-v1'};
+ delete (legacy as {timeoutMs?:unknown}).timeoutMs;
+ assert.throws(()=>new ReadOnlyBatchCoordinator(opts,async()=>{
+  resumedWork++;return 'DONE';
+ },legacy),/INVALID_BATCH_CHECKPOINT/);
+ // A forged timeout cannot silently downgrade a checkpoint's deadline.
+ const changed={...completed,timeoutMs:300000};
+ assert.throws(()=>new ReadOnlyBatchCoordinator(opts,async()=> 'DONE',changed),
+  /INVALID_BATCH_CHECKPOINT/);
+ assert.equal(resumedWork,0);
+});
+
+test('TEST-022/026: timeout checkpoint accessor and hostile deadline fail closed',()=>{
+ const opts={count:1,timeoutMs:50,jobHashes:[SCRIPT_A]};
+ const checkpoint=new ReadOnlyBatchCoordinator(opts,async()=> 'DONE').snapshot();
+ let reads=0;
+ const accessor={...checkpoint};
+ Object.defineProperty(accessor,'timeoutMs',{enumerable:true,
+  get(){reads++;throw Error('PRIVATE_CHECKPOINT_DATA');}});
+ assert.throws(()=>new ReadOnlyBatchCoordinator(opts,async()=> 'DONE',accessor),
+  /INVALID_BATCH_CHECKPOINT/);
+ assert.equal(reads,0);
+ for(const timeoutMs of [-1,0,NaN,Infinity,'50',300001]){
+  assert.throws(()=>new ReadOnlyBatchCoordinator(opts,async()=> 'DONE',
+   {...checkpoint,timeoutMs}),/INVALID_BATCH_CHECKPOINT/);
+ }
+});
