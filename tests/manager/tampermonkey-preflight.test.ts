@@ -274,3 +274,40 @@ test('TEST-017/026: an extra @match cannot expand a consented GM diagnostic to o
  assert.equal(result.ok,false);
  if(!result.ok)assert.equal(result.code,'MATCH_NOT_CONFIRMED');
 });
+
+test('TEST-017/026: GM-only Tampermonkey preflight rejects unreviewed execution-context directives',()=>{
+ // @unwrap is a recognized userscript tag, not an unknown-name escape hatch.
+ // A valid @grant and exact @match must not silently approve a different
+ // execution wrapper or an invalid @noframes directive.
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ const scenarios=[
+  {tags:{...base,unwrap:['']},tag:'unwrap without value'},
+  {tags:{...base,unwrap:['true']},tag:'unwrap with value'},
+  {tags:{...base,noframes:['false']},tag:'false noframes'},
+  {tags:{...base,noframes:['','']},tag:'duplicate noframes'}
+ ];
+ for(const item of scenarios){
+  const result=inspect(report,metadata(item.tags));
+  assert.deepEqual(result,{
+   ok:false,status:'BLOCKED',code:'INJECTION_CONTEXT_NOT_CONFIRMED',
+   gmApiVerified:false,businessVerified:false
+  },item.tag);
+ }
+ // An explicit standard @noframes flag does not confer runtime proof.
+ const safe=inspect(report,metadata({...base,noframes:['']}));
+ assert.equal(safe.ok,true);
+ if(safe.ok){
+  assert.equal(safe.gmApiVerified,false);
+  assert.equal(safe.businessVerified,false);
+ }
+ const source=['// ==UserScript==','// @name Context scope test',
+  '// @match https://example.com/*','// @grant GM_getValue',
+  '// @unwrap','// ==/UserScript==','void 0;'].join('\\n').replace(/\\n/g,'\n');
+ const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(source),
+   textEncoding:'utf-8'});
+ assert.equal(parsed.status,'OK');
+ assert.deepEqual(parsed.unknownNames,[],'@unwrap is a known but unsafe context directive');
+ const actual=inspect(report,parsed);
+ assert.equal(actual.ok,false);
+ if(!actual.ok)assert.equal(actual.code,'INJECTION_CONTEXT_NOT_CONFIRMED');
+});
