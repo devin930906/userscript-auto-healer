@@ -144,7 +144,7 @@ async function main(){
   // browser download, especially for loopback URLs. Never promote either
   // to installed-script evidence. Try the documented direct URL next.
   const displayPages=()=>context.pages().map(p=>({
-    url:p.url().replace(/([?&](?:url|token|key)=)[^&]+/gi,'$1[redacted]').slice(0,220)
+    url:p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]').slice(0,220)
   }));
   console.log('POST_LINK_NAVIGATION '+JSON.stringify(displayPages()));
   if(!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
@@ -175,7 +175,26 @@ async function main(){
     }
   }
   tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
-  console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(tabs.map(p=>p.url().replace(/([?&](?:url|token|key)=)[^&]+/gi,'$1[redacted]'))));
+  // Tampermonkey 5.4.x sometimes opens ask.html before the actual
+  // confirmation page. It is another explicit step, not installation proof.
+  const ask=tabs.find(p=>/\/ask\.html(?:\?|$)/i.test(p.url()));
+  if(ask){
+    const question=await ask.locator('body').innerText().catch(()=>'');
+    const actions=await ask.locator('button,input[type="button"],input[type="submit"]').evaluateAll(nodes=>
+      nodes.map(el=>({name:(el.innerText||el.value||'').trim().slice(0,90),id:el.id||''})));
+    console.log('TAMPERMONKEY_ASK_PAGE '+JSON.stringify({
+      visibleText:question.slice(0,1600),controls:actions.slice(0,18)
+    }));
+    const allow=actions.filter(x=>/^(allow|grant|continue|proceed|always allow)$/i.test(x.name));
+    if(allow.length===1){
+      const chosen=allow[0].id ? ask.locator('#'+allow[0].id):
+        ask.getByRole('button',{name:allow[0].name,exact:true});
+      await chosen.first().click({timeout:8000});
+      await sleep(1700);
+    }
+  }
+  tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
+  console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(tabs.map(p=>p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]'))));
   const confirmation=tabs.find(p=>/confirm|install/i.test(p.url()));
   assert.ok(confirmation,'Manager script installation confirmation did not appear');
   let clicked=false;
