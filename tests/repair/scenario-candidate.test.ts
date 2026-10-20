@@ -312,3 +312,33 @@ test('TEST-019/026: one consented DOM origin cannot review a multi-origin usersc
   assert.equal(result.status,'CANDIDATE_ONLY');
   assert.equal(result.automaticPatchAllowed,false);
 });
+
+test('TEST-019/026: DOM repair candidate rejects request Proxy and getters before reflection',()=>{
+  let executed=0;
+  const hostileProxy=new Proxy({...patch},{
+    get(){executed++;throw Error('untrusted request read');},
+    getPrototypeOf(){executed++;throw Error('untrusted prototype');},
+    ownKeys(){executed++;throw Error('untrusted keys');},
+    getOwnPropertyDescriptor(){executed++;throw Error('untrusted descriptor');}
+  });
+  const revoked=Proxy.revocable({...patch},{});
+  revoked.revoke();
+  const hostileGetter={...patch};
+  Object.defineProperty(hostileGetter,'expectedSourceSha256',{
+    enumerable:true,
+    get(){executed++;return hash;}
+  });
+  const nestedGetter={...patch};
+  Object.defineProperty(nestedGetter,'originalSelector',{
+    enumerable:true,
+    get(){executed++;return '#old';}
+  });
+  for(const request of [hostileProxy,revoked.proxy,hostileGetter,nestedGetter]){
+    const result=proposeFromReadOnlyDomDiagnostic(
+      request,scenario,series(),true);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  assert.equal(executed,0,'request reflection must not execute caller code');
+});

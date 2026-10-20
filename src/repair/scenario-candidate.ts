@@ -6,6 +6,7 @@
  * Tampermonkey, userscript execution, GM APIs or business recovery. This
  * bridge issues only reviewable local CANDIDATE_ONLY data, never writes.
  */
+import {types as nodeTypes} from 'node:util';
 import type {DynamicObservation} from '../observe/dom-observer';
 import {parseUserscriptMetadata} from '../analyze/metadata-parser';
 import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
@@ -90,7 +91,23 @@ export function proposeFromReadOnlyDomDiagnostic(
 ):DiagnosticCandidateResult{
   try{
     if(userApproved!==true)return blocked('NOT_AUTHORIZED');
-    if(!patch||typeof patch!=='object')
+    if(!patch||typeof patch!=='object'||nodeTypes.isProxy(patch)||
+       Array.isArray(patch))
+      return blocked('INVALID_SCENARIO_LINK');
+    // Do not touch request properties before verifying they are own DATA
+    // descriptors. A getter could mutate state or run arbitrary code even
+    // when the outer catch subsequently returns a blocked decision.
+    const patchProto=Object.getPrototypeOf(patch);
+    if(patchProto!==Object.prototype&&patchProto!==null)
+      return blocked('INVALID_SCENARIO_LINK');
+    const patchDescriptors=Object.getOwnPropertyDescriptors(patch);
+    const patchFields=[
+      'source','expectedSourceSha256','callOffset','method',
+      'originalSelector','replacementSelector','faultEvidenceId'
+    ];
+    if(patchFields.some(field=>
+      !Object.prototype.hasOwnProperty.call(patchDescriptors,field)||
+      !Object.prototype.hasOwnProperty.call(patchDescriptors[field],'value')))
       return blocked('INVALID_SCENARIO_LINK');
     // The canonical registry copies own data descriptors and array entries.
     // Never read a caller's scenario getters or infer authority from extras.
