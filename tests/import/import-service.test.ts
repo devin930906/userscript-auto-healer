@@ -13,6 +13,53 @@ async function workspace(t: { after: (cb: () => Promise<void>) => void }): Promi
 }
 const script = '// ==UserScript==\\n// @name Safe\\n// ==/UserScript==\\nconsole.log(1);\\n'.replaceAll('\\n', '\n');
 
+test('TEST-022/017: native picker emits bounded counter-only progress with duplicate and failures',async t=>{
+  const root=await workspace(t);
+  const good=join(root,'valid.user.js');
+  const invalid=join(root,'missing.user.js');
+  await writeFile(good,script);
+  const updates:unknown[]=[];
+  const result=await importApprovedPaths([good,good,invalid],undefined,
+    status=>updates.push(status));
+  assert.equal(result.scripts.length,1);
+  assert.equal(result.duplicates,1);
+  assert.equal(result.errors.length,1);
+  assert.deepEqual(updates,[
+    {phase:'IMPORTING_READ_ONLY',processed:1,total:3,accepted:1,duplicates:0,failed:0},
+    {phase:'IMPORTING_READ_ONLY',processed:2,total:3,accepted:1,duplicates:1,failed:0},
+    {phase:'IMPORTING_READ_ONLY',processed:3,total:3,accepted:1,duplicates:1,failed:1}
+  ]);
+  assert.ok(updates.every(Object.isFrozen));
+  assert.equal(JSON.stringify(updates).includes(root),false,
+    'progress must not disclose native file paths, original names or source');
+});
+test('TEST-022: native import cancellation after a progress tick retains prior files',async t=>{
+  const root=await workspace(t);
+  const paths=Array.from({length:4},(_,i)=>join(root,'item-'+i+'.user.js'));
+  for(let i=0;i<paths.length;i++)await writeFile(paths[i],script+'//'+i);
+  const abort=new AbortController();
+  const positions:number[]=[];
+  const result=await importApprovedPaths(paths,abort.signal,status=>{
+    positions.push(status.processed);
+    if(status.processed===2)abort.abort();
+  });
+  assert.deepEqual(positions,[1,2]);
+  assert.equal(result.canceled,true);
+  assert.equal(result.unprocessed,2);
+  assert.equal(result.scripts.length,2);
+});
+test('TEST-022: folder import forwards only aggregate progress',async t=>{
+  const root=await workspace(t);
+  await writeFile(join(root,'first.user.js'),script);
+  await writeFile(join(root,'second.user.js'),script+'\n//different');
+  const statuses:unknown[]=[];
+  const result=await scanApprovedDirectory(root,undefined,status=>statuses.push(status));
+  assert.equal(result.scripts.length,2);
+  assert.equal(statuses.length,2);
+  assert.deepEqual(statuses.map((x:any)=>[x.processed,x.total]),[[1,2],[2,2]]);
+  assert.equal(JSON.stringify(statuses).includes(root),false);
+});
+
 test('TEST-001: raw input bytes, SHA-256 and source file stay unchanged', async t => {
   const root = await workspace(t);
   const path = join(root, 'valid.user.js');
