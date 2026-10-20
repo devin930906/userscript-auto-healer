@@ -1,0 +1,122 @@
+import {test} from 'node:test';
+import {strict as assert} from 'node:assert';
+import {createHash} from 'node:crypto';
+import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
+import {
+ BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal,loadReadOnlyBatchJournal
+} from '../../src/jobs/batch-journal';
+
+const hashes=[
+ createHash('sha256').update('authorized-fixture-a').digest('hex'),
+ createHash('sha256').update('authorized-fixture-b').digest('hex')
+];
+const options={count:2,jobHashes:hashes,maxAttempts:2,concurrency:1,timeoutMs:2000};
+const completed=async()=> 'DONE' as const;
+async function withJournal(run:(directory:string)=>Promise<void>){
+ const directory=await mkdtemp(join(tmpdir(),'uah-batch-journal-'));
+ try{await run(directory);}
+ finally{await rm(directory,{recursive:true,force:true});}
+}
+
+test('TASK-013/TEST-022: native checkpoint survives restart without granting repair authority',async()=>{
+ await withJournal(async directory=>{
+  const seen:number[]=[];
+  const first=new ReadOnlyBatchCoordinator(options,async ordinal=>{
+   seen.push(ordinal);return 'DONE';
+  });
+  const initial=await saveReadOnlyBatchJournal(directory,first);
+  assert.equal(initial.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  assert.equal(seen.length,0);
+  const restored=await loadReadOnlyBatchJournal(directory,options,async ordinal=>{
+   seen.push(ordinal);return 'DONE';
+  });
+  assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+  if(restored.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
+  const result=await restored.coordinator.run();
+  assert.deepEqual(seen,[0,1]);
+  assert.deepEqual(result.jobs.map(job=>job.state),['SUCCEEDED','SUCCEEDED']);
+  for(const field of ['automaticPatchAllowed','automaticRollbackAllowed',
+    'tampermonkeyVerified','businessVerified'] as const)assert.equal(result[field],false);
+  const final=await saveReadOnlyBatchJournal(directory,restored.coordinator);
+  assert.equal(final.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const bytes=await readFile(join(directory,BATCH_JOURNAL_FILENAME));
+  const persisted=JSON.parse(bytes.toString('utf8')) as Record<string,unknown>;
+  assert.equal(persisted.schema,'uah-readonly-batch-v2');
+  assert.equal(JSON.stringify(persisted).includes(directory),false);
+  assert.equal(JSON.stringify(persisted).includes('authorized-fixture-a'),false);
+  if(final.status==='CHECKPOINT_SAVED_UNVERIFIED')
+   assert.equal(final.sha256,createHash('sha256').update(bytes).digest('hex'));
+  const again=await loadReadOnlyBatchJournal(directory,options,async ordinal=>{
+   seen.push(ordinal);return 'DONE';
+  });
+  assert.equal(again.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+  if(again.status==='CHECKPOINT_RESTORED_SCHEDULING_ONLY'){
+   assert.deepEqual((await again.coordinator.run()).jobs.map(job=>job.state),
+     ['SUCCEEDED','SUCCEEDED']);
+   assert.deepEqual(seen,[0,1],'a completed persisted batch must not replay');
+  }
+ });
+});
+
+test('TASK-013/TEST-022: foreign batch cannot replace or reuse a committed journal',async()=>{
+ await withJournal(async directory=>{
+  const original=new ReadOnlyBatchCoordinator(options,completed);
+  assert.equal((await saveReadOnlyBatchJournal(directory,original)).status,
+    'CHECKPOINT_SAVED_UNVERIFIED');
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  const before=await readFile(file);
+  const foreignOptions={...options,jobHashes:[...hashes].reverse()};
+  const foreign=new ReadOnlyBatchCoordinator(foreignOptions,completed);
+  const attempt=await saveReadOnlyBatchJournal(directory,foreign);
+  assert.deepEqual(attempt,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(file),before);
+  const load=await loadReadOnlyBatchJournal(directory,foreignOptions,completed);
+  assert.deepEqual(load,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+ });
+});
+
+test('TASK-013/TEST-022: malformed journal cannot be trusted or overwritten',async()=>{
+ await withJournal(async directory=>{
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  await writeFile(file,'{"schema":"tampered","automaticPatchAllowed":true}');
+  const original=await readFile(file);
+  assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+    {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  const fresh=new ReadOnlyBatchCoordinator(options,completed);
+  assert.deepEqual(await saveReadOnlyBatchJournal(directory,fresh),
+    {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(file),original);
+ });
+});
+
+test('TASK-013/TEST-022: active writer lock blocks reads and writes without cleanup',async()=>{
+ await withJournal(async directory=>{
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  assert.equal((await saveReadOnlyBatchJournal(directory,coordinator)).status,
+    'CHECKPOINT_SAVED_UNVERIFIED');
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  await mkdir(lock);
+  const before=await readFile(join(directory,BATCH_JOURNAL_FILENAME));
+  assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+    {status:'BLOCKED',reason:'BUSY'});
+  assert.deepEqual(await saveReadOnlyBatchJournal(directory,coordinator),
+    {status:'BLOCKED',reason:'BUSY'});
+  assert.deepEqual(await readFile(join(directory,BATCH_JOURNAL_FILENAME)),before);
+ });
+});
+
+test('TASK-013/TEST-022: missing journal and unapproved directory fail closed',async()=>{
+ await withJournal(async directory=>{
+  assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+    {status:'BLOCKED',reason:'NOT_FOUND'});
+  const absent=join(directory,'not-created');
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  assert.deepEqual(await saveReadOnlyBatchJournal(absent,coordinator),
+    {status:'BLOCKED',reason:'UNSAFE_PATH'});
+  assert.deepEqual(await loadReadOnlyBatchJournal(absent,options,completed),
+    {status:'BLOCKED',reason:'UNSAFE_PATH'});
+ });
+});
