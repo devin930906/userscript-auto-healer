@@ -39,17 +39,22 @@ type ObservationInput = {
 };
 /** Read ONLY own data descriptor values: do not invoke getters from untrusted inputs. */
 function exactRecord(input: unknown, keys: readonly string[]): Record<string, unknown> | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const proto = Object.getPrototypeOf(input);
-  if (proto !== Object.prototype && proto !== null) return null;
-  const descriptors = Object.getOwnPropertyDescriptors(input);
-  const names = Reflect.ownKeys(descriptors);
-  if (names.length !== keys.length || names.some(name => typeof name !== 'string') ||
-      keys.some(key => !Object.prototype.hasOwnProperty.call(descriptors, key) ||
-        !Object.prototype.hasOwnProperty.call(descriptors[key], 'value'))) return null;
-  const result: Record<string, unknown> = Object.create(null);
-  for (const key of keys) result[key] = descriptors[key].value;
-  return result;
+  try {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const proto = Object.getPrototypeOf(input);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(input);
+    const names = Reflect.ownKeys(descriptors);
+    if (names.length !== keys.length || names.some(name => typeof name !== 'string') ||
+        keys.some(key => !Object.prototype.hasOwnProperty.call(descriptors, key) ||
+          !Object.prototype.hasOwnProperty.call(descriptors[key], 'value'))) return null;
+    const result: Record<string, unknown> = Object.create(null);
+    for (const key of keys) result[key] = descriptors[key].value;
+    return result;
+  } catch {
+    // Proxy traps are untrusted: do not expose arbitrary error text to callers.
+    return null;
+  }
 }
 function validateHash(input: unknown): string {
   if (typeof input !== 'string' || !SHA256.test(input))
