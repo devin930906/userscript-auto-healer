@@ -289,7 +289,7 @@ test('TEST-019/026: one consented DOM origin cannot review a multi-origin usersc
     '// @match *://*/*'
   ]){
     const multiSource=source.replace('// @grant none',
-      otherMatch+'\\n// @grant none');
+      otherMatch+'\n// @grant none');
     const request={...patch,source:multiSource,
       expectedSourceSha256:createHash('sha256').update(multiSource).digest('hex'),
       callOffset:multiSource.indexOf('document.querySelector')};
@@ -303,7 +303,7 @@ test('TEST-019/026: one consented DOM origin cannot review a multi-origin usersc
   // Multiple explicitly scoped patterns that BOTH match the same observed
   // target remain eligible for human review (never automatic application).
   const redundantSource=source.replace('// @grant none',
-    '// @match https://example.com/\\n// @grant none');
+    '// @match https://example.com/\n// @grant none');
   const request={...patch,source:redundantSource,
     expectedSourceSha256:createHash('sha256').update(redundantSource).digest('hex'),
     callOffset:redundantSource.indexOf('document.querySelector')};
