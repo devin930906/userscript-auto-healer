@@ -22,7 +22,7 @@ const approvedIpcChannels=[
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
  'import:dropped','import:files','import:folder','scenario:cancel',
- 'scenario:export-manual','scenario:inspect','scenario:register'
+ 'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
 
