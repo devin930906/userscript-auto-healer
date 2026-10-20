@@ -18,7 +18,8 @@ import {
 
 export type DiagnosticCandidateBlockCode =
   'NOT_AUTHORIZED'|'INVALID_SCENARIO_LINK'|
-  'UNVERIFIED_OR_UNSTABLE_DOM'|'NO_EXACT_SELECTOR_FAILURE'|
+  'UNVERIFIED_OR_UNSTABLE_DOM'|'INCOMPLETE_DOM_COVERAGE'|
+  'NO_EXACT_SELECTOR_FAILURE'|
   'UNVERIFIED_REPLACEMENT'|'PATCH_BLOCKED';
 export type DiagnosticCandidateResult =
   | Readonly<{
@@ -117,6 +118,18 @@ export function proposeFromReadOnlyDomDiagnostic(
       s,observation as DynamicObservation,true);
     if(diagnosis.status!=='LIMITED_DOM_SIGNAL_ONLY'||diagnosis.code!=='NONE')
       return blocked('UNVERIFIED_OR_UNSTABLE_DOM');
+    // A stable selector count from CDP's top document does not establish
+    // selector absence within an iframe or an observed shadow-root subtree.
+    // The diagnostic remains useful, but it must not promote that partial
+    // coverage into a repair candidate. We intentionally DO NOT reject
+    // CLOSED_SHADOW_ROOT_UNKNOWN alone: the DOM observer always reports it,
+    // even when no shadow root is detected; doing so would disable the
+    // existing, explicitly review-only flow on every ordinary page.
+    const samples=(observation as DynamicObservation).samples;
+    if(samples.some(sample=>sample.ok===true&&
+       (sample.summary.iframeCount!==0||
+        sample.summary.visibleShadowRoots!==0)))
+      return blocked('INCOMPLETE_DOM_COVERAGE');
     if(diagnosis.checkedAssertions!==2||
        diagnosis.triage.status!=='SINGLE_CAUSE_SIGNAL_ONLY'||
        diagnosis.triage.category!=='SELECTOR_ASSERTION'||
