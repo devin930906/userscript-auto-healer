@@ -71,6 +71,10 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  '// ==/UserScript==',
  '(function(){',
  " 'use strict';",
+ // @noframes is manager policy only; enforce the same frame boundary inside
+ // the disposable script before any GM, DOM or HTTP effect.
+ " try{if(typeof window!=='undefined'&&window.top!==window)return;}",
+ " catch{return;}",
  // A manually installed fixture may outlive its short-lived HTTP server.
  // Even if the loopback port is later reused, it must not perform GM, DOM
  // or network actions after the consent interval expires.
