@@ -11,6 +11,7 @@
  * and obtain explicit consent before calling this function.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {basename,isAbsolute} from 'node:path';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {MAX_ANALYSIS_BYTES} from '../analyze/import-preview';
@@ -44,7 +45,8 @@ const FILE=/^[^\\/\u0000-\u001f]+\.user\.js$/i;
  * or user-supplied native selection. Reject unknown capabilities rather than
  * forwarding them to the stage/export services. */
 function own(input:unknown,keys:readonly string[]):Record<string,unknown>|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+    Array.isArray(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
  const d=Object.getOwnPropertyDescriptors(input);
@@ -58,6 +60,41 @@ function own(input:unknown,keys:readonly string[]):Record<string,unknown>|null{
  return out;
 }
 
+/**
+ * TASK-009/012 / TEST-019/020/026. The user's original bytes must be
+ * snapshotted without invoking a caller-supplied iterator, Species constructor
+ * or shadowed typed-array length accessor. Array.from/Uint8Array.from consult
+ * Symbol.iterator; TypedArray#slice consults Symbol.species. Neither is a
+ * safe byte transfer from a potentially forged native import record.
+ *
+ * Use the intrinsic byteLength getter to bound allocation BEFORE reading
+ * the native numeric elements of a genuine (non-Proxy) byte view. The copy
+ * becomes the sole source for hashing, text decoding and AST review.
+ * This is a local consistency boundary, NOT permission to modify user files.
+ */
+function captureImportedBytes(input:unknown,claimedLength:number):Uint8Array|null{
+ try{
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+     !(input instanceof Uint8Array))return null;
+  // An own accessor or iterator is not a normal native-import byte view.
+  // Reject it without invoking the overridden property.
+  for(const key of ['byteLength','length','byteOffset','buffer',Symbol.iterator]){
+   if(Object.getOwnPropertyDescriptor(input,key))return null;
+  }
+  const base=Object.getPrototypeOf(Uint8Array.prototype) as object;
+  const sizeGetter=Object.getOwnPropertyDescriptor(base,'byteLength')?.get;
+  if(!sizeGetter)return null;
+  const trueSize:unknown=sizeGetter.call(input);
+  if(typeof trueSize!=='number'||!Number.isSafeInteger(trueSize)||
+     trueSize<1||trueSize>MAX_ANALYSIS_BYTES||
+     trueSize!==claimedLength)return null;
+  const bytes=new Uint8Array(trueSize);
+  // Numeric TypedArray indexed reads use internal slots and bypass custom
+  // iterators/getters. The input was confirmed non-Proxy before this point.
+  for(let i=0;i<trueSize;i++)bytes[i]=input[i];
+  return bytes;
+ }catch{return null;}
+}
 /** This only processes paths obtained by a privileged native on-disk import.
  * Dropped bytes have no sourcePath and cannot be silently used as a writable
  * source. The original is NEVER changed, even when export succeeds. */
@@ -77,16 +114,15 @@ export async function exportReviewedImportedSelectorOnly(
      // Content identity alone does not bind a different same-byte file to
      // the filename shown to the user for this native import.
      basename(script.sourcePath)!==script.filename||
-     !(script.bytes instanceof Uint8Array)||
      typeof script.byteLength!=='number'||
      !Number.isSafeInteger(script.byteLength)||
-     script.byteLength!==script.bytes.byteLength||
-     script.byteLength===0||script.byteLength>MAX_ANALYSIS_BYTES)
+     script.byteLength<1||script.byteLength>MAX_ANALYSIS_BYTES)
    return block('INVALID_IMPORT');
   // A non-UTF8 source has a different bytes-hash from the UTF8 AST string.
   // Never substitute the decoded text for the native on-disk fingerprint.
   if(script.textEncoding!=='utf-8')return block('UNSUPPORTED_ENCODING');
-  const bytes=Uint8Array.from(script.bytes);
+  const bytes=captureImportedBytes(script.bytes,script.byteLength);
+  if(!bytes)return block('INVALID_IMPORT');
   if(createHash('sha256').update(bytes).digest('hex')!==script.sha256)
    return block('SOURCE_IDENTITY_MISMATCH');
   const source=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
