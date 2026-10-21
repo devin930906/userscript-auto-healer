@@ -206,6 +206,40 @@ public static class UahCandidateDeleteAccessProbe {
   } catch { return 'scan=unavailable' }
 }
 
+# ISSUE-215 / TEST-028: collect candidate-only ACL metadata at the actual
+# rename failure. Successful DELETE-access handle opens and a successful
+# sibling-control rename cannot rule out differing directory ACL inheritance.
+# This is read-only, bounded, path-redacted context, NOT an effective-access
+# calculation and never permission to retry, move or relax the release gate.
+function Get-CandidatePortableRenameAclSummary([string]$source) {
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       -not [IO.Path]::IsPathRooted($source)) { return 'acl=unavailable' }
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@([char]92,[char]47))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@([char]92,[char]47))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+      [StringComparison]::OrdinalIgnoreCase) -or
+      -not [IO.Directory]::Exists($base)) { return 'acl=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $parent=[IO.Path]::GetDirectoryName($base)
+    if(-not [string]::Equals($parent,$runner,[StringComparison]::OrdinalIgnoreCase) -and
+       -not $parent.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+         [StringComparison]::OrdinalIgnoreCase)) { return 'acl=unavailable' }
+    $summary=@()
+    foreach($path in @($base,$parent)) {
+      $acl=Get-Acl -LiteralPath $path -ErrorAction Stop
+      $denyCount=@($acl.Access | Where-Object {
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny
+      }).Count
+      $readonly=(([int][IO.File]::GetAttributes($path) -band
+        [int][IO.FileAttributes]::ReadOnly) -ne 0)
+      $summary+= "denies=$denyCount protected=$($acl.AreAccessRulesProtected) readonly=$readonly"
+    }
+    return "acl=ok root=[$($summary[0])] parent=[$($summary[1])]"
+  } catch { return 'acl=unavailable' }
+}
+
 # TEST-028: lexical containment is insufficient on Windows: a junction or
 # symlink anywhere in the existing source ancestry (including ABOVE
 # RUNNER_TEMP) can redirect a nested source to another filesystem tree.
@@ -342,7 +376,8 @@ function Get-CandidatePortableFirstDenialSummary(
     Join-Path $source 'UserscriptAutoHealer.exe')
   $sharing=Get-CandidatePortableFileShareSummary $source $candidateFiles
   $sibling=Get-CandidatePortableSiblingRenameControl $source
-  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling]"
+  $acl=Get-CandidatePortableRenameAclSummary $source
+  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl"
 }
 
 function Move-CandidatePortableDirectory(

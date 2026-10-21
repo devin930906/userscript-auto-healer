@@ -226,6 +226,9 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
   // Bound physical read work even when many different paths contain
   // byte-identical files (or malformed files which never reach scripts[]).
   let selectedBytes = 0;
+  // After the aggregate read limit, do not access any remaining file.
+  // Report every skipped selection so progress cannot silently stop early.
+  let budgetExhausted = false;
   if (!Array.isArray(paths) || paths.length > MAX_SELECTED_FILES) {
     outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
     return outcome;
@@ -241,6 +244,10 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     try {
     const path = paths[index];
     const display = typeof path === 'string' ? basename(path) : '(invalid)';
+    if (budgetExhausted) {
+      outcome.errors.push(failure(display, 'SCAN_LIMIT'));
+      continue;
+    }
     // A native picker selects an exact path. Do not silently normalize away
     // . / .. components: with linked ancestors, lexical resolution can read a
     // different file than the one selected (or bypass an ancestor link check).
@@ -263,8 +270,10 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
       if (!info.isFile()) { outcome.errors.push(failure(display, 'NOT_REGULAR_FILE')); continue; }
       if (info.size > BigInt(MAX_SCRIPT_BYTES)) { outcome.errors.push(failure(display, 'FILE_TOO_LARGE')); continue; }
       if (BigInt(selectedBytes) + info.size > BigInt(MAX_TOTAL_IMPORTED_BYTES)) {
+        // Account for the rest of the batch without further disk I/O.
+        budgetExhausted = true;
         outcome.errors.push(failure(display, 'SCAN_LIMIT'));
-        break;
+        continue;
       }
       // Account for attempted file reads, not just accepted unique results.
       // Otherwise 1000 renamed identical files can evade the batch budget.

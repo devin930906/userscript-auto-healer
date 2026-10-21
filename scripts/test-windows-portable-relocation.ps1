@@ -261,6 +261,25 @@ try {
     throw 'Sibling control accepted a path outside RUNNER_TEMP'
   }
   Write-Output 'PASS: same-parent empty sibling move diagnostics preserve payload and deny out-of-scope paths'
+  # ISSUE-215: ACL/attribute metadata must be read-only and path-redacted.
+  # A clear ACL snapshot is only evidence, not proof that rename is possible.
+  $aclEvidence=Get-CandidatePortableRenameAclSummary $controlSource
+  if($aclEvidence -notmatch '^acl=ok root=\[denies=\d+ protected=(True|False) readonly=(True|False)\] parent=\[denies=\d+ protected=(True|False) readonly=(True|False)\]$' -or
+     $aclEvidence.Contains($controlSource) -or
+     [IO.File]::ReadAllText($controlPayload) -cne 'still-original') {
+    throw "Candidate ACL diagnostics changed payload or returned invalid evidence: $aclEvidence"
+  }
+  $outsideAcl=Get-CandidatePortableRenameAclSummary (Join-Path $root 'outside-unknown')
+  if($outsideAcl -cne 'acl=unavailable') { throw 'ACL diagnostic accepted unknown candidate path' }
+  $aclFailure=& {
+    function Get-Acl { throw 'Simulated read-only ACL query failure' }
+    Get-CandidatePortableRenameAclSummary $controlSource
+  }
+  if($aclFailure -cne 'acl=unavailable') {
+    throw 'Failed ACL query was misrepresented as successful evidence'
+  }
+  Write-Output 'PASS: candidate-only ACL metadata diagnostic is bounded, path-redacted and fail closed'
+
 
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
