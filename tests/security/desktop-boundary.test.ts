@@ -21,7 +21,8 @@ const approvedIpcChannels=[
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
- 'import:dropped','import:files','import:folder','import:get-progress','scenario:cancel',
+ 'import:dropped','import:files','import:folder','import:get-progress',
+ 'restore:manual-original','scenario:cancel',
  'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
@@ -174,6 +175,13 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   assert.match(main, /ipcMain\.handle\('import:get-progress',event=>/);
   assert.match(main, /authorizeSender\(event\);\s*\/\/ No user data/);
   assert.match(main, /authorizeSender\(event\);\s*if\(!nativeImportController\)return/);
+  // New potentially file-writing manual restore is exact and main-frame-only.
+  assert.match(main, /ipcMain\.handle\('restore:manual-original',async\(event,\.\.\.args:unknown\[\]\)=>/);
+  assert.match(main, /authorizeSender\(event\);\s*if\(args\.length\)return \{ok:false,code:'INVALID_REQUEST'/);
+  assert.match(main, /prepareManualOriginalRestoreSelection\(/);
+  assert.match(main, /if\(approved\.response!==0\|\|revoked\(\)\)/);
+  assert.match(main, /restoreVerifiedOriginalNativeOnly\(/);
+  assert.doesNotMatch(main, /ipcMain\.handle\('restore:manual-original',async\(event,(?:path|sourcePath|backupPath|options)/);
   assert.match(main, /ipcMain\.handle\('browser:start'/);
   assert.match(main, /dialog\.showMessageBox/);
   assert.match(main, /stopOnlyOwnedBrowser\(\)/);
@@ -233,6 +241,9 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.match(preload, /ipcRenderer\.invoke\('scenario:inspect',id\)/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:cancel'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('scenario:export-manual',id\)/);
+  assert.match(preload, /restoreManualOriginal: \(\): Promise<unknown> => ipcRenderer\.invoke\('restore:manual-original'\)/);
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:manual-original',\s*[^)]/);
+
   assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-manual',\s*\{/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
 });
