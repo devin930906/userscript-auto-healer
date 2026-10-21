@@ -42,6 +42,7 @@ test('TEST-017: separate temporary sessions never reuse a Tampermonkey userscrip
  assert.equal(first.session.source.includes('// @grant GM_getValue'),true);
  assert.equal(second.session.source.includes('// @grant GM_getValue'),true);
  assert.equal(second.session.source.includes('// @grant GM_setValue'),true);
+ assert.equal(second.session.source.includes('// @grant GM_deleteValue'),true);
  for(const session of [first.session,second.session]){
   const token=session.source.match(/token:"([0-9a-f]{64})"/)?.[1];
   assert.ok(token);
@@ -230,6 +231,7 @@ test('TEST-017/018 stage: isolated local probe generates explicit GM userscript 
  assert.match(probe.origin,/^http:\/\/127\.0\.0\.1:\d+$/);
  assert.match(probe.source,/\/\/ @grant GM_getValue/);
  assert.match(probe.source,/\/\/ @grant GM_setValue/);
+ assert.match(probe.source,/\/\/ @grant GM_deleteValue/);
  assert.match(probe.source,/\/\/ @run-at document-idle/);
  assert.match(probe.source,/\/\/ @noframes/);
  assert.match(probe.source,/\/\/ @match http:\/\/127\.0\.0\.1\/\*/);
@@ -309,38 +311,75 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
    assert.equal(receipts[mode]?.businessVerified,false);
  }
 });
-test('TEST-017/018: isolated GM storage readback is distinct from a default lookup',async t=>{
+test('TEST-017/018: isolated GM storage passes only after cleanup and read-after-delete',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
  if(!started.ok)return;
  t.after(()=>started.session.stop());
- for(const denied of [false,true]){
+ for(const scenario of ['success','write-denied','read-denied','delete-denied','delete-read-denied'] as const){
   const storage=new Map<string,string>();
   const reports:Array<Record<string,unknown>>=[];
-  let writes=0;
+  let writes=0;let deletes=0;let storageReads=0;
   runInNewContext(started.session.source,{
    Date:class extends Date{static now(){return started.session.expiresAt-1000;}},URL,
    location:{origin:started.session.origin,href:started.session.origin+'/?mode=fixed'},
    document:{readyState:'complete',querySelector:()=>({
     setAttribute:()=>{},getAttribute:()=> 'done'
    })},
-   GM_getValue:(key:string,fallback:string)=>storage.get(key)??fallback,
+   GM_getValue:(key:string,fallback:string)=>{
+    if(key.startsWith('uah-gm-storage-')){
+     storageReads++;
+     if(scenario==='read-denied'&&storageReads===1)
+      throw Error('GM_READ_DENIED');
+     if(scenario==='delete-read-denied'&&storageReads===2)
+      throw Error('GM_CONFIRM_DELETE_DENIED');
+    }
+    return storage.get(key)??fallback;
+   },
    GM_setValue:(key:string,value:string)=>{
     writes++;
-    if(denied)throw Error('GM_WRITE_DENIED');
+    if(scenario==='write-denied')throw Error('GM_WRITE_DENIED');
     storage.set(key,value);
+   },
+   GM_deleteValue:(key:string)=>{
+    deletes++;
+    if(scenario==='delete-denied')throw Error('GM_DELETE_DENIED');
+    storage.delete(key);
    },
    fetch:(_url:string,opts:{body:string})=>{
     reports.push(JSON.parse(opts.body) as Record<string,unknown>);
     return Promise.resolve();
    }
   });
-  assert.equal(writes,1);
-  assert.equal(reports.length,1);
-  assert.equal(reports[0].gmDefaultMatched,true);
-  assert.equal(reports[0].gmStorageRoundtripMatched,!denied);
-  assert.equal(reports[0].businessAction,true);
+  assert.equal(writes,1,scenario);
+  assert.equal(deletes,scenario==='write-denied'?0:1,scenario);
+  assert.equal(storage.size,scenario==='write-denied'||scenario==='delete-denied'?Number(scenario==='delete-denied'):0,scenario);
+  assert.equal(reports.length,1,scenario);
+  assert.equal(reports[0].gmDefaultMatched,true,scenario);
+  assert.equal(reports[0].gmStorageRoundtripMatched,scenario==='success',scenario);
+  assert.equal(reports[0].businessAction,true,scenario);
  }
+});
+
+test('TEST-017/018: absent GM deletion privilege must never report storage success',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ t.after(()=>started.session.stop());
+ const reports:Array<Record<string,unknown>>=[];
+ runInNewContext(started.session.source,{
+  Date:class extends Date{static now(){return started.session.expiresAt-1000;}},URL,
+  location:{origin:started.session.origin,href:started.session.origin+'/?mode=fixed'},
+  document:{readyState:'complete',querySelector:()=>({setAttribute:()=>{},getAttribute:()=> 'done'})},
+  GM_getValue:(_k:string,fallback:string)=>fallback,
+  GM_setValue:()=>{},
+  fetch:(_url:string,opts:{body:string})=>{
+   reports.push(JSON.parse(opts.body) as Record<string,unknown>);
+   return Promise.resolve();
+  }
+ });
+ assert.equal(reports.length,1);
+ assert.equal(reports[0].gmStorageRoundtripMatched,false);
 });
 
 test('TEST-017 stage: stopped isolated probe closes its listener',async()=>{
