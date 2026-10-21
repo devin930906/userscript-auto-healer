@@ -58,6 +58,55 @@ test('TEST-017: report includes bounded unverified evidence but no source, token
  }
  assert.ok(Buffer.byteLength(serialized)<4096);
 });
+test('TEST-017/026: report capture never executes forged session or snapshot accessors and proxy traps',()=>{
+ const at=Date.parse('2026-10-19T02:02:00.000Z');
+ let getters=0;let traps=0;
+ const badGetter=(base:object,key:string,returned:unknown)=>{
+  const copy={...base};
+  Object.defineProperty(copy,key,{
+   enumerable:true,configurable:true,
+   get(){getters++;return returned;}
+  });
+  return copy;
+ };
+ const hostile:ProxyHandler<object>={
+  getPrototypeOf(){traps++;throw Error('proxy prototype');},
+  ownKeys(){traps++;throw Error('proxy keys');},
+  getOwnPropertyDescriptor(){traps++;throw Error('proxy descriptor');},
+  apply(){traps++;throw Error('proxy invoke');}
+ };
+ const forgedFunction=new Proxy(()=>summary,hostile);
+ const revoked=Proxy.revocable({...session},{});
+ revoked.revoke();
+ const variants:unknown[]=[
+  badGetter(session,'browserVersion','155.0.8059.40'),
+  badGetter(session,'snapshot',()=>summary),
+  {...session,snapshot:()=>badGetter(summary,'reportedGmDefaultMatched',true)},
+  {...session,consistencySnapshot:()=>badGetter(consistency,'comparedModes',2)},
+  {...session,domSnapshot:()=>badGetter({broken:dom('broken',0),fixed:dom('fixed',1)},
+   'broken',dom('broken',0))},
+  {...session,domSnapshot:()=>({
+   broken:badGetter(dom('broken',0),'actionCount',0),fixed:dom('fixed',1)
+  })},
+  {...session,snapshot:()=>new Proxy({...summary},hostile)},
+  {...session,consistencySnapshot:()=>new Proxy({...consistency},hostile)},
+  {...session,domSnapshot:()=>({
+   broken:new Proxy({...dom('broken',0)},hostile),fixed:dom('fixed',1)
+  })},
+  {...session,snapshot:forgedFunction},
+  new Proxy({...session},hostile),
+  revoked.proxy
+ ];
+ for(const [index,variant] of variants.entries()){
+  assert.equal(createLimitedGmReport(variant as typeof session,at).status,
+   'BLOCKED','unsafe capture '+index);
+ }
+ assert.equal(getters,0,'an accessor must not execute during report capture');
+ assert.equal(traps,0,'a proxy trap must not execute during report capture');
+ assert.equal(createLimitedGmReport(session,at).status,
+  'UNVERIFIED_REPORT_READY','legitimate native snapshots remain supported');
+});
+
 test('TEST-017: incomplete or malformed self-reports fail closed; never claim real GM success',()=>{
  const awaiting={...session,snapshot:()=>({...summary,
    status:'AWAITING_BROWSER_VISITS' as const,observedModes:0,
