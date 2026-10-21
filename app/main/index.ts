@@ -25,6 +25,8 @@ import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
 import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
+import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
+import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
@@ -546,6 +548,85 @@ function registerSafeIpc(): void {
     stopOnlyGmProbe();
     return {ok:existed,status:existed?'FIXTURE_STOP_REQUESTED':'NO_ACTIVE_FIXTURE',
       ...unverified};
+  });
+
+  // TASK-011: explicit manual *original* restore only. The renderer sends no
+  // paths, hashes, bytes, backup selection, or approval flags. Every file is
+  // independently native-picked; this action never applies repair candidates
+  // or changes a Tampermonkey installed extension/script automatically.
+  ipcMain.handle('restore:manual-original',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||scenarioObserveInProgress||launchInProgress||
+       profilePreparationInProgress||gmActionInProgress||gmStartInProgress||
+       readOwnedBrowser())
+      return {ok:false,code:'RESTORE_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    // Serialized through the existing cross-module native-picking gate, so
+    // other privileged pickers and imports cannot overlap this restore.
+    nativeSelectionInProgress=true;
+    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    try{
+      const initial=await dialog.showMessageBox(win,{
+        type:'warning',buttons:['选择原文件和独立备份','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'手动恢复原始脚本（会覆盖您选定的文件）',
+        detail:'仅在已保存可信独立原版备份、且您明确要求手动恢复时使用。'
+          +'\n此功能不会更新 Tampermonkey 内已安装的脚本。'
+          +'\n必须先在文件系统中独立保存当前版本；随后仍需再次确认实际覆盖。'
+          +'\n请先关闭可能编辑该脚本的外部程序。'
+      });
+      if(initial.response!==0||revoked())return {ok:false,code:'CANCELLED',...unverified};
+      const source=await dialog.showOpenDialog(win,{
+        title:'手动恢复：选择要被替换的当前 .user.js 脚本',
+        properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
+      });
+      if(source.canceled||source.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const backup=await dialog.showOpenDialog(win,{
+        title:'手动恢复：选择本应用生成的原版 .backup.user.js 文件',
+        properties:['openFile'],filters:[{name:'Userscript backup',extensions:['js']}]
+      });
+      if(backup.canceled||backup.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const prepared=await prepareManualOriginalRestoreSelection(
+        source.filePaths[0],backup.filePaths[0]);
+      if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(prepared.status!=='AWAITING_NATIVE_RESTORE_CONSENT')
+        return {ok:false,code:prepared.reason,...unverified};
+      // Final OS dialog is the source of consent. No serialized renderer
+      // bool can authorize a write; hashes are rechecked inside transaction.
+      const approved=await dialog.showMessageBox(win,{
+        type:'warning',buttons:['恢复原始文件并备份当前版本','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'最终确认：这将覆盖选中的原始脚本文件',
+        detail:'被替换文件：'+prepared.sourcePath+
+          '\n确认原版备份：'+backup.filePaths[0]+
+          '\n当前 SHA-256：'+prepared.expectedCurrentSha256+
+          '\n待恢复 SHA-256：'+prepared.expectedOriginalSha256+
+          '\n程序会先在备份目录独立保存当前字节并写入恢复意图，再尝试原子替换。'
+          +'\n这是本机手动恢复，不是自动修复、Tampermonkey GM 或业务验收。'
+      });
+      if(approved.response!==0||revoked())
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      // No extra await between final consent and the transaction. The lock,
+      // source/backup content, pathname identity and consent are revalidated
+      // again by the native-only implementation immediately before rename.
+      const {status:_status,...selection}=prepared;
+      const result=await restoreVerifiedOriginalNativeOnly({
+        ...selection,userApproved:true,manualRestoreApproved:true
+      });
+      if(result.status!=='RESTORED_NATIVE_ONLY')
+        return {ok:false,code:result.reason,...unverified};
+      return {ok:true,status:'RESTORED_NATIVE_ONLY',
+        journalFileName:result.journalFileName,
+        displacedBackupFileName:result.displacedBackupFileName,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'RESTORE_FAILED',...unverified};
+    }finally{nativeSelectionInProgress=false;}
   });
 
   // Every path MUST come from the native OS picker, not renderer-provided input.
