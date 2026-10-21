@@ -7,7 +7,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {
- BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal,loadReadOnlyBatchJournal
+ BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal,loadReadOnlyBatchJournal,
+ runCheckpointedReadOnlyBatch
 } from '../../src/jobs/batch-journal';
 
 const hashes=[
@@ -217,5 +218,93 @@ test('TASK-013/TEST-022/026: losing the writer lock identity aborts publish and 
     'a substituted lock remains present and untouched for its actual owner');
    await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),{code:'ENOENT'});
   }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
+ });
+});
+
+test('TASK-013/TEST-022: each completed job and active read-only attempt is durable before next dispatch',async()=>{
+ await withJournal(async directory=>{
+  let waiting!:()=>void,release!:()=>void;
+  const started=new Promise<void>(resolve=>{waiting=resolve;});
+  const suspended=new Promise<void>(resolve=>{release=resolve;});
+  const calls:number[]=[];
+  const first=new ReadOnlyBatchCoordinator(options,async ordinal=>{
+   calls.push(ordinal);
+   if(ordinal===1){waiting();await suspended;}
+   return 'DONE';
+  });
+  const progress=runCheckpointedReadOnlyBatch(directory,first);
+  await started;
+  // This snapshot exists while job #1 is still active: job #0 has been
+  // durably completed, and job #1's first attempt was written before dispatch.
+  const bytes=await readFile(join(directory,BATCH_JOURNAL_FILENAME));
+  const onDisk=JSON.parse(bytes.toString('utf8'));
+  assert.deepEqual(onDisk.jobs.map((job:{state:string})=>job.state),
+   ['SUCCEEDED','RUNNING']);
+  assert.deepEqual(onDisk.jobs.map((job:{attempts:number})=>job.attempts),[1,1]);
+  assert.equal(onDisk.automaticPatchAllowed,false);
+  assert.equal(onDisk.automaticRollbackAllowed,false);
+  // Read the captured journal in a separate disposable folder to simulate
+  // restarting with the crash-time bytes; never touch the live batch.
+  await withJournal(async recoveryDirectory=>{
+   await writeFile(join(recoveryDirectory,BATCH_JOURNAL_FILENAME),bytes);
+   const replayed:number[]=[];
+   const restored=await loadReadOnlyBatchJournal(
+    recoveryDirectory,options,async ordinal=>{replayed.push(ordinal);return 'DONE';});
+   assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+   if(restored.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
+   const after=await runCheckpointedReadOnlyBatch(recoveryDirectory,restored.coordinator);
+   assert.equal(after.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED',JSON.stringify(after));
+   assert.deepEqual(replayed,[1],'a completed job must not be replayed');
+   if(after.status==='BATCH_SETTLED_CHECKPOINTED_UNVERIFIED'){
+    assert.deepEqual(after.snapshot.jobs.map(j=>j.attempts),[1,2]);
+    assert.equal(after.snapshot.businessVerified,false);
+   }
+  });
+  release();
+  const done=await progress;
+  assert.equal(done.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED',JSON.stringify(done));
+  assert.deepEqual(calls,[0,1]);
+ });
+});
+
+test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting foreign lock',async()=>{
+ await withJournal(async directory=>{
+  let called=0;
+  const coordinator=new ReadOnlyBatchCoordinator(options,async()=>{
+   called++;return 'DONE';
+  });
+  const original=ReadOnlyBatchCoordinator.prototype.snapshot;
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  let snapshots=0;
+  ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
+   snapshots++;
+   if(snapshots===4)mkdirSync(lock);
+   return original.call(this);
+  };
+  try{
+   const result=await runCheckpointedReadOnlyBatch(directory,coordinator);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'BUSY'});
+   assert.equal(called,0,'worker must not start without persisted RUNNING attempt');
+   assert.deepEqual(readdirSync(lock),[],'foreign lock evidence is retained');
+   const bytes=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
+   assert.deepEqual(bytes.jobs.map((job:{state:string})=>job.state),
+    ['QUEUED','QUEUED']);
+  }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
+ });
+});
+
+test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unbound batch identities',async()=>{
+ await withJournal(async directory=>{
+  let called=0;
+  const worker=async()=>{called++;return 'DONE' as const;};
+  const concurrent=new ReadOnlyBatchCoordinator({...options,concurrency:2},worker);
+  assert.deepEqual(await runCheckpointedReadOnlyBatch(directory,concurrent),
+   {status:'BLOCKED',reason:'INVALID_INPUT'});
+  const unbound=new ReadOnlyBatchCoordinator({count:1},worker);
+  assert.deepEqual(await runCheckpointedReadOnlyBatch(directory,unbound),
+   {status:'BLOCKED',reason:'INVALID_INPUT'});
+  assert.equal(called,0);
+  await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),
+   {code:'ENOENT'});
  });
 });
