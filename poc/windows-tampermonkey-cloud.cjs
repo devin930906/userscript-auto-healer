@@ -38,6 +38,8 @@ let source=[
  '// @match https://example.com/*',
  '// @grant GM_getValue',
  '// @run-at '+runAt,
+ // Match the production disposable GM probe's explicit top-frame-only scope.
+ '// @noframes',
  '// ==/UserScript==',
  'const injectedReadyState=document.readyState;',
  'let gm=false;',
@@ -296,6 +298,9 @@ async function main(){
   });
   const fixedPage=await context.newPage();
   await fixedPage.addInitScript(()=>{
+    // The top-page fixture owns this target. A child frame supplies its own
+    // independent target, never a duplicate ID from this injected helper.
+    if(window.top!==window)return;
     document.addEventListener('DOMContentLoaded',()=>{
       const el=document.createElement('button');el.id='uah-ci-target';
       document.body?.append(el);
@@ -313,6 +318,35 @@ async function main(){
   },variant==='product-original'
     ?{injected:'yes',gm:'true',business:'missing-target',action:null}
     :{injected:'yes',gm:'true',business:'recovered',action:'done'});
+  // TASK-007 / TEST-017/026: a matching-origin child frame is not an
+  // independent user-approved top-level script target. A genuine extension
+  // is present here; the browser must exercise the actual manager policy.
+  // The disposable frame is served locally via Playwright routing, without
+  // reading an account, user script, profile or third-party site data.
+  await context.route('https://example.com/uah-ci-nested-frame',route=>
+    route.fulfill({status:200,contentType:'text/html',
+      body:'<!doctype html><html><body><button id="uah-ci-target">Disposable iframe</button></body></html>'}));
+  await fixedPage.evaluate(()=>{
+    const child=document.createElement('iframe');
+    child.id='uah-ci-nested-frame';
+    child.src='https://example.com/uah-ci-nested-frame';
+    document.body.append(child);
+  });
+  await fixedPage.frameLocator('#uah-ci-nested-frame').locator('#uah-ci-target')
+    .waitFor({timeout:15000});
+  const childFrame=fixedPage.frames().find(frame=>
+    frame.url()==='https://example.com/uah-ci-nested-frame');
+  assert.ok(childFrame,'Disposable child frame did not reach the intended URL');
+  await childFrame.waitForLoadState('load',{timeout:15000});
+  await sleep(1200);
+  const childEvidence=await childFrame.evaluate(()=>({
+    injected:document.documentElement.dataset.uahCiInjected||null,
+    gm:document.documentElement.dataset.uahCiGm||null,
+    action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
+  }));
+  console.log('TAMPERMONKEY_UNAUTHORIZED_CHILD_FRAME '+JSON.stringify(childEvidence));
+  assert.deepEqual(childEvidence,{injected:null,gm:null,action:null},
+    'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
     ' fixture variant '+variant+' GM_getValue and expected business assertions.');
   if(variant==='product-original')
