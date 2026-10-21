@@ -225,9 +225,9 @@ export function proposeFromReadOnlyDomDiagnostic(
       return blocked('INVALID_SCENARIO_LINK');
     // The same exact snapshot must be used for scenario linkage and AST
     // planning. No later reads of mutable or privileged caller properties.
-    const captured:Record<string,unknown>=Object.create(null);
-    for(const field of patchFields)captured[field]=patchDescriptors[field].value;
-    const request=captured as unknown as LiteralPatchRequest;
+    const requestFields:Record<string,unknown>=Object.create(null);
+    for(const field of patchFields)requestFields[field]=patchDescriptors[field].value;
+    const request=requestFields as unknown as LiteralPatchRequest;
     // The canonical registry copies own data descriptors and array entries.
     // Never read a caller's scenario getters or infer authority from extras.
     const checked=preflightScenario(scenario as ScenarioInput);
