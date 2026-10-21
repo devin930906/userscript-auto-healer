@@ -37,39 +37,31 @@ try {
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
     $rejected=$false
-    # WarningVariable on a terminating function invocation is scoped to that
-    # invocation and need not survive its throw. Capture PowerShell stream 4
-    # outside an inner catch instead, so all emitted records remain testable.
-    $script:relocationLockError=$null
-    $conflictWarnings=@(& {
-      try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
-      catch { $script:relocationLockError=$_ }
-    } 4>&1)
-    if($null -ne $script:relocationLockError) {
-      $rootError=$script:relocationLockError.Exception
+    $rootFailure=$null
+    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
+    catch {
+      $rootError=$_.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
       $code=$rootError.HResult -band 0xFFFF
       if(($rootError -isnot [System.IO.IOException] -and
           $rootError -isnot [System.UnauthorizedAccessException]) -or
-          $code -notin @(5,32,33)) { throw $script:relocationLockError }
+          $code -notin @(5,32,33)) { throw }
+      $rootFailure=$rootError
       $rejected=$true
     }
     if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
       throw 'Persistent Windows file lock did not fail closed'
     }
-    # Verify both bounded failures are explainable from CI logs, including
-    # the true Windows HRESULT/Win32 code and time, without logging paths.
-    if($conflictWarnings.Count -ne 2) {
-      throw 'Expected one structured Windows relocation diagnostic per failed attempt'
+    # Validate the production formatter against the actual Windows exception,
+    # with a fixed clock so the record can be independently asserted.
+    $fixedUtc=[DateTime]::new(2026,10,21,3,12,0,[DateTimeKind]::Utc)
+    $record=Format-CandidatePortableRelocationFailure 2 2 $rootFailure $true $false $fixedUtc
+    $expected=("TASK-020 relocation attempt 2/2 UTC=2026-10-21T03:12:00.000Z type={0} HRESULT=0x{1:X8} Win32={2} sourceExists=True destinationExists=False" -f
+      $rootFailure.GetType().Name,$rootFailure.HResult,$code)
+    if($record -cne $expected) {
+      throw 'Windows relocation diagnostic formatter lost the HRESULT, attempt or state'
     }
-    for($n=1; $n -le 2; $n++) {
-      $diagnostic=[string]$conflictWarnings[$n-1].Message
-      if($diagnostic -notmatch "TASK-020 relocation attempt $n/2 UTC=\d{4}-\d{2}-\d{2}T" -or
-         $diagnostic -notmatch 'HRESULT=0x[0-9A-Fa-f]{8} Win32=(5|32|33) ' -or
-         $diagnostic -notmatch 'sourceExists=True destinationExists=False') {
-        throw "Windows relocation attempt $n missing structured fail-closed diagnostics"
-      }
-    }
+    Write-Output "PASS: Windows lock diagnostic recorded HRESULT and Win32=$code without full paths"
   } finally { $locked.Dispose() }
   if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
