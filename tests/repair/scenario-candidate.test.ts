@@ -342,3 +342,84 @@ test('TEST-019/026: DOM repair candidate rejects request Proxy and getters befor
   }
   assert.equal(executed,0,'request reflection must not execute caller code');
 });
+
+
+test('TASK-009/TEST-019/026: mutable/accessor DOM evidence cannot be laundered into a candidate',()=>{
+ let executed=0;
+ const forbidden=():never=>{
+  executed++;throw Error('UNTRUSTED_DOM_ACCESSOR_MUST_NOT_RUN');
+ };
+ const topAccessor={...series()};
+ Object.defineProperty(topAccessor,'samples',{
+  enumerable:true,get:forbidden
+ });
+ const nestedSummary={...sample()};
+ Object.defineProperty(nestedSummary,'summary',{
+  enumerable:true,get:forbidden
+ });
+ const nestedCounts={...sample()};
+ Object.defineProperty(nestedCounts,'selectorCounts',{
+  enumerable:true,get:forbidden
+ });
+ const slotArray=series().samples.slice();
+ Object.defineProperty(slotArray,'0',{enumerable:true,configurable:true,get:forbidden});
+ const getterArray={...series(),samples:slotArray};
+ const customIterator=series().samples.slice();
+ Object.defineProperty(customIterator,Symbol.iterator,{get:forbidden});
+ const proxy=new Proxy(series(),{
+  get:forbidden,getPrototypeOf:forbidden,
+  ownKeys:forbidden,getOwnPropertyDescriptor:forbidden
+ });
+ const nestedProxy=new Proxy({...sample().summary},{
+  get:forbidden,getPrototypeOf:forbidden,
+  ownKeys:forbidden,getOwnPropertyDescriptor:forbidden
+ });
+ const revoked=Proxy.revocable(series(),{get:forbidden});revoked.revoke();
+ const hostileCounts={...sample()};
+ hostileCounts.selectorCounts=new Proxy({...sample().selectorCounts},{
+  get:forbidden,getPrototypeOf:forbidden,
+  ownKeys:forbidden,getOwnPropertyDescriptor:forbidden
+ });
+ const invalid=[
+  topAccessor,
+  {...series(),samples:[nestedSummary,sample(0,1,'2026-10-18T00:00:01Z')]},
+  {...series(),samples:[nestedCounts,sample(0,1,'2026-10-18T00:00:01Z')]},
+  getterArray,
+  {...series(),samples:customIterator},
+  proxy,revoked.proxy,
+  {...series(),samples:[{...sample(),summary:nestedProxy},sample(0,1,'2026-10-18T00:00:01Z')]},
+  {...series(),samples:[hostileCounts,sample(0,1,'2026-10-18T00:00:01Z')]},
+  {...series(),samples:[{...sample(),extraAuthority:true},sample(0,1,'2026-10-18T00:00:01Z')]},
+  {...series(),samples:[{...sample(),selectorCounts:{'#old':0,'#new':1,extra:99}},
+    sample(0,1,'2026-10-18T00:00:01Z')]}
+ ];
+ for(const observation of invalid){
+  const decision=proposeFromReadOnlyDomDiagnostic(
+   patch,scenario,observation,true);
+  assert.equal(decision.status,'BLOCKED');
+  assert.equal(decision.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in decision,false);
+ }
+ assert.equal(executed,0,'untrusted DOM getters/iterators/Proxy traps were never executed');
+ // Preserve the actual existing, review-only happy path.
+ assert.equal(proposeFromReadOnlyDomDiagnostic(
+  patch,scenario,series(),true).status,'CANDIDATE_ONLY');
+});
+
+test('TASK-009/TEST-019/026: a mutating DOM sample getter cannot change scope after validation',()=>{
+ let reads=0;
+ const changing={...series()};
+ Object.defineProperty(changing,'samples',{enumerable:true,get(){
+  reads++;
+  if(reads===1)return series().samples;
+  return series().samples.map(item=>({
+   ...item,summary:{elementCount:4,iframeCount:1,visibleShadowRoots:0,
+    blindSpots:['IFRAME_CONTENT_UNVERIFIED']}
+  }));
+ }});
+ const result=proposeFromReadOnlyDomDiagnostic(patch,scenario,changing,true);
+ assert.equal(result.status,'BLOCKED');
+ assert.equal(result.automaticPatchAllowed,false);
+ assert.equal('candidateSource' in result,false);
+ assert.equal(reads,0,'never read caller-owned getter before or after DOM validation');
+});
