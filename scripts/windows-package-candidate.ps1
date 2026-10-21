@@ -155,7 +155,11 @@ Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoa
 # Recheck the entire moved payload before any subsequent read-only ACL test.
 $moved=Join-Path $temp 'relocated portable 路径'
 if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated test directory' }
-Move-Item -LiteralPath $expanded -Destination $moved -ErrorAction Stop
+# Atomic same-parent rename: unlike PowerShell Move-Item this cannot leave a
+# partially copied payload when an Electron utility still holds an open DLL.
+. (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
+$relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
+Write-Output "PASS: atomic portable directory relocation ($relocationAttempts attempt(s))"
 $expanded=$moved
 $movedFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
 if ($movedFiles.Count -ne $sourceFiles.Count) { throw 'Relocated ZIP payload file count changed' }

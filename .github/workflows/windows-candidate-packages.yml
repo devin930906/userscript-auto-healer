@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'scripts/windows-package-candidate.ps1'
+      - 'scripts/windows-portable-relocation.ps1'
+      - 'scripts/test-windows-portable-relocation.ps1'
       - '.github/workflows/windows-candidate-packages.yml'
       - 'app/**'
       - 'src/**'
@@ -37,6 +39,9 @@ jobs:
       - name: Run registered regressions and compile the real app
         shell: pwsh
         run: npm test
+      - name: Test real Windows portable relocation, file locks and no overwrite
+        shell: pwsh
+        run: ./scripts/test-windows-portable-relocation.ps1
       - name: Package Windows deliverables and verify candidates
         id: package
         shell: pwsh
