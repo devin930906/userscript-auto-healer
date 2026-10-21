@@ -119,6 +119,42 @@ test('TEST-017: native report refuses nested unknown fields and accessors before
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TEST-017/026: report save refuses live and revoked Proxy inputs before any reflection',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-report-proxy-'));
+ try{
+  const ready=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const report=ready.report;
+  let trapCalls=0;
+  const traps:ProxyHandler<object>={
+   getPrototypeOf(){trapCalls++;throw Error('Unexpected proxy prototype access');},
+   ownKeys(){trapCalls++;throw Error('Unexpected proxy key enumeration');},
+   getOwnPropertyDescriptor(){trapCalls++;throw Error('Unexpected proxy descriptor access');}
+  };
+  const inputs:unknown[]=[
+   new Proxy({...report},traps),
+   {...report,assessment:new Proxy({...report.assessment},traps)},
+   {...report,consistency:new Proxy({...report.consistency},traps)},
+   {...report,dom:new Proxy({...report.dom},traps)},
+   {...report,dom:{...report.dom,broken:new Proxy({...report.dom.broken},traps)}},
+   {...report,dom:{...report.dom,fixed:new Proxy({...report.dom.fixed},traps)}}
+  ];
+  const revoked=Proxy.revocable({...report},{});
+  revoked.revoke();
+  inputs.push(revoked.proxy);
+  for(const [index,input] of inputs.entries()){
+   const result=await saveLimitedGmReportOnly(
+    input as typeof report,join(root,'refused-'+index+'.json'),true);
+   assert.equal(result.status,'BLOCKED','proxy input '+index);
+   if(result.status==='BLOCKED')
+    assert.equal(result.code,'INVALID_REQUEST','proxy input '+index);
+  }
+  assert.equal(trapCalls,0,'no untrusted Proxy trap may run during validation');
+  assert.deepEqual(await readdir(root),[],'no partial report may be published');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-017: native report creates a private separate JSON only once and never overwrites',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-gm-report-'));
  try{
