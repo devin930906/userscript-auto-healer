@@ -235,3 +235,13 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - 本轮**使用了项目已有产品代码** `src/analyze/selector-analyzer.ts`、`src/repair/patch-planner.ts`，实际执行 `analyzeSelectors` → `proposeLiteralSelectorPatch`（`CANDIDATE_ONLY`）→ `auditProposedLiteralSelectorPatch`（`REVIEWABLE_ONLY`）；只修改一处经过 AST 定位的 `document.querySelector` 字面选择器，保留元数据与剩余代码不变。独立两个 Job 均记录原版 SHA-256 `f564a76620d1aee7b80b12ddea3a92de27cdc6e0eb16e634451ef6d173694103`，候选 SHA-256 `69c1079ef37e55c987bc81fd1696c836e45d50dfb480d5cd3bd831de4f4f0ac4`；`automaticPatchAllowed=false`。
 - 原版在合成按钮实际存在的网页上调用真实 `GM_getValue` 成功，但由于失效选择器返回 `missing-target`、动作标记不存在；产品审核候选在同种页面调用 `GM_getValue` 后返回 `recovered/done`，目标按钮具有预期动作标记。没有通过 Playwright `evaluate` 直接运行用户脚本来冒充 Tampermonkey；管理器中真正安装了受控临时脚本。
 - **证据限制**：仍使用 Chromium 141.0.7390.37 与从厂商网站下载、解包的 Tampermonkey MV3 5.4.1，不是经商店 ID 签名认证的正式安装，也未取得真实用户已登录网站、真正生产故障诊断证据、完整自动应用/事务备份/回滚或跨 Chrome/便携版支持矩阵。此实验只证明单个已审计的**离线候选**在合成业务场景可执行且有效，原文件与用户扩展均未被自动修改。**TEST-017/018/019 尚未完整通过，GATE-001..011 均仍未完整验收**。
+
+## （7）2026-10-21 TASK-011/TEST-020/026 暂存候选 Proxy 反射安全回归（阶段验证）
+
+[PR #211](https://github.com/devin930906/userscript-auto-healer/pull/211) 已合并至 `main`，合并 SHA `b80f1df3450c41225a6ebfd38d0196f073308c39`。原生只读暂存候选复核 `src/version/staged-candidate-recheck.ts` 的 `record()` 曾在排除不可信 `Proxy` 前调用 `Object.getPrototypeOf` 与自身属性描述符反射。新增 `TEST-020/026` 回归要求恶意活 Proxy 的选项及回执均被拒绝、反射陷阱执行次数为零，并确保已撤销 Proxy 安全拒绝；生产端只增加 `node:util.types.isProxy` 前置守卫，没有新增文件写入、恢复、Chrome/Tampermonkey 或 IPC 权限。
+
+- **RED 实证**：测试提交 `518e1edd87898df608ddbbeac804387526e4facc` 的 [Windows Application Checks #39529409462](https://github.com/devin930906/userscript-auto-healer/actions/runs/39529409462) 失败，447 项用例中 445 pass、1 fail、1 skip；唯一失败为新增用例，实际触发 2 次 Proxy 陷阱（预期 0）。
+- **GREEN 实证**：修复提交 `751305f6ee702164c502f49d14b9e4e0a00822da` 的 [Windows Application Checks #39529701522](https://github.com/devin930906/userscript-auto-healer/actions/runs/39529701522) success：447 项 446 pass、0 fail、1 skip，TypeScript 和真实 Electron sandbox/preload smoke 均通过。
+- **候选双包回归**：[Windows Candidate EXE+ZIP #39529701493](https://github.com/devin930906/userscript-auto-healer/actions/runs/39529701493) success，构建执行源为 PR 合成提交 `7917eed658e41c31d9c8252671dc578309627b1b`，不是合并后的 main；142 项安装内容逐文件 SHA-256 一致、真实 ZIP 解压启动、安装版启动、合成升级与卸载用户数据保留均有受限证据。Artifact `12314643465` 为 **CANDIDATE ONLY / NOT STABLE**，不得作为正式 EXE/ZIP 或 Release 附件。
+
+本增量只证明不可信输入反射边界的负例修复和候选打包回归；**TASK-011 仍开发中，TEST-020/026 未完成全部发布层验收，GATE-006/007 未通过**。原子事务、崩溃回滚、真实 Tampermonkey/GM/业务恢复、用户 Windows 设备矩阵及 GATE-001..011 的正式 Stable 验收均必须另行核验。
