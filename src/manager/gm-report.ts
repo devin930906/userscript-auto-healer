@@ -36,12 +36,13 @@ const consistencyStatuses=new Set<Consistency>([
 type LimitedDom={observedAt:string;actionCount:0|1;
  fixtureDomMatchesExpected:boolean};
 export type LimitedGmReport=Readonly<{
- schema:'uah-manual-gm-fixture-v2';verdict:'NOT_VERIFIED';
+ schema:'uah-manual-gm-fixture-v3';verdict:'NOT_VERIFIED';
  browserVersion:string;
  collectedAt:string;expiresAt:string;
  runAt:'document-start'|'document-body'|'document-end'|'document-idle';
  assessment:Readonly<{
    status:Status;observedModes:number;reportedGmDefaultMatched:boolean;
+   reportedGmStorageRoundtripMatched:boolean;
    reportedBrokenFailed:boolean;reportedFixedRecovered:boolean
  }>;
  consistency:Readonly<{status:Consistency;comparedModes:0|1|2}>;
@@ -80,7 +81,8 @@ function coherentLimitedEvidence(
  dom:LimitedGmReport['dom']
 ):boolean{
  const matchingReports=assessment.observedModes===2&&
-   assessment.reportedGmDefaultMatched&&assessment.reportedBrokenFailed&&
+   assessment.reportedGmDefaultMatched&&assessment.reportedGmStorageRoundtripMatched&&
+   assessment.reportedBrokenFailed&&
    assessment.reportedFixedRecovered;
  if(assessment.status==='SELF_REPORTED_EXPECTATIONS_MATCH'){
    if(!matchingReports)return false;
@@ -146,6 +148,7 @@ export function createLimitedGmReport(
      !Number.isInteger(s.observedModes)||s.observedModes<0||s.observedModes>2||
      !Number.isInteger(c.comparedModes)||c.comparedModes<0||c.comparedModes>2||
      typeof s.reportedGmDefaultMatched!=='boolean'||
+     typeof s.reportedGmStorageRoundtripMatched!=='boolean'||
      typeof s.reportedBrokenFailed!=='boolean'||
      typeof s.reportedFixedRecovered!=='boolean'||
      s.extensionAuthenticityVerified!==false||
@@ -169,7 +172,7 @@ export function createLimitedGmReport(
       actionCount:d.actionCount,fixtureDomMatchesExpected:d.fixtureDomMatchesExpected});
   }
   const report:LimitedGmReport=Object.freeze({
-   schema:'uah-manual-gm-fixture-v2' as const,
+   schema:'uah-manual-gm-fixture-v3' as const,
    verdict:'NOT_VERIFIED' as const,
    browserVersion:session.browserVersion,
    collectedAt:new Date(collectedAt).toISOString(),
@@ -178,6 +181,7 @@ export function createLimitedGmReport(
    assessment:Object.freeze({
     status:s.status,observedModes:s.observedModes,
     reportedGmDefaultMatched:s.reportedGmDefaultMatched,
+    reportedGmStorageRoundtripMatched:s.reportedGmStorageRoundtripMatched,
     reportedBrokenFailed:s.reportedBrokenFailed,
     reportedFixedRecovered:s.reportedFixedRecovered
    }),
@@ -225,12 +229,13 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
  if(!root)return null;
  const assessment=exactData(root.assessment,[
   'status','observedModes','reportedGmDefaultMatched',
+  'reportedGmStorageRoundtripMatched',
   'reportedBrokenFailed','reportedFixedRecovered'
  ]);
  const consistency=exactData(root.consistency,['status','comparedModes']);
  const dom=exactData(root.dom,['broken','fixed']);
  if(!assessment||!consistency||!dom||
-    root.schema!=='uah-manual-gm-fixture-v2'||root.verdict!=='NOT_VERIFIED'||
+    root.schema!=='uah-manual-gm-fixture-v3'||root.verdict!=='NOT_VERIFIED'||
     !validChromeVersion(root.browserVersion)||
     !validObservedAt(root.collectedAt)||!validObservedAt(root.expiresAt)||
     !isSupportedGmProbeRunAt(root.runAt)||
@@ -243,6 +248,7 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
     (assessment.observedModes as number)<0||
     (assessment.observedModes as number)>2||
     typeof assessment.reportedGmDefaultMatched!=='boolean'||
+    typeof assessment.reportedGmStorageRoundtripMatched!=='boolean'||
     typeof assessment.reportedBrokenFailed!=='boolean'||
     typeof assessment.reportedFixedRecovered!=='boolean'||
     !consistencyStatuses.has(consistency.status as Consistency)||
@@ -268,6 +274,7 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
    status:assessment.status as Status,
    observedModes:assessment.observedModes as number,
    reportedGmDefaultMatched:assessment.reportedGmDefaultMatched as boolean,
+   reportedGmStorageRoundtripMatched:assessment.reportedGmStorageRoundtripMatched as boolean,
    reportedBrokenFailed:assessment.reportedBrokenFailed as boolean,
    reportedFixedRecovered:assessment.reportedFixedRecovered as boolean
  };
@@ -277,7 +284,7 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
  };
  const checkedDom={broken,fixed};
  const checkedReport={
-  schema:'uah-manual-gm-fixture-v2' as const,
+  schema:'uah-manual-gm-fixture-v3' as const,
   verdict:'NOT_VERIFIED' as const,
   browserVersion:root.browserVersion,
   collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
@@ -288,7 +295,7 @@ function sanitizeReportForSave(input:unknown):LimitedGmReport|null{
     !chronologicalLimitedEvidence(checkedReport))
    return null;
  return Object.freeze({
-  schema:'uah-manual-gm-fixture-v2',verdict:'NOT_VERIFIED',
+  schema:'uah-manual-gm-fixture-v3',verdict:'NOT_VERIFIED',
   browserVersion:root.browserVersion,
   collectedAt:root.collectedAt,expiresAt:root.expiresAt,runAt:root.runAt,
   assessment:Object.freeze(checkedAssessment),
