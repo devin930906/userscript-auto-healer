@@ -222,7 +222,7 @@ test('TEST-019/026: planner refuses executable getters and identity-shifting req
    });
    return nullPrototype;
   })(),
-  (()=>{const missing={...original};delete (missing as Partial<LiteralPatchRequest>).method;return missing;})(),
+  Object.fromEntries(Object.entries(original).filter(([key])=>key!=='method')),
   [original],
   new (class {source=original.source;})()
  ];
