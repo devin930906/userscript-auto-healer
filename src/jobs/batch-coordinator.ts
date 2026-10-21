@@ -230,8 +230,9 @@ export class ReadOnlyBatchCoordinator{
  /** Native journal write guard: never allow an older or foreign batch
   * snapshot to overwrite a later persisted scheduling hint.
   * This is NOT checkpoint authentication and grants no script authority.
-  * Existing RUNNING entries are normalized by the checkpoint validator so a
-  * restarted, still-retryable job can return to QUEUED with its old attempts.
+  * Persistence compares the original RUNNING state without restart
+  * normalization; only constructor recovery turns an interrupted attempt into
+  * QUEUED or FAILED according to its retry budget.
   */
  mayPersistOver(previous:unknown):boolean{
   let persisted:MutableJob[];
