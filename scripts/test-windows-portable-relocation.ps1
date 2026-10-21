@@ -242,6 +242,17 @@ try {
   [IO.File]::WriteAllText($permanentFile,'preserve-me')
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
+    # Sharing evidence is read-only, never a reason to weaken Move's guard.
+    $shareEvidence=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($shareEvidence -cne 'scan=ok probed=1 blockedExamples=1 names=payload.txt') {
+      throw "Locked disposable file was not identified by bounded share probe: $shareEvidence"
+    }
+    $outsideShare=Get-CandidatePortableFileShareSummary $permanent @(
+      (Join-Path $root 'outside-scope.txt'))
+    if($outsideShare -cne 'scan=unavailable') {
+      throw 'Share probe accepted a path outside its candidate directory'
+    }
+    Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
     $rejected=$false
     $rootFailure=$null
     try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
