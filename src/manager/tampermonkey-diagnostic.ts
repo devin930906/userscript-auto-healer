@@ -23,6 +23,7 @@ export interface ManualDiagnosticAssessment {
    'SELF_REPORTED_EXPECTATIONS_MATCH'|'REPORTED_MISMATCH';
  readonly observedModes:number;
  readonly reportedGmDefaultMatched:boolean;
+ readonly reportedGmStorageRoundtripMatched:boolean;
  readonly reportedBrokenFailed:boolean;
  readonly reportedFixedRecovered:boolean;
  readonly extensionAuthenticityVerified:false;
@@ -227,7 +228,8 @@ function descriptorFields(
  }catch{return null;}
 }
 const receiptFields=[
-  'status','mode','reportedGmDefaultMatched','reportedBusinessAction',
+  'status','mode','reportedGmDefaultMatched',
+  'reportedGmStorageRoundtripMatched','reportedBusinessAction',
   'extensionAuthenticityVerified','scriptInstallationVerified',
   'gmApiVerified','businessVerified'
 ] as const;
@@ -235,6 +237,7 @@ function cleanReceipt(value:unknown,mode:GmProbeMode):GmProbeReceipt|null{
  const x=descriptorFields(value,receiptFields,true);
  if(!x||x.status!=='SELF_REPORTED_FIXTURE_ONLY'||x.mode!==mode||
    typeof x.reportedGmDefaultMatched!=='boolean'||
+   typeof x.reportedGmStorageRoundtripMatched!=='boolean'||
    typeof x.reportedBusinessAction!=='boolean'||
    x.extensionAuthenticityVerified!==false||
    x.scriptInstallationVerified!==false||
@@ -243,6 +246,7 @@ function cleanReceipt(value:unknown,mode:GmProbeMode):GmProbeReceipt|null{
  return Object.freeze({
    status:'SELF_REPORTED_FIXTURE_ONLY',mode,
    reportedGmDefaultMatched:x.reportedGmDefaultMatched,
+   reportedGmStorageRoundtripMatched:x.reportedGmStorageRoundtripMatched,
    reportedBusinessAction:x.reportedBusinessAction,
    ...emptyFlags
  });
@@ -258,6 +262,8 @@ export function assessManualProbeObservations(
  const observedModes=Number(a!==null)+Number(b!==null);
  const reportedGmDefaultMatched=a!==null&&b!==null&&
    a.reportedGmDefaultMatched&&b.reportedGmDefaultMatched;
+ const reportedGmStorageRoundtripMatched=a!==null&&b!==null&&
+   a.reportedGmStorageRoundtripMatched&&b.reportedGmStorageRoundtripMatched;
  const reportedBrokenFailed=a!==null&&a.reportedBusinessAction===false;
  const reportedFixedRecovered=b!==null&&b.reportedBusinessAction===true;
  const exactVisits=Object.keys(v).sort().join(',')==='broken,fixed'&&
@@ -265,10 +271,12 @@ export function assessManualProbeObservations(
  const status:ManualDiagnosticAssessment['status']=
    !exactVisits?'AWAITING_BROWSER_VISITS':
    !('broken' in r)||!('fixed' in r)?'AWAITING_REPORTS':
-   a&&b&&reportedGmDefaultMatched&&reportedBrokenFailed&&reportedFixedRecovered?
+   a&&b&&reportedGmDefaultMatched&&reportedGmStorageRoundtripMatched&&
+   reportedBrokenFailed&&reportedFixedRecovered?
      'SELF_REPORTED_EXPECTATIONS_MATCH':'REPORTED_MISMATCH';
  return {status,observedModes,
-   reportedGmDefaultMatched,reportedBrokenFailed,reportedFixedRecovered,
+   reportedGmDefaultMatched,reportedGmStorageRoundtripMatched,
+   reportedBrokenFailed,reportedFixedRecovered,
    ...emptyFlags};
 }
 

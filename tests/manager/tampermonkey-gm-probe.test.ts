@@ -41,6 +41,7 @@ test('TEST-017: separate temporary sessions never reuse a Tampermonkey userscrip
  assert.notEqual(a.namespace,b.namespace);
  assert.equal(first.session.source.includes('// @grant GM_getValue'),true);
  assert.equal(second.session.source.includes('// @grant GM_getValue'),true);
+ assert.equal(second.session.source.includes('// @grant GM_setValue'),true);
  for(const session of [first.session,second.session]){
   const token=session.source.match(/token:"([0-9a-f]{64})"/)?.[1];
   assert.ok(token);
@@ -228,6 +229,7 @@ test('TEST-017/018 stage: isolated local probe generates explicit GM userscript 
  t.after(()=>probe.stop());
  assert.match(probe.origin,/^http:\/\/127\.0\.0\.1:\d+$/);
  assert.match(probe.source,/\/\/ @grant GM_getValue/);
+ assert.match(probe.source,/\/\/ @grant GM_setValue/);
  assert.match(probe.source,/\/\/ @run-at document-idle/);
  assert.match(probe.source,/\/\/ @noframes/);
  assert.match(probe.source,/\/\/ @match http:\/\/127\.0\.0\.1\/\*/);
@@ -258,11 +260,11 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
  const send=(payload:unknown,headers:Record<string,string>={'Content-Type':'application/json'})=>
    fetch(probe.origin+'/receipt',{method:'POST',headers,body:JSON.stringify(payload)});
  assert.equal((await send({token:'wrong',mode:'fixed',
-   gmDefaultMatched:true,businessAction:true})).status,403);
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true})).status,403);
  assert.deepEqual(probe.receiptSnapshot(),{});
  // A browser's cross-origin Origin must not submit a purported fixture receipt.
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:true,businessAction:true},{
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true},{
    'Content-Type':'application/json','Origin':'http://unrelated.invalid'})).status,403);
  assert.deepEqual(probe.receiptSnapshot(),{});
  // Reject an HTTP absolute-form request target even if Host is local. URL()
@@ -275,30 +277,31 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
    });
    req.on('error',reject);
    req.end(JSON.stringify({token,mode:'fixed',
-     gmDefaultMatched:true,businessAction:true}));
+     gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true}));
  });
  assert.equal(absoluteTargetStatus,400);
  assert.deepEqual(probe.receiptSnapshot(),{});
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:'true',businessAction:true})).status,403);
+   gmDefaultMatched:'true',gmStorageRoundtripMatched:true,businessAction:true})).status,403);
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:true,businessAction:true,extensionVerified:true})).status,403);
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true,extensionVerified:true})).status,403);
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:true,businessAction:true},{'Content-Type':'text/plain'})).status,415);
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true},{'Content-Type':'text/plain'})).status,415);
  assert.equal((await send({token,mode:'broken',
-   gmDefaultMatched:true,businessAction:false})).status,204);
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:false})).status,204);
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:true,businessAction:true})).status,204);
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true})).status,204);
  // The same mode's later conflicting report must never overwrite the first.
  assert.equal((await send({token,mode:'fixed',
-   gmDefaultMatched:false,businessAction:false})).status,409);
+   gmDefaultMatched:false,gmStorageRoundtripMatched:false,businessAction:false})).status,409);
  assert.equal((await send({token,mode:'broken',
-   gmDefaultMatched:false,businessAction:true})).status,409);
+   gmDefaultMatched:false,gmStorageRoundtripMatched:false,businessAction:true})).status,409);
  const receipts=probe.receiptSnapshot();
  assert.equal(receipts.broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
  assert.equal(receipts.broken?.reportedBusinessAction,false);
  assert.equal(receipts.fixed?.reportedBusinessAction,true);
  assert.equal(receipts.fixed?.reportedGmDefaultMatched,true);
+ assert.equal(receipts.fixed?.reportedGmStorageRoundtripMatched,true);
  for(const mode of ['broken','fixed'] as const){
    assert.equal(receipts[mode]?.extensionAuthenticityVerified,false);
    assert.equal(receipts[mode]?.scriptInstallationVerified,false);
@@ -306,6 +309,40 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
    assert.equal(receipts[mode]?.businessVerified,false);
  }
 });
+test('TEST-017/018: isolated GM storage readback is distinct from a default lookup',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ t.after(()=>started.session.stop());
+ for(const denied of [false,true]){
+  const storage=new Map<string,string>();
+  const reports:Array<Record<string,unknown>>=[];
+  let writes=0;
+  runInNewContext(started.session.source,{
+   Date:class extends Date{static now(){return started.session.expiresAt-1000;}},URL,
+   location:{origin:started.session.origin,href:started.session.origin+'/?mode=fixed'},
+   document:{readyState:'complete',querySelector:()=>({
+    setAttribute:()=>{},getAttribute:()=> 'done'
+   })},
+   GM_getValue:(key:string,fallback:string)=>storage.get(key)??fallback,
+   GM_setValue:(key:string,value:string)=>{
+    writes++;
+    if(denied)throw Error('GM_WRITE_DENIED');
+    storage.set(key,value);
+   },
+   fetch:(_url:string,opts:{body:string})=>{
+    reports.push(JSON.parse(opts.body) as Record<string,unknown>);
+    return Promise.resolve();
+   }
+  });
+  assert.equal(writes,1);
+  assert.equal(reports.length,1);
+  assert.equal(reports[0].gmDefaultMatched,true);
+  assert.equal(reports[0].gmStorageRoundtripMatched,!denied);
+  assert.equal(reports[0].businessAction,true);
+ }
+});
+
 test('TEST-017 stage: stopped isolated probe closes its listener',async()=>{
  const result=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(result.ok,true);
@@ -538,7 +575,7 @@ test('TEST-017/026: interrupted HTTP receipt does not terminate fixture or recor
    const reply=await fetch(probe.origin+'/receipt',{
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({token,mode:'broken',
-       gmDefaultMatched:false,businessAction:false})
+       gmDefaultMatched:false,gmStorageRoundtripMatched:false,businessAction:false})
    });
    assert.equal(reply.status,204);
    assert.equal(probe.receiptSnapshot().broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
