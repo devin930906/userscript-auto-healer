@@ -37,20 +37,29 @@ let source=[
  '// @version 0.0.1',
  '// @match https://example.com/*',
  '// @grant GM_getValue',
+ '// @grant GM_setValue',
  '// @run-at '+runAt,
  // Match the production disposable GM probe's explicit top-frame-only scope.
  '// @noframes',
  '// ==/UserScript==',
  'const injectedReadyState=document.readyState;',
- 'let gm=false;',
- 'try { gm=typeof GM_getValue==="function"&&',
- 'GM_getValue("__uah_ci_missing_key__","ci-default")==="ci-default"; }catch(e){}',
+ 'let gmDefault=false;let gmRoundtrip=false;',
+ 'try { gmDefault=typeof GM_getValue==="function"&&',
+ 'GM_getValue("__uah_ci_missing_key__","ci-default")==="ci-default";',
+ ' if(gmDefault&&typeof GM_setValue==="function"){',
+ '  GM_setValue("__uah_ci_storage_roundtrip__","ci-write-readback");',
+ '  gmRoundtrip=GM_getValue("__uah_ci_storage_roundtrip__","not-written")==="ci-write-readback";',
+ ' }',
+ ' }catch(e){}',
+ 'const gm=gmDefault&&gmRoundtrip;',
  'const report=()=>{',
  ' if(!document.documentElement)throw Error("Missing fixture root");',
  ' document.documentElement.dataset.uahCiInjected="yes";',
  ' document.documentElement.dataset.uahCiRunAt='+JSON.stringify(runAt)+';',
  ' document.documentElement.dataset.uahCiInjectionReadyState=injectedReadyState;',
  ' document.documentElement.dataset.uahCiGm=String(gm);',
+ ' document.documentElement.dataset.uahCiGmDefault=String(gmDefault);',
+ ' document.documentElement.dataset.uahCiGmRoundtrip=String(gmRoundtrip);',
  ' const anchor=document.querySelector("#uah-ci-target");',
  ' if(anchor&&gm)anchor.setAttribute("data-uah-ci-action","done");',
  ' document.documentElement.dataset.uahCiBusiness=anchor&&gm?"recovered":"missing-target";',
@@ -276,6 +285,8 @@ async function main(){
       runAt:document.documentElement.dataset.uahCiRunAt,
       injectionReadyState:document.documentElement.dataset.uahCiInjectionReadyState,
       gm:document.documentElement.dataset.uahCiGm,
+      gmDefault:document.documentElement.dataset.uahCiGmDefault,
+      gmRoundtrip:document.documentElement.dataset.uahCiGmRoundtrip,
       business:document.documentElement.dataset.uahCiBusiness,
       action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
     }));
@@ -292,9 +303,11 @@ async function main(){
   assert.ok(['loading','interactive','complete'].includes(broken.injectionReadyState),
     'Actual userscript injection readyState must be recorded');
   assert.deepEqual({
-    injected:broken.injected,gm:broken.gm,business:broken.business,action:broken.action
+    injected:broken.injected,gm:broken.gm,gmDefault:broken.gmDefault,
+    gmRoundtrip:broken.gmRoundtrip,business:broken.business,action:broken.action
   },{
-    injected:'yes',gm:'true',business:'missing-target',action:null
+    injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',
+    business:'missing-target',action:null
   });
   const fixedPage=await context.newPage();
   await fixedPage.addInitScript(()=>{
@@ -314,10 +327,11 @@ async function main(){
   assert.ok(['loading','interactive','complete'].includes(fixed.injectionReadyState),
     'Actual userscript injection readyState must be recorded');
   assert.deepEqual({
-    injected:fixed.injected,gm:fixed.gm,business:fixed.business,action:fixed.action
+    injected:fixed.injected,gm:fixed.gm,gmDefault:fixed.gmDefault,
+    gmRoundtrip:fixed.gmRoundtrip,business:fixed.business,action:fixed.action
   },variant==='product-original'
-    ?{injected:'yes',gm:'true',business:'missing-target',action:null}
-    :{injected:'yes',gm:'true',business:'recovered',action:'done'});
+    ?{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'missing-target',action:null}
+    :{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'recovered',action:'done'});
   // TASK-007 / TEST-017/026: a matching-origin child frame is not an
   // independent user-approved top-level script target. A genuine extension
   // is present here; the browser must exercise the actual manager policy.
@@ -348,7 +362,7 @@ async function main(){
   assert.deepEqual(childEvidence,{injected:null,gm:null,action:null},
     'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
-    ' fixture variant '+variant+' GM_getValue and expected business assertions.');
+    ' fixture variant '+variant+' GM_getValue default + GM_setValue/readback and expected business assertions.');
   if(variant==='product-original')
     console.log('EXPECTED_PRODUCT_ORIGINAL_FAILURE: unchanged selector fails on target-present page');
   if(variant==='product-candidate')
