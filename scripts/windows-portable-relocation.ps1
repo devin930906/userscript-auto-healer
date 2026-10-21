@@ -97,8 +97,8 @@ function Get-CandidatePortableFileShareSummary(
        $null -eq $filePaths -or $filePaths.Count -gt 512) {
       return 'scan=unavailable'
     }
-    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\\','/'))
-    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
        [StringComparison]::OrdinalIgnoreCase)) { return 'scan=unavailable' }
     Assert-CandidatePortableNoReparsePath $runner $base
@@ -157,7 +157,7 @@ public static class UahCandidateDeleteAccessProbe {
           if($blocked.Count -lt 8) {
             $name=if([string]::Equals($path,$base,
               [StringComparison]::OrdinalIgnoreCase)) {'(root)'} else {
-              $path.Substring($prefix.Length).Replace('\\','/')
+              $path.Substring($prefix.Length).Replace('\','/')
             }
             $blocked.Add(($name.Replace(';','_').Replace("`r",'').Replace("`n",'')+
               ':Win32='+$code))
