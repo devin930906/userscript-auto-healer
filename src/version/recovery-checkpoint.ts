@@ -6,6 +6,7 @@
  * Native-only: never expose arbitrary paths through renderer IPC.
  */
 import {createHash,randomUUID} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {link,lstat,open,unlink} from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -47,7 +48,11 @@ type Receipt={
 };
 type Options={sourcePath:string;backupDirectory:string;userApproved:boolean};
 function values(input:unknown,names:readonly string[]):Record<string,unknown>|null{
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  // A Proxy (including a revoked one) can run arbitrary ownKeys and
+  // getPrototypeOf traps even before independent native consent is checked.
+  // Reject it using Node's intrinsic predicate before any reflection.
+  if(!input||typeof input!=='object'||Array.isArray(input)||
+     nodeTypes.isProxy(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const desc=Object.getOwnPropertyDescriptors(input);
