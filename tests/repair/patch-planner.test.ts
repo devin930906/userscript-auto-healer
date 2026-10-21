@@ -216,9 +216,12 @@ test('TEST-019/026: planner refuses executable getters and identity-shifting req
   {...original,automaticPatchAllowed:true},
   {...original,[Symbol('secret')]:true},
   Object.assign(Object.create({inherited:true}),original),
-  Object.assign(Object.create(null),{...original,
-   get replacementSelector(){getterCalls++;return '#new';}
-  }),
+  (()=>{const nullPrototype=Object.assign(Object.create(null),original);
+   Object.defineProperty(nullPrototype,'replacementSelector',{
+    enumerable:true,get(){getterCalls++;return '#new';}
+   });
+   return nullPrototype;
+  })(),
   (()=>{const missing={...original};delete (missing as Partial<LiteralPatchRequest>).method;return missing;})(),
   [original],
   new (class {source=original.source;})()
