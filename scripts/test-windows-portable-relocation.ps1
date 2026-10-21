@@ -37,6 +37,7 @@ try {
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
     $rejected=$false
+    $rootFailure=$null
     try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
     catch {
       $rootError=$_.Exception
@@ -45,11 +46,22 @@ try {
       if(($rootError -isnot [System.IO.IOException] -and
           $rootError -isnot [System.UnauthorizedAccessException]) -or
           $code -notin @(5,32,33)) { throw }
+      $rootFailure=$rootError
       $rejected=$true
     }
     if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
       throw 'Persistent Windows file lock did not fail closed'
     }
+    # Validate the production formatter against the actual Windows exception,
+    # with a fixed clock so the record can be independently asserted.
+    $fixedUtc=[DateTime]::new(2026,10,21,3,12,0,[DateTimeKind]::Utc)
+    $record=Format-CandidatePortableRelocationFailure 2 2 $rootFailure $true $false $fixedUtc
+    $expected=("TASK-020 relocation attempt 2/2 UTC=2026-10-21T03:12:00.000Z type={0} HRESULT=0x{1:X8} Win32={2} sourceExists=True destinationExists=False" -f
+      $rootFailure.GetType().Name,$rootFailure.HResult,$code)
+    if($record -cne $expected) {
+      throw 'Windows relocation diagnostic formatter lost the HRESULT, attempt or state'
+    }
+    Write-Output "PASS: Windows lock diagnostic recorded HRESULT and Win32=$code without full paths"
   } finally { $locked.Dispose() }
   if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
