@@ -169,6 +169,11 @@ try {
 } catch {
   # Preserve the actual exception and the original fail-closed guard.
   Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after relocation failure'
+  # Inspect candidate-only file sharing at the failure, without modifying
+  # any original data or masking the authoritative Directory.Move exception.
+  $candidateFilePaths=@($extractedFiles | ForEach-Object { $_.FullName })
+  $shareSummary=Get-CandidatePortableFileShareSummary $expanded $candidateFilePaths
+  Write-Output "DIAGNOSTIC: candidate file-sharing $shareSummary"
   Write-Output "DIAGNOSTIC: sourceExists=$(Test-Path -LiteralPath $expanded); destinationExists=$(Test-Path -LiteralPath $moved)"
   throw
 }
