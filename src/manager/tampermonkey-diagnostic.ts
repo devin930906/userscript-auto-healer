@@ -70,7 +70,7 @@ function validFixtureBlindSpots(value:unknown):boolean{
   return names.length===2&&names.includes('0')&&names.includes('length')&&
     Object.prototype.hasOwnProperty.call(entries['0'],'value')&&
     entries['0'].value==='CLOSED_SHADOW_ROOT_UNKNOWN'&&
-    entries.length.value===1;
+    Object.getOwnPropertyDescriptor(value,'length')?.value===1;
  }catch{return false;}
 }
 /** Pure, conservative mapping of a limited DOM sample into a diagnostic
