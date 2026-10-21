@@ -312,6 +312,40 @@ test('TEST-020: read-only native intent inspection identifies restored and displ
  });
 });
 
+test('TEST-020/026: restore inspection refuses a backup changed after its first verification',async t=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const query={sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  const snapshotModule=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const verified=snapshotModule.verifyApprovedSourceFingerprint;
+  let swapped=false;
+  // Deterministic interleaving: the two backup reads have completed when
+  // source fingerprinting begins. An external editor invalidates one backup
+  // before the inspector could issue a success receipt.
+  t.mock.method(snapshotModule,'verifyApprovedSourceFingerprint',
+   async (input:Parameters<typeof verified>[0])=>{
+    const result=await verified(input);
+    if(!swapped&&result.status==='MATCHED_READ_ONLY'){
+     swapped=true;
+     await writeFile(join(opts.backupDirectory,opts.backupFileName),
+      Buffer.from('tampered-during-read-only-inspection'));
+    }
+    return result;
+   });
+  const result=await inspectNativeRestoreIntentReadOnly(query);
+  assert.equal(swapped,true,'the test must mutate after initial backup checks');
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_UNVERIFIED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+ });
+});
+
 test('TEST-020/026: forged journal, tampered backup and diverged source never give a usable receipt',async()=>{
  await fixture(async opts=>{
   const restored=await restoreVerifiedOriginalNativeOnly(opts);
