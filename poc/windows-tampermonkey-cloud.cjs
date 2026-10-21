@@ -296,6 +296,9 @@ async function main(){
   });
   const fixedPage=await context.newPage();
   await fixedPage.addInitScript(()=>{
+    // The top-page fixture owns this target. A child frame supplies its own
+    // independent target, never a duplicate ID from this injected helper.
+    if(window.top!==window)return;
     document.addEventListener('DOMContentLoaded',()=>{
       const el=document.createElement('button');el.id='uah-ci-target';
       document.body?.append(el);
