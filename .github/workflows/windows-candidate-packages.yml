@@ -36,12 +36,15 @@ jobs:
       - name: Verify type contracts
         shell: pwsh
         run: npm run typecheck
-      - name: Run registered regressions and compile the real app
-        shell: pwsh
-        run: npm test
+      # Verify the independent Windows filesystem gate first so a separate
+      # Chrome/CDP startup problem cannot hide a candidate relocation defect.
+      # Both checks are still mandatory; neither failure is ignored.
       - name: Test real Windows portable relocation, file locks and no overwrite
         shell: pwsh
         run: ./scripts/test-windows-portable-relocation.ps1
+      - name: Run registered regressions and compile the real app
+        shell: pwsh
+        run: npm test
       - name: Package Windows deliverables and verify candidates
         id: package
         shell: pwsh

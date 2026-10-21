@@ -90,6 +90,38 @@ try {
     } finally {
       Remove-Item -LiteralPath $junction -Force -ErrorAction Stop
     }
+    # A junction in an ANCESTOR of RUNNER_TEMP is outside the current guard's
+    # runner-to-source walk. The lexical paths still appear under RUNNER_TEMP,
+    # but the actual relocation would follow the ancestor junction.
+    $parentTarget=Join-Path $root 'disposable-parent-junction-target'
+    $nestedRunner=Join-Path $parentTarget 'nested-runner'
+    $nestedSource=Join-Path $nestedRunner 'source'
+    New-Item -ItemType Directory -Path $nestedSource -Force | Out-Null
+    $nestedPayload=Join-Path $nestedSource 'preserve.txt'
+    [IO.File]::WriteAllText($nestedPayload,'ancestor-must-not-rename')
+    $parentJunction=Join-Path $root 'runner-parent-junction'
+    New-Item -ItemType Junction -Path $parentJunction -Target $parentTarget -ErrorAction Stop | Out-Null
+    try {
+      $env:RUNNER_TEMP=Join-Path $parentJunction 'nested-runner'
+      $ancestorDenied=$false
+      try {
+        Move-CandidatePortableDirectory (Join-Path $env:RUNNER_TEMP 'source') (
+          Join-Path $env:RUNNER_TEMP 'moved') 1 0 | Out-Null
+      } catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*reparse point refused*') { throw }
+        $ancestorDenied=$true
+      }
+      if(-not $ancestorDenied -or
+         -not (Test-Path -LiteralPath $nestedPayload -PathType Leaf) -or
+         [IO.File]::ReadAllText($nestedPayload) -cne 'ancestor-must-not-rename' -or
+         (Test-Path -LiteralPath (Join-Path $nestedRunner 'moved'))) {
+        throw 'Junction ancestor of RUNNER_TEMP redirected candidate relocation'
+      }
+      Write-Output 'PASS: RUNNER_TEMP ancestor junction cannot redirect candidate relocation'
+    } finally {
+      $env:RUNNER_TEMP=$sandbox
+      Remove-Item -LiteralPath $parentJunction -Force -ErrorAction Stop
+    }
   } finally { $env:RUNNER_TEMP=$originalRunnerTemp }
 
   # The smoke parent may exit before its child/utility image. Wait for only
@@ -210,6 +242,17 @@ try {
   [IO.File]::WriteAllText($permanentFile,'preserve-me')
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
+    # Sharing evidence is read-only, never a reason to weaken Move's guard.
+    $shareEvidence=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($shareEvidence -notlike 'scan=ok probed=1 blockedExamples=1 names=payload.txt:Win32=*') {
+      throw "Locked disposable file was not identified by bounded share probe: $shareEvidence"
+    }
+    $outsideShare=Get-CandidatePortableFileShareSummary $permanent @(
+      (Join-Path $root 'outside-scope.txt'))
+    if($outsideShare -cne 'scan=unavailable') {
+      throw 'Share probe accepted a path outside its candidate directory'
+    }
+    Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
     $rejected=$false
     $rootFailure=$null
     try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
@@ -242,6 +285,23 @@ try {
     throw 'Persistent Windows file lock modified original payload'
   }
   Write-Output 'PASS: persistent lock blocks relocation without altering payload'
+
+  # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
+  # FILE_SHARE_DELETE still allows the old read-only probe to succeed, even
+  # though Windows will refuse to rename its parent. The new diagnostic must
+  # actually request DELETE access without deleting or changing any bytes.
+  $noDeleteShare=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $deleteAccess=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($deleteAccess -notlike '*blockedExamples=1*') {
+      throw "Delete-share omission was not detected: $deleteAccess"
+    }
+    if([IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+      throw 'Read-only delete-access diagnostic changed the fixture bytes'
+    }
+  } finally { $noDeleteShare.Dispose() }
+  Write-Output 'PASS: Windows delete-share omission is detected without changing source'
 
   # Never overwrite another relocated copy, even if the source is valid.
   $source=Join-Path $root 'unmoved-source'

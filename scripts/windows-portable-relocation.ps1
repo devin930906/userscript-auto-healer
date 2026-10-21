@@ -82,15 +82,116 @@ function Write-CandidatePortableProcessSnapshot([string]$candidateExe,[string]$l
   Write-Output ("DIAGNOSTIC: {0} candidate owners: {1}" -f $label,$summary)
 }
 
+# ISSUE-215 / TEST-028: a FileAccess.Read open, even with FileShare.Delete,
+# does NOT request DELETE access, and cannot discover a handle whose share
+# mode allows read but denies deletion/rename. Use a disposable, read-only
+# native DELETE-access handle probe instead; CreateFileW does NOT delete data.
+# Scan only verified runner-owned candidate files and their parent directories.
+# Any inaccessible/ambiguous identity is reported; never treat it as clear.
+function Get-CandidatePortableFileShareSummary(
+  [string]$source,[string[]]$filePaths
+) {
+  try {
+    if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       [string]::IsNullOrWhiteSpace($source) -or
+       $null -eq $filePaths -or $filePaths.Count -gt 512) {
+      return 'scan=unavailable'
+    }
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase)) { return 'scan=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $prefix=$base+[IO.Path]::DirectorySeparatorChar
+    $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $targets=[Collections.Generic.List[string]]::new()
+    if($seen.Add($base)) { $targets.Add($base) }
+    foreach($path in $filePaths) {
+      if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable' }
+      $full=[IO.Path]::GetFullPath($path)
+      if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        return 'scan=unavailable'
+      }
+      $parent=[IO.Path]::GetDirectoryName($full)
+      while($parent.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        if($seen.Add($parent)) { $targets.Add($parent) }
+        $parent=[IO.Path]::GetDirectoryName($parent)
+      }
+      if($seen.Add($full)) { $targets.Add($full) }
+    }
+    # Includes the root and every parent of a candidate file. Reparse paths
+    # are rejected before any native handle is requested.
+    foreach($path in $targets) {
+      if(([int][IO.File]::GetAttributes($path) -band
+         [int][IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return 'scan=unavailable'
+      }
+    }
+    if(-not ('UahCandidateDeleteAccessProbe' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using Microsoft.Win32.SafeHandles;
+using System.Runtime.InteropServices;
+public static class UahCandidateDeleteAccessProbe {
+  [DllImport("kernel32.dll", EntryPoint="CreateFileW", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern SafeFileHandle Open(string path, uint access, uint share,
+    IntPtr security, uint disposition, uint flags, IntPtr templateFile);
+}
+'@ -ErrorAction Stop
+    }
+    $blocked=[Collections.Generic.List[string]]::new()
+    $blockedCount=0
+    foreach($path in $targets) {
+      $handle=$null
+      try {
+        # DELETE (0x10000) with share READ|WRITE|DELETE (7),
+        # OPEN_EXISTING (3), FILE_FLAG_BACKUP_SEMANTICS (0x02000000)
+        # works for both directories and files. No DELETE_ON_CLOSE.
+        $handle=[UahCandidateDeleteAccessProbe]::Open($path,
+          [uint32]0x10000,[uint32]7,[IntPtr]::Zero,[uint32]3,
+          [uint32]0x02000000,[IntPtr]::Zero)
+        if($handle.IsInvalid) {
+          $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+          if($code -notin @(5,32,33)) { return 'scan=unavailable' }
+          $blockedCount++
+          if($blocked.Count -lt 8) {
+            $name=if([string]::Equals($path,$base,
+              [StringComparison]::OrdinalIgnoreCase)) {'(root)'} else {
+              $path.Substring($prefix.Length).Replace('\','/')
+            }
+            $blocked.Add(($name.Replace(';','_').Replace("`r",'').Replace("`n",'')+
+              ':Win32='+$code))
+          }
+        }
+      } finally { if($null -ne $handle) { $handle.Dispose() } }
+    }
+    # Candidate-relative names, never arbitrary user filesystem paths.
+    return "scan=ok probed=$($filePaths.Count) blockedExamples=$blockedCount names=$($blocked -join ';')"
+  } catch { return 'scan=unavailable' }
+}
+
 # TEST-028: lexical containment is insufficient on Windows: a junction or
-# symlink inside RUNNER_TEMP can redirect a nested source to an outside tree.
-# Inspect every existing source component (including the runner root).
+# symlink anywhere in the existing source ancestry (including ABOVE
+# RUNNER_TEMP) can redirect a nested source to another filesystem tree.
 # Source and destination must be siblings, so this covers both parents.
 # This is a fail-closed snapshot, NOT an OS-enforced handle against races.
 function Assert-CandidatePortableNoReparsePath(
   [string]$runner,[string]$source
 ) {
-  $paths=@($runner)
+  # The earlier runner-to-source walk misses a junction in RUNNER_TEMP's
+  # parent chain. Include every ancestor through the volume root; the actual
+  # runner directory itself is also checked by the existing attribute guard.
+  $paths=@()
+  $ancestor=$runner
+  while(-not [string]::IsNullOrWhiteSpace($ancestor)) {
+    $paths+= $ancestor
+    $parent=[IO.Path]::GetDirectoryName($ancestor)
+    if([string]::IsNullOrWhiteSpace($parent) -or
+       [string]::Equals($parent,$ancestor,[StringComparison]::OrdinalIgnoreCase)) {
+      break
+    }
+    $ancestor=$parent
+  }
   $cursor=$runner
   $relative=$source.Substring($runner.Length+1)
   foreach($component in ($relative -split '[\\/]')) {
