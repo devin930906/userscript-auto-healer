@@ -195,6 +195,64 @@ test('TEST-019: malformed inputs and unsafe diagnostic getters never produce pat
 });
 
 
+test('TEST-019/026: planner refuses executable getters and identity-shifting request objects before any read',()=>{
+ const original=request();
+ const candidate=proposeLiteralSelectorPatch(original);
+ assert.equal(candidate.status,'CANDIDATE_ONLY');
+ if(candidate.status!=='CANDIDATE_ONLY')return;
+ let getterCalls=0,proxyTraps=0;
+ const attacker=(field:keyof LiteralPatchRequest):LiteralPatchRequest=>{
+  const bad={...original};
+  Object.defineProperty(bad,field,{
+   enumerable:true,configurable:true,
+   get(){getterCalls++;return original[field];}
+  });
+  return bad;
+ };
+ const inputCases:unknown[]=[
+  ...(['source','expectedSourceSha256','callOffset','method','originalSelector',
+     'replacementSelector','faultEvidenceId'] as (keyof LiteralPatchRequest)[])
+     .map(attacker),
+  {...original,automaticPatchAllowed:true},
+  {...original,[Symbol('secret')]:true},
+  Object.assign(Object.create({inherited:true}),original),
+  (()=>{const nullPrototype=Object.assign(Object.create(null),original);
+   Object.defineProperty(nullPrototype,'replacementSelector',{
+    enumerable:true,get(){getterCalls++;return '#new';}
+   });
+   return nullPrototype;
+  })(),
+  Object.fromEntries(Object.entries(original).filter(([key])=>key!=='method')),
+  [original],
+  new (class {source=original.source;})()
+ ];
+ const hostile=new Proxy({...original},{
+  get(){proxyTraps++;throw Error('proxy get');},
+  ownKeys(){proxyTraps++;throw Error('proxy keys');},
+  getPrototypeOf(){proxyTraps++;throw Error('proxy prototype');},
+  getOwnPropertyDescriptor(){proxyTraps++;throw Error('proxy descriptor');}
+ });
+ const revoked=Proxy.revocable({...original},{});
+ revoked.revoke();
+ inputCases.push(hostile,revoked.proxy);
+ for(const [index,bad] of inputCases.entries()){
+  const proposal=proposeLiteralSelectorPatch(bad as LiteralPatchRequest);
+  assert.equal(proposal.status,'BLOCKED','proposal '+index);
+  assert.equal(proposal.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in proposal,false);
+  const review=auditProposedLiteralSelectorPatch(bad as LiteralPatchRequest,candidate);
+  assert.equal(review.status,'BLOCKED','audit '+index);
+  assert.equal(review.automaticPatchAllowed,false);
+ }
+ assert.equal(getterCalls,0,'no caller getter may execute during patch planning');
+ assert.equal(proxyTraps,0,'no Proxy trap may execute during patch planning');
+ const noProto=Object.assign(Object.create(null),original) as LiteralPatchRequest;
+ assert.equal(proposeLiteralSelectorPatch(noProto).status,'CANDIDATE_ONLY');
+ const frozen=Object.freeze({...original});
+ assert.equal(proposeLiteralSelectorPatch(frozen).status,'CANDIDATE_ONLY');
+ assert.equal(auditProposedLiteralSelectorPatch(frozen,candidate).status,'REVIEWABLE_ONLY');
+});
+
 test('TEST-019: independent local audit re-generates one permitted AST diff only',()=>{
   const req=request();
   const candidate=proposeLiteralSelectorPatch(req);

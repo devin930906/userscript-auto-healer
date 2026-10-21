@@ -163,69 +163,106 @@ function headerEnd(source:string):number|null{
   return start&&close&&close.index>start.index?close.index+close[0].length:null;
 }
 
+const PATCH_REQUEST_FIELDS=[
+ 'source','expectedSourceSha256','callOffset','method',
+ 'originalSelector','replacementSelector','faultEvidenceId'
+] as const;
+
+/** Snapshot the seven exact own data properties before looking at a script.
+ * A getter can modify or leak local data even when its return value is valid;
+ * catching its exception AFTER evaluation cannot undo that side effect.
+ * Reject accessors, extra approval claims, inherited fields, symbols,
+ * class instances and Proxy inputs without executing their traps.
+ */
+function captureLiteralPatchRequest(input:unknown):LiteralPatchRequest|null{
+ try{
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+     Array.isArray(input))return null;
+  const prototype=Object.getPrototypeOf(input);
+  if(prototype!==Object.prototype&&prototype!==null)return null;
+  const descriptors=Object.getOwnPropertyDescriptors(input);
+  const keys=Reflect.ownKeys(descriptors);
+  if(keys.length!==PATCH_REQUEST_FIELDS.length||
+     keys.some(key=>typeof key!=='string'||
+       !PATCH_REQUEST_FIELDS.includes(key as typeof PATCH_REQUEST_FIELDS[number]))||
+     PATCH_REQUEST_FIELDS.some(key=>
+       !Object.prototype.hasOwnProperty.call(descriptors,key)||
+       !Object.prototype.hasOwnProperty.call(descriptors[key],'value')))
+    return null;
+  // These are inert values, not property gets on the caller's object.
+  return {
+   source:descriptors.source.value,
+   expectedSourceSha256:descriptors.expectedSourceSha256.value,
+   callOffset:descriptors.callOffset.value,
+   method:descriptors.method.value,
+   originalSelector:descriptors.originalSelector.value,
+   replacementSelector:descriptors.replacementSelector.value,
+   faultEvidenceId:descriptors.faultEvidenceId.value
+  } as LiteralPatchRequest;
+ }catch{return null;}
+}
+
 /** Fail closed for dynamic selectors, false identity, fallbacks and unverified
  * source versions. A candidate does not grant file-write or auto-apply rights.
  */
 export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPatchResult{
   try{
-    // A Proxy can execute hostile traps even during an otherwise read-only
-    // integrity check. Reject it before reading any source or descriptor.
-    if(nodeTypes.isProxy(input))return blocked('INVALID_INPUT');
-    if(!input||typeof input!=='object'||typeof input.source!=='string'||
-       Buffer.byteLength(input.source,'utf8')>MAX_SOURCE_BYTES||
-       !SHA256.test(input.expectedSourceSha256)||
-       !Number.isSafeInteger(input.callOffset)||input.callOffset<0||
-       !EVIDENCE_ID.test(input.faultEvidenceId)||
-       (input.method!=='querySelector'&&input.method!=='querySelectorAll')||
-       typeof input.originalSelector!=='string'||
-       typeof input.replacementSelector!=='string')
+    const request=captureLiteralPatchRequest(input);
+    if(!request||typeof request.source!=='string'||
+       Buffer.byteLength(request.source,'utf8')>MAX_SOURCE_BYTES||
+       !SHA256.test(request.expectedSourceSha256)||
+       !Number.isSafeInteger(request.callOffset)||request.callOffset<0||
+       !EVIDENCE_ID.test(request.faultEvidenceId)||
+       (request.method!=='querySelector'&&request.method!=='querySelectorAll')||
+       typeof request.originalSelector!=='string'||
+       typeof request.replacementSelector!=='string')
       return blocked('INVALID_INPUT');
-    if(hash(input.source)!==input.expectedSourceSha256)return blocked('STALE_SOURCE');
-    if(!SIMPLE_SELECTOR.test(input.originalSelector)||
-       !SIMPLE_SELECTOR.test(input.replacementSelector)||
-       input.originalSelector===input.replacementSelector)
+    if(hash(request.source)!==request.expectedSourceSha256)return blocked('STALE_SOURCE');
+    if(!SIMPLE_SELECTOR.test(request.originalSelector)||
+       !SIMPLE_SELECTOR.test(request.replacementSelector)||
+       request.originalSelector===request.replacementSelector)
       return blocked('INVALID_CANDIDATE');
     // A loose search for header markers anywhere in the file can accept
     // ordinary JavaScript with an embedded, non-installable userscript header.
     // Use TASK-003's canonical metadata parser to require a genuine leading
     // userscript metadata block before proposing even a review-only diff.
     const metadata=parseUserscriptMetadata({
-      bytes:Buffer.from(input.source,'utf8'),textEncoding:'utf-8'
+      bytes:Buffer.from(request.source,'utf8'),textEncoding:'utf-8'
     });
     if(metadata.status!=='OK')return blocked('INVALID_METADATA');
     // A text match on a shadowed document could patch an unrelated object.
-    if(ambiguousDocumentBinding(input.source))return blocked('UNSUPPORTED_TARGET');
-    const boundary=headerEnd(input.source);
-    if(boundary===null||input.callOffset<=boundary)return blocked('INVALID_METADATA');
-    const analysis=analyzeSelectors(input.source);
+    if(ambiguousDocumentBinding(request.source))return blocked('UNSUPPORTED_TARGET');
+    const boundary=headerEnd(request.source);
+    if(boundary===null||request.callOffset<=boundary)return blocked('INVALID_METADATA');
+    const analysis=analyzeSelectors(request.source);
     if(analysis.status!=='OK')return blocked('UNSUPPORTED_SOURCE');
-    const site=analysis.sites.find(s=>s.offset===input.callOffset);
+    const site=analysis.sites.find(s=>s.offset===request.callOffset);
     if(!site||site.kind!=='literal'||site.fallbackGroup!==null||
-       site.method!==input.method||site.selector!==input.originalSelector)
+       site.method!==request.method||site.selector!==request.originalSelector)
       return blocked('UNSUPPORTED_TARGET');
-    const argument=findLiteralArgument(input.source,input.callOffset,input.method);
+    const argument=findLiteralArgument(request.source,request.callOffset,request.method);
     if(!argument||argument.start<=boundary||
-       argument.value!==input.originalSelector)
+       argument.value!==request.originalSelector)
       return blocked('UNSUPPORTED_TARGET');
-    const before=input.source.slice(argument.start,argument.end);
-    const after=JSON.stringify(input.replacementSelector);
-    const candidateSource=input.source.slice(0,argument.start)+after+
-      input.source.slice(argument.end);
+    const before=request.source.slice(argument.start,argument.end);
+    const after=JSON.stringify(request.replacementSelector);
+    const candidateSource=request.source.slice(0,argument.start)+after+
+      request.source.slice(argument.end);
     // A valid changed AST must still point to the intended single literal call.
     const verifiedAst=analyzeSelectors(candidateSource);
-    const changedSite=verifiedAst.sites.find(s=>s.offset===input.callOffset);
+    const changedSite=verifiedAst.sites.find(s=>s.offset===request.callOffset);
     if(verifiedAst.status!=='OK'||verifiedAst.sites.length!==analysis.sites.length||
-       changedSite?.method!==input.method||
+       changedSite?.method!==request.method||
        changedSite?.kind!=='literal'||
-       changedSite.selector!==input.replacementSelector||
-       candidateSource.slice(0,boundary)!==input.source.slice(0,boundary))
+       changedSite.selector!==request.replacementSelector||
+       candidateSource.slice(0,boundary)!==request.source.slice(0,boundary))
       return blocked('UNSUPPORTED_SOURCE');
     return Object.freeze({
       status:'CANDIDATE_ONLY' as const,
       reason:'REQUIRES_REAL_MANAGER_AND_BUSINESS_VALIDATION' as const,
-      originalSha256:input.expectedSourceSha256,
+      originalSha256:request.expectedSourceSha256,
       candidateSha256:hash(candidateSource),
-      faultEvidenceId:input.faultEvidenceId,
+      faultEvidenceId:request.faultEvidenceId,
       candidateSource,
       change:Object.freeze({start:argument.start,end:argument.end,before,after}),
       automaticPatchAllowed:false as const,
