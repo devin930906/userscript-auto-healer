@@ -44,6 +44,16 @@ export async function removeOwnedStagingPending(
    return false;
   }
   await unlink(pending);
+  if(published!==undefined){
+   // A successful pending-name removal alone does not prove that the
+   // published pathname still refers to the verified staged inode.
+   // Fail closed on post-unlink replacement or an unexpected extra link.
+   // This second snapshot narrows, but cannot eliminate, pathname races.
+   const remaining=await lstat(published,{bigint:true});
+   if(!remaining.isFile()||remaining.isSymbolicLink()||
+      remaining.nlink!==1n||!sameBytes(remaining,owned)||
+      await hasUnsafePathLink(published))return false;
+  }
   return true;
  }catch{return false;}
 }
