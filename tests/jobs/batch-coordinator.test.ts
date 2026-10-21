@@ -606,6 +606,33 @@ test('TEST-022: stale checkpoints cannot regress persisted completion or attempt
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TEST-022/026: an in-flight journal save must not publish a snapshot captured before native dispatch',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-batch-snapshot-race-'));
+ const opts={count:1,maxAttempts:2,timeoutMs:2000,jobHashes:[SCRIPT_A]};
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ let started!:()=>void;
+ const active=new Promise<void>(resolve=>{started=resolve;});
+ const batch=new ReadOnlyBatchCoordinator(opts,async()=>{
+  started();await pending;return 'DONE';
+ });
+ try{
+  assert.equal((await saveReadOnlyBatchJournal(root,batch)).status,
+   'CHECKPOINT_SAVED_UNVERIFIED');
+  const path=join(root,BATCH_JOURNAL_FILENAME);
+  const previous=await readFile(path);
+  // save() captures QUEUED attempt 0 synchronously, before its first await.
+  const saving=saveReadOnlyBatchJournal(root,batch);
+  const running=batch.run();
+  await active;
+  assert.deepEqual(batch.snapshot().jobs.map(x=>[x.state,x.attempts]),[['RUNNING',1]]);
+  assert.deepEqual(await saving,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.deepEqual(await readFile(path),previous,
+   'an obsolete queued/zero-attempt snapshot must not replace prior durable bytes');
+  batch.cancel();release();await running;
+ }finally{release();await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-022: readers do not accept a checkpoint while native writer lock exists',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-batch-busy-reader-'));
  const opts={count:1,jobHashes:[SCRIPT_A]};
