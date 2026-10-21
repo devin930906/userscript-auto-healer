@@ -57,6 +57,26 @@ const FIXTURE_SELECTORS=[
  '#current-target[data-uah-probe-action="done"]'
 ] as const;
 
+/** Current read-only observer always lists the generic closed-shadow unknown.
+ * Additional/forged blind spots invalidate expected fixture DOM coverage.
+ * Read descriptors, never execute untrusted array getters or proxy traps.
+ */
+function validFixtureBlindSpots(value:unknown):boolean{
+ try{
+  if(!Array.isArray(value)||isProxy(value)||
+     Object.getPrototypeOf(value)!==Array.prototype)return false;
+  const entries=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(entries);
+  const len=Object.getOwnPropertyDescriptor(value,'length')?.value;
+  // No blind spots is a valid stronger fixture sample; the observer may also
+  // report its one unconditional generic closed-shadow limitation.
+  if(len===0)return names.length===1&&names[0]==='length';
+  return len===1&&names.length===2&&names.includes('0')&&
+    names.includes('length')&&
+    Object.prototype.hasOwnProperty.call(entries['0'],'value')&&
+    entries['0'].value==='CLOSED_SHADOW_ROOT_UNKNOWN';
+ }catch{return false;}
+}
 /** Pure, conservative mapping of a limited DOM sample into a diagnostic
  * observation. Require the action attribute on the one approved target,
  * not merely anywhere else in the page. Even a perfect result can NEVER set businessVerified=true.
@@ -96,7 +116,7 @@ export function summarizeFixtureDomEvidence(
     !Number.isSafeInteger(summary.visibleShadowRoots)||
     (summary.visibleShadowRoots as number)<0||
     (summary.visibleShadowRoots as number)>(summary.elementCount as number)||
-    !Array.isArray(summary.blindSpots))return invalid();
+    !validFixtureBlindSpots(summary.blindSpots))return invalid();
  const current=counts[FIXTURE_SELECTORS[0]];
  const obsolete=counts[FIXTURE_SELECTORS[1]];
  const acted=counts[FIXTURE_SELECTORS[2]];

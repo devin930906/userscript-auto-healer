@@ -510,3 +510,50 @@ test('TEST-018/026: observed iframe or shadow-root invalidates top-frame fixture
    'Uninspected nested document or visible shadow tree cannot certify the controlled fixture');
  }
 });
+
+test('TEST-018/026: forged or incomplete blind-spot lists cannot certify GM fixture DOM',()=>{
+ const observed={
+  ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+  observedAt:'2026-10-21T00:00:00.000Z',
+  originMatchesApproved:true as const,routeChanged:false,
+  summary:{elementCount:6,iframeCount:0,visibleShadowRoots:0,
+   blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN'] as const},
+  selectorCounts:{'#current-target':1,'#obsolete-target':0,
+   '[data-uah-probe-action="done"]':1,
+   '#current-target[data-uah-probe-action="done"]':1},
+  fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ const evaluate=(blindSpots:unknown)=>summarizeFixtureDomEvidence('fixed',{
+  ...observed,summary:{...observed.summary,
+   blindSpots:blindSpots as typeof observed.summary.blindSpots}
+ });
+ assert.equal(evaluate([]).ok,true,
+  'a fixture with no blind spots is valid limited DOM evidence');
+ assert.equal(evaluate(['CLOSED_SHADOW_ROOT_UNKNOWN']).ok,true,
+  'the observer also reports its known closed-shadow limitation');
+ const poison=()=>{throw Error('UNTRUSTED_BLINDSPOT_ACCESSOR');};
+ let calls=0;
+ const accessor=['CLOSED_SHADOW_ROOT_UNKNOWN'];
+ Object.defineProperty(accessor,'0',{get(){calls++;return poison();}});
+ const extraField=Object.assign(['CLOSED_SHADOW_ROOT_UNKNOWN'],{secret:true});
+ const malformed=[
+  ['IFRAME_CONTENT_UNVERIFIED'],['CROSS_ORIGIN_FRAME_UNVERIFIED'],
+  ['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED'],
+  ['CLOSED_SHADOW_ROOT_UNKNOWN','CROSS_ORIGIN_FRAME_UNVERIFIED'],
+  ['CLOSED_SHADOW_ROOT_UNKNOWN','CLOSED_SHADOW_ROOT_UNKNOWN'],
+  ['UNKNOWN_FUTURE_BLIND_SPOT'],extraField,accessor,
+  new Proxy(['CLOSED_SHADOW_ROOT_UNKNOWN'],{
+   get(){calls++;return poison();},
+   ownKeys(){calls++;return poison();}
+  }),
+  Object.create(null),null
+ ];
+ for(const value of malformed){
+  assert.doesNotThrow(()=>evaluate(value),
+   'a hostile blind-spot value must not execute user code or throw');
+  assert.deepEqual(evaluate(value),
+    {ok:false,code:'INVALID_FIXTURE_OBSERVATION'},
+    'unknown or partial DOM coverage must never become expected fixture evidence');
+ }
+ assert.equal(calls,0,'blind-spot getters and Proxy traps were not invoked');
+});
