@@ -120,6 +120,36 @@ try {
   }
   Write-Output 'PASS: redacted candidate-name process path refuses relocation'
 
+  # An access-denied rename needs a read-only snapshot taken AT the denial,
+  # not just the earlier pre-move process check. Report exact candidate matches,
+  # but never mistake an inaccessible process path for proof of exit.
+  $ownerSnapshot=& {
+    function Get-CimInstance {
+      param([string]$ClassName,[string]$Filter,[string]$ErrorAction)
+      if($ClassName -cne 'Win32_Process' -or
+         $Filter -cne "Name='UserscriptAutoHealer.exe'") {
+        throw 'Unexpected owner diagnostic query'
+      }
+      @(
+        [pscustomobject]@{ExecutablePath=$ownedExe},
+        [pscustomobject]@{ExecutablePath=(Join-Path $root 'other\UserscriptAutoHealer.exe')},
+        [pscustomobject]@{ExecutablePath=$null}
+      )
+    }
+    Get-CandidatePortableRelocationOwnerSummary $ownedExe
+  }
+  if($ownerSnapshot -cne 'live=1 unknownPath=1 query=ok') {
+    throw 'Candidate owner snapshot failed to distinguish exact and ambiguous identities'
+  }
+  $failedOwnerSnapshot=& {
+    function Get-CimInstance { throw 'Simulated CIM query failure' }
+    Get-CandidatePortableRelocationOwnerSummary $ownedExe
+  }
+  if($failedOwnerSnapshot -cne 'live=unknown unknownPath=unknown query=failed') {
+    throw 'Failed process query incorrectly reported no candidate owners'
+  }
+  Write-Output 'PASS: final-denial owner snapshot handles exact, opaque and failed CIM identity'
+
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
   $permanent=Join-Path $root 'permanently-locked'
