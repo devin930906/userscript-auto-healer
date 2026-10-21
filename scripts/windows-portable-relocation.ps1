@@ -105,6 +105,14 @@ function Get-CandidatePortableFileShareSummary(
     $prefix=$base+[IO.Path]::DirectorySeparatorChar
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $targets=[Collections.Generic.List[string]]::new()
+    # ISSUE-215: the parent may deny FILE_ADD_SUBDIRECTORY or DELETE_CHILD
+    # even while every file in the source tree permits DELETE access.
+    # This is only a handle-open diagnostic; it performs no rename or writes.
+    $sourceParent=[IO.Path]::GetDirectoryName($base)
+    if(-not $sourceParent.StartsWith($runner,[StringComparison]::OrdinalIgnoreCase)) {
+      return 'scan=unavailable'
+    }
+    if($seen.Add($sourceParent)) { $targets.Add($sourceParent) }
     if($seen.Add($base)) { $targets.Add($base) }
     foreach($path in $filePaths) {
       if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable' }
@@ -168,15 +176,22 @@ public static class UahCandidateDeleteAccessProbe {
         # DELETE (0x10000) with share READ|WRITE|DELETE (7),
         # OPEN_EXISTING (3), FILE_FLAG_BACKUP_SEMANTICS (0x02000000)
         # works for both directories and files. No DELETE_ON_CLOSE.
+        # A source-tree entry needs DELETE; its common parent instead needs
+        # FILE_ADD_SUBDIRECTORY (0x4) and FILE_DELETE_CHILD (0x40).
+        # Success merely narrows the cause: it is NOT an effective ACL proof.
+        $requested=if([string]::Equals($path,$sourceParent,
+          [StringComparison]::OrdinalIgnoreCase)) {[uint32]0x44} else {[uint32]0x10000}
         $handle=[UahCandidateDeleteAccessProbe]::Open($path,
-          [uint32]0x10000,[uint32]7,[IntPtr]::Zero,[uint32]3,
+          $requested,[uint32]7,[IntPtr]::Zero,[uint32]3,
           [uint32]0x02000000,[IntPtr]::Zero)
         if($handle.IsInvalid) {
           $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
           if($code -notin @(5,32,33)) { return 'scan=unavailable' }
           $blockedCount++
           if($blocked.Count -lt 8) {
-            $name=if([string]::Equals($path,$base,
+            $name=if([string]::Equals($path,$sourceParent,
+              [StringComparison]::OrdinalIgnoreCase)) {'(parent)'} elseif(
+              [string]::Equals($path,$base,
               [StringComparison]::OrdinalIgnoreCase)) {'(root)'} else {
               $path.Substring($prefix.Length).Replace('\','/')
             }
@@ -186,7 +201,7 @@ public static class UahCandidateDeleteAccessProbe {
         }
       } finally { if($null -ne $handle) { $handle.Dispose() } }
     }
-    # Candidate-relative names, never arbitrary user filesystem paths.
+    # Candidate-relative names or fixed (parent)/(root), no absolute paths.
     return "scan=ok probed=$($filePaths.Count) blockedExamples=$blockedCount names=$($blocked -join ';')"
   } catch { return 'scan=unavailable' }
 }
