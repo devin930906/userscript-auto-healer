@@ -147,7 +147,12 @@ foreach($original in $sourceFiles) {
   }
 }
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
-$expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
+# ISSUE-215: execute the EXTRACTED binary while the smoke process cwd stays
+# OUTSIDE the directory we must subsequently rename. A surviving utility
+# process or inherited cwd directory handle must not pin that candidate tree.
+# This also exercises that packaged resources are resolved from the binary,
+# not accidentally from its initial working directory.
+$expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $temp 'extracted' $temp
 Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
 # TASK-020 / ISSUE-215 diagnostic only: match the exact disposable test EXE
 # location, never query or modify external Chrome profiles or terminate processes.
