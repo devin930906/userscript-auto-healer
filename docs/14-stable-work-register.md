@@ -131,3 +131,13 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 本次成功的候选构建实际 checkout 为 PR 测试合成 SHA `5a15097fbb14a83d24b94fb8779240cd0cd784d4`，不是合并后 main 或正式发布 SHA。开发候选 EXE 的 SHA-256 为 `b44ddd2f15bdb92426ac42b3b650cab79b44606a946c3997abc8727289f16d81`；真正开发候选 Portable.zip 的 SHA-256 为 `04011863948a02d9b183595442009e9c740fc7d1bdea86e90768640fc7c3b166`。短期 Actions Artifact ID `12312670651`，原始外层 Actions 自动 ZIP 不是正式便携包，到期 2026-10-24 01:05:42 UTC。无 GitHub Stable Release、无正式用户 EXE/ZIP 验收结论。
 
 此增量仅完成 TASK-020 / TEST-028 的**Windows 开发候选目录移动可靠性修复**，不表示 TASK-020、TEST-028 或 GATE-009/011 完整通过；可信 Tampermonkey 产品级功能、安全自动修复与原子恢复、TASK-007..018、正式 EXE/ZIP 的同源发布及 GATE-001..011 保持原先发布阻断。下次仍需以最新 main、Open PR、Actions 和工程任务登记续接，不因本轮候选成功宣布 Stable。
+
+## （7）2026-10-21 TASK-013 / TEST-022/026 持久作业检查点并发快照防回退
+
+[PR #209](https://github.com/devin930906/userscript-auto-healer/pull/209) 已 squash 合并至 main：合并提交 c84f22a307d021e4544c6d51255245adf726e8e9；PR 最终 HEAD cd927e1a0064929f789c141a9cc9e1eb3a12b7b7。仅修改 src/jobs/batch-journal.ts 和 tests/jobs/batch-coordinator.test.ts。真实问题是保存函数先将 ReadOnlyBatchCoordinator 的 QUEUED/0 状态序列化，随后异步文件 I/O；与此同时批次开始运行到 RUNNING/1。原有 mayPersistOver() 对比活队列与历史持久快照，但不能证明预先序列化的待发布字节仍为活队列当前状态。此竞态可让旧队列检查点在新作业开始后写入，造成进度/尝试次数持久记录回退。
+
+测试先行提交 b6e0005c12e71a1da7771169d28bd1535773cb84 的 [Windows Application #39526319339](https://github.com/devin930906/userscript-auto-healer/actions/runs/39526319339) 实际失败：445 tests / 443 pass / 1 fail / 1 conditional skip。新增 TEST-022/026 #181 用真实临时磁盘目录、已保存历史检查点、同时开启原生作业模拟保存竞态，实际错误返回 CHECKPOINT_SAVED_UNVERIFIED，预期必须 BLOCKED/INVALID_CHECKPOINT 且保留旧文件字节。生产修复提交 cd927e1a0064929f789c141a9cc9e1eb3a12b7b7 在 rename 发布前重新调用原生快照并逐字节比较，状态/次数变化就拒绝发布且保留原检查点；不读取用户脚本，不授予自动修改权限。
+
+最终 [Windows Application #39526506492](https://github.com/devin930906/userscript-auto-healer/actions/runs/39526506492) success：445 tests / 444 pass / 0 fail / 1 conditional skip、Windows Electron sandbox/preload smoke success。[Windows Candidate EXE+ZIP #39526506634](https://github.com/devin930906/userscript-auto-healer/actions/runs/39526506634) success：相同 445 项测试，ZIP 142 文件整包哈希校验、便携移动/只读 ACL/运行、安装包完整性、合成旧版升级、卸载与 AppData 保留全部仍通过。实际候选打包 checkout SHA f17ad8d6c61c7d75b7f29f8800ae517ed03e5045（PR 测试合成提交，非 main）。候选 EXE SHA256 4c4434755fc519032d35f9263b105fd995eca85377ed48b829b46fbf256d5845；候选真实 Portable.zip SHA256 9a6d4b7051a98716cae0a4f3f1650af9c0bbf55d66dda181f0ea96a2fe164837；短期 Actions artifact ID 12313622680，到期 2026-10-24 01:23:34 UTC。外层 Actions 自动 ZIP 不是正式便携 ZIP。
+
+完成范围仅为 TASK-013 已有原生只读检查点在所测并发状态下的发布前防回退，**不是**通用多进程完整原子调度、彻底消除任意提交竞态、持久断电恢复、真实 Tampermonkey 业务、自动修复或完整 TASK-013/TEST-022/026/GATE-007 验收。用户 Chrome 浏览器的扩展/页面只读工具调用均返回内部失败，TASK-007 真实前置证据本轮无法新增；下一任务仍应以可信 Tampermonkey 产品级验证和完整恢复安全为核心。全部 GATE-001..011 维持未完整通过、没有 Stable Release。
