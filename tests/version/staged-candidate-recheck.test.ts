@@ -213,3 +213,32 @@ test('TEST-020: directory junction ancestors do not bypass candidate receipt che
   assert.deepEqual(await readFile(p.sourcePath),Buffer.from(original));
  });
 });
+
+test('TEST-020/026: untrusted Proxy options and receipts never execute reflection traps',async()=>{
+ let trapCalls=0;
+ const hostile=new Proxy({},{
+  getPrototypeOf(){trapCalls++;return Object.prototype;},
+  ownKeys(){trapCalls++;return [];},
+  getOwnPropertyDescriptor(){trapCalls++;return undefined;},
+  get(){trapCalls++;return undefined;}
+ });
+ const safeOptions={
+  sourcePath:join(tmpdir(),'uah-proxy-test.user.js'),
+  backupDirectory:join(tmpdir(),'uah-proxy-test-backups'),
+  userApproved:true
+ };
+ const untrustedOptions=await verifyStagedCandidateReadOnly(request,{},hostile);
+ assert.equal(untrustedOptions.status,'BLOCKED');
+ assert.equal(trapCalls,0,'options Proxy must be refused before any trap');
+
+ const untrustedReceipt=await verifyStagedCandidateReadOnly(request,hostile,safeOptions);
+ assert.equal(untrustedReceipt.status,'BLOCKED');
+ assert.equal(trapCalls,0,'receipt Proxy must be refused before any trap');
+
+ const revoked=Proxy.revocable({},{});
+ revoked.revoke();
+ const revokedOptions=await verifyStagedCandidateReadOnly(request,{},revoked.proxy);
+ assert.equal(revokedOptions.status,'BLOCKED');
+ const revokedReceipt=await verifyStagedCandidateReadOnly(request,revoked.proxy,safeOptions);
+ assert.equal(revokedReceipt.status,'BLOCKED');
+});

@@ -8,6 +8,7 @@
  */
 
 import {basename,isAbsolute,join} from 'node:path';
+import {types as nodeTypes} from 'node:util';
 import {lstat} from 'node:fs/promises';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import type {BigIntStats} from 'node:fs';
@@ -48,7 +49,8 @@ type Receipt={
  tampermonkeyVerified:false;businessVerified:false
 };
 function record(input:unknown,required:readonly string[]):Record<string,unknown>|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ if(!input||typeof input!=='object'||Array.isArray(input)||
+    nodeTypes.isProxy(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
  const descriptors=Object.getOwnPropertyDescriptors(input);
