@@ -73,6 +73,35 @@ function Get-CandidatePortableRelocationOwnerSummary([string]$candidateExe) {
   }
 }
 
+# TEST-028: lexical containment is insufficient on Windows: a junction or
+# symlink inside RUNNER_TEMP can redirect a nested source to an outside tree.
+# Inspect every existing source component (including the runner root).
+# Source and destination must be siblings, so this covers both parents.
+# This is a fail-closed snapshot, NOT an OS-enforced handle against races.
+function Assert-CandidatePortableNoReparsePath(
+  [string]$runner,[string]$source
+) {
+  $paths=@($runner)
+  $cursor=$runner
+  $relative=$source.Substring($runner.Length+1)
+  foreach($component in ($relative -split '[\\/]')) {
+    if([string]::IsNullOrWhiteSpace($component)) {
+      throw [InvalidOperationException]::new('Candidate relocation path component unavailable')
+    }
+    $cursor=[IO.Path]::Combine($cursor,$component)
+    $paths+= $cursor
+  }
+  foreach($path in $paths) {
+    try { $attributes=[IO.File]::GetAttributes($path) }
+    catch {
+      throw [InvalidOperationException]::new('Candidate relocation path component unavailable')
+    }
+    if((([int]$attributes) -band ([int][IO.FileAttributes]::ReparsePoint)) -ne 0) {
+      throw [InvalidOperationException]::new('Candidate relocation reparse point refused')
+    }
+  }
+}
+
 # TASK-020 / REQ-028 / TEST-028: same-volume candidate-only portable move.
 # A PowerShell Move-Item of a directory containing locked files can partially
 # populate a destination before failing. Windows Directory.Move performs one
@@ -124,6 +153,7 @@ function Move-CandidatePortableDirectory(
   if(-not $sameParent -or [String]::Equals($from,$to,[StringComparison]::OrdinalIgnoreCase)) {
     throw [InvalidOperationException]::new('Candidate relocation must rename to a distinct sibling')
   }
+  Assert-CandidatePortableNoReparsePath $runner $from
   if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
     throw [InvalidOperationException]::new('Candidate relocation source missing or destination exists')
   }
@@ -133,6 +163,8 @@ function Move-CandidatePortableDirectory(
     if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
       throw [InvalidOperationException]::new('Candidate relocation changed while retrying')
     }
+    # Check again: a previous denial or wait does not preserve ancestor identity.
+    Assert-CandidatePortableNoReparsePath $runner $from
     try {
       [IO.Directory]::Move($from,$to)
       return $attempt
