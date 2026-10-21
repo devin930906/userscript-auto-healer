@@ -53,6 +53,34 @@ export type LimitedGmReportResult=
  |Readonly<{status:'UNVERIFIED_REPORT_READY';report:LimitedGmReport}>;
 const invalid=():LimitedGmReportResult=>
  Object.freeze({status:'BLOCKED' as const,code:'INVALID_EVIDENCE' as const});
+
+/** Capture only inert own-data fields. A native report boundary must not
+ * invoke a caller-controlled accessor or Proxy trap when reading a fixture
+ * session or one of its snapshots. No secrets/unknown extra fields are copied.
+ */
+function captureFields(
+ value:unknown,allowed:readonly string[],required:readonly string[]=allowed
+):Record<string,unknown>|null{
+ try{
+  if(!value||typeof value!=='object'||isProxy(value)||Array.isArray(value))
+   return null;
+  const proto=Object.getPrototypeOf(value);
+  if(proto!==Object.prototype&&proto!==null)return null;
+  const descriptors=Object.getOwnPropertyDescriptors(value);
+  const keys=Reflect.ownKeys(descriptors);
+  if(keys.some(k=>typeof k!=='string'||!allowed.includes(k))||
+     required.some(k=>!Object.prototype.hasOwnProperty.call(descriptors,k)))
+   return null;
+  const out:Record<string,unknown>=Object.create(null);
+  for(const key of keys as string[]){
+   const d=descriptors[key];
+   if(!Object.prototype.hasOwnProperty.call(d,'value'))return null;
+   out[key]=d.value;
+  }
+  return out;
+ }catch{return null;}
+}
+
 function iso(t:unknown):t is number{
  return typeof t==='number'&&Number.isSafeInteger(t)&&t>=0&&
   t<=8.64e15;
@@ -139,12 +167,33 @@ export function createLimitedGmReport(
  session:Input,collectedAt:number=Date.now()
 ):LimitedGmReportResult{
  try{
-  if(!session||!iso(collectedAt)||!iso(session.expiresAt)||
-     !isSupportedGmProbeRunAt(session.runAt)||
-     !validChromeVersion(session.browserVersion))return invalid();
-  const s=session.snapshot(),c=session.consistencySnapshot(),dom=session.domSnapshot();
-  if(!s||!c||!dom||!statuses.has(s.status)||
-     !consistencyStatuses.has(c.status)||
+  const meta=captureFields(session,[
+   'runAt','browserVersion','expiresAt','snapshot','consistencySnapshot',
+   'domSnapshot','status','source','installUrl','origin','runtimeHint',
+   'visit','observe','stop','domSnapshot','consistencySnapshot'
+  ],['runAt','browserVersion','expiresAt','snapshot',
+     'consistencySnapshot','domSnapshot']);
+  if(!meta||!iso(collectedAt)||!iso(meta.expiresAt)||
+     !isSupportedGmProbeRunAt(meta.runAt)||
+     !validChromeVersion(meta.browserVersion)||
+     typeof meta.snapshot!=='function'||
+     typeof meta.consistencySnapshot!=='function'||
+     typeof meta.domSnapshot!=='function')return invalid();
+  const s=captureFields((meta.snapshot as Input['snapshot'])(),[
+   'status','observedModes','reportedGmDefaultMatched',
+   'reportedGmStorageRoundtripMatched','reportedBrokenFailed',
+   'reportedFixedRecovered','extensionAuthenticityVerified',
+   'scriptInstallationVerified','gmApiVerified','businessVerified'
+  ]);
+  const c=captureFields((meta.consistencySnapshot as Input['consistencySnapshot'])(),[
+   'status','comparedModes','extensionAuthenticityVerified',
+   'scriptInstallationVerified','gmApiVerified','businessVerified'
+  ]);
+  const dom=captureFields((meta.domSnapshot as Input['domSnapshot'])(),[
+   'broken','fixed'
+  ],[]);
+  if(!s||!c||!dom||!statuses.has(s.status as Status)||
+     !consistencyStatuses.has(c.status as Consistency)||
      !Number.isInteger(s.observedModes)||s.observedModes<0||s.observedModes>2||
      !Number.isInteger(c.comparedModes)||c.comparedModes<0||c.comparedModes>2||
      typeof s.reportedGmDefaultMatched!=='boolean'||
@@ -159,33 +208,39 @@ export function createLimitedGmReport(
      c.gmApiVerified!==false||c.businessVerified!==false)return invalid();
   const picked:{broken:LimitedDom|null;fixed:LimitedDom|null}={broken:null,fixed:null};
   for(const mode of ['broken','fixed'] as const){
-    const d=dom[mode];
-    if(d===undefined)continue;
-    if(d.status!=='LIMITED_FIXTURE_DOM_ONLY'||d.mode!==mode||
+    const raw=dom[mode];
+    if(raw===undefined)continue;
+    const d=captureFields(raw,[
+     'status','mode','observedAt','targetCount','actionCount',
+     'fixtureDomMatchesExpected','extensionAuthenticityVerified',
+     'scriptInstallationVerified','gmApiVerified','businessVerified'
+    ]);
+    if(!d||d.status!=='LIMITED_FIXTURE_DOM_ONLY'||d.mode!==mode||
        !validObservedAt(d.observedAt)||d.targetCount!==1||
        (d.actionCount!==0&&d.actionCount!==1)||
        typeof d.fixtureDomMatchesExpected!=='boolean'||
        d.extensionAuthenticityVerified!==false||
        d.scriptInstallationVerified!==false||
        d.gmApiVerified!==false||d.businessVerified!==false)return invalid();
-    picked[mode]=Object.freeze({observedAt:d.observedAt,
-      actionCount:d.actionCount,fixtureDomMatchesExpected:d.fixtureDomMatchesExpected});
+    picked[mode]=Object.freeze({observedAt:d.observedAt as string,
+      actionCount:d.actionCount as 0|1,
+      fixtureDomMatchesExpected:d.fixtureDomMatchesExpected as boolean});
   }
   const report:LimitedGmReport=Object.freeze({
    schema:'uah-manual-gm-fixture-v3' as const,
    verdict:'NOT_VERIFIED' as const,
-   browserVersion:session.browserVersion,
+   browserVersion:meta.browserVersion,
    collectedAt:new Date(collectedAt).toISOString(),
-   expiresAt:new Date(session.expiresAt).toISOString(),
-   runAt:session.runAt,
+   expiresAt:new Date(meta.expiresAt as number).toISOString(),
+   runAt:meta.runAt,
    assessment:Object.freeze({
-    status:s.status,observedModes:s.observedModes,
-    reportedGmDefaultMatched:s.reportedGmDefaultMatched,
-    reportedGmStorageRoundtripMatched:s.reportedGmStorageRoundtripMatched,
-    reportedBrokenFailed:s.reportedBrokenFailed,
-    reportedFixedRecovered:s.reportedFixedRecovered
+    status:s.status as Status,observedModes:s.observedModes as number,
+    reportedGmDefaultMatched:s.reportedGmDefaultMatched as boolean,
+    reportedGmStorageRoundtripMatched:s.reportedGmStorageRoundtripMatched as boolean,
+    reportedBrokenFailed:s.reportedBrokenFailed as boolean,
+    reportedFixedRecovered:s.reportedFixedRecovered as boolean
    }),
-   consistency:Object.freeze({status:c.status,comparedModes:c.comparedModes}),
+   consistency:Object.freeze({status:c.status as Consistency,comparedModes:c.comparedModes as 0|1|2}),
    dom:Object.freeze(picked),...flags
   });
   if(!coherentLimitedEvidence(report.assessment,report.consistency,report.dom)||
