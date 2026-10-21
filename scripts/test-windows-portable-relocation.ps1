@@ -338,7 +338,7 @@ try {
   $childPayload=Join-Path $childFixture 'payload.txt'
   [IO.File]::WriteAllText($childPayload,'keep-parent-fixture')
   $parentHandle=[UahCandidateDeleteAccessProbe]::Open($parentFixture,
-    [uint32]0x80000000,[uint32]0,[IntPtr]::Zero,[uint32]3,
+    [uint32]2147483648,[uint32]0,[IntPtr]::Zero,[uint32]3,
     [uint32]0x02000000,[IntPtr]::Zero)
   if($parentHandle.IsInvalid) {
     $parentHandle.Dispose()
