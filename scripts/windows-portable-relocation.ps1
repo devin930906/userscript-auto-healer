@@ -1,3 +1,43 @@
+# TASK-020 / ISSUE-215: a successful parent Electron shell smoke receipt
+# does not certify that its utility/renderer subprocesses have released DLLs.
+# Only inspect this run's disposable candidate EXE under RUNNER_TEMP. Never
+# terminate any process; fail closed if that executable remains live.
+function Wait-CandidatePortableProcessExit(
+  [string]$candidateExe,[int]$maxChecks=20,[int]$delayMilliseconds=250
+) {
+  if([string]::IsNullOrWhiteSpace($candidateExe) -or
+     [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+     $maxChecks -lt 1 -or $maxChecks -gt 30 -or
+     $delayMilliseconds -lt 0 -or $delayMilliseconds -gt 1000) {
+    throw [ArgumentException]::new('Invalid candidate process wait options')
+  }
+  $exact=[IO.Path]::GetFullPath($candidateExe)
+  $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+  if(-not $exact.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+     [StringComparison]::OrdinalIgnoreCase) -or
+     [IO.Path]::GetFileName($exact) -cne 'UserscriptAutoHealer.exe') {
+    throw [InvalidOperationException]::new('Process wait is limited to the disposable candidate executable')
+  }
+  for($check=1; $check -le $maxChecks; $check++) {
+    # CIM includes processes with this image name from other directories.
+    # Exact path comparison is required; do not use name-only process counts.
+    # A failed CIM query is an error, not proof that no processes exist.
+    $matches=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop |
+      Where-Object {
+        $_.ExecutablePath -and [string]::Equals(
+          [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
+          [StringComparison]::OrdinalIgnoreCase)
+      })
+    if($matches.Count -eq 0) { return $check }
+    Write-Warning ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
+      $matches.Count,$check,$maxChecks)
+    if($check -eq $maxChecks) {
+      throw [InvalidOperationException]::new('Candidate-owned executable did not exit before relocation')
+    }
+    Start-Sleep -Milliseconds $delayMilliseconds
+  }
+}
+
 # TASK-020 / REQ-028 / TEST-028: same-volume candidate-only portable move.
 # A PowerShell Move-Item of a directory containing locked files can partially
 # populate a destination before failing. Windows Directory.Move performs one

@@ -28,6 +28,41 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # The smoke parent may exit before its child/utility image. Wait for only
+  # the exact owned candidate binary, and never kill or move it while live.
+  # cmd.exe is copied into a fresh RUNNER_TEMP folder as a self-contained,
+  # disposable test stand-in; no system or user process is modified.
+  $ownedExe=Join-Path $root 'UserscriptAutoHealer.exe'
+  Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Destination $ownedExe -ErrorAction Stop
+  $owned=Start-Process -FilePath $ownedExe -ArgumentList '/d /c "ping -n 5 127.0.0.1 >nul"' -PassThru -WindowStyle Hidden
+  try {
+    Start-Sleep -Milliseconds 200
+    $owned.Refresh()
+    if($owned.HasExited) { throw 'Disposable process fixture exited before ownership verification' }
+    $refused=$false
+    try { Wait-CandidatePortableProcessExit $ownedExe 1 0 | Out-Null }
+    catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*did not exit before relocation*') { throw }
+      $refused=$true
+    }
+    if(-not $refused) { throw 'Live candidate-owned executable was not blocked' }
+    $null=Wait-Process -Id $owned.Id -Timeout 20 -ErrorAction Stop
+    $checks=Wait-CandidatePortableProcessExit $ownedExe 3 100
+    if($checks -lt 1) { throw 'Stopped owned executable remained live' }
+    Write-Output 'PASS: candidate-owned process blocks move until natural exit'
+  } finally {
+    $owned.Refresh()
+    # Cleanup is limited to the process started for THIS disposable test.
+    if(-not $owned.HasExited) { Stop-Process -Id $owned.Id -Force -ErrorAction SilentlyContinue }
+    $owned.Dispose()
+  }
+  $foreignExe=Join-Path $root 'not-the-candidate.exe'
+  $outOfScope=$false
+  try { Wait-CandidatePortableProcessExit $foreignExe 1 0 | Out-Null }
+  catch [System.InvalidOperationException] { $outOfScope=$true }
+  if(-not $outOfScope) { throw 'Process wait accepted a noncandidate executable' }
+  Write-Output 'PASS: noncandidate executable path rejected'
+
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
   $permanent=Join-Path $root 'permanently-locked'

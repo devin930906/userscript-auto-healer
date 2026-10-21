@@ -166,6 +166,13 @@ function Trace-CandidateElectronProcesses([string]$candidateExe,[string]$label) 
   }
 }
 Trace-CandidateElectronProcesses (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
+# A successful smoke parent receipt alone is insufficient to move a directory
+# that may still be mapped by a candidate-owned Electron child. This bounded
+# check never stops any process. Unknown/noncandidate locks still fail closed
+# in the existing atomic Move-CandidatePortableDirectory helper.
+. (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
+$ownedChecks=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
+Write-Output "PASS: candidate-owned executable quiescent before relocation (check $ownedChecks)"
 # TEST-028: exercise an actual portable directory MOVE (not a second copy
 # built in the original path). Spaces and Unicode path components must not
 # break Electron's packaged resource lookup or redirect persistent userData.
@@ -174,7 +181,6 @@ $moved=Join-Path $temp 'relocated portable 路径'
 if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated test directory' }
 # Atomic same-parent rename: unlike PowerShell Move-Item this cannot leave a
 # partially copied payload when an Electron utility still holds an open DLL.
-. (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 try {
   $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
 } catch {
