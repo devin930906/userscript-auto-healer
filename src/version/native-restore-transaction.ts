@@ -146,11 +146,15 @@ export async function removeOwnedPublishedJournalPending(
 ):Promise<boolean>{
  try{
   const id='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+  // A matching inode is not enough: the hard links must name one journal ID.
+  const pendingName=basename(pendingPath).match(
+    new RegExp('^\\.uah-restore-('+id+')\\.pending$'));
+  const publishedName=basename(publishedPath).match(
+    new RegExp('^\\.uah-restore-('+id+')\\.journal\\.json$'));
   if(!isAbsolute(pendingPath)||pendingPath!==resolve(pendingPath)||
      !isAbsolute(publishedPath)||publishedPath!==resolve(publishedPath)||
      dirname(pendingPath)!==dirname(publishedPath)||
-     !new RegExp('^\\.uah-restore-'+id+'\\.pending$').test(basename(pendingPath))||
-     !new RegExp('^\\.uah-restore-'+id+'\\.journal\\.json$').test(basename(publishedPath))||
+     !pendingName||!publishedName||pendingName[1]!==publishedName[1]||
      staged.nlink!==1n||
      await hasUnsafePathLink(pendingPath)||
      await hasUnsafePathLink(publishedPath))return false;
@@ -312,7 +316,9 @@ export async function restoreVerifiedOriginalNativeOnly(
 
   // An intent record is persisted BEFORE touching the source name.
   // It contains no absolute paths, source text, URL or claimed verification.
-  const journalFileName='.uah-restore-'+randomUUID()+'.journal.json';
+  // Same ID for the staging hard link and its published journal path.
+  const journalId=randomUUID();
+  const journalFileName='.uah-restore-'+journalId+'.journal.json';
   const journalPath=join(opts.backupDirectory,journalFileName);
   const journal=Buffer.from(JSON.stringify({
    schema:1,state:'RESTORE_INTENT_UNVERIFIED',
@@ -327,7 +333,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   // while writing leaves at most a clearly uncommitted .pending file; only a
   // completely fsynced and byte-verified record is published by a no-clobber
   // same-directory hard link. This is NOT a full power-loss fsync guarantee.
-  journalPending=join(opts.backupDirectory,'.uah-restore-'+randomUUID()+'.pending');
+  journalPending=join(opts.backupDirectory,'.uah-restore-'+journalId+'.pending');
   const j=await open(journalPending,'wx',0o600);
   try{
    await j.writeFile(journal);

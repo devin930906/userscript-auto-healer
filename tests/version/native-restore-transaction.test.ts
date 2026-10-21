@@ -49,8 +49,9 @@ test('TEST-020/026: published restore intent cleanup never unlinks a foreign rep
   await mkdir(directory);
   const owner=await lstat(directory,{bigint:true});
   async function linkedJournal(){
-   const pending=join(directory,'.uah-restore-'+randomUUID()+'.pending');
-   const published=join(directory,'.uah-restore-'+randomUUID()+'.journal.json');
+   const id=randomUUID();
+   const pending=join(directory,'.uah-restore-'+id+'.pending');
+   const published=join(directory,'.uah-restore-'+id+'.journal.json');
    await writeFile(pending,'original journal bytes');
    const staged=await lstat(pending,{bigint:true});
    await link(pending,published);
@@ -63,6 +64,16 @@ test('TEST-020/026: published restore intent cleanup never unlinks a foreign rep
   assert.equal((await lstat(valid.published)).nlink,1);
   assert.equal((await readdir(directory)).includes(
    valid.pending.slice(directory.length+1)),false);
+
+  // A same-inode journal with a different transaction ID must not
+  // authorize removal of the pending entry from an unrelated identity.
+  const mismatched=await linkedJournal();
+  const foreignJournal=join(directory,'.uah-restore-'+randomUUID()+'.journal.json');
+  await rename(mismatched.published,foreignJournal);
+  assert.equal(await removeOwnedPublishedJournalPending(
+   mismatched.pending,foreignJournal,mismatched.staged,owner),false);
+  assert.equal((await readFile(mismatched.pending)).toString(),'original journal bytes');
+  assert.equal((await readFile(foreignJournal)).toString(),'original journal bytes');
 
   // The old pending is still present under a different name; never remove
   // the unrelated newly created file at its former pathname.
