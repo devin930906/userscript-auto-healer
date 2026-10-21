@@ -42,9 +42,18 @@ function Move-CandidatePortableDirectory(
       # rethrow the original exception. All other causes fail immediately.
       $rootError=$_.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
+      $win32Code=$rootError.HResult -band 0xFFFF
+      # Issue #215: a top-level PowerShell exception alone hid the actual
+      # Windows failure after extracted Electron smoke. Record each attempt
+      # without leaking full temp paths or changing the retry/error policy.
+      # On an exhausted retry the original exception is still rethrown.
+      $utc=[DateTime]::UtcNow.ToString(
+        'yyyy-MM-ddTHH:mm:ss.fffZ',[Globalization.CultureInfo]::InvariantCulture)
+      Write-Warning ("TASK-020 relocation attempt {0}/{1} UTC={2} type={3} HRESULT=0x{4:X8} Win32={5} sourceExists={6} destinationExists={7}" -f
+        $attempt,$maxAttempts,$utc,$rootError.GetType().Name,
+        $rootError.HResult,$win32Code,[IO.Directory]::Exists($from),(Test-Path -LiteralPath $to))
       if($rootError -isnot [System.IO.IOException] -and
          $rootError -isnot [System.UnauthorizedAccessException]) { throw }
-      $win32Code=$rootError.HResult -band 0xFFFF
       if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
       if($attempt -eq $maxAttempts) { throw }
       if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
