@@ -194,8 +194,19 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   staging=undefined;
   const stored=await boundedRead(target);
   const finalDir=await checkedDirectory(directory);
+  // Rename and byte parity alone do not attest publication: another process
+  // may replace the pathname with an identical JSON file immediately after
+  // rename(). Preserve the staged inode identity across that boundary, and
+  // verify that the pathname still points to the file just read. This is a
+  // bounded snapshot check, NOT an atomic handle-enforced transaction.
+  const published=await lstat(target,{bigint:true});
   if(!stored||!finalDir||!sameDir(start,finalDir)||
-     !stored.bytes.equals(bytes))return deny('IO_FAILURE');
+     !sameDir(ownedStaging,stored.file)||
+     !published.isFile()||published.isSymbolicLink()||published.nlink!==1n||
+     !sameFile(stored.file,published)||
+     !stored.bytes.equals(bytes)||
+     !await stillOwnWriterLock(directory,start,ownedLock))
+    return deny('IO_FAILURE');
   return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
    sha256:createHash('sha256').update(bytes).digest('hex')});
  }catch{return deny('IO_FAILURE');}
