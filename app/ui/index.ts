@@ -67,6 +67,9 @@ interface Window {
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false;automaticRollbackAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
+    inspectRestoreIntent():Promise<{ok:boolean;code?:string;status?:string;
+      sourceState?:'ORIGINAL_PRESENT'|'DISPLACED_PRESENT';
+      automaticPatchAllowed:false;businessVerified:false;tampermonkeyVerified:false}>;
     restoreManualOriginal():Promise<{ok:boolean;code?:string;status?:string;
       journalFileName?:string;displacedBackupFileName?:string;
       automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
@@ -98,6 +101,8 @@ const MAX_DIRECTORY_DEPTH = 8;
 const MAX_DIRECTORY_ENTRIES = 10000;
 
 const statusElement = document.getElementById('status');
+const intentInspectButton=document.getElementById('restore-inspect-intent') as HTMLButtonElement|null;
+const intentInspectResult=document.getElementById('restore-inspect-result');
 const manualRestoreButton=document.getElementById('restore-manual-original') as HTMLButtonElement|null;
 const manualRestoreResult=document.getElementById('restore-manual-result');
 let manualRestoreBusy=false;
@@ -684,6 +689,7 @@ manualRestoreButton?.addEventListener('click',()=>{
  if(manualRestoreBusy)return;
  manualRestoreBusy=true;
  manualRestoreButton.disabled=true;
+ if(intentInspectButton)intentInspectButton.disabled=true;
  if(manualRestoreResult)manualRestoreResult.textContent=
    '仅通过系统对话框选择原始文件与可信备份；最终写入前必须再次确认。';
  void window.healer.restoreManualOriginal().then(result=>{
@@ -698,7 +704,37 @@ manualRestoreButton?.addEventListener('click',()=>{
  }).catch(()=>{
   if(manualRestoreResult)manualRestoreResult.textContent=
    '手动恢复请求失败；实际文件状态无法确认，请检查原始文件、备份与恢复意图。';
- }).finally(()=>{manualRestoreBusy=false;manualRestoreButton.disabled=false;});
+ }).finally(()=>{
+  manualRestoreBusy=false;manualRestoreButton.disabled=false;
+  if(intentInspectButton)intentInspectButton.disabled=false;
+ });
+});
+intentInspectButton?.addEventListener('click',()=>{
+ if(manualRestoreBusy)return;
+ manualRestoreBusy=true;
+ intentInspectButton.disabled=true;
+ if(manualRestoreButton)manualRestoreButton.disabled=true;
+ if(intentInspectResult)intentInspectResult.textContent=
+   '请通过系统对话框独立选择当前脚本与已有恢复意图文件；仅执行只读字节核对。';
+ void window.healer.inspectRestoreIntent().then(result=>{
+  if(!intentInspectResult)return;
+  if(result.ok&&result.status==='RESTORE_INTENT_OBSERVED_READ_ONLY'){
+   intentInspectResult.textContent=result.sourceState==='ORIGINAL_PRESENT'
+    ?'只读核对：当前本地文件的原版字节与恢复意图一致，两份独立备份亦核验通过。'
+      +' 此结果不证明 Tampermonkey 已安装脚本或业务恢复，也不授权再次写入。'
+    :'只读核对：当前本地文件仍为被替换前的版本；两份独立备份核验通过。'
+      +' 没有执行任何恢复，请勿在未确认外部编辑状态前反复覆盖。';
+  }else{
+   intentInspectResult.textContent='只读核对未完成：'+(result.code??'UNKNOWN')+
+     '。文件实际状态未获可信确认；请人工检查原文件与备份，不要盲目重复覆盖。';
+  }
+ }).catch(()=>{
+  if(intentInspectResult)intentInspectResult.textContent=
+   '只读核对请求失败；没有获得可信文件状态，不应据此执行自动恢复。';
+ }).finally(()=>{
+  manualRestoreBusy=false;intentInspectButton.disabled=false;
+  if(manualRestoreButton)manualRestoreButton.disabled=false;
+ });
 });
 
 scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{

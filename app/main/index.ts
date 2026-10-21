@@ -2,8 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import { join, win32 } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, win32 } from 'node:path';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +27,7 @@ import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/hea
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
+import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 let mainWindow: BrowserWindow | null = null;
@@ -549,6 +550,62 @@ function registerSafeIpc(): void {
     stopOnlyGmProbe();
     return {ok:existed,status:existed?'FIXTURE_STOP_REQUESTED':'NO_ACTIVE_FIXTURE',
       ...unverified};
+  });
+
+  // TASK-011/TEST-020/026: explicit read-only recovery reconciliation.
+  // No renderer-supplied paths/bytes, user approval booleans or write operations.
+  // Two independent native file selections are bound by the existing journal
+  // verifier to the precise source and to BOTH independently verified backups.
+  ipcMain.handle('restore:inspect-intent',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||scenarioObserveInProgress||launchInProgress||
+       profilePreparationInProgress||gmActionInProgress||gmStartInProgress||
+       readOwnedBrowser())
+      return {ok:false,code:'RESTORE_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    nativeSelectionInProgress=true;
+    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'info',buttons:['只读核对','取消'],defaultId:1,cancelId:1,noLink:true,
+        message:'只读核对已有的恢复意图（不会写入）',
+        detail:'请依次选择当前的 .user.js 脚本，以及本工具先前保存的'
+          +' .uah-restore-*.journal.json 恢复意图文件。'
+          +'\\n系统会独立验证原版与被替换版本的备份。'
+          +'\\n不会复制、覆盖、修改文件、安装脚本或授权自动重试。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const selectedSource=await dialog.showOpenDialog(win,{
+        title:'只读核对：选择目前的 .user.js 原文件',
+        properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
+      });
+      if(selectedSource.canceled||selectedSource.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const journalSelection=await dialog.showOpenDialog(win,{
+        title:'只读核对：选择先前生成的 .uah-restore-*.journal.json 意图文件',
+        properties:['openFile'],filters:[{name:'Restore intent',extensions:['json']}]
+      });
+      if(journalSelection.canceled||journalSelection.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const observed=await inspectNativeRestoreIntentReadOnly({
+        sourcePath:selectedSource.filePaths[0],
+        backupDirectory:dirname(journalSelection.filePaths[0]),
+        journalFileName:basename(journalSelection.filePaths[0]),
+        userApproved:true
+      });
+      if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(observed.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY')
+        return {ok:false,code:observed.reason,...unverified};
+      // Return a fixed classification only, never source paths, journals,
+      // recovery digests, contents or the ability to change the source.
+      return {ok:true,status:'RESTORE_INTENT_OBSERVED_READ_ONLY',
+        sourceState:observed.sourceState,...unverified};
+    }catch{return {ok:false,code:'INSPECTION_FAILED',...unverified};}
+    finally{nativeSelectionInProgress=false;}
   });
 
   // TASK-011: explicit manual *original* restore only. The renderer sends no
@@ -1277,6 +1334,7 @@ async function createMainWindow(): Promise<void> {
     if(independentBackup.status!=='BACKUP_ONLY')
       throw new Error('MANUAL_RESTORE_FIXTURE_BACKUP_FAILED');
     const manualBackup=join(manualBackupDirectory,independentBackup.backupFileName);
+    let nativePickedIntentPath:string|undefined;
     writeFileSync(manualSource,editedBytes);
     Object.defineProperty(dialog,'showOpenDialog',{
       configurable:true,writable:true,
@@ -1285,6 +1343,11 @@ async function createMainWindow(): Promise<void> {
           return {canceled:false,filePaths:[manualSource]};
         if(options.title?.startsWith('手动恢复：选择本应用生成'))
           return {canceled:false,filePaths:[manualBackup]};
+        if(options.title?.startsWith('只读核对：选择目前的'))
+          return {canceled:false,filePaths:[manualSource]};
+        if(options.title?.startsWith('只读核对：选择先前生成的'))
+          return {canceled:!nativePickedIntentPath,
+            filePaths:nativePickedIntentPath?[nativePickedIntentPath]:[]};
         return {canceled:true,filePaths:[]};
       }
     });
@@ -1292,7 +1355,8 @@ async function createMainWindow(): Promise<void> {
       configurable:true,writable:true,
       value:async(_window:unknown,options:{message?:string})=>({
         response:options.message?.startsWith('手动恢复原始脚本')||
-          options.message?.startsWith('最终确认：')?0:1,
+          options.message?.startsWith('最终确认：')||
+          options.message?.startsWith('只读核对已有的恢复意图')?0:1,
         checkboxChecked:false
       })
     });
@@ -1328,12 +1392,47 @@ async function createMainWindow(): Promise<void> {
     if(repeat.ok!==false||repeat.code!=='SOURCE_UNCHANGED'||
        !readFileSync(manualSource).equals(oldBytes))
       throw new Error('MANUAL_RESTORE_REPEAT_MUST_FAIL_CLOSED');
+    nativePickedIntentPath=join(manualBackupDirectory,nameMatch[2]);
+    const beforeInspectionSource=readFileSync(manualSource);
+    const beforeInspectionJournal=readFileSync(nativePickedIntentPath);
+    const beforeInspectionInventory=readdirSync(manualBackupDirectory).sort();
+    const wrongArgs=await win.webContents.executeJavaScript(
+      "window.healer.inspectRestoreIntent('not-allowed')",true
+    ) as {ok?:boolean;code?:string;status?:string;sourceState?:string};
+    // The no-argument preload bridge intentionally drops unexpected
+    // JavaScript arguments. Verify they never become native path authority.
+    if(wrongArgs.ok!==true||wrongArgs.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY'||
+       wrongArgs.sourceState!=='ORIGINAL_PRESENT')
+      throw new Error('RESTORE_INSPECTION_BRIDGE_ARGUMENT_ISOLATION_FAILED');
+    const inspectedByRenderer=await win.webContents.executeJavaScript(
+      "(async()=>{const button=document.getElementById('restore-inspect-intent');"+
+      "const notice=document.getElementById('restore-inspect-result');"+
+      "if(!button||!notice||button.disabled)return false;button.click();"+
+      "return await new Promise(resolve=>{const start=Date.now();"+
+      "const tick=()=>{if(notice.textContent.includes('只读核对：当前本地文件的原版字节与恢复意图一致'))"+
+      "return resolve(!button.disabled);"+
+      "if(notice.textContent.includes('只读核对未完成')||Date.now()-start>6000)"+
+      "return resolve(false);setTimeout(tick,30);};tick();});})()",
+      true
+    ) as boolean;
+    const directInspection=await win.webContents.executeJavaScript(
+      'window.healer.inspectRestoreIntent()',true
+    ) as {ok?:boolean;status?:string;sourceState?:string;sourcePath?:string;originalSha256?:string};
+    if(!inspectedByRenderer||directInspection.ok!==true||
+       directInspection.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY'||
+       directInspection.sourceState!=='ORIGINAL_PRESENT'||
+       'sourcePath' in directInspection||'originalSha256' in directInspection||
+       !readFileSync(manualSource).equals(beforeInspectionSource)||
+       !readFileSync(nativePickedIntentPath).equals(beforeInspectionJournal)||
+       JSON.stringify(readdirSync(manualBackupDirectory).sort())!==
+         JSON.stringify(beforeInspectionInventory))
+      throw new Error('RESTORE_INSPECTION_READONLY_ELECTRON_UI_FAILED');
 
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
@@ -1388,7 +1487,20 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
   });
-}).catch(() => {
+}).catch(error => {
+  // Only the disposable GitHub Windows smoke fixture may emit this narrow,
+  // allowlisted error identifier; never print paths, URLs, script bytes or
+  // arbitrary exception text to CI logs. Production behavior is unchanged.
+  if(process.argv.includes('--uahtest-shell-only')&&
+     process.env.GITHUB_ACTIONS==='true'){
+    const message=error instanceof Error?error.message:'';
+    const code=/^[A-Z][A-Z0-9_]{4,90}$/.test(message)?message:'UNKNOWN';
+    const receipt=process.env.UAH_SMOKE_RECEIPT;
+    try{if(receipt)writeFileSync(receipt+'.failure',code,{encoding:'utf8',flag:'wx'});}
+    catch{/* Diagnostics must not mask the actual smoke failure. */}
+    app.exit(1);
+    return;
+  }
   process.exitCode = 1;
   app.quit();
 });
