@@ -1266,8 +1266,8 @@ async function createMainWindow(): Promise<void> {
     const manualSource=join(fixtureDir,'manual-smoke.user.js');
     const manualBackupDirectory=join(fixtureDir,'manual-backups');
     mkdirSync(manualBackupDirectory);
-    const oldBytes=Buffer.from('// ==UserScript==\\n// @name Smoke Original\\n// ==/UserScript==\\n');
-    const editedBytes=Buffer.from('// ==UserScript==\\n// @name Smoke Edited\\n// ==/UserScript==\\n');
+    const oldBytes=Buffer.from('// ==UserScript==\n// @name Smoke Original\n// ==/UserScript==\n');
+    const editedBytes=Buffer.from('// ==UserScript==\n// @name Smoke Edited\n// ==/UserScript==\n');
     writeFileSync(manualSource,oldBytes);
     const independentBackup=await createVerifiedBackupOnly({
       sourcePath:manualSource,backupDirectory:manualBackupDirectory,
