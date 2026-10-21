@@ -282,7 +282,7 @@ function Get-CandidatePortableSiblingRenameControl([string]$source) {
        [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
        -not [IO.Path]::IsPathRooted($source)) { return 'control=unavailable' }
     $base=[IO.Path]::GetFullPath($source)
-    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
        [StringComparison]::OrdinalIgnoreCase) -or
        -not [IO.Directory]::Exists($base)) { return 'control=unavailable' }
