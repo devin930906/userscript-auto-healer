@@ -77,6 +77,28 @@ test('TEST-017/018/026: same-origin iframe cannot run disposable GM fixture or r
   assert.deepEqual(probe.receiptSnapshot(),{},'no self-report should be recorded');
  }
 });
+test('TEST-017: explicit top-level fixture still executes GM and reports normally',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-idle');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const topWindow:{top?:object}={};
+ topWindow.top=topWindow;
+ const count={gm:0,query:0,action:0,report:0};
+ runInNewContext(probe.source,{
+  Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+  window:topWindow,
+  location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+  document:{readyState:'complete',querySelector:()=>{
+   count.query++;
+   return {setAttribute:()=>{count.action++;},getAttribute:()=> 'done'};
+  }},
+  GM_getValue:(_key:string,fallback:string)=>{count.gm++;return fallback;},
+  fetch:()=>{count.report++;return Promise.resolve();}
+ });
+ assert.deepEqual(count,{gm:1,query:1,action:1,report:1});
+});
 test('TEST-017: document-body and document-end accept each explicit run-at and defer DOM when parsing',async t=>{
  for(const runAt of ['document-body','document-end'] as const){
   const result=await startIsolatedTampermonkeyGmProbe(true,30000,runAt);
