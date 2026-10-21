@@ -1,9 +1,10 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {createHash,randomUUID} from 'node:crypto';
+import {link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {removeOwnedStagingPending} from '../../src/version/staging-pending-ownership';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
 import {stageReviewedCandidateOnly} from '../../src/version/staged-candidate';
 import {stageRecoveryCheckpointOnly,inspectRecoveryCheckpointReadOnly} from '../../src/version/recovery-checkpoint';
@@ -38,6 +39,81 @@ async function fixture(run:(opts:{sourcePath:string;backupDirectory:string;
    await run(opts);
  }finally{await rm(root,{recursive:true,force:true});}
 }
+
+test('TEST-020/026: pending cleanup refuses substituted source, alias and parent',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-cleanup-'));
+ const folder=join(root,'backup');
+ try{
+  await mkdir(folder);
+  const parent=await lstat(folder,{bigint:true});
+  const next=()=>join(folder,'.'+randomUUID()+'.pending');
+  const owned=next();
+  await writeFile(owned,'owned');
+  const first=await lstat(owned,{bigint:true});
+  assert.equal(await removeOwnedStagingPending(owned,first,parent),true);
+  assert.equal((await readdir(folder)).length,0);
+
+  await writeFile(owned,'previous');
+  const old=await lstat(owned,{bigint:true});
+  await rename(owned,join(folder,'previous-preserved'));
+  await writeFile(owned,'replacement');
+  assert.equal(await removeOwnedStagingPending(owned,old,parent),false);
+  assert.equal((await readFile(owned)).toString(),'replacement');
+  assert.equal((await readFile(join(folder,'previous-preserved'))).toString(),'previous');
+
+  const alias=next();
+  await writeFile(alias,'double-linked');
+  const beforeAlias=await lstat(alias,{bigint:true});
+  await link(alias,join(folder,'third-alias'));
+  assert.equal(await removeOwnedStagingPending(alias,beforeAlias,parent),false);
+  assert.equal((await readFile(alias)).toString(),'double-linked');
+
+  const pending=next();
+  const published=join(folder,'published.backup.user.js');
+  await writeFile(pending,'verified-copy');
+  const before=await lstat(pending,{bigint:true});
+  await link(pending,published);
+  assert.equal(await removeOwnedStagingPending(pending,before,parent,published),true);
+  assert.equal((await readFile(published)).toString(),'verified-copy');
+  assert.equal((await lstat(published,{bigint:true})).nlink,1n);
+
+  const separate=next();
+  const unrelated=join(folder,'other.backup.user.js');
+  await writeFile(separate,'important');
+  const separateOwner=await lstat(separate,{bigint:true});
+  await writeFile(unrelated,'other');
+  assert.equal(await removeOwnedStagingPending(separate,separateOwner,parent,unrelated),false);
+  assert.equal((await readFile(separate)).toString(),'important');
+  assert.equal((await readFile(unrelated)).toString(),'other');
+  // Identical contents are not publication identity: a substituted inode
+  // must not authorize removal of an independent pending recovery copy.
+  await writeFile(unrelated,'important');
+  assert.equal(await removeOwnedStagingPending(separate,separateOwner,parent,unrelated),false);
+  assert.equal((await readFile(separate)).toString(),'important');
+  assert.equal((await readFile(unrelated)).toString(),'important');
+
+  const triple=next();
+  const firstPublished=join(folder,'linked.backup.user.js');
+  await writeFile(triple,'protected-links');
+  const tripleOwner=await lstat(triple,{bigint:true});
+  await link(triple,firstPublished);
+  await link(triple,join(folder,'extra-recovery-link'));
+  assert.equal(await removeOwnedStagingPending(triple,tripleOwner,parent,firstPublished),false);
+  assert.equal((await readFile(triple)).toString(),'protected-links');
+
+  const protectedPending=next();
+  await writeFile(protectedPending,'old-directory');
+  const identity=await lstat(protectedPending,{bigint:true});
+  const oldDirectory=join(root,'previous-folder');
+  await rename(folder,oldDirectory);
+  await mkdir(folder);
+  await writeFile(protectedPending,'new-directory');
+  assert.equal(await removeOwnedStagingPending(protectedPending,identity,parent),false);
+  assert.equal((await readFile(protectedPending)).toString(),'new-directory');
+  assert.equal((await readFile(join(oldDirectory,
+     protectedPending.slice(folder.length+1)))).toString(),'old-directory');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 
 test('TEST-020: persist a bounded recovery checkpoint without changing source or backup',async()=>{
  await fixture(async opts=>{
