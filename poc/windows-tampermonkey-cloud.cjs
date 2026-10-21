@@ -27,7 +27,12 @@ const runAt=process.env.UAH_TM_RUN_AT;
 const variant=process.env.UAH_TM_VARIANT;
 assert.ok(['baseline','product-original','product-candidate','native-gm'].includes(variant),
   'Unreviewed fixture variant is forbidden');
-if(variant!=='baseline')assert.equal(runAt,'document-idle');
+// The reviewed AST original/candidate pair uses the document-idle fixture.
+// The product's OWN GM diagnostic supports all four explicit @run-at modes;
+// TEST-017/018 must exercise those modes in a real Tampermonkey extension,
+// rather than extrapolating from a separate hand-written baseline fixture.
+if(variant==='product-original'||variant==='product-candidate')
+  assert.equal(runAt,'document-idle');
 assert.ok(RUN_AT_MODES.includes(runAt),
   'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
 let source=[

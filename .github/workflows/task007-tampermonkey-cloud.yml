@@ -44,6 +44,15 @@ jobs:
             variant: product-candidate
           # End-to-end manager installation of the actual native product fixture.
           # Unlike the AST-only PoC, this is the source served by production code.
+          # Native product-generated GM diagnostic in every supported timing
+          # mode; unlike baseline, these use production fixture generation.
+          # Every entry has its own disposable Profile and manager install.
+          - run_at: document-start
+            variant: native-gm
+          - run_at: document-body
+            variant: native-gm
+          - run_at: document-end
+            variant: native-gm
           - run_at: document-idle
             variant: native-gm
     steps:
