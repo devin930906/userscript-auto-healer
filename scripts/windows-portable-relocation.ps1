@@ -85,7 +85,7 @@ function Move-CandidatePortableDirectory(
   }
   $from=[IO.Path]::GetFullPath($source)
   $to=[IO.Path]::GetFullPath($destination)
-  $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+  $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
   $runnerPrefix=$runner+[IO.Path]::DirectorySeparatorChar
   if(-not $from.StartsWith($runnerPrefix,[StringComparison]::OrdinalIgnoreCase) -or
      -not $to.StartsWith($runnerPrefix,[StringComparison]::OrdinalIgnoreCase)) {
