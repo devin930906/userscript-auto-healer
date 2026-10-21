@@ -247,3 +247,57 @@ test('TEST-020/023/026: manual export binds displayed native filename to the sel
   }
  });
 });
+
+
+test('TASK-009/012 TEST-019/020/026: hostile imported byte views never execute user-controlled readers or write files',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  let hooks=0;
+  const fail=():never=>{hooks++;throw Error('PRIVATE_IMPORTED_BYTE_VIEW_CALLBACK');};
+  const traps:ProxyHandler<object>={
+   getPrototypeOf:fail,ownKeys:fail,getOwnPropertyDescriptor:fail,get:fail
+  };
+  const outer=new Proxy({...script},traps);
+  const proxiedBytes=new Proxy(script.bytes,traps);
+  const revoked=Proxy.revocable(script.bytes,{});revoked.revoke();
+  const withIterator=Uint8Array.from(script.bytes);
+  Object.defineProperty(withIterator,Symbol.iterator,{get:fail});
+  const withLength=Uint8Array.from(script.bytes);
+  Object.defineProperty(withLength,'byteLength',{get:fail});
+  const withNumericLength=Uint8Array.from(script.bytes);
+  Object.defineProperty(withNumericLength,'length',{get:fail});
+  const cases:unknown[]=[
+   outer,{...script,bytes:proxiedBytes},{...script,bytes:revoked.proxy},
+   {...script,bytes:withIterator},{...script,bytes:withLength},
+   {...script,bytes:withNumericLength}
+  ];
+  for(const entry of cases){
+   const result=await exportReviewedImportedSelectorOnly(entry,
+    scenario(script.sha256),observation(),{
+      backupDirectory,exportDirectory,userApproved:true
+    });
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+  }
+  assert.equal(hooks,0,'untrusted typed-array getters, iterators and Proxy traps must not run');
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readdir(exportDirectory),[]);
+  assert.equal(await readFile(scriptPath,'utf8'),source);
+ });
+});
+
+test('TASK-009/012 TEST-019/020: forged native byteLength cannot induce an oversized read or partial export',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  const forged={...script,bytes:Uint8Array.from(script.bytes),
+   byteLength:script.byteLength-1};
+  const result=await exportReviewedImportedSelectorOnly(forged,
+   scenario(script.sha256),observation(),{
+    backupDirectory,exportDirectory,userApproved:true
+   });
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readdir(exportDirectory),[]);
+  assert.equal(await readFile(scriptPath,'utf8'),source);
+ });
+});
