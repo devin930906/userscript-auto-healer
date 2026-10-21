@@ -37,7 +37,8 @@ try {
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
     $rejected=$false
-    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
+    $conflictWarnings=@()
+    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 -WarningVariable +conflictWarnings | Out-Null }
     catch {
       $rootError=$_.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
@@ -49,6 +50,19 @@ try {
     }
     if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
       throw 'Persistent Windows file lock did not fail closed'
+    }
+    # Verify both bounded failures are explainable from CI logs, including
+    # the true Windows HRESULT/Win32 code and time, without logging paths.
+    if($conflictWarnings.Count -ne 2) {
+      throw 'Expected one structured Windows relocation diagnostic per failed attempt'
+    }
+    for($n=1; $n -le 2; $n++) {
+      $diagnostic=[string]$conflictWarnings[$n-1].Message
+      if($diagnostic -notmatch "TASK-020 relocation attempt $n/2 UTC=\\d{4}-\\d{2}-\\d{2}T" -or
+         $diagnostic -notmatch 'HRESULT=0x[0-9A-Fa-f]{8} Win32=(5|32|33) ' -or
+         $diagnostic -notmatch 'sourceExists=True destinationExists=False') {
+        throw "Windows relocation attempt $n missing structured fail-closed diagnostics"
+      }
     }
   } finally { $locked.Dispose() }
   if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
