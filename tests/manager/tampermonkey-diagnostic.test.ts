@@ -18,7 +18,8 @@ import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
 const selfReport=(mode:'broken'|'fixed',gm:boolean,business:boolean):GmProbeReceipt=>({
  status:'SELF_REPORTED_FIXTURE_ONLY',mode,
- reportedGmDefaultMatched:gm,reportedBusinessAction:business,
+ reportedGmDefaultMatched:gm,reportedGmStorageRoundtripMatched:gm,
+ reportedBusinessAction:business,
  extensionAuthenticityVerified:false,scriptInstallationVerified:false,
  gmApiVerified:false,businessVerified:false
 });
@@ -212,7 +213,8 @@ test('TEST-018: matching fixture observations never become manager or GM verific
  const x=assessManualProbeObservations(both,visited);
  assert.deepEqual(x,{
    status:'SELF_REPORTED_EXPECTATIONS_MATCH',observedModes:2,
-   reportedGmDefaultMatched:true,reportedBrokenFailed:true,reportedFixedRecovered:true,
+   reportedGmDefaultMatched:true,reportedGmStorageRoundtripMatched:true,
+   reportedBrokenFailed:true,reportedFixedRecovered:true,
    extensionAuthenticityVerified:false,scriptInstallationVerified:false,
    gmApiVerified:false,businessVerified:false
  });
@@ -241,6 +243,7 @@ test('TEST-018: missing or malformed receipts are not accepted as observed succe
  assert.equal(result.status,'REPORTED_MISMATCH');
  assert.equal(result.reportedBrokenFailed,false);
  assert.equal(result.reportedGmDefaultMatched,false);
+ assert.equal(result.reportedGmStorageRoundtripMatched,false);
  assert.equal(result.gmApiVerified,false);
 });
 
