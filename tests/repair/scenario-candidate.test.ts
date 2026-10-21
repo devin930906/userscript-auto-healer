@@ -43,6 +43,31 @@ function series(oldCount=0,newCount=1){
     userscriptVerified:false as const
   };
 }
+test('TEST-019/026: diagnostic request rejects extra authority claims at its own boundary',()=>{
+  const cases:unknown[]=[
+    {...patch,automaticPatchAllowed:true},
+    {...patch,businessRecoveredVerified:true},
+    {...patch,[Symbol('privileged')]:true}
+  ];
+  for(const bad of cases){
+    const result=proposeFromReadOnlyDomDiagnostic(
+      bad as LiteralPatchRequest,scenario,series(),true);
+    assert.equal(result.status,'BLOCKED');
+    if(result.status==='BLOCKED')
+      assert.equal(result.reason,'INVALID_SCENARIO_LINK');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  // Exact, descriptor-backed inputs remain eligible for review only.
+  const frozen=Object.freeze({...patch});
+  const noProto=Object.assign(Object.create(null),patch) as LiteralPatchRequest;
+  for(const valid of [frozen,noProto]){
+    const result=proposeFromReadOnlyDomDiagnostic(valid,scenario,series(),true);
+    assert.equal(result.status,'CANDIDATE_ONLY');
+    assert.equal(result.automaticPatchAllowed,false);
+  }
+});
+
 test('TEST-014: stable old-absent/new-present DOM signals produce only a local candidate',()=>{
   const result=proposeFromReadOnlyDomDiagnostic(patch,scenario,series(),true);
   assert.equal(result.status,'CANDIDATE_ONLY');
