@@ -527,15 +527,17 @@ test('TEST-018/026: forged or incomplete blind-spot lists cannot certify GM fixt
   ...observed,summary:{...observed.summary,
    blindSpots:blindSpots as typeof observed.summary.blindSpots}
  });
+ assert.equal(evaluate([]).ok,true,
+  'a fixture with no blind spots is valid limited DOM evidence');
  assert.equal(evaluate(['CLOSED_SHADOW_ROOT_UNKNOWN']).ok,true,
-  'the observer always reports its known closed-shadow limitation');
+  'the observer also reports its known closed-shadow limitation');
  const poison=()=>{throw Error('UNTRUSTED_BLINDSPOT_ACCESSOR');};
  let calls=0;
  const accessor=['CLOSED_SHADOW_ROOT_UNKNOWN'];
  Object.defineProperty(accessor,'0',{get(){calls++;return poison();}});
  const extraField=Object.assign(['CLOSED_SHADOW_ROOT_UNKNOWN'],{secret:true});
  const malformed=[
-  [],['IFRAME_CONTENT_UNVERIFIED'],['CROSS_ORIGIN_FRAME_UNVERIFIED'],
+  ['IFRAME_CONTENT_UNVERIFIED'],['CROSS_ORIGIN_FRAME_UNVERIFIED'],
   ['CLOSED_SHADOW_ROOT_UNKNOWN','IFRAME_CONTENT_UNVERIFIED'],
   ['CLOSED_SHADOW_ROOT_UNKNOWN','CROSS_ORIGIN_FRAME_UNVERIFIED'],
   ['CLOSED_SHADOW_ROOT_UNKNOWN','CLOSED_SHADOW_ROOT_UNKNOWN'],
