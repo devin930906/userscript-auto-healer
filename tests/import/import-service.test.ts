@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { importApprovedPaths, importDroppedBytes, MAX_SCRIPT_BYTES, scanApprovedDirectory } from '../../src/import/import-service';
@@ -33,6 +33,32 @@ test('TEST-022/017: native picker emits bounded counter-only progress with dupli
   assert.equal(JSON.stringify(updates).includes(root),false,
     'progress must not disclose native file paths, original names or source');
 });
+test('TEST-002/022: exhausted byte budget accounts for every selected item without further reads',async t=>{
+  const root=await workspace(t);
+  const selected:string[]=[];
+  // Sparse exact-limit files are deliberately invalid scripts, but each
+  // counts against the bounded physical-read budget.
+  for(let i=0;i<16;i++){
+    const path=join(root,`budget-${i}.user.js`);
+    await writeFile(path,'');
+    await truncate(path,MAX_SCRIPT_BYTES);
+    selected.push(path);
+  }
+  const overBudget=join(root,'over-budget.user.js');
+  const notOnDisk=join(root,'not-on-disk.user.js');
+  await writeFile(overBudget,script);
+  const progress:number[]=[];
+  const result=await importApprovedPaths([...selected,overBudget,notOnDisk],undefined,
+    update=>progress.push(update.processed));
+  assert.equal(result.scripts.length,0);
+  assert.equal(result.errors.length,18);
+  assert.deepEqual(result.errors.slice(-2).map(error=>error.code),
+    ['SCAN_LIMIT','SCAN_LIMIT']);
+  assert.deepEqual(progress,Array.from({length:18},(_,i)=>i+1));
+  assert.equal(result.canceled,undefined);
+  assert.equal(result.unprocessed,undefined);
+});
+
 test('TEST-022: native import cancellation after a progress tick retains prior files',async t=>{
   const root=await workspace(t);
   const paths=Array.from({length:4},(_,i)=>join(root,'item-'+i+'.user.js'));
