@@ -173,3 +173,60 @@ test('TEST-013: hostile diagnostic accessors and proxy traps fail closed',()=>{
     assert.equal(log.list()[0].status,'INVALID_EVIDENCE');
   }
 });
+
+
+test('TASK-008/TEST-013/026: outer evidence array cannot execute an iterator, index getter or Proxy trap',()=>{
+ let executed=0;
+ const poison=():never=>{executed++;throw Error('SECRET_HOSTILE_EVIDENCE_EXECUTED');};
+ const valid=signal('safe','SELECTOR_NOT_FOUND');
+ const indexGetter=[valid];
+ Object.defineProperty(indexGetter,'0',{configurable:true,enumerable:true,get:poison});
+ const iterationOverride=[valid];
+ Object.defineProperty(iterationOverride,Symbol.iterator,{configurable:true,value:poison});
+ const iteratorGetter=[valid];
+ Object.defineProperty(iteratorGetter,Symbol.iterator,{configurable:true,get:poison});
+ const proxy=new Proxy([valid],{
+  get:poison,getPrototypeOf:poison,ownKeys:poison,
+  getOwnPropertyDescriptor:poison
+ });
+ const revoked=Proxy.revocable([valid],{get:poison});
+ revoked.revoke();
+ const sparse=Array(1);
+ const additional=Object.assign([valid],{privateToken:'SECRET'});
+ const customProto=[valid];
+ Object.setPrototypeOf(customProto,Object.create(Array.prototype));
+ const malformed=[
+  indexGetter,iterationOverride,iteratorGetter,proxy,revoked.proxy,
+  sparse,additional,customProto
+ ];
+ for(const payload of malformed){
+  assert.doesNotThrow(()=>{
+   const result=classifyFaultSignals(payload);
+   assert.equal(result.status,'INVALID_EVIDENCE');
+   assert.equal(result.category,'UNKNOWN');
+   assert.deepEqual(result.evidenceIds,[]);
+   assert.equal(result.automaticPatchAllowed,false);
+   const entry=new BoundedFaultLog().record(payload);
+   assert.equal(entry.status,'INVALID_EVIDENCE');
+   assert.equal(JSON.stringify(entry).includes('SECRET'),false);
+  });
+ }
+ assert.equal(executed,0,'untrusted array getters, iterator hooks and Proxy traps must never run');
+ assert.equal(classifyFaultSignals([valid]).status,'SINGLE_CAUSE_SIGNAL_ONLY');
+});
+
+test('TASK-008/TEST-013/026: non-plain or proxied evidence records cannot certify a fault',()=>{
+ let accessed=0;
+ const trap=():never=>{accessed++;throw Error('SECRET_PROXY_ACCESS');};
+ const recordProxy=new Proxy(signal('safe','NETWORK_FAILURE'),{
+  getPrototypeOf:trap,ownKeys:trap,getOwnPropertyDescriptor:trap,get:trap
+ });
+ const nonPlain=Object.assign(Object.create({hijack:true}),signal('safe','NETWORK_FAILURE'));
+ for(const value of [recordProxy,nonPlain]){
+  const result=classifyFaultSignals([value]);
+  assert.deepEqual(result.evidenceIds,[]);
+  assert.equal(result.status,'INVALID_EVIDENCE');
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+ assert.equal(accessed,0,'reject malformed records without reflecting on hostile proxies');
+});
