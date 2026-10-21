@@ -335,6 +335,41 @@ async function main(){
     }));
     await page.close();
    }
+   // TASK-007 / TEST-017/018: the ACTUAL product-generated @noframes
+   // script must not execute inside a same-origin nested frame. Previous
+   // unit/VM tests alone cannot establish real Tampermonkey injection policy.
+   // Use a fresh disposable top-level fixture, not any user's website.
+   const top=await context.newPage();
+   try{
+    await top.goto(nativeProbe.origin+'/?mode=fixed',{
+     waitUntil:'domcontentloaded',timeout:20000});
+    await top.locator('#current-target[data-uah-probe-action="done"]')
+     .waitFor({timeout:30000});
+    await top.evaluate(()=>{
+     const frame=document.createElement('iframe');
+     frame.id='uah-native-gm-child-frame';
+     frame.src=location.origin+'/?mode=fixed';
+     document.body.append(frame);
+    });
+    const child=top.frameLocator('#uah-native-gm-child-frame');
+    await child.locator('#current-target').waitFor({timeout:20000});
+    const childFrame=top.frames().find(frame=>
+     frame!==top.mainFrame()&&frame.url()===nativeProbe.origin+'/?mode=fixed');
+    assert.ok(childFrame,'Product GM fixture child frame not loaded');
+    await childFrame.waitForLoadState('load',{timeout:20000});
+    await sleep(1400);
+    const childMarker=await child.locator('#current-target')
+     .getAttribute('data-uah-probe-action');
+    assert.equal(childMarker,null,
+     'Native Tampermonkey GM fixture must never act inside matching-origin iframe');
+    assert.equal(await top.locator('#current-target')
+     .getAttribute('data-uah-probe-action'),'done',
+     'Rejecting nested injection must not break top-level consented fixture');
+    console.log('NATIVE_PRODUCT_REAL_MANAGER_NOFRAMES '+JSON.stringify({
+     runAt,topLevelAction:true,childAction:false,
+     managerVerifiedForStable:false,automaticPatchAllowed:false
+    }));
+   }finally{await top.close();}
    assert.deepEqual(Object.keys(nativeProbe.receiptSnapshot()).sort(),['broken','fixed']);
    console.log('NATIVE_PRODUCT_GM_DIAGNOSTIC_STAGE_PASSED: real unpacked Tampermonkey ran product-generated source; synthetic evidence only; no auto repair or store-signed identity.');
    return;
