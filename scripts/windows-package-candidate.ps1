@@ -149,6 +149,23 @@ foreach($original in $sourceFiles) {
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
 $expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'extracted' $temp
 Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+# TASK-020 / ISSUE-215 diagnostic only: match the exact disposable test EXE
+# location, never query or modify external Chrome profiles or terminate processes.
+# Parent Electron's exit does not prove its renderer/utility children exited.
+function Trace-CandidateElectronProcesses([string]$candidateExe,[string]$label) {
+  $exact=[IO.Path]::GetFullPath($candidateExe)
+  $matches=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" |
+    Where-Object {
+      $_.ExecutablePath -and [string]::Equals(
+        [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
+        [StringComparison]::OrdinalIgnoreCase)
+    })
+  Write-Output "DIAGNOSTIC: $label candidate EXE live processes: $($matches.Count)"
+  foreach($entry in $matches) {
+    Write-Output "DIAGNOSTIC: candidate PID=$($entry.ProcessId) parent=$($entry.ParentProcessId)"
+  }
+}
+Trace-CandidateElectronProcesses (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
 # TEST-028: exercise an actual portable directory MOVE (not a second copy
 # built in the original path). Spaces and Unicode path components must not
 # break Electron's packaged resource lookup or redirect persistent userData.
@@ -158,7 +175,14 @@ if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated te
 # Atomic same-parent rename: unlike PowerShell Move-Item this cannot leave a
 # partially copied payload when an Electron utility still holds an open DLL.
 . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
-$relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
+try {
+  $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
+} catch {
+  # Preserve the actual exception and the original fail-closed guard.
+  Trace-CandidateElectronProcesses (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after relocation failure'
+  Write-Output "DIAGNOSTIC: sourceExists=$(Test-Path -LiteralPath $expanded); destinationExists=$(Test-Path -LiteralPath $moved)"
+  throw
+}
 Write-Output "PASS: atomic portable directory relocation ($relocationAttempts attempt(s))"
 $expanded=$moved
 $movedFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
