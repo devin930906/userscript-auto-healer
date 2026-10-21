@@ -33,15 +33,22 @@ function Move-CandidatePortableDirectory(
     try {
       [IO.Directory]::Move($from,$to)
       return $attempt
-    } catch [System.IO.IOException] {
-      # Win32 ERROR_SHARING_VIOLATION (32) / ERROR_LOCK_VIOLATION (33)
-      # only. Denied access, invalid paths, missing files and any other
-      # I/O failure must retain their original exception and stop immediately.
-      $win32Code=$_.Exception.HResult -band 0xFFFF
-      if($win32Code -ne 32 -and $win32Code -ne 33) { throw }
+    } catch {
+      # PowerShell wraps .NET method failures in MethodInvocationException.
+      # Unwrap to the actual Windows file-system error; an open child DLL
+      # may surface as ACCESS_DENIED (5), not only SHARING_VIOLATION (32)
+      # or LOCK_VIOLATION (33). Retry only these bounded access conflicts.
+      # Persistent NTFS ACL denials are never ignored: retries exhaust and
+      # rethrow the original exception. All other causes fail immediately.
+      $rootError=$_.Exception
+      while($rootError.InnerException) { $rootError=$rootError.InnerException }
+      if($rootError -isnot [System.IO.IOException] -and
+         $rootError -isnot [System.UnauthorizedAccessException]) { throw }
+      $win32Code=$rootError.HResult -band 0xFFFF
+      if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
       if($attempt -eq $maxAttempts) { throw }
       if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
-        throw [InvalidOperationException]::new('Sharing violation left changed relocation state')
+        throw [InvalidOperationException]::new('Windows access conflict left changed relocation state')
       }
       Start-Sleep -Milliseconds $delayMilliseconds
     }
