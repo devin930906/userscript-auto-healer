@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import { join, win32 } from 'node:path';
+import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -27,6 +27,7 @@ import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/hea
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
+import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 let mainWindow: BrowserWindow | null = null;
@@ -549,6 +550,62 @@ function registerSafeIpc(): void {
     stopOnlyGmProbe();
     return {ok:existed,status:existed?'FIXTURE_STOP_REQUESTED':'NO_ACTIVE_FIXTURE',
       ...unverified};
+  });
+
+  // TASK-011/TEST-020/026: explicit read-only recovery reconciliation.
+  // No renderer-supplied paths/bytes, user approval booleans or write operations.
+  // Two independent native file selections are bound by the existing journal
+  // verifier to the precise source and to BOTH independently verified backups.
+  ipcMain.handle('restore:inspect-intent',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||scenarioObserveInProgress||launchInProgress||
+       profilePreparationInProgress||gmActionInProgress||gmStartInProgress||
+       readOwnedBrowser())
+      return {ok:false,code:'RESTORE_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    nativeSelectionInProgress=true;
+    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'info',buttons:['只读核对','取消'],defaultId:1,cancelId:1,noLink:true,
+        message:'只读核对已有的恢复意图（不会写入）',
+        detail:'请依次选择当前的 .user.js 脚本，以及本工具先前保存的'
+          +' .uah-restore-*.journal.json 恢复意图文件。'
+          +'\\n系统会独立验证原版与被替换版本的备份。'
+          +'\\n不会复制、覆盖、修改文件、安装脚本或授权自动重试。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const selectedSource=await dialog.showOpenDialog(win,{
+        title:'只读核对：选择目前的 .user.js 原文件',
+        properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
+      });
+      if(selectedSource.canceled||selectedSource.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const journalSelection=await dialog.showOpenDialog(win,{
+        title:'只读核对：选择先前生成的 .uah-restore-*.journal.json 意图文件',
+        properties:['openFile'],filters:[{name:'Restore intent',extensions:['json']}]
+      });
+      if(journalSelection.canceled||journalSelection.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const observed=await inspectNativeRestoreIntentReadOnly({
+        sourcePath:selectedSource.filePaths[0],
+        backupDirectory:dirname(journalSelection.filePaths[0]),
+        journalFileName:basename(journalSelection.filePaths[0]),
+        userApproved:true
+      });
+      if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(observed.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY')
+        return {ok:false,code:observed.reason,...unverified};
+      // Return a fixed classification only, never source paths, journals,
+      // recovery digests, contents or the ability to change the source.
+      return {ok:true,status:'RESTORE_INTENT_OBSERVED_READ_ONLY',
+        sourceState:observed.sourceState,...unverified};
+    }catch{return {ok:false,code:'INSPECTION_FAILED',...unverified};}
+    finally{nativeSelectionInProgress=false;}
   });
 
   // TASK-011: explicit manual *original* restore only. The renderer sends no
