@@ -90,6 +90,38 @@ try {
     } finally {
       Remove-Item -LiteralPath $junction -Force -ErrorAction Stop
     }
+    # A junction in an ANCESTOR of RUNNER_TEMP is outside the current guard's
+    # runner-to-source walk. The lexical paths still appear under RUNNER_TEMP,
+    # but the actual relocation would follow the ancestor junction.
+    $parentTarget=Join-Path $root 'disposable-parent-junction-target'
+    $nestedRunner=Join-Path $parentTarget 'nested-runner'
+    $nestedSource=Join-Path $nestedRunner 'source'
+    New-Item -ItemType Directory -Path $nestedSource -Force | Out-Null
+    $nestedPayload=Join-Path $nestedSource 'preserve.txt'
+    [IO.File]::WriteAllText($nestedPayload,'ancestor-must-not-rename')
+    $parentJunction=Join-Path $root 'runner-parent-junction'
+    New-Item -ItemType Junction -Path $parentJunction -Target $parentTarget -ErrorAction Stop | Out-Null
+    try {
+      $env:RUNNER_TEMP=Join-Path $parentJunction 'nested-runner'
+      $ancestorDenied=$false
+      try {
+        Move-CandidatePortableDirectory (Join-Path $env:RUNNER_TEMP 'source') (
+          Join-Path $env:RUNNER_TEMP 'moved') 1 0 | Out-Null
+      } catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*reparse point refused*') { throw }
+        $ancestorDenied=$true
+      }
+      if(-not $ancestorDenied -or
+         -not (Test-Path -LiteralPath $nestedPayload -PathType Leaf) -or
+         [IO.File]::ReadAllText($nestedPayload) -cne 'ancestor-must-not-rename' -or
+         (Test-Path -LiteralPath (Join-Path $nestedRunner 'moved'))) {
+        throw 'Junction ancestor of RUNNER_TEMP redirected candidate relocation'
+      }
+      Write-Output 'PASS: RUNNER_TEMP ancestor junction cannot redirect candidate relocation'
+    } finally {
+      $env:RUNNER_TEMP=$sandbox
+      Remove-Item -LiteralPath $parentJunction -Force -ErrorAction Stop
+    }
   } finally { $env:RUNNER_TEMP=$originalRunnerTemp }
 
   # The smoke parent may exit before its child/utility image. Wait for only
