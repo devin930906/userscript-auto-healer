@@ -4,6 +4,7 @@
  * This is a diagnostic handoff, not a verified Tampermonkey product result.
  */
 import {createHash} from 'node:crypto';
+import {isProxy} from 'node:util/types';
 import {lstat,open} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,resolve} from 'node:path';
 import {verifyExactCandidateBytesReadOnly} from '../version/candidate-bytes';
@@ -201,7 +202,9 @@ const savedReportKeys=[
  * extra fields and non-plain prototypes are not safe export data.
  */
 function exactData(input:unknown,fields:readonly string[]):Record<string,unknown>|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ // Node's intrinsic Proxy detection does not execute user-defined traps,
+ // including for revoked proxies. Do this before any descriptor reflection.
+ if(!input||typeof input!=='object'||isProxy(input)||Array.isArray(input))return null;
  const prototype=Object.getPrototypeOf(input);
  if(prototype!==Object.prototype&&prototype!==null)return null;
  const descriptors=Object.getOwnPropertyDescriptors(input);
