@@ -105,3 +105,27 @@ test('TEST-021: malformed, hostile inputs never produce approval or disclose raw
     assert.equal(JSON.stringify(result).includes('Consent-only example'),false);
   }
 });
+
+test('TASK-010/TEST-021/026: acceptance request must be own plain data without executing accessors',()=>{
+  let getterCalls=0;
+  const accessorHash={...request};
+  Object.defineProperty(accessorHash,'expectedSourceSha256',{
+    enumerable:true,
+    get(){getterCalls++;return request.expectedSourceSha256;}
+  });
+  const accessorSource={...request};
+  Object.defineProperty(accessorSource,'source',{
+    enumerable:true,
+    get(){getterCalls++;return source;}
+  });
+  const inherited=Object.create(request) as LiteralPatchRequest;
+  const extraSymbol=Object.assign({...request},{[Symbol('unexpected')]:true});
+  for(const input of [accessorHash,accessorSource,inherited,extraSymbol]){
+    const outcome=assessLocalAcceptancePreflight(input,candidate,opts);
+    assert.equal(outcome.status,'BLOCKED',
+      'untrusted request must not pass the local acceptance boundary');
+    assert.equal(outcome.automaticPatchAllowed,false);
+  }
+  assert.equal(getterCalls,0,
+    'untrusted request getters must not run in the acceptance preflight');
+});

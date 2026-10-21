@@ -32,6 +32,11 @@ export type LocalAcceptancePreflightResult=
   }>;
 
 const SHA256=/^[a-f0-9]{64}$/;
+const REQUEST_FIELDS=[
+  'source','expectedSourceSha256','callOffset','method',
+  'originalSelector','replacementSelector','faultEvidenceId'
+] as const;
+
 function blocked(reason:PreflightBlockReason):LocalAcceptancePreflightResult{
   return Object.freeze({
     status:'BLOCKED' as const,reason,
@@ -73,7 +78,22 @@ export function assessLocalAcceptancePreflight(
     const diskSourceSha256:unknown=fields.diskSourceSha256.value;
     if(typeof diskSourceSha256!=='string'||!SHA256.test(diskSourceSha256)||
        !request||typeof request!=='object'||utilTypes.isProxy(request)||
-       diskSourceSha256!==request.expectedSourceSha256)
+       Array.isArray(request))
+      return blocked('SOURCE_IDENTITY_UNCONFIRMED');
+    // Never read requester-supplied fields before confirming that all seven
+    // are own data properties. Getters/inherited fields may execute arbitrary
+    // script code or supply a forged source identity to this preflight.
+    const requestProto=Object.getPrototypeOf(request);
+    if(requestProto!==Object.prototype&&requestProto!==null)
+      return blocked('SOURCE_IDENTITY_UNCONFIRMED');
+    const requestDescriptors=Object.getOwnPropertyDescriptors(request);
+    const requestKeys=Reflect.ownKeys(requestDescriptors);
+    if(requestKeys.length!==REQUEST_FIELDS.length||
+       requestKeys.some(k=>typeof k!=='string'||
+         !REQUEST_FIELDS.includes(k as typeof REQUEST_FIELDS[number]))||
+       REQUEST_FIELDS.some(k=>!Object.prototype.hasOwnProperty.call(requestDescriptors,k)||
+         !Object.prototype.hasOwnProperty.call(requestDescriptors[k],'value'))||
+       requestDescriptors.expectedSourceSha256.value!==diskSourceSha256)
       return blocked('SOURCE_IDENTITY_UNCONFIRMED');
 
     // Regenerate the AST-anchored diff and exact candidate schema, including
