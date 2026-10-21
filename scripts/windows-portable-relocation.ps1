@@ -331,9 +331,24 @@ function Get-CandidatePortableSiblingRenameControl([string]$source) {
   }
 }
 
+# ISSUE-215: capture evidence at the FIRST access denial rather than only
+# after bounded retries. A transient denial may disappear before the final
+# attempt; the caller provides its already enumerated candidate-only files.
+# This probe never resolves a denial into permission to move or modify data.
+function Get-CandidatePortableFirstDenialSummary(
+  [string]$source,[string[]]$candidateFiles
+) {
+  $owners=Get-CandidatePortableRelocationOwnerSummary (
+    Join-Path $source 'UserscriptAutoHealer.exe')
+  $sharing=Get-CandidatePortableFileShareSummary $source $candidateFiles
+  $sibling=Get-CandidatePortableSiblingRenameControl $source
+  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling]"
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
-  [int]$maxAttempts=12,[int]$delayMilliseconds=250
+  [int]$maxAttempts=12,[int]$delayMilliseconds=250,
+  [string[]]$candidateFiles=$null
 ) {
   if([string]::IsNullOrWhiteSpace($source) -or
      [string]::IsNullOrWhiteSpace($destination) -or
@@ -394,6 +409,12 @@ function Move-CandidatePortableDirectory(
       # On an exhausted retry the original exception is still rethrown.
       Write-Warning (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
         [IO.Directory]::Exists($from)) (Test-Path -LiteralPath $to) ([DateTime]::UtcNow))
+      if($attempt -eq 1) {
+        # Diagnostics are strictly observational. Even a successful sibling
+        # control cannot bypass or shorten this move's fail-closed retries.
+        Write-Warning ("TASK-020 first relocation denial: "+(
+          Get-CandidatePortableFirstDenialSummary $from $candidateFiles))
+      }
       if($rootError -isnot [System.IO.IOException] -and
          $rootError -isnot [System.UnauthorizedAccessException]) { throw }
       if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
