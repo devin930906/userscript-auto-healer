@@ -82,6 +82,53 @@ function Write-CandidatePortableProcessSnapshot([string]$candidateExe,[string]$l
   Write-Output ("DIAGNOSTIC: {0} candidate owners: {1}" -f $label,$summary)
 }
 
+# ISSUE-215: on a real denial, inspect only the already-verified candidate
+# file list with a read-only, delete-sharing probe. Sharing conflicts can reveal
+# a locked candidate FILE; an all-clear does NOT prove that directories,
+# antivirus or other filesystem actors have released their handles.
+# Return a bounded, relative-name-only summary and never obscure the original
+# Directory.Move exception if a diagnostic itself cannot run.
+function Get-CandidatePortableFileShareSummary(
+  [string]$source,[string[]]$filePaths
+) {
+  try {
+    if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       [string]::IsNullOrWhiteSpace($source) -or
+       $null -eq $filePaths -or $filePaths.Count -gt 512) {
+      return 'scan=unavailable'
+    }
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase)) { return 'scan=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $prefix=$base+[IO.Path]::DirectorySeparatorChar
+    $blocked=[Collections.Generic.List[string]]::new()
+    foreach($path in $filePaths) {
+      if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable' }
+      $full=[IO.Path]::GetFullPath($path)
+      if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        return 'scan=unavailable'
+      }
+      $stream=$null
+      try {
+        $stream=[IO.File]::Open($full,[IO.FileMode]::Open,[IO.FileAccess]::Read,
+          ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+      } catch {
+        if($blocked.Count -lt 8) {
+          $blocked.Add($full.Substring($prefix.Length).Replace(';','_'))
+        }
+      } finally {
+        if($null -ne $stream) { $stream.Dispose() }
+      }
+    }
+    # The bounded examples are candidate-relative paths, never user paths.
+    return "scan=ok probed=$($filePaths.Count) blockedExamples=$($blocked.Count) names=$($blocked -join ';')"
+  } catch {
+    return 'scan=unavailable'
+  }
+}
+
 # TEST-028: lexical containment is insufficient on Windows: a junction or
 # symlink anywhere in the existing source ancestry (including ABOVE
 # RUNNER_TEMP) can redirect a nested source to another filesystem tree.
