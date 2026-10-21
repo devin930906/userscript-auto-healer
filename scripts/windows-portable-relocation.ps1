@@ -46,6 +46,33 @@ function Wait-CandidatePortableProcessExit(
   }
 }
 
+# ISSUE-215: collect bounded, read-only evidence at the ACTUAL final
+# relocation denial. An earlier no-process snapshot cannot exclude a race.
+# Only compare candidate image paths; log counts, never arbitrary full paths.
+# Unknown/redacted CIM identities must never be presented as zero owners.
+function Get-CandidatePortableRelocationOwnerSummary([string]$candidateExe) {
+  try {
+    $exact=[IO.Path]::GetFullPath($candidateExe)
+    $live=0
+    $unknownPath=0
+    $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop)
+    foreach($process in $processes) {
+      $image=[string]$process.ExecutablePath
+      if([string]::IsNullOrWhiteSpace($image)) {
+        $unknownPath++
+        continue
+      }
+      try {
+        if([string]::Equals([IO.Path]::GetFullPath($image),$exact,
+           [StringComparison]::OrdinalIgnoreCase)) { $live++ }
+      } catch { $unknownPath++ }
+    }
+    return "live=$live unknownPath=$unknownPath query=ok"
+  } catch {
+    return 'live=unknown unknownPath=unknown query=failed'
+  }
+}
+
 # TASK-020 / REQ-028 / TEST-028: same-volume candidate-only portable move.
 # A PowerShell Move-Item of a directory containing locked files can partially
 # populate a destination before failing. Windows Directory.Move performs one
@@ -128,7 +155,14 @@ function Move-CandidatePortableDirectory(
       if($rootError -isnot [System.IO.IOException] -and
          $rootError -isnot [System.UnauthorizedAccessException]) { throw }
       if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
-      if($attempt -eq $maxAttempts) { throw }
+      if($attempt -eq $maxAttempts) {
+        # Do not mask/replace the original .NET access exception when CIM is
+        # unavailable; this is diagnostic evidence, not an unlock mechanism.
+        $owners=Get-CandidatePortableRelocationOwnerSummary (
+          Join-Path $from 'UserscriptAutoHealer.exe')
+        Write-Warning "TASK-020 final relocation denial candidate owners: $owners"
+        throw
+      }
       if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
         throw [InvalidOperationException]::new('Windows access conflict left changed relocation state')
       }
