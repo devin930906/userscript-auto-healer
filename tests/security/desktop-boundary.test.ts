@@ -221,20 +221,20 @@ test('TASK-011/TEST-020/026: desktop reconciles restore intent only after native
   const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
   const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
-  assert.match(main,/ipcMain\\.handle\\('restore:inspect-intent',async\\(event,\\.\\.\\.args:unknown\\[\\]\\)=>/);
-  assert.match(main,/inspectNativeRestoreIntentReadOnly\\(/);
-  assert.match(main,/if\\(args\\.length\\)return \\{ok:false,code:'INVALID_REQUEST'/);
-  assert.match(main,/backupDirectory:dirname\\(journalSelection\\.filePaths\\[0\\]\\)/);
-  assert.match(main,/journalFileName:basename\\(journalSelection\\.filePaths\\[0\\]\\)/);
-  assert.match(preload,/inspectRestoreIntent: \\(\\): Promise<unknown> => ipcRenderer\\.invoke\\('restore:inspect-intent'\\)/);
-  assert.doesNotMatch(preload,/ipcRenderer\\.invoke\\('restore:inspect-intent',\\s*[^)]/);
-  assert.match(ui,/window\\.healer\\.inspectRestoreIntent\\(\\)/);
+  assert.match(main,/ipcMain\.handle\('restore:inspect-intent',async\(event,\.\.\.args:unknown\[\]\)=>/);
+  assert.match(main,/inspectNativeRestoreIntentReadOnly\(/);
+  assert.match(main,/if\(args\.length\)return \{ok:false,code:'INVALID_REQUEST'/);
+  assert.match(main,/backupDirectory:dirname\(journalSelection\.filePaths\[0\]\)/);
+  assert.match(main,/journalFileName:basename\(journalSelection\.filePaths\[0\]\)/);
+  assert.match(preload,/inspectRestoreIntent: \(\): Promise<unknown> => ipcRenderer\.invoke\('restore:inspect-intent'\)/);
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:inspect-intent',\s*[^)]/);
+  assert.match(ui,/window\.healer\.inspectRestoreIntent\(\)/);
   assert.match(ui,/sourceState==='ORIGINAL_PRESENT'/);
   assert.match(html,/id="restore-inspect-intent"/);
   assert.match(html,/只读/);
   // The UI cannot send arbitrary source/journal names or request retry.
-  assert.doesNotMatch(main,/ipcMain\\.handle\\('restore:inspect-intent',async\\(event,(?:source|journal|path)/);
-  assert.doesNotMatch(preload,/ipcRenderer\\.invoke\\('restore:inspect-intent',\\s*[^)]/);
+  assert.doesNotMatch(main,/ipcMain\.handle\('restore:inspect-intent',async\(event,(?:source|journal|path)/);
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:inspect-intent',\s*[^)]/);
 });
 
 test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer', () => {
