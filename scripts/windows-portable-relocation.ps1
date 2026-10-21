@@ -216,8 +216,8 @@ function Get-CandidatePortableRenameAclSummary([string]$source) {
     if([string]::IsNullOrWhiteSpace($source) -or
        [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
        -not [IO.Path]::IsPathRooted($source)) { return 'acl=unavailable' }
-    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\\','/'))
-    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@([char]92,[char]47))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@([char]92,[char]47))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
       [StringComparison]::OrdinalIgnoreCase) -or
       -not [IO.Directory]::Exists($base)) { return 'acl=unavailable' }
