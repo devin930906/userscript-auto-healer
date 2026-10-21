@@ -11,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
+import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
 const changed=Buffer.from('// ==UserScript==\n// @name Edited\n// ==/UserScript==\n');
@@ -145,5 +146,83 @@ test('TEST-020: successful native restore retains selected script permission mod
    assert.ok((await readdir(opts.backupDirectory)).every(n=>!n.endsWith('.pending')),
     'do not leave staging names after successful journal publication');
   }
+ });
+});
+
+test('TEST-020: read-only native intent inspection identifies restored and displaced source without changing files',async()=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY',JSON.stringify(restored));
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const query={sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  const beforeNames=await readdir(opts.backupDirectory);
+  const journalBefore=await readFile(join(opts.backupDirectory,restored.journalFileName));
+  const first=await inspectNativeRestoreIntentReadOnly(query);
+  assert.equal(first.status,'RESTORE_INTENT_OBSERVED_READ_ONLY',JSON.stringify(first));
+  if(first.status==='RESTORE_INTENT_OBSERVED_READ_ONLY'){
+   assert.equal(first.sourceState,'ORIGINAL_PRESENT');
+   assert.equal(first.originalSha256,sha(original));
+   assert.equal(first.displacedSha256,sha(changed));
+   assert.equal(first.automaticPatchAllowed,false);
+   assert.equal(first.automaticRollbackAllowed,false);
+   assert.equal(first.tampermonkeyVerified,false);
+   assert.equal(first.businessVerified,false);
+  }
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+  await writeFile(opts.sourcePath,changed);
+  const second=await inspectNativeRestoreIntentReadOnly(query);
+  assert.equal(second.status,'RESTORE_INTENT_OBSERVED_READ_ONLY',JSON.stringify(second));
+  if(second.status==='RESTORE_INTENT_OBSERVED_READ_ONLY')
+   assert.equal(second.sourceState,'DISPLACED_PRESENT');
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+  assert.deepEqual(await readdir(opts.backupDirectory),beforeNames);
+  assert.deepEqual(await readFile(join(opts.backupDirectory,restored.journalFileName)),journalBefore);
+ });
+});
+
+test('TEST-020/026: forged journal, tampered backup and diverged source never give a usable receipt',async()=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const query={sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  const journalPath=join(opts.backupDirectory,restored.journalFileName);
+  const authentic=await readFile(journalPath);
+  await writeFile(journalPath,Buffer.from('{"state":"RESTORE_INTENT_UNVERIFIED"}\\n'));
+  assert.equal((await inspectNativeRestoreIntentReadOnly(query)).status,'BLOCKED');
+  await writeFile(journalPath,authentic);
+  await writeFile(join(opts.backupDirectory,opts.backupFileName),'tampered');
+  assert.equal((await inspectNativeRestoreIntentReadOnly(query)).status,'BLOCKED');
+  // The original backup is now tainted; even an unchanged journal is not enough.
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+  await writeFile(opts.sourcePath,Buffer.from('unrelated third party update'));
+  assert.equal((await inspectNativeRestoreIntentReadOnly(query)).status,'BLOCKED');
+ });
+});
+
+test('TEST-020/026: manual approval, exact journal name and untrusted Proxy are rejected without traps',async()=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const query={sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  let traps=0;
+  const proxy=new Proxy(query,{
+   getPrototypeOf(){traps++;throw Error('untrusted prototype');},
+   ownKeys(){traps++;throw Error('untrusted keys');},
+   get(){traps++;throw Error('untrusted access');}
+  });
+  for(const input of [proxy,{...query,userApproved:false},
+   {...query,journalFileName:'../../other.journal.json'},
+   {...query,journalFileName:'.uah-restore-anything.pending'},
+   {...query,automaticRollbackAllowed:true}]){
+   const result=await inspectNativeRestoreIntentReadOnly(input);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  }
+  assert.equal(traps,0);
+  assert.deepEqual(await readFile(opts.sourcePath),original);
  });
 });
