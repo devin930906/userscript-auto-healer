@@ -101,7 +101,11 @@ export function summarizeFixtureDomEvidence(
  const obsolete=counts[FIXTURE_SELECTORS[1]];
  const acted=counts[FIXTURE_SELECTORS[2]];
  const actedOnTarget=counts[FIXTURE_SELECTORS[3]];
- if(sample.routeChanged!==false||sample.originMatchesApproved!==true||
+ // The controlled top-frame fixture has no child documents or visible shadow
+ // subtrees. Selector counts from a limited top-level CDP sample cannot
+ // establish behavior inside such uninspected DOM regions.
+ if(summary.iframeCount!==0||summary.visibleShadowRoots!==0||
+    sample.routeChanged!==false||sample.originMatchesApproved!==true||
     sample.status!=='LIMITED_DOM_OBSERVATION'||
     sample.fullPageVerified!==false||sample.userscriptVerified!==false||
     !Number.isSafeInteger(current)||current!==1||
