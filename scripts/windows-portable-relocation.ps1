@@ -3,6 +3,20 @@
 # populate a destination before failing. Windows Directory.Move performs one
 # same-parent rename, so an error must never become a partial file copy.
 # This helper does NOT move real user data and does NOT certify Stable.
+# Keep the production warning and the deterministic Windows regression on
+# one formatter. This has no file-system effects and does not expose paths.
+function Format-CandidatePortableRelocationFailure(
+  [int]$attempt,[int]$maxAttempts,[System.Exception]$cause,
+  [bool]$sourceExists,[bool]$destinationExists,[DateTime]$observedAtUtc
+) {
+  $utc=$observedAtUtc.ToUniversalTime().ToString(
+    'yyyy-MM-ddTHH:mm:ss.fffZ',[Globalization.CultureInfo]::InvariantCulture)
+  $win32Code=$cause.HResult -band 0xFFFF
+  return ("TASK-020 relocation attempt {0}/{1} UTC={2} type={3} HRESULT=0x{4:X8} Win32={5} sourceExists={6} destinationExists={7}" -f
+    $attempt,$maxAttempts,$utc,$cause.GetType().Name,$cause.HResult,
+    $win32Code,$sourceExists,$destinationExists)
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
   [int]$maxAttempts=12,[int]$delayMilliseconds=250
@@ -47,11 +61,8 @@ function Move-CandidatePortableDirectory(
       # Windows failure after extracted Electron smoke. Record each attempt
       # without leaking full temp paths or changing the retry/error policy.
       # On an exhausted retry the original exception is still rethrown.
-      $utc=[DateTime]::UtcNow.ToString(
-        'yyyy-MM-ddTHH:mm:ss.fffZ',[Globalization.CultureInfo]::InvariantCulture)
-      Write-Warning ("TASK-020 relocation attempt {0}/{1} UTC={2} type={3} HRESULT=0x{4:X8} Win32={5} sourceExists={6} destinationExists={7}" -f
-        $attempt,$maxAttempts,$utc,$rootError.GetType().Name,
-        $rootError.HResult,$win32Code,[IO.Directory]::Exists($from),(Test-Path -LiteralPath $to))
+      Write-Warning (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
+        [IO.Directory]::Exists($from)) (Test-Path -LiteralPath $to) ([DateTime]::UtcNow))
       if($rootError -isnot [System.IO.IOException] -and
          $rootError -isnot [System.UnauthorizedAccessException]) { throw }
       if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
