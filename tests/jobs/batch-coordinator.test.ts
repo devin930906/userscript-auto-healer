@@ -850,3 +850,28 @@ test('TEST-022: expired global AST deadline is distinguished from user cancellat
   globalThis.setTimeout=nativeTimeout;
  }
 });
+
+test('TASK-013/TEST-022: live final RUNNING may settle successfully but crashed final attempt never replays',async()=>{
+ let signalStarted!:()=>void,allowFinish!:()=>void;
+ const started=new Promise<void>(resolve=>{signalStarted=resolve;});
+ const released=new Promise<void>(resolve=>{allowFinish=resolve;});
+ const opts={count:1,maxAttempts:1,concurrency:1,jobHashes:[SCRIPT_A]};
+ const native=new ReadOnlyBatchCoordinator(opts,async()=>{
+  signalStarted();await released;return 'DONE';
+ });
+ const inFlight=native.run();
+ await started;
+ const persistedRunning=native.snapshot();
+ assert.equal(persistedRunning.jobs[0].state,'RUNNING');
+ assert.equal(persistedRunning.jobs[0].attempts,1);
+ allowFinish();
+ const completed=await inFlight;
+ assert.equal(completed.jobs[0].state,'SUCCEEDED');
+ assert.equal(native.mayPersistOver(persistedRunning),true,
+  'a live last attempt can commit success over an in-flight receipt');
+ const restarted=new ReadOnlyBatchCoordinator(opts,async()=>{
+  throw Error('EXHAUSTED_ATTEMPT_MUST_NOT_RUN');
+ },persistedRunning);
+ assert.deepEqual(restarted.snapshot().jobs.map(j=>j.state),['FAILED'],
+  'a crashed final attempt must still exhaust its bounded retry budget');
+});
