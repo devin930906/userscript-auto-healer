@@ -84,6 +84,7 @@ interface Window {
     saveGmReport(): Promise<{ok:boolean;code?:string;status?:string;fileName?:string;sha256?:string;byteLength?:number}>;
     gmProbeStatus(): Promise<{ok:boolean;code?:string;status?:string;
       observedModes?:number;reportedGmDefaultMatched?:boolean;
+      reportedGmStorageRoundtripMatched?:boolean;
       reportedBrokenFailed?:boolean;reportedFixedRecovered?:boolean;
       consistencyStatus?:string;comparedModes?:number;
       brokenDomAction?:number|null;fixedDomAction?:number|null}>;
@@ -872,6 +873,7 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
  }
  if(gmResult)gmResult.textContent='报告模式数：'+(result.observedModes??0)+
    '；自报 GM 默认值匹配：'+Boolean(result.reportedGmDefaultMatched)+
+   '；自报 GM 存储写入读回：'+Boolean(result.reportedGmStorageRoundtripMatched)+
    '；自报 broken 失败：'+Boolean(result.reportedBrokenFailed)+
    '；自报 fixed 动作：'+Boolean(result.reportedFixedRecovered)+
    '；独立 DOM 对照：'+(result.consistencyStatus??'UNKNOWN')+
