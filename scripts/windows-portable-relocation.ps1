@@ -409,15 +409,15 @@ function Move-CandidatePortableDirectory(
       # On an exhausted retry the original exception is still rethrown.
       Write-Warning (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
         [IO.Directory]::Exists($from)) (Test-Path -LiteralPath $to) ([DateTime]::UtcNow))
+      if($rootError -isnot [System.IO.IOException] -and
+         $rootError -isnot [System.UnauthorizedAccessException]) { throw }
+      if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
       if($attempt -eq 1) {
         # Diagnostics are strictly observational. Even a successful sibling
         # control cannot bypass or shorten this move's fail-closed retries.
         Write-Warning ("TASK-020 first relocation denial: "+(
           Get-CandidatePortableFirstDenialSummary $from $candidateFiles))
       }
-      if($rootError -isnot [System.IO.IOException] -and
-         $rootError -isnot [System.UnauthorizedAccessException]) { throw }
-      if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
       if($attempt -eq $maxAttempts) {
         # Do not mask/replace the original .NET access exception when CIM is
         # unavailable; this is diagnostic evidence, not an unlock mechanism.
