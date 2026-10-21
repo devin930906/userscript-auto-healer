@@ -119,6 +119,27 @@ function Get-CandidatePortableFileShareSummary(
       }
       if($seen.Add($full)) { $targets.Add($full) }
     }
+    # ISSUE-215 / TEST-028: a candidate empty directory is not an ancestor
+    # of any enumerated file, yet an open directory handle can deny rename.
+    # Walk only direct child directories, reject reparse points before descent,
+    # and bound the entire read-only diagnostic independently of file count.
+    $pending=[Collections.Generic.Queue[string]]::new()
+    $pending.Enqueue($base)
+    $directoryCount=0
+    while($pending.Count -gt 0) {
+      $parent=$pending.Dequeue()
+      foreach($child in @(Get-ChildItem -LiteralPath $parent -Directory -Force -ErrorAction Stop)) {
+        $full=[IO.Path]::GetFullPath([string]$child.FullName)
+        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+           (([int]$child.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0)) {
+          return 'scan=unavailable'
+        }
+        $directoryCount++
+        if($directoryCount -gt 512) { return 'scan=unavailable' }
+        if($seen.Add($full)) { $targets.Add($full) }
+        $pending.Enqueue($full)
+      }
+    }
     # Includes the root and every parent of a candidate file. Reparse paths
     # are rejected before any native handle is requested.
     foreach($path in $targets) {

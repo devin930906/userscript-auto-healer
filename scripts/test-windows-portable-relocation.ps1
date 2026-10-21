@@ -303,6 +303,30 @@ try {
   } finally { $noDeleteShare.Dispose() }
   Write-Output 'PASS: Windows delete-share omission is detected without changing source'
 
+  # ISSUE-215 / TEST-028: files alone do not cover an empty subdirectory.
+  # A surviving directory handle without FILE_SHARE_DELETE must be visible
+  # to the bounded diagnosis, even though no ZIP file has that directory
+  # in its ancestry. This fixture belongs solely to RUNNER_TEMP.
+  $emptyDirectory=Join-Path $permanent 'empty-child'
+  New-Item -ItemType Directory -Path $emptyDirectory | Out-Null
+  $emptyHandle=[UahCandidateDeleteAccessProbe]::Open($emptyDirectory,
+    [uint32]2147483648,[uint32]3,[IntPtr]::Zero,[uint32]3,
+    [uint32]0x02000000,[IntPtr]::Zero)
+  if($emptyHandle.IsInvalid) {
+    $emptyHandle.Dispose()
+    throw 'Windows empty-directory DELETE-sharing fixture could not be opened'
+  }
+  try {
+    $emptySummary=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($emptySummary -notlike '*blockedExamples=1*names=empty-child:Win32=*') {
+      throw "Empty candidate child directory lock was absent from diagnostics: $emptySummary"
+    }
+    if([IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+      throw 'Empty directory diagnostic altered the candidate file payload'
+    }
+  } finally { $emptyHandle.Dispose() }
+  Write-Output 'PASS: file-share scan includes locked empty candidate child directories'
+
   # Never overwrite another relocated copy, even if the source is valid.
   $source=Join-Path $root 'unmoved-source'
   $existing=Join-Path $root 'existing-destination'
