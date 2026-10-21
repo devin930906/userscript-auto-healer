@@ -11,6 +11,7 @@ import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
+import {types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
 import {hasUnsafePathLink} from './path-boundary';
@@ -49,7 +50,9 @@ function sameDirectory(a:BigIntStats,b:BigIntStats):boolean{
   return a.dev===b.dev&&a.ino===b.ino;
 }
 function parse(input:unknown):{sourcePath:string;backupDirectory:string}|null {
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  // Reject even revoked Proxies before getPrototypeOf, descriptors or ownKeys.
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+     Array.isArray(input))return null;
   const prototype=Object.getPrototypeOf(input);
   if(prototype!==Object.prototype&&prototype!==null)return null;
   const desc=Object.getOwnPropertyDescriptors(input);
