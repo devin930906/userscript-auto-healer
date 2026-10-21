@@ -175,7 +175,12 @@ async function main(){
   }
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8',
     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
-  res.end('<!doctype html><title>Disposable CI install</title><a href="/test.user.js" id="install">Test only</a>');
+  // A second, independently bound loopback port is an unauthorized origin
+  // for the product GM probe, despite its intentionally broad @match host.
+  // Expose the same DOM target here so an origin-guard regression is visible.
+  res.end(req.url==='/?mode=fixed'
+   ? '<!doctype html><html><body><div id="current-target">Wrong-port fixture</div></body></html>'
+   : '<!doctype html><title>Disposable CI install</title><a href="/test.user.js" id="install">Test only</a>');
  });
  await new Promise((resolve,reject)=>{
   server.once('error',reject);
@@ -375,6 +380,28 @@ async function main(){
      managerVerifiedForStable:false,automaticPatchAllowed:false
     }));
    }finally{await top.close();}
+   // TEST-017/018: Chrome match patterns cannot encode a loopback port.
+   // The same live manager therefore sees this disposable *other* local port,
+   // but the actual product-generated script must honor its exact consented
+   // location.origin guard before any GM/DOM/report effect.
+   const wrongOrigin='http://127.0.0.1:'+port;
+   assert.notEqual(wrongOrigin,nativeProbe.origin,
+    'Control fixture must not share the authorized GM probe origin');
+   const wrongPort=await context.newPage();
+   try{
+    await wrongPort.goto(wrongOrigin+'/?mode=fixed',{
+     waitUntil:'domcontentloaded',timeout:20000});
+    await wrongPort.locator('#current-target').waitFor({timeout:20000});
+    await sleep(1600);
+    const wrongMarker=await wrongPort.locator('#current-target')
+     .getAttribute('data-uah-probe-action');
+    assert.equal(wrongMarker,null,
+     'Product GM script must not act on a different loopback port');
+    console.log('NATIVE_PRODUCT_REAL_MANAGER_CROSS_PORT_DENIED '+JSON.stringify({
+     runAt,wrongPortAction:false,authorizedOriginUnchanged:true,
+     managerVerifiedForStable:false,automaticPatchAllowed:false
+    }));
+   }finally{await wrongPort.close();}
    assert.deepEqual(Object.keys(nativeProbe.receiptSnapshot()).sort(),['broken','fixed']);
    console.log('NATIVE_PRODUCT_GM_DIAGNOSTIC_STAGE_PASSED: real unpacked Tampermonkey ran product-generated source; synthetic evidence only; no auto repair or store-signed identity.');
    return;
