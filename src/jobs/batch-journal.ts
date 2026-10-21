@@ -123,8 +123,9 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    if((error as NodeJS.ErrnoException).code==='EEXIST')return deny('BUSY');
    return deny('IO_FAILURE');
   }
-  ownedLock=await lstat(lock,{bigint:true});
-  if(!ownedLock.isDirectory()||ownedLock.isSymbolicLink())return deny('BUSY');
+  const acquiredLock=await lstat(lock,{bigint:true});
+  if(!acquiredLock.isDirectory()||acquiredLock.isSymbolicLink())return deny('BUSY');
+  ownedLock=acquiredLock;
   const lockedDir=await checkedDirectory(directory);
   if(!lockedDir||!sameDir(start,lockedDir))return deny('UNSAFE_PATH');
   try{
