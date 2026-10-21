@@ -10,6 +10,7 @@
  * untrusted or obsolete checkpoint must never authorize skipping any job.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 
 export type ReadOnlyWorkResult='DONE'|'RETRYABLE_FAILURE'|'PERMANENT_FAILURE';
 export type BatchJobState='QUEUED'|'RUNNING'|'SUCCEEDED'|'FAILED'|'CANCELLED';
@@ -59,7 +60,7 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  // Hostile Proxies can throw during descriptor or prototype inspection.
  // Treat them as invalid input, never propagate their arbitrary errors.
  try{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||Array.isArray(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
  const descriptors=Object.getOwnPropertyDescriptors(input);
@@ -78,7 +79,7 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  */
 function fingerprintHashes(input:unknown,count:number):string|null {
  if(input===undefined)return null;
- if(!Array.isArray(input)||input.length!==count||
+ if(nodeTypes.isProxy(input)||!Array.isArray(input)||input.length!==count||
     Object.getPrototypeOf(input)!==Array.prototype)
    throw Error('INVALID_BATCH_OPTIONS');
  const descriptors=Object.getOwnPropertyDescriptors(input);
@@ -101,7 +102,7 @@ function validateOptions(options:Options):ValidatedOptions{
  try{
  // Inspect own descriptors first; never invoke accessor properties while
  // validating potentially hostile batch options.
- if(!options||typeof options!=='object'||Array.isArray(options))
+ if(!options||typeof options!=='object'||nodeTypes.isProxy(options)||Array.isArray(options))
    throw Error('INVALID_BATCH_OPTIONS');
  const descriptors=Object.getOwnPropertyDescriptors(options);
  const allowed=['count','maxAttempts','concurrency','timeoutMs','jobHashes'] as const;
@@ -145,7 +146,7 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
     opts.batchFingerprint===null||top.batchFingerprint!==opts.batchFingerprint||
     top.automaticPatchAllowed!==false||top.automaticRollbackAllowed!==false||
     top.tampermonkeyVerified!==false||top.businessVerified!==false||
-    !Array.isArray(top.jobs)||top.jobs.length!==opts.count)
+    nodeTypes.isProxy(top.jobs)||!Array.isArray(top.jobs)||top.jobs.length!==opts.count)
    throw Error('INVALID_BATCH_CHECKPOINT');
  // Checkpoint arrays are untrusted: accessor-backed elements can have
  // side effects, and sparse/extra properties must never be accepted.
@@ -185,7 +186,7 @@ export class ReadOnlyBatchCoordinator{
   * Proxy wrappers without invoking user-defined reflection traps. */
  static isNativeInstance(value:unknown):value is ReadOnlyBatchCoordinator{
   return typeof value==='object'&&value!==null&&
-   #nativeBrand in value&&
+   !nodeTypes.isProxy(value)&&#nativeBrand in value&&
    Object.getPrototypeOf(value)===ReadOnlyBatchCoordinator.prototype;
  }
  private readonly jobs:MutableJob[];
