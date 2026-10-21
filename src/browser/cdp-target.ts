@@ -145,12 +145,8 @@ export async function openApprovedTarget(
   const created=await requestNewTab(session.browserWebsocket,targetUrl,signal);
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!created)return {ok:false,code:'CDP_COMMAND_FAILED'};
-  // On Windows CI an already-owned, newly created tab may finish its first
-  // main-frame navigation after the former 9s budget. Continue to require
-  // the SAME targetId, exact approved URL, live browser and owning listener;
-  // extra bounded readiness time never turns incomplete evidence into success.
   const began=Date.now();
-  while(Date.now()-began<15000){
+  while(Date.now()-began<9000){
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     try{
       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
