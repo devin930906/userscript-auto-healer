@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
+import {mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -162,5 +163,59 @@ test('TASK-013/TEST-022/026: shadowed instance methods cannot forge checkpoint w
    {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
   assert.deepEqual(await readFile(file),original,
    'shadowed monotonicity check must not overwrite a different batch');
+ });
+});
+
+test('TASK-013/TEST-022/026: a replaced pending checkpoint must not become the committed journal',async()=>{
+ await withJournal(async directory=>{
+  const native=new ReadOnlyBatchCoordinator(options,completed);
+  const original=ReadOnlyBatchCoordinator.prototype.snapshot;
+  let count=0;
+  let replacementPath='';
+  ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
+   count++;
+   if(count===2){
+    const staged=readdirSync(directory).filter(name=>
+     /^\\.uah-readonly-batch-.*\\.tmp$/.test(name));
+    assert.equal(staged.length,1,'fixture must intercept the staged file before publication');
+    replacementPath=join(directory,staged[0]);
+    renameSync(replacementPath,join(directory,'owned-staging-kept-for-review'));
+    writeFileSync(replacementPath,'FOREIGN-STAGING-MUST-REMAIN');
+   }
+   return original.call(this);
+  };
+  try{
+   const result=await saveReadOnlyBatchJournal(directory,native);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+   assert.equal(count,2);
+   assert.equal((await readFile(replacementPath,'utf8')),'FOREIGN-STAGING-MUST-REMAIN');
+   await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),{code:'ENOENT'},
+    'no unowned file may be promoted to the trusted journal name');
+  }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
+ });
+});
+
+test('TASK-013/TEST-022/026: losing the writer lock identity aborts publish and preserves foreign lock',async()=>{
+ await withJournal(async directory=>{
+  const native=new ReadOnlyBatchCoordinator(options,completed);
+  const original=ReadOnlyBatchCoordinator.prototype.snapshot;
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  let count=0;
+  ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
+   count++;
+   if(count===2){
+    renameSync(lock,join(directory,'original-owned-lock-kept-for-review'));
+    mkdirSync(lock);
+   }
+   return original.call(this);
+  };
+  try{
+   const result=await saveReadOnlyBatchJournal(directory,native);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'BUSY'});
+   assert.equal(count,2);
+   assert.deepEqual(readdirSync(lock),[],
+    'a substituted lock remains present and untouched for its actual owner');
+   await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),{code:'ENOENT'});
+  }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
  });
 });
