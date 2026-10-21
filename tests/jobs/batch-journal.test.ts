@@ -253,7 +253,7 @@ test('TASK-013/TEST-022: each completed job and active read-only attempt is dura
    assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
    if(restored.status!=='CHECKPOINT_RESTORED_SCHEDULING_ONLY')return;
    const after=await runCheckpointedReadOnlyBatch(recoveryDirectory,restored.coordinator);
-   assert.equal(after.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED');
+   assert.equal(after.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED',JSON.stringify(after));
    assert.deepEqual(replayed,[1],'a completed job must not be replayed');
    if(after.status==='BATCH_SETTLED_CHECKPOINTED_UNVERIFIED'){
     assert.deepEqual(after.snapshot.jobs.map(j=>j.attempts),[1,2]);
@@ -262,7 +262,7 @@ test('TASK-013/TEST-022: each completed job and active read-only attempt is dura
   });
   release();
   const done=await progress;
-  assert.equal(done.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED');
+  assert.equal(done.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED',JSON.stringify(done));
   assert.deepEqual(calls,[0,1]);
  });
 });
