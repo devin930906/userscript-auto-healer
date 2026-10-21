@@ -110,6 +110,52 @@ test('TEST-020/021: refuse untrusted receipts and absent native consent',async()
  });
 });
 
+test('TEST-020/026: recovery checkpoint stage and inspection reject Proxy before any reflection or filesystem mutation',async()=>{
+ await fixture(async opts=>{
+  const staged=await stageReviewedCandidateOnly(request,candidate,opts);
+  assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const before=(await readdir(opts.backupDirectory)).sort();
+  let traps=0;
+  const hostile=<T extends object>(value:T):T=>new Proxy(value,{
+   getPrototypeOf(){traps++;throw Error('SECRET_PROXY_TRAP');},
+   ownKeys(){traps++;throw Error('SECRET_PROXY_TRAP');},
+   getOwnPropertyDescriptor(){traps++;throw Error('SECRET_PROXY_TRAP');},
+   get(){traps++;throw Error('SECRET_PROXY_TRAP');}
+  });
+  for(const [req,receipt,options] of [
+   [request,staged,hostile(opts)],
+   [request,hostile(staged),opts],
+   [hostile(request),staged,opts]
+  ] as const){
+   const result=await stageRecoveryCheckpointOnly(req,receipt,options);
+   assert.deepEqual(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+  }
+  assert.equal(traps,0,'unauthorized Proxy reflection must never execute its handler');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  const saved=await stageRecoveryCheckpointOnly(request,staged,opts);
+  assert.equal(saved.status,'CHECKPOINT_STAGED_UNVERIFIED');
+  if(saved.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+  const priorEntries=(await readdir(opts.backupDirectory)).sort();
+  for(const [req,options] of [
+   [hostile(request),opts],
+   [request,hostile(opts)]
+  ] as const){
+   const result=await inspectRecoveryCheckpointReadOnly(
+    req,saved.checkpointFileName,options);
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+  }
+  assert.equal(traps,0,'read-only checkpoint inspection cannot invoke Proxy traps');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),priorEntries);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
 test('TEST-020: stale source or modified staged candidate never yields checkpoint',async()=>{
  await fixture(async opts=>{
   const staged=await stageReviewedCandidateOnly(request,candidate,opts);
