@@ -63,6 +63,31 @@ try {
   if(-not $outOfScope) { throw 'Process wait accepted a noncandidate executable' }
   Write-Output 'PASS: noncandidate executable path rejected'
 
+  # A successful CIM query can return an image-name match with a hidden path.
+  # The exact candidate identity is then unknowable; never return a false
+  # "quiescent" receipt. Shadow CIM only in this local test scope.
+  $opaqueRejected=& {
+    function Get-CimInstance {
+      param([string]$ClassName,[string]$Filter,[string]$ErrorAction)
+      if($ClassName -cne 'Win32_Process' -or
+         $Filter -cne "Name='UserscriptAutoHealer.exe'") {
+        throw 'Unexpected candidate process query'
+      }
+      [pscustomobject]@{Name='UserscriptAutoHealer.exe';ExecutablePath=$null}
+    }
+    try {
+      Wait-CandidatePortableProcessExit $ownedExe 1 0 | Out-Null
+      return $false
+    } catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*executable path unavailable*') { throw }
+      return $true
+    }
+  }
+  if(-not $opaqueRejected) {
+    throw 'Hidden CIM executable path incorrectly cleared the relocation gate'
+  }
+  Write-Output 'PASS: redacted candidate-name process path refuses relocation'
+
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
   $permanent=Join-Path $root 'permanently-locked'
