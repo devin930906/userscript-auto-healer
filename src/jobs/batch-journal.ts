@@ -11,7 +11,7 @@ import {constants} from 'node:fs';
 import {lstat,mkdir,open,rename,rm,rmdir} from 'node:fs/promises';
 import {isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from '../version/path-boundary';
-import {ReadOnlyBatchCoordinator,type ReadOnlyWorker} from './batch-coordinator';
+import {ReadOnlyBatchCoordinator,type ReadOnlyWorker,type ReadOnlyBatchSnapshot} from './batch-coordinator';
 
 export type BatchJournalFailure='INVALID_INPUT'|'UNSAFE_PATH'|'BUSY'|'NOT_FOUND'|'INVALID_CHECKPOINT'|'IO_FAILURE';
 export type BatchJournalSaveResult=
@@ -244,5 +244,57 @@ export async function loadReadOnlyBatchJournal(
  }catch(error){
   if((error as NodeJS.ErrnoException).code==='ENOENT')return deny('NOT_FOUND');
   return deny('IO_FAILURE');
+ }
+}
+
+/** TASK-013 / REQ-022 / TEST-022: opt-in durable scheduling of an already
+ * trusted, read-only native batch. Persist the RUNNING attempt before calling
+ * its worker and each settlement before dispatching the next item.
+ *
+ * The existing checkpoint is an unauthenticated scheduling hint. This helper
+ * therefore deliberately supports only one concurrent read-only worker;
+ * it is NOT durable transaction execution, exactly-once side effects, user
+ * consent, Tampermonkey attestation, script modification or auto-rollback.
+ * If a journal write fails, no further work is dispatched. A crash can
+ * replay the last RUNNING read-only operation within its bounded retry limit.
+ */
+export type CheckpointedReadOnlyBatchResult=
+ |Readonly<{status:'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED';
+    snapshot:ReadOnlyBatchSnapshot}>
+ |Readonly<{status:'BLOCKED';reason:BatchJournalFailure}>;
+
+export async function runCheckpointedReadOnlyBatch(
+ directory:string,coordinator:ReadOnlyBatchCoordinator
+):Promise<CheckpointedReadOnlyBatchResult>{
+ if(!ReadOnlyBatchCoordinator.isNativeInstance(coordinator))
+  return deny('INVALID_INPUT');
+ let current:ReadOnlyBatchSnapshot;
+ try{current=ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator);}
+ catch{return deny('INVALID_INPUT');}
+ // Do not silently fall back to a non-durable run or race two writers.
+ if(current.concurrency!==1||!current.batchFingerprint||
+    !/^[0-9a-f]{64}$/.test(current.batchFingerprint))
+  return deny('INVALID_INPUT');
+ const initial=await saveReadOnlyBatchJournal(directory,coordinator);
+ if(initial.status==='BLOCKED')return initial;
+ let saveFailure:BatchJournalFailure='IO_FAILURE';
+ try{
+  const final=await ReadOnlyBatchCoordinator.prototype.run.call(
+   coordinator,async()=>{
+    const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+    if(saved.status==='BLOCKED'){
+     saveFailure=saved.reason;
+     throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
+    }
+   }
+  );
+  return Object.freeze({
+   status:'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED' as const,
+   snapshot:final
+  });
+ }catch{
+  // The run loop has already stopped further dispatch on a failed write.
+  // Never report its in-memory outcome as a durable success receipt.
+  return deny(saveFailure);
  }
 }
