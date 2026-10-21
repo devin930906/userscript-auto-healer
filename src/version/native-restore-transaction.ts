@@ -107,6 +107,32 @@ export async function stillOwnNativeRestorePathLock(
     sameDirectory(originalLock,current);
  }catch{return false;}
 }
+/**
+ * TASK-011 / TEST-020/026: best-effort cleanup of ONLY the staging inode
+ * created by this restore. A malicious/accidental rename at the .pending
+ * pathname must not turn error cleanup into deletion of somebody else's
+ * replacement file. No user-supplied paths are exposed through renderer IPC.
+ *
+ * This is a filesystem identity snapshot, not a handle-based guarantee
+ * against a swap between the final lstat and unlink.
+ */
+export async function removeOwnedNativeRestorePending(
+ pendingPath:string,owned:BigIntStats,parentOwned:BigIntStats
+):Promise<boolean>{
+ try{
+  if(!isAbsolute(pendingPath)||pendingPath!==resolve(pendingPath)||
+     !/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/.test(
+      basename(pendingPath))||await hasUnsafePathLink(pendingPath))return false;
+  const parent=await lstat(dirname(pendingPath),{bigint:true});
+  if(!parent.isDirectory()||parent.isSymbolicLink()||
+     !sameDirectory(parent,parentOwned))return false;
+  const file=await lstat(pendingPath,{bigint:true});
+  if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1n||
+     !sameFile(file,owned))return false;
+  await unlink(pendingPath);
+  return true;
+ }catch{return false;}
+}
 /** Snapshot the independently published backup with descriptor + path
  * identity and a bounded SHA-256 check, not an unbounded readFile().
  */
@@ -162,6 +188,10 @@ export async function restoreVerifiedOriginalNativeOnly(
  let acquired=false;
  let pending:string|undefined;
  let journalPending:string|undefined;
+ let pendingIdentity:BigIntStats|undefined;
+ let journalPendingIdentity:BigIntStats|undefined;
+ let pendingParentIdentity:BigIntStats|undefined;
+ let journalParentIdentity:BigIntStats|undefined;
  try{
   if(await hasUnsafePathLink(opts.sourcePath)||
      await hasUnsafePathLink(opts.backupDirectory))return block('UNSAFE_PATH');
@@ -176,6 +206,9 @@ export async function restoreVerifiedOriginalNativeOnly(
      // Never replace a deliberately read-only source, even if the current
      // process has elevated rights. Refuse BEFORE creating any backup/journal.
      (sourceStart.mode&0o222n)===0n)return block('UNSAFE_PATH');
+  // Capture the actual directories, not only names used during cleanup.
+  pendingParentIdentity=parentStart;
+  journalParentIdentity=directoryStart;
 
   // Lock the CANONICAL PATH, not the inode: a successful atomic rename
   // necessarily changes the inode and must not change the lock identity.
@@ -235,6 +268,7 @@ export async function restoreVerifiedOriginalNativeOnly(
    // parity, which still requires independent Windows security review.
    await handle.chmod(Number(sourceStart.mode&0o777n));
    await handle.sync();
+   pendingIdentity=await handle.stat({bigint:true});
   }finally{await handle.close();}
   if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
@@ -258,8 +292,11 @@ export async function restoreVerifiedOriginalNativeOnly(
   // same-directory hard link. This is NOT a full power-loss fsync guarantee.
   journalPending=join(opts.backupDirectory,'.uah-restore-'+randomUUID()+'.pending');
   const j=await open(journalPending,'wx',0o600);
-  try{await j.writeFile(journal);await j.sync();}
-  finally{await j.close();}
+  try{
+   await j.writeFile(journal);
+   await j.sync();
+   journalPendingIdentity=await j.stat({bigint:true});
+  }finally{await j.close();}
   if(await verifyExactCandidateBytesReadOnly(journalPending,journal)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
   if(await hasUnsafePathLink(opts.backupDirectory))return block('UNSAFE_PATH');
@@ -329,8 +366,13 @@ export async function restoreVerifiedOriginalNativeOnly(
   });
  }catch{return block('IO_FAILURE');}
  finally{
-  if(pending)await unlink(pending).catch(()=>undefined);
-  if(journalPending)await unlink(journalPending).catch(()=>undefined);
+  // If staging did not reach a verified post-sync inode, preserve it for
+  // manual inspection. Never unlink a replacement just because names match.
+  if(pending&&pendingIdentity&&pendingParentIdentity)
+   await removeOwnedNativeRestorePending(pending,pendingIdentity,pendingParentIdentity);
+  if(journalPending&&journalPendingIdentity&&journalParentIdentity)
+   await removeOwnedNativeRestorePending(
+    journalPending,journalPendingIdentity,journalParentIdentity);
   if(acquired){
    // Never remove somebody else's replacement lock object or any
    // nonempty crash evidence; manual recovery may be required.

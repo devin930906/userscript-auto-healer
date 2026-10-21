@@ -5,12 +5,12 @@
  */
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {chmod,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
-import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock} from '../../src/version/native-restore-transaction';
+import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
@@ -41,6 +41,48 @@ async function fixture(run:(data:{
   });
  }finally{await rm(root,{recursive:true,force:true});}
 }
+test('TEST-020/026: native restore cleanup removes only its own verified pending inode',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-pending-owner-'));
+ const parent=join(root,'selected-parent');
+ const movedParent=join(root,'original-parent');
+ try{
+  await mkdir(parent);
+  const pending=join(parent,'.uah-restore-'+randomUUID()+'.pending');
+  const parentIdentity=await lstat(parent,{bigint:true});
+  await writeFile(pending,'owned');
+  const owned=await lstat(pending,{bigint:true});
+  assert.equal(await removeOwnedNativeRestorePending(pending,owned,parentIdentity),true);
+  assert.deepEqual(await readdir(parent),[],'only own verified temp is removed');
+
+  // An external rename/replacement at the SAME path must never be deleted.
+  await writeFile(pending,'owned');
+  const displaced=await lstat(pending,{bigint:true});
+  await rename(pending,join(parent,'preserved-previous-temp'));
+  await writeFile(pending,'foreign');
+  assert.equal(await removeOwnedNativeRestorePending(pending,displaced,parentIdentity),false);
+  assert.equal((await readFile(pending)).toString(),'foreign');
+  assert.equal((await readFile(join(parent,'preserved-previous-temp'))).toString(),'owned');
+
+  // Even an in-place external modification makes the metadata receipt stale.
+  const stale=await lstat(pending,{bigint:true});
+  await writeFile(pending,'mutated-foreign-content');
+  assert.equal(await removeOwnedNativeRestorePending(pending,stale,parentIdentity),false);
+  assert.equal((await readFile(pending)).toString(),'mutated-foreign-content');
+
+  // Replacing the parent directory must not redirect cleanup to a new tree.
+  const parentFile=join(parent,'.uah-restore-'+randomUUID()+'.pending');
+  await writeFile(parentFile,'keep-old-tree');
+  const beforeParentMove=await lstat(parentFile,{bigint:true});
+  await rename(parent,movedParent);
+  await mkdir(parent);
+  await writeFile(parentFile,'keep-new-tree');
+  assert.equal(await removeOwnedNativeRestorePending(parentFile,beforeParentMove,parentIdentity),false);
+  assert.equal((await readFile(parentFile)).toString(),'keep-new-tree');
+  assert.equal((await readFile(join(movedParent,
+   parentFile.slice(parent.length+1)))).toString(),'keep-old-tree');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-020/026: displaced or removed restore path mutex is never mistaken for the acquired lock',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-restore-lock-'));
  try{
