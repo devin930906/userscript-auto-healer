@@ -26,6 +26,7 @@ export interface GmProbeReceipt {
  readonly status:'SELF_REPORTED_FIXTURE_ONLY';
  readonly mode:GmProbeMode;
  readonly reportedGmDefaultMatched:boolean;
+ readonly reportedGmStorageRoundtripMatched:boolean;
  readonly reportedBusinessAction:boolean;
  readonly extensionAuthenticityVerified:false;
  readonly scriptInstallationVerified:false;
@@ -66,6 +67,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  '// @version 0.0.1',
  '// @match http://127.0.0.1/*',
  '// @grant GM_getValue',
+ '// @grant GM_setValue',
  '// @run-at '+runAt,
  '// @noframes',
  '// ==/UserScript==',
@@ -89,6 +91,16 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' try{gmMatched=GM_getValue('+JSON.stringify('uah-gm-probe-'+token)+','+
     JSON.stringify(PROBE_DEFAULT)+')==='+JSON.stringify(PROBE_DEFAULT)+';}',
  ' catch{gmMatched=false;}',
+ // Writes only a unique, consented disposable GM fixture key.
+ ' let gmStorageRoundtrip=false;',
+ ' if(Date.now()>='+expiresAt+')return;',
+ ' if(location.href!==expectedUrl)return;',
+ " try{if(typeof GM_setValue==='function'&&typeof GM_getValue==='function'){",
+ '  const storageKey='+JSON.stringify('uah-gm-storage-'+token+'-')+'+mode;',
+ "  GM_setValue(storageKey,'gm-roundtrip-ok');",
+ "  gmStorageRoundtrip=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
+ ' }}catch{gmStorageRoundtrip=false;',
+ ' }',
  // A synchronous GM getter, DOM query or setter can cross the consent
  // deadline. Abort before every subsequent side effect, not only at entry.
  ' if(Date.now()>='+expiresAt+')return;',
@@ -114,7 +126,8 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' void fetch('+JSON.stringify(origin+'/receipt')+',',
  " {method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},",
  ' body:JSON.stringify({token:'+JSON.stringify(token)+',mode,',
- " gmDefaultMatched:gmMatched,businessAction:actionConfirmed})}).catch(()=>{});",
+ " gmDefaultMatched:gmMatched,gmStorageRoundtripMatched:gmStorageRoundtrip,",
+ " businessAction:actionConfirmed})}).catch(()=>{});",
  ' };',
  ...(runAt!=='document-idle' ? [
    " if(document.readyState==='loading'){",
@@ -236,9 +249,10 @@ export async function startIsolatedTampermonkeyGmProbe(
      if(!isObject(input)||input.token!==token||
        (input.mode!=='broken'&&input.mode!=='fixed')||
        typeof input.gmDefaultMatched!=='boolean'||
+       typeof input.gmStorageRoundtripMatched!=='boolean'||
        typeof input.businessAction!=='boolean'||
        Object.keys(input).sort().join(',')!==
-          'businessAction,gmDefaultMatched,mode,token'){
+          'businessAction,gmDefaultMatched,gmStorageRoundtripMatched,mode,token'){
        res.writeHead(403).end();return;
      }
      const mode=input.mode as GmProbeMode;
@@ -249,6 +263,7 @@ export async function startIsolatedTampermonkeyGmProbe(
      receipts[mode]=Object.freeze({
        status:'SELF_REPORTED_FIXTURE_ONLY',mode,
        reportedGmDefaultMatched:input.gmDefaultMatched,
+       reportedGmStorageRoundtripMatched:input.gmStorageRoundtripMatched,
        reportedBusinessAction:input.businessAction,
        extensionAuthenticityVerified:false,
        scriptInstallationVerified:false,
