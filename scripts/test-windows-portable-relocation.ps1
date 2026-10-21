@@ -234,6 +234,34 @@ try {
   }
   Write-Output 'PASS: final-denial owner snapshot handles exact, opaque and failed CIM identity'
 
+  # ISSUE-215 / TEST-028: a same-parent rename of a fresh EMPTY disposable
+  # sibling distinguishes runner/parent rename failure from a candidate-specific
+  # refusal. A control must never move, inspect or delete the payload tree.
+  $controlParent=Join-Path $root 'sibling-control-parent'
+  $controlSource=Join-Path $controlParent 'actual-payload'
+  New-Item -ItemType Directory -Path $controlSource -Force | Out-Null
+  $controlPayload=Join-Path $controlSource 'original.txt'
+  [IO.File]::WriteAllText($controlPayload,'still-original')
+  $controlStatus=Get-CandidatePortableSiblingRenameControl $controlSource
+  if($controlStatus -cne 'control=move-ok' -or
+     -not (Test-Path -LiteralPath $controlPayload -PathType Leaf) -or
+     [IO.File]::ReadAllText($controlPayload) -cne 'still-original' -or
+     @(Get-ChildItem -LiteralPath $controlParent -Force).Count -ne 1) {
+    throw "Disposable sibling control changed original files or leaked a probe: $controlStatus"
+  }
+  $originalTemp=$env:RUNNER_TEMP
+  try {
+    $env:RUNNER_TEMP=Join-Path $root 'narrow-control-sandbox'
+    New-Item -ItemType Directory -Path $env:RUNNER_TEMP | Out-Null
+    $foreignStatus=Get-CandidatePortableSiblingRenameControl $controlSource
+  } finally { $env:RUNNER_TEMP=$originalTemp }
+  if($foreignStatus -cne 'control=unavailable' -or
+     [IO.File]::ReadAllText($controlPayload) -cne 'still-original' -or
+     @(Get-ChildItem -LiteralPath $controlParent -Force).Count -ne 1) {
+    throw 'Sibling control accepted a path outside RUNNER_TEMP'
+  }
+  Write-Output 'PASS: same-parent empty sibling move diagnostics preserve payload and deny out-of-scope paths'
+
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
   $permanent=Join-Path $root 'permanently-locked'
