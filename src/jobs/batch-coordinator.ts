@@ -132,7 +132,8 @@ function validateOptions(options:Options):ValidatedOptions{
 /** No checkpoint contains a script name or an event log. A caller must not
  * treat this mutable progress format as a signed, persistent audit ledger.
  */
-function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
+function validateCheckpoint(input:unknown,opts:ValidatedOptions,
+ normalizeInterrupted=true):MutableJob[]{
  try{
  const top=exactData(input,[
   'schema','phase','maxAttempts','concurrency','timeoutMs','batchFingerprint','jobs',
@@ -171,7 +172,10 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions):MutableJob[]{
     throw Error('INVALID_BATCH_CHECKPOINT');
   // A killed read-only job may be retried at most within the original limit.
   // A completed job is never replayed just because the process restarted.
-  const state=job.state==='RUNNING'
+  // Only a PROCESS RESTART turns an interrupted attempt into queued/failed.
+  // Persistence comparison must preserve a live RUNNING terminal attempt:
+  // it may still succeed before the worker returns, even at maxAttempts.
+  const state=normalizeInterrupted&&job.state==='RUNNING'
     ?(job.attempts===opts.maxAttempts?'FAILED':'QUEUED')
     :job.state as BatchJobState;
   jobs.push({ordinal:i,state,attempts:job.attempts});
@@ -236,7 +240,7 @@ export class ReadOnlyBatchCoordinator{
     count:this.jobs.length,
     maxAttempts:this.maxAttempts,concurrency:this.concurrency,
     timeoutMs:this.timeoutMs,batchFingerprint:this.batchFingerprint
-   });
+   },false);
   }catch{return false;}
   return persisted.every((old,i)=>{
    const current=this.jobs[i];
