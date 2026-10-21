@@ -8,6 +8,7 @@
  * A boolean from a caller is NOT independent user authentication.
  */
 import {basename,isAbsolute} from 'node:path';
+import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
@@ -32,7 +33,9 @@ export type ManualRepairFlowResult=
 const block=(reason:Reason):ManualRepairFlowResult=>
  Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
 function plain(input:unknown,names:readonly string[]):Record<string,unknown>|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ // An untrusted Proxy can run code through getPrototypeOf/ownKeys traps.
+ if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+    Array.isArray(input))return null;
  const p=Object.getPrototypeOf(input);
  if(p!==Object.prototype&&p!==null)return null;
  const d=Object.getOwnPropertyDescriptors(input);
