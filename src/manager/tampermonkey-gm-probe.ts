@@ -68,6 +68,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  '// @match http://127.0.0.1/*',
  '// @grant GM_getValue',
  '// @grant GM_setValue',
+ '// @grant GM_deleteValue',
  '// @run-at '+runAt,
  '// @noframes',
  '// ==/UserScript==',
@@ -91,15 +92,26 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' try{gmMatched=GM_getValue('+JSON.stringify('uah-gm-probe-'+token)+','+
     JSON.stringify(PROBE_DEFAULT)+')==='+JSON.stringify(PROBE_DEFAULT)+';}',
  ' catch{gmMatched=false;}',
- // Writes only a unique, consented disposable GM fixture key.
+ // Use only a per-session disposable key. A successful roundtrip also
+ // requires immediate deletion, with a read-after-delete check. Never
+ // leave a new persistent test value after an apparently successful test.
  ' let gmStorageRoundtrip=false;',
  ' if(Date.now()>='+expiresAt+')return;',
  ' if(location.href!==expectedUrl)return;',
- " try{if(typeof GM_setValue==='function'&&typeof GM_getValue==='function'){",
+ " if(typeof GM_setValue==='function'&&typeof GM_getValue==='function'&&",
+ "    typeof GM_deleteValue==='function'){",
  '  const storageKey='+JSON.stringify('uah-gm-storage-'+token+'-')+'+mode;',
- "  GM_setValue(storageKey,'gm-roundtrip-ok');",
- "  gmStorageRoundtrip=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
- ' }}catch{gmStorageRoundtrip=false;',
+ '  let writeSucceeded=false;let readBack=false;let removed=false;',
+ '  try{',
+ "   GM_setValue(storageKey,'gm-roundtrip-ok');writeSucceeded=true;",
+ "   readBack=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
+ '  }catch{}finally{',
+ '   if(writeSucceeded){try{',
+ "    GM_deleteValue(storageKey);",
+ "    removed=GM_getValue(storageKey,'gm-deleted')==='gm-deleted';",
+ '   }catch{removed=false;}}',
+ '  }',
+ '  gmStorageRoundtrip=writeSucceeded&&readBack&&removed;',
  ' }',
  // A synchronous GM getter, DOM query or setter can cross the consent
  // deadline. Abort before every subsequent side effect, not only at entry.
