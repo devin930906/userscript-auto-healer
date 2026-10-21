@@ -202,7 +202,6 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   const published=await lstat(target,{bigint:true});
   if(!stored||!finalDir||!sameDir(start,finalDir)||
      !sameDir(ownedStaging,stored.file)||
-     !stored.file.isFile()||stored.file.nlink!==1n||
      !published.isFile()||published.isSymbolicLink()||published.nlink!==1n||
      !sameFile(stored.file,published)||
      !stored.bytes.equals(bytes)||
