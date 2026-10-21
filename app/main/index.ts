@@ -3,9 +3,9 @@ import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type Im
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import { join, win32 } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
@@ -27,6 +27,7 @@ import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/hea
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
+import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 let mainWindow: BrowserWindow | null = null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
@@ -1258,6 +1259,76 @@ async function createMainWindow(): Promise<void> {
       "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
+    // TASK-011 / TEST-020/021/026: true desktop renderer -> preload ->
+    // native OS pickers -> TWO simulated explicit consents -> safe native
+    // restore on disposable Windows fixture paths. This test must never use
+    // actual user Chrome, scripts or Home folders.
+    const manualSource=join(fixtureDir,'manual-smoke.user.js');
+    const manualBackupDirectory=join(fixtureDir,'manual-backups');
+    mkdirSync(manualBackupDirectory);
+    const oldBytes=Buffer.from('// ==UserScript==\n// @name Smoke Original\n// ==/UserScript==\n');
+    const editedBytes=Buffer.from('// ==UserScript==\n// @name Smoke Edited\n// ==/UserScript==\n');
+    writeFileSync(manualSource,oldBytes);
+    const independentBackup=await createVerifiedBackupOnly({
+      sourcePath:manualSource,backupDirectory:manualBackupDirectory,
+      expectedSha256:createHash('sha256').update(oldBytes).digest('hex'),
+      userApproved:true
+    });
+    if(independentBackup.status!=='BACKUP_ONLY')
+      throw new Error('MANUAL_RESTORE_FIXTURE_BACKUP_FAILED');
+    const manualBackup=join(manualBackupDirectory,independentBackup.backupFileName);
+    writeFileSync(manualSource,editedBytes);
+    Object.defineProperty(dialog,'showOpenDialog',{
+      configurable:true,writable:true,
+      value:async(_window:unknown,options:{title?:string})=>{
+        if(options.title?.startsWith('手动恢复：选择要被替换'))
+          return {canceled:false,filePaths:[manualSource]};
+        if(options.title?.startsWith('手动恢复：选择本应用生成'))
+          return {canceled:false,filePaths:[manualBackup]};
+        return {canceled:true,filePaths:[]};
+      }
+    });
+    Object.defineProperty(dialog,'showMessageBox',{
+      configurable:true,writable:true,
+      value:async(_window:unknown,options:{message?:string})=>({
+        response:options.message?.startsWith('手动恢复原始脚本')||
+          options.message?.startsWith('最终确认：')?0:1,
+        checkboxChecked:false
+      })
+    });
+    const uiManualRestored=await win.webContents.executeJavaScript(
+      "(async()=>{const button=document.getElementById('restore-manual-original');"+
+      "const notice=document.getElementById('restore-manual-result');"+
+      "if(!button||!notice||button.disabled)return false;button.click();"+
+      "return await new Promise(resolve=>{const start=Date.now();"+
+      "const tick=()=>{if(notice.textContent.includes('本机原字节手动恢复成功'))"+
+      "return resolve(!button.disabled);"+
+      "if(notice.textContent.includes('手动恢复未完成')||Date.now()-start>6000)"+
+      "return resolve(false);setTimeout(tick,30);};tick();});})()",
+      true
+    ) as boolean;
+    if(!uiManualRestored||!readFileSync(manualSource).equals(oldBytes))
+      throw new Error('MANUAL_RESTORE_REAL_ELECTRON_UI_FAILED');
+    const generated=await win.webContents.executeJavaScript(
+      "document.getElementById('restore-manual-result').textContent",
+      true
+    ) as string;
+    const nameMatch=/被替换版本已单独保留为：([^；]+)；恢复意图记录：([^。]+)。/.exec(generated);
+    if(!nameMatch||!readFileSync(join(manualBackupDirectory,nameMatch[1])).equals(editedBytes))
+      throw new Error('MANUAL_RESTORE_DISPLACED_COPY_MISSING');
+    const intent=JSON.parse(readFileSync(join(manualBackupDirectory,nameMatch[2]),'utf8')) as {
+      state?:string;automaticPatchAllowed?:boolean;automaticRollbackAllowed?:boolean
+    };
+    if(intent.state!=='RESTORE_INTENT_UNVERIFIED'||
+       intent.automaticPatchAllowed!==false||intent.automaticRollbackAllowed!==false)
+      throw new Error('MANUAL_RESTORE_INTENT_NOT_SAFE');
+    const repeat=await win.webContents.executeJavaScript(
+      'window.healer.restoreManualOriginal()',true
+    ) as {ok?:boolean;code?:string};
+    if(repeat.ok!==false||repeat.code!=='SOURCE_UNCHANGED'||
+       !readFileSync(manualSource).equals(oldBytes))
+      throw new Error('MANUAL_RESTORE_REPEAT_MUST_FAIL_CLOSED');
+
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});

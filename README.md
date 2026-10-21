@@ -52,3 +52,7 @@ TASK-001 安全桌面骨架已提交至 `feat/stable-development`，在 Windows 
 ## （7）TASK-004 场景契约入库（2026-10-18）
 
 [PR #4](https://github.com/devin930906/userscript-auto-healer/pull/4) 已合并（SHA `dc088797220f9a3d7efa5b1d89dede6ff0ae657c`），Node 30/30 与 Windows 真 Electron smoke 在 [Actions 39104629620](https://github.com/devin930906/userscript-auto-healer/actions/runs/39104629620) 全部通过。项目已具备只读导入、静态元数据/AST 与业务测试场景登记基础，**尚不具备自动修复/验证完成的能力**；下一项 TASK-005 为独立 Chrome/Profile/CDP 安全启动。
+
+## 手动原版恢复（TASK-011 阶段功能）
+桌面界面提供独立的「手动恢复原始脚本」入口。仅在用户主动操作、经过两次原生系统确认并使用与选定脚本完整路径绑定的本工具原版备份时，才会尝试替换本地文件；替换前必须验证源与备份身份，另行备份被替换版本、写恢复意图及复核恢复结果。用户需停止外部编辑并确认正确脚本。该入口不更新 Tampermonkey 已安装脚本，不授权自动修复/自动回滚，也不宣称已恢复网页业务。
+本功能在 Windows 临时文件上的原生事务测试，以及模拟系统对话框的 Electron UI 到原生恢复测试，均必须以对应 GitHub Actions 实际运行结论确认；这不替代真实用户环境、断电/外部编辑竞争、GM/业务验证或正式 Stable 的 TEST/GATE。
