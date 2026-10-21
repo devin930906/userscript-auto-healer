@@ -244,7 +244,7 @@ try {
   try {
     # Sharing evidence is read-only, never a reason to weaken Move's guard.
     $shareEvidence=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
-    if($shareEvidence -cne 'scan=ok probed=1 blockedExamples=1 names=payload.txt') {
+    if($shareEvidence -notlike 'scan=ok probed=1 blockedExamples=1 names=payload.txt:Win32=*') {
       throw "Locked disposable file was not identified by bounded share probe: $shareEvidence"
     }
     $outsideShare=Get-CandidatePortableFileShareSummary $permanent @(
