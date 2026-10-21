@@ -751,6 +751,65 @@ test('TEST-022/026: foreign or forged native script hashes are rejected before a
  assert.equal(previews[0].automaticPatchAllowed,false);
 });
 
+test('TASK-013/TEST-022/026: native AST queue rejects executable input descriptors and proxies without side effects',async()=>{
+ const script=realNativeScript(55);
+ let trapCalls=0;
+ const badScript=new Proxy({...script},{
+  get(target,key,receiver){trapCalls++;return Reflect.get(target,key,receiver);}
+ });
+ const bad=await runImportedReadOnlyAnalysisQueue([badScript]);
+ assert.deepEqual(bad.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.equal(trapCalls,0,'no untrusted script Proxy trap may run');
+
+ let getterCalls=0;
+ const accessor={...script};
+ Object.defineProperty(accessor,'bytes',{enumerable:true,get(){
+  getterCalls++;return script.bytes;
+ }});
+ const badAccessor=await runImportedReadOnlyAnalysisQueue([accessor]);
+ assert.deepEqual(badAccessor.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.equal(getterCalls,0,'no script property getter may run');
+
+ const byteProxy=new Proxy(script.bytes,{
+  get(target,key,receiver){trapCalls++;return Reflect.get(target,key,receiver);}
+ });
+ trapCalls=0;
+ const badBytes=await runImportedReadOnlyAnalysisQueue([{...script,bytes:byteProxy}]);
+ assert.deepEqual(badBytes.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.equal(trapCalls,0,'no byte buffer Proxy trap may run');
+
+ const list=[script];
+ Object.defineProperty(list,'0',{enumerable:true,configurable:true,get(){
+  getterCalls++;return script;
+ }});
+ getterCalls=0;
+ const badIndex=await runImportedReadOnlyAnalysisQueue(list);
+ assert.deepEqual(badIndex.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.equal(getterCalls,0,'no imported batch index getter may run');
+
+ const proxyList=new Proxy([script],{
+  get(target,key,receiver){trapCalls++;return Reflect.get(target,key,receiver);}
+ });
+ trapCalls=0;
+ assert.deepEqual(await runImportedReadOnlyAnalysisQueue(proxyList),[]);
+ assert.equal(trapCalls,0,'no batch Proxy trap may run even to read length');
+});
+
+test('TASK-013/TEST-022/026: native AST copy ignores a typed-array subclass iterator',async()=>{
+ const script=realNativeScript(56);
+ let iteratorCalls=0;
+ class HostileIteratorBytes extends Uint8Array{
+  *[Symbol.iterator]():ArrayIterator<number>{
+   iteratorCalls++;
+   yield* super[Symbol.iterator]();
+  }
+ }
+ const subclass=new HostileIteratorBytes(script.bytes);
+ const result=await runImportedReadOnlyAnalysisQueue([{...script,bytes:subclass}]);
+ assert.deepEqual(result,[previewImportedScriptAnalysis(script)]);
+ assert.equal(iteratorCalls,0,'snapshot must copy native bytes without executing user iteration');
+});
+
 test('TEST-022/026: later native AST segments cannot be swapped after script identity validation',async()=>{
  const scripts=Array.from({length:34},(_,i)=>realNativeScript(i));
  const expected=scripts.map(previewImportedScriptAnalysis);
