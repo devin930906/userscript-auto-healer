@@ -35,6 +35,29 @@ type Identity={dev:bigint;ino:bigint;size:bigint;mtimeNs:bigint;ctimeNs:bigint};
 const sameDir=(a:Identity,b:Identity)=>a.dev===b.dev&&a.ino===b.ino;
 const sameFile=(a:Identity,b:Identity)=>sameDir(a,b)&&a.size===b.size&&
  a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
+/** Identity snapshots guard against replacing this operation's staging file
+ * or cooperative lock. A final check is not an atomic handle-based guarantee.
+ */
+async function stillOwnWriterLock(directory:string,parent:Identity,lock:Identity):Promise<boolean>{
+ try{
+  const currentParent=await checkedDirectory(directory);
+  if(!currentParent||!sameDir(parent,currentParent))return false;
+  const current=await lstat(join(directory,BATCH_JOURNAL_LOCK_FILENAME),{bigint:true});
+  return current.isDirectory()&&!current.isSymbolicLink()&&sameDir(lock,current);
+ }catch{return false;}
+}
+async function stillOwnStagingFile(
+ directory:string,path:string,parent:Identity,staged:Identity
+):Promise<boolean>{
+ try{
+  if(await hasUnsafePathLink(path))return false;
+  const currentParent=await checkedDirectory(directory);
+  if(!currentParent||!sameDir(parent,currentParent))return false;
+  const current=await lstat(path,{bigint:true});
+  return current.isFile()&&!current.isSymbolicLink()&&
+   current.nlink===1n&&sameFile(staged,current);
+ }catch{return false;}
+}
 function validPath(directory:unknown):directory is string{
  return typeof directory==='string'&&directory.length>0&&directory.length<=4096&&
   !directory.includes('\0')&&isAbsolute(directory)&&directory===resolve(directory);
@@ -92,16 +115,22 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
  const target=join(directory,BATCH_JOURNAL_FILENAME);
  const lock=join(directory,BATCH_JOURNAL_LOCK_FILENAME);
  let acquired=false,staging:string|undefined;
+ let ownedLock:Identity|undefined,ownedStaging:Identity|undefined;
+ let previousTarget:Identity|undefined;
  try{
   try{await mkdir(lock,{mode:0o700});acquired=true;}
   catch(error){
    if((error as NodeJS.ErrnoException).code==='EEXIST')return deny('BUSY');
    return deny('IO_FAILURE');
   }
+  const acquiredLock=await lstat(lock,{bigint:true});
+  if(!acquiredLock.isDirectory()||acquiredLock.isSymbolicLink())return deny('BUSY');
+  ownedLock=acquiredLock;
   const lockedDir=await checkedDirectory(directory);
   if(!lockedDir||!sameDir(start,lockedDir))return deny('UNSAFE_PATH');
   try{
    const existing=await lstat(target,{bigint:true});
+   previousTarget=existing;
    if(!existing.isFile()||existing.isSymbolicLink()||existing.nlink!==1n)
     return deny('INVALID_CHECKPOINT');
    // An existing checkpoint is untrusted. Never clobber another batch or
@@ -121,7 +150,11 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   }
   staging=join(directory,'.uah-readonly-batch-'+randomUUID()+'.tmp');
   const handle=await open(staging,'wx',0o600);
-  try{await handle.writeFile(bytes);await handle.sync();}finally{await handle.close();}
+  try{
+   await handle.writeFile(bytes);
+   await handle.sync();
+   ownedStaging=await handle.stat({bigint:true});
+  }finally{await handle.close();}
   const current=await checkedDirectory(directory);
   if(!current||!sameDir(start,current))return deny('UNSAFE_PATH');
   // The coordinator is live while disk I/O awaits. Never publish bytes
@@ -135,6 +168,28 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
     ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');}
   catch{return deny('INVALID_CHECKPOINT');}
   if(!latest.equals(bytes))return deny('INVALID_CHECKPOINT');
+  if(!ownedLock||!await stillOwnWriterLock(directory,start,ownedLock))
+   return deny('BUSY');
+  if(!ownedStaging||!await stillOwnStagingFile(directory,staging,start,ownedStaging))
+   return deny('INVALID_CHECKPOINT');
+  const prepared=await boundedRead(staging);
+  if(!prepared||!sameFile(ownedStaging,prepared.file)||
+     !prepared.bytes.equals(bytes))return deny('INVALID_CHECKPOINT');
+  // Refuse a newly inserted target or a changed prior checkpoint. These are
+  // fail-closed snapshots rather than an atomic multi-process CAS.
+  try{
+   const targetNow=await lstat(target,{bigint:true});
+   if(!previousTarget||!sameFile(previousTarget,targetNow)||
+      !targetNow.isFile()||targetNow.nlink!==1n)
+    return deny('INVALID_CHECKPOINT');
+  }catch(e){
+   if((e as NodeJS.ErrnoException).code!=='ENOENT'||previousTarget)
+    return deny('INVALID_CHECKPOINT');
+  }
+  if(!await stillOwnStagingFile(directory,staging,start,ownedStaging))
+   return deny('INVALID_CHECKPOINT');
+  if(!await stillOwnWriterLock(directory,start,ownedLock))
+   return deny('BUSY');
   await rename(staging,target);
   staging=undefined;
   const stored=await boundedRead(target);
@@ -145,8 +200,11 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    sha256:createHash('sha256').update(bytes).digest('hex')});
  }catch{return deny('IO_FAILURE');}
  finally{
-  if(staging)await rm(staging,{force:true}).catch(()=>undefined);
-  if(acquired)await rmdir(lock).catch(()=>undefined);
+  if(staging&&ownedStaging&&
+     await stillOwnStagingFile(directory,staging,start,ownedStaging))
+   await rm(staging,{force:true}).catch(()=>undefined);
+  if(acquired&&ownedLock&&await stillOwnWriterLock(directory,start,ownedLock))
+   await rmdir(lock).catch(()=>undefined);
  }
 }
 /** Load only through the existing exact schema, SHA identity and timeout
