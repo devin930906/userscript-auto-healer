@@ -1484,7 +1484,20 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
   });
-}).catch(() => {
+}).catch(error => {
+  // Only the disposable GitHub Windows smoke fixture may emit this narrow,
+  // allowlisted error identifier; never print paths, URLs, script bytes or
+  // arbitrary exception text to CI logs. Production behavior is unchanged.
+  if(process.argv.includes('--uahtest-shell-only')&&
+     process.env.GITHUB_ACTIONS==='true'){
+    const message=error instanceof Error?error.message:'';
+    const code=/^[A-Z][A-Z0-9_]{4,90}$/.test(message)?message:'UNKNOWN';
+    const receipt=process.env.UAH_SMOKE_RECEIPT;
+    try{if(receipt)writeFileSync(receipt+'.failure',code,{encoding:'utf8',flag:'wx'});}
+    catch{/* Diagnostics must not mask the actual smoke failure. */}
+    app.exit(1);
+    return;
+  }
   process.exitCode = 1;
   app.quit();
 });
