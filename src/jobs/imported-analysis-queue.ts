@@ -5,6 +5,7 @@
  * resume across process restarts still requires a separate trusted workflow.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES,MAX_TOTAL_IMPORTED_BYTES,MAX_SELECTED_FILES,
  type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
@@ -22,6 +23,10 @@ const unavailable=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
  'ISOLATED_ANALYSIS_FAILED')=>unavailableImportPreview(status,'NOT_CHECKED');
 
 type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
+// Invoke the native TypedArray byte-length getter, not a subclass override.
+const NATIVE_TYPED_ARRAY_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
+ Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
+
 
 /** Bind the source bytes and ordered hashes to the SAME private native
  * snapshot. The native importer hands us Uint8Arrays, which remain mutable
@@ -30,26 +35,50 @@ type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
  */
 function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundScript[]|null{
  try{
+  // Only a native data-only batch can reach the privileged AST worker.
+  // A Proxy, accessor-backed array index or custom iterator can execute
+  // arbitrary JS even when the eventual hash check refuses its payload.
+  if(nodeTypes.isProxy(scripts)||!Array.isArray(scripts)||
+     Object.getPrototypeOf(scripts)!==Array.prototype||
+     !NATIVE_TYPED_ARRAY_BYTE_LENGTH)return null;
+  const slots=Object.getOwnPropertyDescriptors(scripts);
+  if(Reflect.ownKeys(slots).length!==scripts.length+1)return null;
   const seen=new Set<string>();
   const copies:BoundScript[]=[];
   let totalBytes=0;
-  for(const item of scripts){
-   const original=item?.bytes;
-   const sha=item?.sha256;
-   const encoding=item?.textEncoding;
-   if(!(original instanceof Uint8Array)||!Number.isSafeInteger(item.byteLength)||
-      item.byteLength!==original.byteLength||
-      original.byteLength>MAX_SCRIPT_BYTES||
-      totalBytes+original.byteLength>MAX_TOTAL_IMPORTED_BYTES||
-      typeof sha!=='string'||!SHA256.test(sha)||!ENCODINGS.has(encoding)||
+  for(let i=0;i<scripts.length;i++){
+   const slot=slots[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+   const item:unknown=slot.value;
+   if(!item||typeof item!=='object'||nodeTypes.isProxy(item)||
+      Object.getPrototypeOf(item)!==Object.prototype)return null;
+   const fields=Object.getOwnPropertyDescriptors(item);
+   if(['bytes','sha256','byteLength','textEncoding'].some(key=>
+       !fields[key]||!Object.prototype.hasOwnProperty.call(fields[key],'value')))
+    return null;
+   const original:unknown=fields.bytes.value;
+   const sha:unknown=fields.sha256.value;
+   const encoding:unknown=fields.textEncoding.value;
+   const claimedByteLength:unknown=fields.byteLength.value;
+   if(!original||typeof original!=='object'||nodeTypes.isProxy(original)||
+      !(original instanceof Uint8Array))return null;
+   const actualByteLength=NATIVE_TYPED_ARRAY_BYTE_LENGTH.call(original) as number;
+   if(!Number.isSafeInteger(claimedByteLength)||
+      claimedByteLength!==actualByteLength||
+      actualByteLength>MAX_SCRIPT_BYTES||
+      totalBytes+actualByteLength>MAX_TOTAL_IMPORTED_BYTES||
+      typeof sha!=='string'||!SHA256.test(sha)||
+      !ENCODINGS.has(encoding as ImportedScript['textEncoding'])||
       seen.has(sha))return null;
-   // Copy before hashing. A racing SharedArrayBuffer/write cannot substitute
-   // unchecked bytes after the hash check; only the validated copy is used.
-   const bytes=Uint8Array.from(original);
+   // A native TypedArray constructor copies bytes through internal slots:
+   // unlike Uint8Array.from, it cannot execute an overridden iterator.
+   // A concurrent external mutation cannot replace the validated copy.
+   const bytes=new Uint8Array(original);
    if(createHash('sha256').update(bytes).digest('hex')!==sha)return null;
    totalBytes+=bytes.byteLength;
    seen.add(sha);
-   copies.push(Object.freeze({bytes,sha256:sha,textEncoding:encoding}));
+   copies.push(Object.freeze({bytes,sha256:sha,
+     textEncoding:encoding as ImportedScript['textEncoding']}));
   }
   return copies;
  }catch{return null;}
@@ -64,11 +93,13 @@ export async function runImportedReadOnlyAnalysisQueue(
  scripts:readonly ImportedScript[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void
 ):Promise<ImportAnalysisPreview[]>{
+ // A hostile batch Proxy must not be consulted even for its length.
+ if(nodeTypes.isProxy(scripts)||!Array.isArray(scripts))return [];
  const count=scripts.length;
  if(count===0)return [];
- if(count>MAX_SELECTED_FILES)return scripts.map(()=>unavailable('SKIPPED_BATCH_BUDGET'));
+ if(count>MAX_SELECTED_FILES)return Array.from({length:count},()=>unavailable('SKIPPED_BATCH_BUDGET'));
  const boundScripts=snapshotNativeScripts(scripts);
- if(!boundScripts)return scripts.map(()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
+ if(!boundScripts)return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  if(signal?.aborted)return scripts.map(()=>unavailable('SKIPPED_CANCELLED'));
  const segmentCount=Math.ceil(count/MAX_BATCH_PREVIEW_FILES);
  const groups=Array.from({length:segmentCount},(_,index)=>{
