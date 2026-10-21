@@ -25,7 +25,7 @@ const RUN_AT_MODES=Object.freeze([
 ]);
 const runAt=process.env.UAH_TM_RUN_AT;
 const variant=process.env.UAH_TM_VARIANT;
-assert.ok(['baseline','product-original','product-candidate'].includes(variant),
+assert.ok(['baseline','product-original','product-candidate','native-gm'].includes(variant),
   'Unreviewed fixture variant is forbidden');
 if(variant!=='baseline')assert.equal(runAt,'document-idle');
 assert.ok(RUN_AT_MODES.includes(runAt),
@@ -71,7 +71,7 @@ let source=[
 ].join('\n');
 // Only a disposable selector source is ever handed to the application's
 // existing AST planner. Neither the real user's scripts nor site data are read.
-if(variant!=='baseline'){
+if(variant==='product-original'||variant==='product-candidate'){
   const original=source.replace(
     'document.querySelector("#uah-ci-target")',
     'document.querySelector("#uah-ci-stale-target")');
@@ -176,6 +176,21 @@ async function main(){
   server.once('error',reject);
   server.listen(0,'127.0.0.1',resolve);
  });
+ // Native variant runs the product's actual bounded, consented diagnostic
+ // source. Its loopback self-reports are not manager attestation.
+ let nativeProbe;
+ if(variant==='native-gm'){
+  const {startIsolatedTampermonkeyGmProbe}=
+    require('../dist/src/manager/tampermonkey-gm-probe.js');
+  const started=await startIsolatedTampermonkeyGmProbe(true,300000,runAt);
+  assert.equal(started.ok,true,'Native product loopback fixture must start');
+  nativeProbe=started.session;
+  assert.ok(nativeProbe.source.includes('// @grant GM_getValue'));
+  assert.ok(nativeProbe.source.includes('// @grant GM_setValue'));
+  console.log('NATIVE_PRODUCT_FIXTURE '+JSON.stringify({
+   runAt:nativeProbe.runAt,unverified:true,ttlMinutes:5
+  }));
+ }
  let context;
  const launch=()=>chromium.launchPersistentContext(profile,{
   channel:'chromium',headless:false,
@@ -208,8 +223,13 @@ async function main(){
   context=await launch();
   const installerPage=await context.newPage();
   const port=server.address().port;
-  await installerPage.goto('http://127.0.0.1:'+port+'/',{waitUntil:'domcontentloaded'});
-  await installerPage.locator('#install').click();
+  if(nativeProbe){
+   await installerPage.goto(nativeProbe.origin+'/?mode=broken',{
+    waitUntil:'domcontentloaded'});
+  }else{
+   await installerPage.goto('http://127.0.0.1:'+port+'/',{waitUntil:'domcontentloaded'});
+   await installerPage.locator('#install').click();
+  }
   await sleep(1800);
   // Tampermonkey MV3 may use an intermediate vendor-hosted page or a
   // browser download, especially for loopback URLs. Never promote either
@@ -218,9 +238,9 @@ async function main(){
     url:p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]').slice(0,220)
   }));
   console.log('POST_LINK_NAVIGATION '+JSON.stringify(displayPages()));
-  if(!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
+  if(nativeProbe||!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
     const direct=await context.newPage();
-    try{await direct.goto('http://127.0.0.1:'+port+'/test.user.js',{timeout:12000});}
+    try{await direct.goto(nativeProbe?.installUrl||'http://127.0.0.1:'+port+'/test.user.js',{timeout:12000});}
     catch(error){console.log('DIRECT_SCRIPT_NAVIGATION '+String(error).slice(0,130));}
     await sleep(2200);
     console.log('POST_DIRECT_NAVIGATION '+JSON.stringify(displayPages()));
@@ -277,6 +297,48 @@ async function main(){
   }
   assert.equal(clicked,true,'No visible native manager Install confirmation');
   await sleep(1800);
+  if(nativeProbe){
+   const flags=[
+    'extensionAuthenticityVerified','scriptInstallationVerified',
+    'gmApiVerified','businessVerified'
+   ];
+   for(const mode of ['broken','fixed']){
+    const page=await context.newPage();
+    await page.goto(nativeProbe.origin+'/?mode='+mode,{
+     waitUntil:'domcontentloaded',timeout:20000});
+    const deadline=Date.now()+30000;
+    let receipt;
+    while(Date.now()<deadline){
+     receipt=nativeProbe.receiptSnapshot()[mode];
+     if(receipt)break;
+     await sleep(200);
+    }
+    assert.ok(receipt,'Native product fixture receipt missing for '+mode);
+    assert.equal(receipt.status,'SELF_REPORTED_FIXTURE_ONLY');
+    assert.equal(receipt.reportedGmDefaultMatched,true,
+     'Real manager did not self-report default GM_getValue');
+    assert.equal(receipt.reportedGmStorageRoundtripMatched,true,
+     'Real manager did not self-report GM_setValue/readback');
+    assert.equal(receipt.reportedBusinessAction,mode==='fixed',
+     'Real manager fixture broken/fixed state differed');
+    for(const key of flags)assert.equal(receipt[key],false,
+     'No trust authority from an HTTP receipt: '+key);
+    const marker=await page.locator('#current-target')
+     .getAttribute('data-uah-probe-action');
+    assert.equal(marker,mode==='fixed'?'done':null,
+     'Independent fixture DOM must match HTTP report');
+    console.log('NATIVE_PRODUCT_REAL_MANAGER_UNVERIFIED '+JSON.stringify({
+     mode,gmDefault:receipt.reportedGmDefaultMatched,
+     gmRoundtrip:receipt.reportedGmStorageRoundtripMatched,
+     reportedBusiness:receipt.reportedBusinessAction,
+     domMarker:marker,gmApiVerified:false,businessVerified:false
+    }));
+    await page.close();
+   }
+   assert.deepEqual(Object.keys(nativeProbe.receiptSnapshot()).sort(),['broken','fixed']);
+   console.log('NATIVE_PRODUCT_GM_DIAGNOSTIC_STAGE_PASSED: real unpacked Tampermonkey ran product-generated source; synthetic evidence only; no auto repair or store-signed identity.');
+   return;
+  }
   const readBusiness=async(page)=>{
     await page.waitForFunction(
       ()=>document.documentElement.dataset.uahCiInjected==='yes',{timeout:12000});
@@ -370,6 +432,7 @@ async function main(){
   console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
+  if(nativeProbe)await nativeProbe.stop();
   await new Promise(resolve=>server.close(resolve));
  }
 }
