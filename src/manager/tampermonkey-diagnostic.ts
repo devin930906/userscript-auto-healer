@@ -67,10 +67,14 @@ function validFixtureBlindSpots(value:unknown):boolean{
      Object.getPrototypeOf(value)!==Array.prototype)return false;
   const entries=Object.getOwnPropertyDescriptors(value);
   const names=Reflect.ownKeys(entries);
-  return names.length===2&&names.includes('0')&&names.includes('length')&&
+  const len=Object.getOwnPropertyDescriptor(value,'length')?.value;
+  // No blind spots is a valid stronger fixture sample; the observer may also
+  // report its one unconditional generic closed-shadow limitation.
+  if(len===0)return names.length===1&&names[0]==='length';
+  return len===1&&names.length===2&&names.includes('0')&&
+    names.includes('length')&&
     Object.prototype.hasOwnProperty.call(entries['0'],'value')&&
-    entries['0'].value==='CLOSED_SHADOW_ROOT_UNKNOWN'&&
-    Object.getOwnPropertyDescriptor(value,'length')?.value===1;
+    entries['0'].value==='CLOSED_SHADOW_ROOT_UNKNOWN';
  }catch{return false;}
 }
 /** Pure, conservative mapping of a limited DOM sample into a diagnostic
