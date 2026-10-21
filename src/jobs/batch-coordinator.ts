@@ -254,9 +254,22 @@ export class ReadOnlyBatchCoordinator{
    if(job.state==='QUEUED')job.state='CANCELLED';
   }
  }
- /** Multiple run calls share one promise; no duplicate dispatch. */
- run():Promise<ReadOnlyBatchSnapshot>{
-  if(this.inFlight)return this.inFlight;
+ /** Multiple ordinary run calls share one promise; no duplicate dispatch.
+  * Native-only opt-in checkpoint callbacks are deliberately serialized:
+  * a running job is persisted BEFORE the trusted read-only worker starts,
+  * and its result is persisted BEFORE another job is dispatched. Concurrent
+  * checkpoint writers are unsupported and fail closed, never downgraded.
+  * Only trusted native code may supply this callback; it grants no script
+  * write, browser, manager or rollback permissions.
+  */
+ run(onTransition?:()=>Promise<void>):Promise<ReadOnlyBatchSnapshot>{
+  if(onTransition!==undefined&&
+     (typeof onTransition!=='function'||this.concurrency!==1))
+   return Promise.reject(Error('INVALID_CHECKPOINT_CALLBACK'));
+  if(this.inFlight){
+   if(onTransition)return Promise.reject(Error('BATCH_ALREADY_RUNNING'));
+   return this.inFlight;
+  }
   const controller=new AbortController();
   this.controller=controller;
   const take=():MutableJob|undefined=>{
@@ -271,6 +284,20 @@ export class ReadOnlyBatchCoordinator{
    while(true){
     const job=take();
     if(!job)return;
+    if(onTransition){
+     try{await onTransition();}
+     catch{
+      // No worker may start when its RUNNING attempt was not durable.
+      this.cancel();
+      job.state='CANCELLED';
+      throw Error('CHECKPOINT_FAILED');
+     }
+     if(controller.signal.aborted){
+      job.state='CANCELLED';
+      await onTransition();
+      return;
+     }
+    }
     let outcome:ReadOnlyWorkResult='PERMANENT_FAILURE';
     let timedOut=false;
     let deadline:NodeJS.Timeout|undefined;
@@ -314,6 +341,16 @@ export class ReadOnlyBatchCoordinator{
     else if(outcome==='RETRYABLE_FAILURE'&&job.attempts<this.maxAttempts)
       job.state='QUEUED';
     else job.state='FAILED';
+    if(onTransition){
+     try{await onTransition();}
+     catch{
+      // The worker may already have settled, but a failed journal update
+      // must stop later jobs. A crash-time RUNNING record can only replay a
+      // trusted read-only worker, never a script mutation or auto-repair.
+      this.cancel();
+      throw Error('CHECKPOINT_FAILED');
+     }
+    }
    }
   };
   this.inFlight=Promise.all(Array.from({length:this.concurrency},()=>lane()))
