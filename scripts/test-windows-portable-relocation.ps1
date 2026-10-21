@@ -18,10 +18,11 @@ try {
     try { Move-Item -LiteralPath $direct -Destination (Join-Path $root 'direct-moved') -ErrorAction Stop }
     catch [System.IO.IOException] { $directFailed=$true }
     if(-not $directFailed) { throw 'TEST-028 setup failed to reproduce Windows sharing violation' }
-    if(-not (Test-Path -LiteralPath $directFile -PathType Leaf) -or
-       (Test-Path -LiteralPath (Join-Path $root 'direct-moved'))) {
-      throw 'Direct failed move unexpectedly modified the test directory'
-    }
+    # Move-Item may partially create a destination before reporting failure;
+    # this is exactly why retrying Move-Item itself would be unsafe.
+    Write-Output ("OBSERVED: old Move-Item failed; sourceExists="+
+      (Test-Path -LiteralPath $direct)+"; destinationExists="+
+      (Test-Path -LiteralPath (Join-Path $root 'direct-moved')))
   } finally { $open.Dispose() }
   Write-Output 'PASS: real Windows exclusive file lock rejects old direct Move-Item'
 
@@ -38,11 +39,14 @@ try {
     $rejected=$false
     try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
     catch [System.IO.IOException] { $rejected=$true }
-    if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist')) -or
-       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+    if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
       throw 'Persistent Windows file lock did not fail closed'
     }
   } finally { $locked.Dispose() }
+  if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
+      [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+    throw 'Persistent Windows file lock modified original payload'
+  }
   Write-Output 'PASS: persistent lock blocks relocation without altering payload'
 
   # Never overwrite another relocated copy, even if the source is valid.
