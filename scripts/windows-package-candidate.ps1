@@ -179,7 +179,9 @@ if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated te
 # Atomic same-parent rename: unlike PowerShell Move-Item this cannot leave a
 # partially copied payload when an Electron utility still holds an open DLL.
 try {
-  $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
+  $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved 12 250 @(
+    $extractedFiles | ForEach-Object { $_.FullName }
+  )
 } catch {
   # Preserve the actual exception and the original fail-closed guard.
   Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after relocation failure'
