@@ -176,7 +176,7 @@ test('TASK-013/TEST-022/026: a replaced pending checkpoint must not become the c
    count++;
    if(count===2){
     const staged=readdirSync(directory).filter(name=>
-     /^\\.uah-readonly-batch-.*\\.tmp$/.test(name));
+     name.startsWith('.uah-readonly-batch-')&&name.endsWith('.tmp'));
     assert.equal(staged.length,1,'fixture must intercept the staged file before publication');
     replacementPath=join(directory,staged[0]);
     renameSync(replacementPath,join(directory,'owned-staging-kept-for-review'));
