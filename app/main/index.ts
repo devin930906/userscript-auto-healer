@@ -409,6 +409,7 @@ function registerSafeIpc(): void {
       expiresAt:active.expiresAt,
       observedModes:summary.observedModes,
       reportedGmDefaultMatched:summary.reportedGmDefaultMatched,
+      reportedGmStorageRoundtripMatched:summary.reportedGmStorageRoundtripMatched,
       reportedBrokenFailed:summary.reportedBrokenFailed,
       reportedFixedRecovered:summary.reportedFixedRecovered,
       consistencyStatus:consistency.status,comparedModes:consistency.comparedModes,
