@@ -286,6 +286,23 @@ try {
   }
   Write-Output 'PASS: persistent lock blocks relocation without altering payload'
 
+  # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
+  # FILE_SHARE_DELETE still allows the old read-only probe to succeed, even
+  # though Windows will refuse to rename its parent. The new diagnostic must
+  # actually request DELETE access without deleting or changing any bytes.
+  $noDeleteShare=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $deleteAccess=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($deleteAccess -notlike '*blockedExamples=1*') {
+      throw "Delete-share omission was not detected: $deleteAccess"
+    }
+    if([IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+      throw 'Read-only delete-access diagnostic changed the fixture bytes'
+    }
+  } finally { $noDeleteShare.Dispose() }
+  Write-Output 'PASS: Windows delete-share omission is detected without changing source'
+
   # Never overwrite another relocated copy, even if the source is valid.
   $source=Join-Path $root 'unmoved-source'
   $existing=Join-Path $root 'existing-destination'
