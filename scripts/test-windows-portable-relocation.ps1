@@ -38,7 +38,15 @@ try {
   try {
     $rejected=$false
     try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
-    catch [System.IO.IOException] { $rejected=$true }
+    catch {
+      $rootError=$_.Exception
+      while($rootError.InnerException) { $rootError=$rootError.InnerException }
+      $code=$rootError.HResult -band 0xFFFF
+      if(($rootError -isnot [System.IO.IOException] -and
+          $rootError -isnot [System.UnauthorizedAccessException]) -or
+          $code -notin @(5,32,33)) { throw }
+      $rejected=$true
+    }
     if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
       throw 'Persistent Windows file lock did not fail closed'
     }
