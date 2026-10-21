@@ -327,6 +327,34 @@ try {
   } finally { $emptyHandle.Dispose() }
   Write-Output 'PASS: file-share scan includes locked empty candidate child directories'
 
+  # ISSUE-215: a directory's own DELETE probe cannot distinguish an ACL or
+  # sharing denial on its parent. Hold ONLY a new disposable parent open with
+  # exclusive sharing, then confirm that the extended diagnostic reports a
+  # bounded (parent) status without leaking an absolute path or changing data.
+  $parentFixture=Join-Path $root 'locked-parent-fixture'
+  $childFixture=Join-Path $parentFixture 'source'
+  New-Item -ItemType Directory -Path $parentFixture | Out-Null
+  New-Item -ItemType Directory -Path $childFixture | Out-Null
+  $childPayload=Join-Path $childFixture 'payload.txt'
+  [IO.File]::WriteAllText($childPayload,'keep-parent-fixture')
+  $parentHandle=[UahCandidateDeleteAccessProbe]::Open($parentFixture,
+    [uint32]0x80000000,[uint32]0,[IntPtr]::Zero,[uint32]3,
+    [uint32]0x02000000,[IntPtr]::Zero)
+  if($parentHandle.IsInvalid) {
+    $parentHandle.Dispose()
+    throw 'Disposable parent fixture could not establish a sharing lock'
+  }
+  try {
+    $parentSummary=Get-CandidatePortableFileShareSummary $childFixture @($childPayload)
+    if($parentSummary -notlike 'scan=ok probed=1 blockedExamples=1 names=(parent):Win32=*') {
+      throw "Parent sharing denial was not distinguished from source file locks: $parentSummary"
+    }
+    if([IO.File]::ReadAllText($childPayload) -cne 'keep-parent-fixture') {
+      throw 'Parent sharing diagnostic changed disposable payload bytes'
+    }
+  } finally { $parentHandle.Dispose() }
+  Write-Output 'PASS: candidate parent rename-rights diagnostic detects exclusive parent handle'
+
   # Never overwrite another relocated copy, even if the source is valid.
   $source=Join-Path $root 'unmoved-source'
   $existing=Join-Path $root 'existing-destination'
