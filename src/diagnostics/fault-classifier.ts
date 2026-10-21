@@ -3,6 +3,8 @@
  * Callers must independently validate the provenance of their observations.
  * A category here is only a signal classification, not root-cause proof.
  */
+import {types as nodeTypes} from 'node:util';
+
 export type FaultCategory =
   'PERMISSION'|'NETWORK'|'JAVASCRIPT'|'SELECTOR_ASSERTION'|
   'BUSINESS_ASSERTION'|'UNKNOWN';
@@ -60,19 +62,35 @@ function triage(
  */
 export function classifyFaultSignals(input:unknown):FaultTriage {
   try{
-  if(!Array.isArray(input)||input.length===0||input.length>MAX_SIGNALS)
+  // Do not iterate an untrusted array. A caller can override Symbol.iterator,
+  // define an indexed getter, or supply a Proxy whose traps would execute
+  // inside the privileged diagnostics process. Read inert own data slots only.
+  if(!Array.isArray(input)||nodeTypes.isProxy(input)||
+     Object.getPrototypeOf(input)!==Array.prototype)
+    return triage('INVALID_EVIDENCE','UNKNOWN',[]);
+  const count=Object.getOwnPropertyDescriptor(input,'length')?.value;
+  if(!Number.isSafeInteger(count)||count<1||count>MAX_SIGNALS)
+    return triage('INVALID_EVIDENCE','UNKNOWN',[]);
+  const entries=Object.getOwnPropertyDescriptors(input);
+  if(Reflect.ownKeys(entries).length!==count+1)
     return triage('INVALID_EVIDENCE','UNKNOWN',[]);
   const ids:string[]=[];
   const unique=new Set<string>();
   const categories=new Set<FaultCategory>();
   let unknown=false;
   let noFailureObserved=false;
-  for(const item of input){
-    if(item===null||typeof item!=='object'||Array.isArray(item))
+  for(let i=0;i<count;i++){
+    const slot=entries[String(i)];
+    if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
       return triage('INVALID_EVIDENCE','UNKNOWN',[]);
-    // Read descriptors instead of invoking hostile accessor properties.
-    // Proxy traps and revoked proxies can throw: the enclosing fail-closed
-    // boundary returns INVALID_EVIDENCE without retaining raw payloads.
+    const item:unknown=slot.value;
+    if(item===null||typeof item!=='object'||Array.isArray(item)||
+       nodeTypes.isProxy(item)||
+       (Object.getPrototypeOf(item)!==Object.prototype&&
+        Object.getPrototypeOf(item)!==null))
+      return triage('INVALID_EVIDENCE','UNKNOWN',[]);
+    // Records too must be inert plain data; never trigger accessors or
+    // Proxy reflection to classify an untrusted source as a cause.
     const fields=Object.getOwnPropertyDescriptors(item);
     if(Reflect.ownKeys(fields).length!==2||
       !Object.prototype.hasOwnProperty.call(fields,'id')||
