@@ -124,6 +124,17 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   try{await handle.writeFile(bytes);await handle.sync();}finally{await handle.close();}
   const current=await checkedDirectory(directory);
   if(!current||!sameDir(start,current))return deny('UNSAFE_PATH');
+  // The coordinator is live while disk I/O awaits. Never publish bytes
+  // captured when its job states/attempt counts were different from the
+  // current native scheduling state (e.g. QUEUED/0 -> RUNNING/1). Otherwise
+  // mayPersistOver() could approve current progress while rename() writes
+  // an obsolete snapshot and loses the only durable retry evidence.
+  // Recheck the native prototype method, not a shadowed instance method.
+  let latest:Buffer;
+  try{latest=Buffer.from(JSON.stringify(
+    ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');}
+  catch{return deny('INVALID_CHECKPOINT');}
+  if(!latest.equals(bytes))return deny('INVALID_CHECKPOINT');
   await rename(staging,target);
   staging=undefined;
   const stored=await boundedRead(target);
