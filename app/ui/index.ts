@@ -67,6 +67,9 @@ interface Window {
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false;automaticRollbackAllowed:false}>;
     cancelScenarioInspection():Promise<{ok:boolean;status?:string;code?:string}>;
+    restoreManualOriginal():Promise<{ok:boolean;code?:string;status?:string;
+      journalFileName?:string;displacedBackupFileName?:string;
+      automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
     chooseChrome(): Promise<{ok:boolean;code?:string;filename?:string}>;
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
@@ -95,6 +98,9 @@ const MAX_DIRECTORY_DEPTH = 8;
 const MAX_DIRECTORY_ENTRIES = 10000;
 
 const statusElement = document.getElementById('status');
+const manualRestoreButton=document.getElementById('restore-manual-original') as HTMLButtonElement|null;
+const manualRestoreResult=document.getElementById('restore-manual-result');
+let manualRestoreBusy=false;
 const output = document.getElementById('import-list');
 const importSummary = document.getElementById('import-summary');
 const cancelImport = document.getElementById('cancel-import') as HTMLButtonElement | null;
@@ -674,6 +680,27 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
  }finally{scenarioInspectionBusy=false;browserControls();}
 }));
+manualRestoreButton?.addEventListener('click',()=>{
+ if(manualRestoreBusy)return;
+ manualRestoreBusy=true;
+ manualRestoreButton.disabled=true;
+ if(manualRestoreResult)manualRestoreResult.textContent=
+   '仅通过系统对话框选择原始文件与可信备份；最终写入前必须再次确认。';
+ void window.healer.restoreManualOriginal().then(result=>{
+  if(manualRestoreResult)manualRestoreResult.textContent=
+   result.ok&&result.status==='RESTORED_NATIVE_ONLY'
+    ?'本机原字节手动恢复成功。被替换版本已单独保留为：'+
+      (result.displacedBackupFileName??'(名称不可用)')+
+      '；恢复意图记录：'+(result.journalFileName??'(名称不可用)')+
+      '。仍需手工确认 Tampermonkey 已安装版本及业务结果；没有自动修复或回滚权限。'
+    :'手动恢复未完成：'+(result.code??'UNKNOWN')+
+      '。如果已经创建部分备份或恢复意图，需在选定目录人工核查；不要盲目重试或覆盖。';
+ }).catch(()=>{
+  if(manualRestoreResult)manualRestoreResult.textContent=
+   '手动恢复请求失败；实际文件状态无法确认，请检查原始文件、备份与恢复意图。';
+ }).finally(()=>{manualRestoreBusy=false;manualRestoreButton.disabled=false;});
+});
+
 scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
  const id=scenarioInspectId?.value??'';
  if(!id){
