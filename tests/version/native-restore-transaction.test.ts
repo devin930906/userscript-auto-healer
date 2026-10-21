@@ -6,11 +6,11 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {chmod,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
+import {chmod,link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
-import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending} from '../../src/version/native-restore-transaction';
+import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
@@ -41,6 +41,72 @@ async function fixture(run:(data:{
   });
  }finally{await rm(root,{recursive:true,force:true});}
 }
+test('TEST-020/026: published restore intent cleanup never unlinks a foreign replacement',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-published-journal-'));
+ const directory=join(root,'recoveries');
+ const former=join(root,'former-recoveries');
+ try{
+  await mkdir(directory);
+  const owner=await lstat(directory,{bigint:true});
+  async function linkedJournal(){
+   const pending=join(directory,'.uah-restore-'+randomUUID()+'.pending');
+   const published=join(directory,'.uah-restore-'+randomUUID()+'.journal.json');
+   await writeFile(pending,'original journal bytes');
+   const staged=await lstat(pending,{bigint:true});
+   await link(pending,published);
+   return {pending,published,staged};
+  }
+  const valid=await linkedJournal();
+  assert.equal(await removeOwnedPublishedJournalPending(
+   valid.pending,valid.published,valid.staged,owner),true);
+  assert.equal((await readFile(valid.published)).toString(),'original journal bytes');
+  assert.equal((await lstat(valid.published)).nlink,1);
+  assert.equal((await readdir(directory)).includes(
+   valid.pending.slice(directory.length+1)),false);
+
+  // The old pending is still present under a different name; never remove
+  // the unrelated newly created file at its former pathname.
+  const replacedPending=await linkedJournal();
+  const escaped=join(directory,'kept-old-pending');
+  await rename(replacedPending.pending,escaped);
+  await writeFile(replacedPending.pending,'replacement pending');
+  assert.equal(await removeOwnedPublishedJournalPending(
+   replacedPending.pending,replacedPending.published,
+   replacedPending.staged,owner),false);
+  assert.equal((await readFile(replacedPending.pending)).toString(),'replacement pending');
+  assert.equal((await readFile(replacedPending.published)).toString(),'original journal bytes');
+  assert.equal((await readFile(escaped)).toString(),'original journal bytes');
+
+  // Replacing the published journal does not grant cleanup ownership.
+  const replacedPublished=await linkedJournal();
+  const savedPublished=join(directory,'kept-old-published');
+  await rename(replacedPublished.published,savedPublished);
+  await writeFile(replacedPublished.published,'replacement journal');
+  assert.equal(await removeOwnedPublishedJournalPending(
+   replacedPublished.pending,replacedPublished.published,
+   replacedPublished.staged,owner),false);
+  assert.equal((await readFile(replacedPublished.published)).toString(),'replacement journal');
+  assert.equal((await readFile(replacedPublished.pending)).toString(),'original journal bytes');
+
+  // An unknown third alias or parent replacement must fail closed.
+  const extraAlias=await linkedJournal();
+  await link(extraAlias.pending,join(directory,'unexpected-third-link'));
+  assert.equal(await removeOwnedPublishedJournalPending(
+   extraAlias.pending,extraAlias.published,extraAlias.staged,owner),false);
+  assert.equal((await readFile(extraAlias.pending)).toString(),'original journal bytes');
+
+  const movedParent=await linkedJournal();
+  await rename(directory,former);
+  await mkdir(directory);
+  await writeFile(movedParent.pending,'unowned pending');
+  await writeFile(movedParent.published,'unowned journal');
+  assert.equal(await removeOwnedPublishedJournalPending(
+   movedParent.pending,movedParent.published,movedParent.staged,owner),false);
+  assert.equal((await readFile(movedParent.pending)).toString(),'unowned pending');
+  assert.equal((await readFile(movedParent.published)).toString(),'unowned journal');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-020/026: native restore cleanup removes only its own verified pending inode',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-pending-owner-'));
  const parent=join(root,'selected-parent');

@@ -133,6 +133,43 @@ export async function removeOwnedNativeRestorePending(
   return true;
  }catch{return false;}
 }
+/**
+ * TASK-011 / TEST-020/026: published journal links temporarily share one
+ * inode. Retire its staging name only while BOTH paths still identify that
+ * inode inside the original recovery directory. link() changes ctime,
+ * so compare pre-link inode, size and mtime instead of pre-link ctime.
+ * This is a fail-closed snapshot, not an atomic OS filesystem handle.
+ */
+export async function removeOwnedPublishedJournalPending(
+ pendingPath:string,publishedPath:string,staged:BigIntStats,
+ parentOwned:BigIntStats
+):Promise<boolean>{
+ try{
+  const id='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+  if(!isAbsolute(pendingPath)||pendingPath!==resolve(pendingPath)||
+     !isAbsolute(publishedPath)||publishedPath!==resolve(publishedPath)||
+     dirname(pendingPath)!==dirname(publishedPath)||
+     !new RegExp('^\\.uah-restore-'+id+'\\.pending$').test(basename(pendingPath))||
+     !new RegExp('^\\.uah-restore-'+id+'\\.journal\\.json$').test(basename(publishedPath))||
+     staged.nlink!==1n||
+     await hasUnsafePathLink(pendingPath)||
+     await hasUnsafePathLink(publishedPath))return false;
+  const parent=await lstat(dirname(pendingPath),{bigint:true});
+  if(!parent.isDirectory()||parent.isSymbolicLink()||
+     !sameDirectory(parent,parentOwned))return false;
+  const pending=await lstat(pendingPath,{bigint:true});
+  const published=await lstat(publishedPath,{bigint:true});
+  if(!pending.isFile()||pending.isSymbolicLink()||
+     !published.isFile()||published.isSymbolicLink()||
+     pending.nlink!==2n||published.nlink!==2n||
+     !sameDirectory(pending,staged)||!sameDirectory(pending,published)||
+     pending.size!==staged.size||pending.size!==published.size||
+     pending.mtimeNs!==staged.mtimeNs||
+     pending.mtimeNs!==published.mtimeNs)return false;
+  await unlink(pendingPath);
+  return true;
+ }catch{return false;}
+}
 /** Snapshot the independently published backup with descriptor + path
  * identity and a bounded SHA-256 check, not an unbounded readFile().
  */
@@ -305,7 +342,11 @@ export async function restoreVerifiedOriginalNativeOnly(
      !sameDirectory(directoryStart,journalDirectory))
    return block('UNSAFE_PATH');
   await link(journalPending,journalPath);
-  await unlink(journalPending);
+  // Do not delete an unknown replacement at the staging pathname.
+  if(!journalPendingIdentity||!journalParentIdentity||
+     !await removeOwnedPublishedJournalPending(
+       journalPending,journalPath,journalPendingIdentity,journalParentIdentity))
+    return block('RECOVERY_SAFETY_FAILED');
   journalPending=undefined;
   if(await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
