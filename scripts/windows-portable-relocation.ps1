@@ -267,6 +267,70 @@ function Format-CandidatePortableRelocationFailure(
     $win32Code,$sourceExists,$destinationExists)
 }
 
+# ISSUE-215 / TEST-028: when a real candidate move fails, test whether
+# the SAME parent allows an atomic rename of an unrelated, freshly created
+# EMPTY directory. A clean control narrows (but never proves) candidate-specific
+# contention; a blocked control suggests parent/runner-wide interference.
+# The only objects created/moved/deleted are this invocation's empty GUID-named
+# probe folders. This is diagnostic evidence, never permission to skip Move.
+function Get-CandidatePortableSiblingRenameControl([string]$source) {
+  $from=$null
+  $to=$null
+  $created=$false
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       -not [IO.Path]::IsPathRooted($source)) { return 'control=unavailable' }
+    $base=[IO.Path]::GetFullPath($source)
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return 'control=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $parent=[IO.Path]::GetDirectoryName($base)
+    if(-not [string]::Equals($parent,$runner,[StringComparison]::OrdinalIgnoreCase) -and
+       -not $parent.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase)) { return 'control=unavailable' }
+    $label='uah-empty-rename-control-'+[Guid]::NewGuid().ToString('N')
+    $from=[IO.Path]::Combine($parent,$label)
+    $to=[IO.Path]::Combine($parent,$label+'-moved')
+    if([IO.Directory]::Exists($from) -or [IO.Directory]::Exists($to)) {
+      return 'control=unavailable'
+    }
+    $null=[IO.Directory]::CreateDirectory($from)
+    $created=$true
+    try {
+      [IO.Directory]::Move($from,$to)
+      return 'control=move-ok'
+    } catch {
+      $cause=$_.Exception
+      while($null -ne $cause.InnerException) { $cause=$cause.InnerException }
+      if($cause -is [System.IO.IOException] -or
+         $cause -is [System.UnauthorizedAccessException]) {
+        return ('control=move-denied Win32='+($cause.HResult -band 0xFFFF))
+      }
+      return 'control=unavailable'
+    }
+  } catch { return 'control=unavailable' }
+  finally {
+    if($created) {
+      # Do not recurse or force-delete: an interfered-with/nonempty or reparse
+      # probe is ambiguous and must remain untouched for runner disposal.
+      foreach($path in @($to,$from)) {
+        if($null -ne $path) {
+          try {
+            if([IO.Directory]::Exists($path) -and
+               (([int][IO.File]::GetAttributes($path) -band
+                 [int][IO.FileAttributes]::ReparsePoint) -eq 0)) {
+              [IO.Directory]::Delete($path,$false)
+            }
+          } catch { }
+        }
+      }
+    }
+  }
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
   [int]$maxAttempts=12,[int]$delayMilliseconds=250
