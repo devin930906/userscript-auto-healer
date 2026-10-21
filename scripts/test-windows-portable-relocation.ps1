@@ -58,6 +58,38 @@ try {
       }
     }
     Write-Output 'PASS: outside runner temp and prefix-sibling paths cannot be moved'
+
+    # TASK-020 / TEST-028: a lexical path under RUNNER_TEMP can escape through
+    # a Windows junction. Reproduce entirely inside fresh disposable runner
+    # directories; the junction target is OUTSIDE the nested fake RUNNER_TEMP.
+    # An unsafe helper would rename a directory in the target instead.
+    $junctionTarget=Join-Path $root 'disposable-external-junction-target'
+    $externalSource=Join-Path $junctionTarget 'source'
+    $externalDestination=Join-Path $junctionTarget 'moved'
+    New-Item -ItemType Directory -Path $externalSource -Force | Out-Null
+    $externalPayload=Join-Path $externalSource 'preserve.txt'
+    [IO.File]::WriteAllText($externalPayload,'no-outside-rename')
+    $junction=Join-Path $sandbox 'junction-to-outside'
+    New-Item -ItemType Junction -Path $junction -Target $junctionTarget -ErrorAction Stop | Out-Null
+    try {
+      $reparseDenied=$false
+      try {
+        Move-CandidatePortableDirectory (Join-Path $junction 'source') (
+          Join-Path $junction 'moved') 1 0 | Out-Null
+      } catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*reparse point refused*') { throw }
+        $reparseDenied=$true
+      }
+      if(-not $reparseDenied -or
+         -not (Test-Path -LiteralPath $externalPayload -PathType Leaf) -or
+         [IO.File]::ReadAllText($externalPayload) -cne 'no-outside-rename' -or
+         (Test-Path -LiteralPath $externalDestination)) {
+        throw 'Junction path escaped candidate runner and modified outside source'
+      }
+      Write-Output 'PASS: Windows junction cannot redirect candidate relocation outside runner temp'
+    } finally {
+      Remove-Item -LiteralPath $junction -Force -ErrorAction Stop
+    }
   } finally { $env:RUNNER_TEMP=$originalRunnerTemp }
 
   # The smoke parent may exit before its child/utility image. Wait for only
