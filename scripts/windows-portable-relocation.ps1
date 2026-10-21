@@ -21,13 +21,21 @@ function Wait-CandidatePortableProcessExit(
   for($check=1; $check -le $maxChecks; $check++) {
     # CIM includes processes with this image name from other directories.
     # Exact path comparison is required; do not use name-only process counts.
-    # A failed CIM query is an error, not proof that no processes exist.
-    $matches=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop |
-      Where-Object {
-        $_.ExecutablePath -and [string]::Equals(
-          [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
-          [StringComparison]::OrdinalIgnoreCase)
-      })
+    # A failed query OR a redacted/unavailable process path is not proof that
+    # the exact candidate has exited. Refuse relocation without a trustworthy
+    # disambiguation, even if the opaque process is unrelated.
+    $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop)
+    foreach($process in $processes) {
+      if([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) {
+        throw [InvalidOperationException]::new(
+          'Candidate process executable path unavailable; relocation refused')
+      }
+    }
+    $matches=@($processes | Where-Object {
+      [string]::Equals(
+        [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
+        [StringComparison]::OrdinalIgnoreCase)
+    })
     if($matches.Count -eq 0) { return $check }
     Write-Warning ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
       $matches.Count,$check,$maxChecks)
