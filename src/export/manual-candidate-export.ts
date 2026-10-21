@@ -9,6 +9,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {link,lstat,open,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
+import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -44,7 +45,9 @@ const requestNames=[
  'replacementSelector','faultEvidenceId'
 ];
 function plain(input:unknown,names:readonly string[]):Record<string,unknown>|null{
- if(!input||typeof input!=='object'||Array.isArray(input))return null;
+ // Reject Proxy before invoking its observable reflection traps.
+ if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+    Array.isArray(input))return null;
  const proto=Object.getPrototypeOf(input);
  if(proto!==Object.prototype&&proto!==null)return null;
  const desc=Object.getOwnPropertyDescriptors(input);
