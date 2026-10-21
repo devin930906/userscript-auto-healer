@@ -57,6 +57,9 @@
       <p>此功能仅供已拥有本工具生成的、与当前脚本完整路径绑定的独立 .backup.user.js 备份时使用。先选择需要恢复的本地 .user.js，再选择原始备份；将严格比对两者身份与字节。最终确认后，程序先独立备份当前被替换版本，再写恢复意图并尝试原子替换。操作不能被视为脚本自动修复，也不更新 Tampermonkey 已安装版本。</p>
       <button id="restore-manual-original" type="button">独立授权手动恢复原版（将改写所选文件）</button>
       <p id="restore-manual-result" role="status" aria-live="polite">尚未请求恢复。若出现中断或错误，请检查所选备份目录和原始文件；不要盲目重复操作。</p>
+      <p>如果手动恢复曾中断或返回错误，可先使用下方只读核对：独立选择当前脚本和先前生成的恢复意图 .journal.json 文件；程序只会核对当前原版/被替换版本及两份备份的字节关系，不重试写入、不安装 Tampermonkey 脚本。结果只是本机文件状态，不证明脚本业务功能恢复。</p>
+      <button id="restore-inspect-intent" type="button">只读核对恢复意图（不会覆盖文件）</button>
+      <p id="restore-inspect-result" role="status" aria-live="polite">尚未执行只读核对。</p>
     </section>
     <section aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
