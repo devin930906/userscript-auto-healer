@@ -85,6 +85,21 @@ test('TEST-020/026: pending cleanup refuses substituted source, alias and parent
   assert.equal(await removeOwnedStagingPending(separate,separateOwner,parent,unrelated),false);
   assert.equal((await readFile(separate)).toString(),'important');
   assert.equal((await readFile(unrelated)).toString(),'other');
+  // Identical contents are not publication identity: a substituted inode
+  // must not authorize removal of an independent pending recovery copy.
+  await writeFile(unrelated,'important');
+  assert.equal(await removeOwnedStagingPending(separate,separateOwner,parent,unrelated),false);
+  assert.equal((await readFile(separate)).toString(),'important');
+  assert.equal((await readFile(unrelated)).toString(),'important');
+
+  const triple=next();
+  const firstPublished=join(folder,'linked.backup.user.js');
+  await writeFile(triple,'protected-links');
+  const tripleOwner=await lstat(triple,{bigint:true});
+  await link(triple,firstPublished);
+  await link(triple,join(folder,'extra-recovery-link'));
+  assert.equal(await removeOwnedStagingPending(triple,tripleOwner,parent,firstPublished),false);
+  assert.equal((await readFile(triple)).toString(),'protected-links');
 
   const protectedPending=next();
   await writeFile(protectedPending,'old-directory');
