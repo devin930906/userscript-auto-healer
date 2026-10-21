@@ -144,7 +144,20 @@ export async function launchApprovedIsolatedChrome(
   child.once('error',()=>{errored=true;});
   child.once('exit',()=>{exited=true;});
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
+  // A fresh signed Chrome fixture on Windows CI can remain alive without
+  // publishing CDP during cold startup. Only explicitly test-owned, headless
+  // Chrome gets the longer bounded readiness budget; normal users retain the
+  // original 20s contract and NO ownership/handshake requirement is relaxed.
+  const startupDeadlineMs=options.testHeadless===true?35000:20000;
+  // Keep externally visible diagnostic labels bounded even if the test-only
+  // cold-start wait produces many identical connection refusals.
+  let routineStageCount=0;
   const emitStage=(stage:ChromeStartupStage):void=>{
+    if(stage==='FETCH_REFUSED'||stage==='FETCH_TIMEOUT'||stage==='FETCH_RESET'||
+       stage==='FETCH_FAILED') {
+      if(routineStageCount>=90)return;
+      routineStageCount++;
+    }
     try{options.onStartupStage?.(stage);}
     catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
   };
@@ -152,7 +165,7 @@ export async function launchApprovedIsolatedChrome(
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
   const began=Date.now();
   try{
-    while(Date.now()-began<20000){
+    while(Date.now()-began<startupDeadlineMs){
       if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
       let phase:'FETCH'|'PROCESS'='FETCH';
