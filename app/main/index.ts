@@ -1399,8 +1399,11 @@ async function createMainWindow(): Promise<void> {
     const wrongArgs=await win.webContents.executeJavaScript(
       "window.healer.inspectRestoreIntent('not-allowed')",true
     ) as {ok?:boolean;code?:string};
-    if(wrongArgs.ok!==false||wrongArgs.code!=='INVALID_REQUEST')
-      throw new Error('RESTORE_INSPECTION_ARBITRARY_IPC_NOT_REJECTED');
+    // The no-argument preload bridge intentionally drops unexpected
+    // JavaScript arguments. Verify they never become native path authority.
+    if(wrongArgs.ok!==true||wrongArgs.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY'||
+       wrongArgs.sourceState!=='ORIGINAL_PRESENT')
+      throw new Error('RESTORE_INSPECTION_BRIDGE_ARGUMENT_ISOLATION_FAILED');
     const inspectedByRenderer=await win.webContents.executeJavaScript(
       "(async()=>{const button=document.getElementById('restore-inspect-intent');"+
       "const notice=document.getElementById('restore-inspect-result');"+
