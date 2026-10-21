@@ -149,3 +149,29 @@ test('TEST-019/023/026: cross-origin @match blocks manual candidate export witho
    assert.equal(await readFile(opts.sourcePath,'utf8'),expandedSource);
  });
 });
+
+test('TEST-019/023/026: manual repair rejects Proxy patch/options without reflection or disk writes',async()=>{
+ await fixture(async opts=>{
+  let traps=0;
+  const hostile=(value:object)=>new Proxy(value,{
+    getPrototypeOf(){
+      traps++;
+      throw new Error('untrusted Proxy reflection must not execute');
+    }
+  });
+  for(const [patchInput,optionsInput] of [
+    [hostile(patch),opts],
+    [patch,hostile(opts)]
+  ] as const){
+    const result=await prepareManualRepairExportOnly(
+      patchInput,scenario,samples(),optionsInput);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.automaticRollbackAllowed,false);
+  }
+  assert.equal(traps,0,'untrusted Proxy traps must not be invoked');
+  assert.deepEqual(await readdir(opts.backupDirectory),[]);
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
