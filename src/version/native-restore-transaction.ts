@@ -91,6 +91,22 @@ function sameFile(a:BigIntStats,b:BigIntStats):boolean{
  return sameDirectory(a,b)&&a.size===b.size&&
   a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
 }
+/**
+ * A cooperative path mutex cannot protect against an external process that
+ * removes or replaces its directory. Before touching the selected original,
+ * verify that the lock still names the SAME directory obtained by this
+ * transaction. This is a snapshot check, not an OS-enforced exclusive lock
+ * or proof of resistance to a final-check/rename race.
+ */
+export async function stillOwnNativeRestorePathLock(
+ lockPath:string,originalLock:BigIntStats
+):Promise<boolean>{
+ try{
+  const current=await lstat(lockPath,{bigint:true});
+  return current.isDirectory()&&!current.isSymbolicLink()&&
+    sameDirectory(originalLock,current);
+ }catch{return false;}
+}
 /** Snapshot the independently published backup with descriptor + path
  * identity and a bounded SHA-256 check, not an unbounded readFile().
  */
@@ -281,6 +297,10 @@ export async function restoreVerifiedOriginalNativeOnly(
    return block('RECOVERY_SAFETY_FAILED');
   const lastSource=await lstat(opts.sourcePath,{bigint:true});
   if(!sameFile(sourceStart,lastSource))return block('SOURCE_UNVERIFIED');
+  // The acquired path mutex might have been removed or replaced during
+  // asynchronous backup/journal I/O. Never rename while its identity is lost.
+  if(!owner||!await stillOwnNativeRestorePathLock(lock,owner))
+   return block('SOURCE_LOCKED');
 
   await rename(pending,opts.sourcePath);
   pending=undefined;
@@ -295,6 +315,10 @@ export async function restoreVerifiedOriginalNativeOnly(
      (await verifyBackupRecoverySource({
        ...displacedInput,sourcePath:opts.sourcePath
      })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
+   return block('RECOVERY_SAFETY_FAILED');
+  // A lost lock after replacement must not yield a clean restore receipt.
+  // Keep backups and the intent journal for independent native inspection.
+  if(!owner||!await stillOwnNativeRestorePathLock(lock,owner))
    return block('RECOVERY_SAFETY_FAILED');
   return Object.freeze({
    status:'RESTORED_NATIVE_ONLY' as const,
