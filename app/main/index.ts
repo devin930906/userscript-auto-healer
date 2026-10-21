@@ -1398,7 +1398,7 @@ async function createMainWindow(): Promise<void> {
     const beforeInspectionInventory=readdirSync(manualBackupDirectory).sort();
     const wrongArgs=await win.webContents.executeJavaScript(
       "window.healer.inspectRestoreIntent('not-allowed')",true
-    ) as {ok?:boolean;code?:string};
+    ) as {ok?:boolean;code?:string;status?:string;sourceState?:string};
     // The no-argument preload bridge intentionally drops unexpected
     // JavaScript arguments. Verify they never become native path authority.
     if(wrongArgs.ok!==true||wrongArgs.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY'||
