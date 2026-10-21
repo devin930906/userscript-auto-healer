@@ -176,9 +176,9 @@ export function createLimitedGmReport(
   if(!meta||!iso(collectedAt)||!iso(meta.expiresAt)||
      !isSupportedGmProbeRunAt(meta.runAt)||
      !validChromeVersion(meta.browserVersion)||
-     typeof meta.snapshot!=='function'||
-     typeof meta.consistencySnapshot!=='function'||
-     typeof meta.domSnapshot!=='function')return invalid();
+     typeof meta.snapshot!=='function'||isProxy(meta.snapshot)||
+     typeof meta.consistencySnapshot!=='function'||isProxy(meta.consistencySnapshot)||
+     typeof meta.domSnapshot!=='function'||isProxy(meta.domSnapshot))return invalid();
   const s=captureFields((meta.snapshot as Input['snapshot'])(),[
    'status','observedModes','reportedGmDefaultMatched',
    'reportedGmStorageRoundtripMatched','reportedBrokenFailed',
@@ -194,8 +194,10 @@ export function createLimitedGmReport(
   ],[]);
   if(!s||!c||!dom||!statuses.has(s.status as Status)||
      !consistencyStatuses.has(c.status as Consistency)||
-     !Number.isInteger(s.observedModes)||s.observedModes<0||s.observedModes>2||
-     !Number.isInteger(c.comparedModes)||c.comparedModes<0||c.comparedModes>2||
+     !Number.isInteger(s.observedModes)||(s.observedModes as number)<0||
+     (s.observedModes as number)>2||
+     !Number.isInteger(c.comparedModes)||(c.comparedModes as number)<0||
+     (c.comparedModes as number)>2||
      typeof s.reportedGmDefaultMatched!=='boolean'||
      typeof s.reportedGmStorageRoundtripMatched!=='boolean'||
      typeof s.reportedBrokenFailed!=='boolean'||
