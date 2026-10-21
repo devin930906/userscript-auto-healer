@@ -75,8 +75,22 @@ function Move-CandidatePortableDirectory(
      $delayMilliseconds -lt 0 -or $delayMilliseconds -gt 1000) {
     throw [ArgumentException]::new('Invalid bounded candidate relocation options')
   }
+  # Never permit this candidate-only helper to rename non-runner directories.
+  # GetFullPath normalizes dot segments; the trailing separator prevents an
+  # attacker-controlled sibling of RUNNER_TEMP from passing a prefix check.
+  if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+     -not [IO.Path]::IsPathRooted($source) -or
+     -not [IO.Path]::IsPathRooted($destination)) {
+    throw [InvalidOperationException]::new('Candidate relocation requires absolute runner temp paths')
+  }
   $from=[IO.Path]::GetFullPath($source)
   $to=[IO.Path]::GetFullPath($destination)
+  $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+  $runnerPrefix=$runner+[IO.Path]::DirectorySeparatorChar
+  if(-not $from.StartsWith($runnerPrefix,[StringComparison]::OrdinalIgnoreCase) -or
+     -not $to.StartsWith($runnerPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+    throw [InvalidOperationException]::new('Candidate relocation outside runner temp refused')
+  }
   $sameParent=[String]::Equals(
     [IO.Path]::GetDirectoryName($from),[IO.Path]::GetDirectoryName($to),
     [StringComparison]::OrdinalIgnoreCase)
