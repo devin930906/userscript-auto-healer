@@ -7,7 +7,7 @@
  * bridge issues only reviewable local CANDIDATE_ONLY data, never writes.
  */
 import {types as nodeTypes} from 'node:util';
-import type {DynamicObservation} from '../observe/dom-observer';
+import type {DynamicObservation,ObservationResult,DomSummary} from '../observe/dom-observer';
 import {parseUserscriptMetadata} from '../analyze/metadata-parser';
 import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
 import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
@@ -42,6 +42,117 @@ const blocked=(reason:DiagnosticCandidateBlockCode):DiagnosticCandidateResult=>O
 const SHA=/^[a-f0-9]{64}$/;
 const ID=/^[A-Za-z0-9_-]{1,64}$/;
 
+/** Candidate approval must not re-read mutable caller-owned DOM data after
+ * triage. Take a bounded, own-data-only copy once, rejecting Proxy traps,
+ * accessors, sparse arrays, excess fields and untrusted iterators BEFORE
+ * either the diagnostic or patch candidate uses the sample.
+ * This is only data consistency, not Chrome/manager provenance.
+ */
+function ownData(value:unknown,names:readonly string[]):Record<string,unknown>|null{
+ if(!value||typeof value!=='object'||Array.isArray(value)||
+    nodeTypes.isProxy(value))return null;
+ const prototype=Object.getPrototypeOf(value);
+ if(prototype!==Object.prototype&&prototype!==null)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(value);
+ const fields=Reflect.ownKeys(descriptors);
+ if(fields.length!==names.length||fields.some(k=>typeof k!=='string')||
+    names.some(n=>!Object.prototype.hasOwnProperty.call(descriptors,n)||
+      !Object.prototype.hasOwnProperty.call(descriptors[n],'value')))return null;
+ const result:Record<string,unknown>=Object.create(null);
+ for(const name of names)result[name]=descriptors[name].value;
+ return result;
+}
+function ownArray(value:unknown,min:number,max:number):unknown[]|null{
+ if(!Array.isArray(value)||nodeTypes.isProxy(value)||
+    Object.getPrototypeOf(value)!==Array.prototype)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(value);
+ const count=Object.getOwnPropertyDescriptor(value,'length')?.value;
+ if(!Number.isSafeInteger(count)||count<min||count>max||
+    Reflect.ownKeys(descriptors).length!==count+1)return null;
+ const copied:unknown[]=[];
+ for(let i=0;i<count;i++){
+  const slot=descriptors[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+  copied.push(slot.value);
+ }
+ return copied;
+}
+function captureCandidateDomEvidence(input:unknown):
+ Extract<DynamicObservation,{ok:true}>|null{
+ try{
+  const o=ownData(input,['ok','status','samples','routeChangeDetected',
+    'selectorCountChanged','domCountChanged','userscriptVerified']);
+  if(!o||o.ok!==true||o.status!=='LIMITED_DYNAMIC_OBSERVATION'||
+     o.userscriptVerified!==false||
+     typeof o.routeChangeDetected!=='boolean'||
+     typeof o.selectorCountChanged!=='boolean'||
+     typeof o.domCountChanged!=='boolean')return null;
+  const rawSamples=ownArray(o.samples,2,8);
+  if(!rawSamples)return null;
+  const samples:Extract<ObservationResult,{ok:true}>[]=[];
+  for(const item of rawSamples){
+   const sample=ownData(item,['ok','status','observedAt',
+     'originMatchesApproved','routeChanged','summary','selectorCounts',
+     'fullPageVerified','userscriptVerified']);
+   if(!sample||sample.ok!==true||sample.status!=='LIMITED_DOM_OBSERVATION'||
+      typeof sample.observedAt!=='string'||
+      sample.originMatchesApproved!==true||
+      typeof sample.routeChanged!=='boolean'||
+      sample.fullPageVerified!==false||sample.userscriptVerified!==false)
+    return null;
+   const summary=ownData(sample.summary,['elementCount','iframeCount',
+     'visibleShadowRoots','blindSpots']);
+   if(!summary||typeof summary.elementCount!=='number'||
+      typeof summary.iframeCount!=='number'||
+      typeof summary.visibleShadowRoots!=='number')return null;
+   const rawSpots=ownArray(summary.blindSpots,0,3);
+   if(!rawSpots)return null;
+   const spots:DomSummary['blindSpots'][number][]=[];
+   for(const entry of rawSpots){
+    if(entry!=='IFRAME_CONTENT_UNVERIFIED'&&
+       entry!=='CLOSED_SHADOW_ROOT_UNKNOWN'&&
+       entry!=='CROSS_ORIGIN_FRAME_UNVERIFIED')return null;
+    spots.push(entry);
+   }
+   // CDP selectorCounts is a plain map, often with a null prototype.
+   // Never read its dynamic values or enumerate through an iterator.
+   if(!sample.selectorCounts||typeof sample.selectorCounts!=='object'||
+      Array.isArray(sample.selectorCounts)||
+      nodeTypes.isProxy(sample.selectorCounts))return null;
+   const proto=Object.getPrototypeOf(sample.selectorCounts);
+   if(proto!==Object.prototype&&proto!==null)return null;
+   const counts=Object.getOwnPropertyDescriptors(sample.selectorCounts);
+   const selectorKeys=Reflect.ownKeys(counts);
+   if(selectorKeys.length>8||selectorKeys.some(k=>typeof k!=='string'))
+    return null;
+   const selectors:Record<string,number>=Object.create(null);
+   for(const key of selectorKeys as string[]){
+    const slot=counts[key];
+    if(!Object.prototype.hasOwnProperty.call(slot,'value')||
+       typeof slot.value!=='number')return null;
+    selectors[key]=slot.value;
+   }
+   samples.push({
+    ok:true,status:'LIMITED_DOM_OBSERVATION',
+    observedAt:sample.observedAt,originMatchesApproved:true,
+    routeChanged:sample.routeChanged,fullPageVerified:false,
+    userscriptVerified:false,
+    summary:{
+     elementCount:summary.elementCount,
+     iframeCount:summary.iframeCount,
+     visibleShadowRoots:summary.visibleShadowRoots,
+     blindSpots:spots
+    },selectorCounts:selectors
+   });
+  }
+  return {
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples,
+   routeChangeDetected:o.routeChangeDetected,
+   selectorCountChanged:o.selectorCountChanged,
+   domCountChanged:o.domCountChanged,userscriptVerified:false
+  };
+ }catch{return null;}
+}
 /** Static @match eligibility is necessary, not proof that Tampermonkey
  * injected this source. Unreviewed include/exclusion precedence fails closed.
  * Reuse the manager preflight's narrow URL matcher to avoid drift. */
@@ -135,8 +246,9 @@ export function proposeFromReadOnlyDomDiagnostic(
     // This existing validator enforces authorization, target URL, route
     // stability, multiple increasing timestamps, exact selector inventory,
     // unchanged DOM counts, bounded samples and no fabricated success flags.
-    const diagnosis=summarizeReadOnlyScenarioDomSeries(
-      s,observation as DynamicObservation,true);
+    const captured=captureCandidateDomEvidence(observation);
+    if(!captured)return blocked('UNVERIFIED_OR_UNSTABLE_DOM');
+    const diagnosis=summarizeReadOnlyScenarioDomSeries(s,captured,true);
     if(diagnosis.status!=='LIMITED_DOM_SIGNAL_ONLY'||diagnosis.code!=='NONE')
       return blocked('UNVERIFIED_OR_UNSTABLE_DOM');
     // A stable selector count from CDP's top document does not establish
@@ -146,7 +258,7 @@ export function proposeFromReadOnlyDomDiagnostic(
     // CLOSED_SHADOW_ROOT_UNKNOWN alone: the DOM observer always reports it,
     // even when no shadow root is detected; doing so would disable the
     // existing, explicitly review-only flow on every ordinary page.
-    const samples=(observation as Extract<DynamicObservation,{ok:true}>).samples;
+    const samples=captured.samples;
     if(samples.some(sample=>sample.ok===true&&
        (sample.summary.iframeCount!==0||
         sample.summary.visibleShadowRoots!==0)))
