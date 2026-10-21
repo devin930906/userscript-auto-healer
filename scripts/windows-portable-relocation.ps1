@@ -83,14 +83,27 @@ function Write-CandidatePortableProcessSnapshot([string]$candidateExe,[string]$l
 }
 
 # TEST-028: lexical containment is insufficient on Windows: a junction or
-# symlink inside RUNNER_TEMP can redirect a nested source to an outside tree.
-# Inspect every existing source component (including the runner root).
+# symlink anywhere in the existing source ancestry (including ABOVE
+# RUNNER_TEMP) can redirect a nested source to another filesystem tree.
 # Source and destination must be siblings, so this covers both parents.
 # This is a fail-closed snapshot, NOT an OS-enforced handle against races.
 function Assert-CandidatePortableNoReparsePath(
   [string]$runner,[string]$source
 ) {
-  $paths=@($runner)
+  # The earlier runner-to-source walk misses a junction in RUNNER_TEMP's
+  # parent chain. Include every ancestor through the volume root; the actual
+  # runner directory itself is also checked by the existing attribute guard.
+  $paths=@()
+  $ancestor=$runner
+  while(-not [string]::IsNullOrWhiteSpace($ancestor)) {
+    $paths+= $ancestor
+    $parent=[IO.Path]::GetDirectoryName($ancestor)
+    if([string]::IsNullOrWhiteSpace($parent) -or
+       [string]::Equals($parent,$ancestor,[StringComparison]::OrdinalIgnoreCase)) {
+      break
+    }
+    $ancestor=$parent
+  }
   $cursor=$runner
   $relative=$source.Substring($runner.Length+1)
   foreach($component in ($relative -split '[\\/]')) {
