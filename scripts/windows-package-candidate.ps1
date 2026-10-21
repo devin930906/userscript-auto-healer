@@ -188,6 +188,10 @@ try {
   $candidateFilePaths=@($extractedFiles | ForEach-Object { $_.FullName })
   $shareSummary=Get-CandidatePortableFileShareSummary $expanded $candidateFilePaths
   Write-Output "DIAGNOSTIC: candidate file-sharing $shareSummary"
+  # An independent empty sibling rename narrows parent/runner-wide denial
+  # versus candidate-specific contention; never attempts to move the payload.
+  $control=Get-CandidatePortableSiblingRenameControl $expanded
+  Write-Output "DIAGNOSTIC: candidate same-parent rename $control"
   Write-Output "DIAGNOSTIC: sourceExists=$(Test-Path -LiteralPath $expanded); destinationExists=$(Test-Path -LiteralPath $moved)"
   throw
 }
