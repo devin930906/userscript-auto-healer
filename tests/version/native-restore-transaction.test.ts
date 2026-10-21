@@ -6,11 +6,11 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {chmod,mkdtemp,mkdir,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
+import {chmod,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
-import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
+import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
@@ -41,6 +41,29 @@ async function fixture(run:(data:{
   });
  }finally{await rm(root,{recursive:true,force:true});}
 }
+test('TEST-020/026: displaced or removed restore path mutex is never mistaken for the acquired lock',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-lock-'));
+ try{
+  const lock=join(root,'owner-lock');
+  const moved=join(root,'moved-lock');
+  await mkdir(lock);
+  const owner=await lstat(lock,{bigint:true});
+  assert.equal(await stillOwnNativeRestorePathLock(lock,owner),true,
+   'unchanged acquired mutex must remain usable');
+  await rename(lock,moved);
+  assert.equal(await stillOwnNativeRestorePathLock(lock,owner),false,
+   'missing mutex must refuse source replacement');
+  await mkdir(lock);
+  assert.equal(await stillOwnNativeRestorePathLock(lock,owner),false,
+   'a newly created mutex with the same path is a DIFFERENT owner');
+  await rm(lock,{recursive:true});
+  assert.equal(await stillOwnNativeRestorePathLock(lock,owner),false,
+   'the original mutex relocated elsewhere is not still held');
+  assert.ok((await lstat(moved,{bigint:true})).isDirectory(),
+   'unknown displaced lock evidence must remain intact');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-020: isolated native manual restore preserves displaced bytes as a second independently verifiable backup',async()=>{
  await fixture(async opts=>{
   const result=await restoreVerifiedOriginalNativeOnly(opts);
