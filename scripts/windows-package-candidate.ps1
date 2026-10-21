@@ -152,25 +152,8 @@ Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoa
 # TASK-020 / ISSUE-215 diagnostic only: match the exact disposable test EXE
 # location, never query or modify external Chrome profiles or terminate processes.
 # Parent Electron's exit does not prove its renderer/utility children exited.
-function Trace-CandidateElectronProcesses([string]$candidateExe,[string]$label) {
-  $exact=[IO.Path]::GetFullPath($candidateExe)
-  $matches=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" |
-    Where-Object {
-      $_.ExecutablePath -and [string]::Equals(
-        [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
-        [StringComparison]::OrdinalIgnoreCase)
-    })
-  Write-Output "DIAGNOSTIC: $label candidate EXE live processes: $($matches.Count)"
-  foreach($entry in $matches) {
-    Write-Output "DIAGNOSTIC: candidate PID=$($entry.ProcessId) parent=$($entry.ParentProcessId)"
-  }
-}
-Trace-CandidateElectronProcesses (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
-# A successful smoke parent receipt alone is insufficient to move a directory
-# that may still be mapped by a candidate-owned Electron child. This bounded
-# check never stops any process. Unknown/noncandidate locks still fail closed
-# in the existing atomic Move-CandidatePortableDirectory helper.
 . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
+Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
 $ownedChecks=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
 Write-Output "PASS: candidate-owned executable quiescent before relocation (check $ownedChecks)"
 # TEST-028: exercise an actual portable directory MOVE (not a second copy
@@ -185,7 +168,7 @@ try {
   $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved
 } catch {
   # Preserve the actual exception and the original fail-closed guard.
-  Trace-CandidateElectronProcesses (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after relocation failure'
+  Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after relocation failure'
   Write-Output "DIAGNOSTIC: sourceExists=$(Test-Path -LiteralPath $expanded); destinationExists=$(Test-Path -LiteralPath $moved)"
   throw
 }

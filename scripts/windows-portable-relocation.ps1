@@ -73,6 +73,15 @@ function Get-CandidatePortableRelocationOwnerSummary([string]$candidateExe) {
   }
 }
 
+# ISSUE-215 / TEST-028: a diagnostic snapshot must never make the
+# candidate packaging fail with an unrelated CIM exception or lose the
+# original directory-move exception. The owner summary explicitly reports
+# query failure or opaque executable paths instead of treating them as zero.
+function Write-CandidatePortableProcessSnapshot([string]$candidateExe,[string]$label) {
+  $summary=Get-CandidatePortableRelocationOwnerSummary $candidateExe
+  Write-Output ("DIAGNOSTIC: {0} candidate owners: {1}" -f $label,$summary)
+}
+
 # TEST-028: lexical containment is insufficient on Windows: a junction or
 # symlink inside RUNNER_TEMP can redirect a nested source to an outside tree.
 # Inspect every existing source component (including the runner root).
