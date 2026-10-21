@@ -81,6 +81,30 @@ test('TEST-020 stage: explicit consent and native-only exact input required',asy
      assert.deepEqual(empty.candidates,[]);
  });
 });
+test('TEST-020/026: backup inventory rejects live and revoked Proxy before any reflection',async()=>{
+ await withFixture(async(source,backupDirectory)=>{
+   const selected={sourcePath:source,backupDirectory,userApproved:true};
+   let traps=0;
+   const live=new Proxy(selected,{
+     getPrototypeOf(){traps++;throw Error('untrusted prototype trap');},
+     ownKeys(){traps++;throw Error('untrusted ownKeys trap');},
+     get(){traps++;throw Error('untrusted getter trap');}
+   });
+   const revoked=Proxy.revocable(selected,{});
+   revoked.revoke();
+   const before=await readdir(backupDirectory);
+   for(const untrusted of [live,revoked.proxy]){
+     const result=await inspectBackupInventoryReadOnly(untrusted);
+     assert.equal(result.status,'BLOCKED');
+     if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_REQUEST');
+     assert.equal(result.automaticPatchAllowed,false);
+     assert.equal(result.automaticRollbackAllowed,false);
+   }
+   assert.equal(traps,0,'never invoke traps on an untrusted Proxy');
+   assert.deepEqual(await readdir(backupDirectory),before);
+   assert.deepEqual(await readFile(source),fixtureBytes);
+ });
+});
 test('TEST-020 stage: a forged or altered recovery copy is observational, never restore authority',async()=>{
  await withFixture(async(source,backupDirectory)=>{
    const made=await createVerifiedBackupOnly({sourcePath:source,backupDirectory,
