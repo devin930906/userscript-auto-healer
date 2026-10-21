@@ -216,10 +216,18 @@ export function proposeFromReadOnlyDomDiagnostic(
       'source','expectedSourceSha256','callOffset','method',
       'originalSelector','replacementSelector','faultEvidenceId'
     ];
-    if(patchFields.some(field=>
-      !Object.prototype.hasOwnProperty.call(patchDescriptors,field)||
-      !Object.prototype.hasOwnProperty.call(patchDescriptors[field],'value')))
+    const patchKeys=Reflect.ownKeys(patchDescriptors);
+    if(patchKeys.length!==patchFields.length||
+       patchKeys.some(key=>typeof key!=='string'||!patchFields.includes(key))||
+       patchFields.some(field=>
+         !Object.prototype.hasOwnProperty.call(patchDescriptors,field)||
+         !Object.prototype.hasOwnProperty.call(patchDescriptors[field],'value')))
       return blocked('INVALID_SCENARIO_LINK');
+    // The same exact snapshot must be used for scenario linkage and AST
+    // planning. No later reads of mutable or privileged caller properties.
+    const captured:Record<string,unknown>=Object.create(null);
+    for(const field of patchFields)captured[field]=patchDescriptors[field].value;
+    const request=captured as unknown as LiteralPatchRequest;
     // The canonical registry copies own data descriptors and array entries.
     // Never read a caller's scenario getters or infer authority from extras.
     const checked=preflightScenario(scenario as ScenarioInput);
@@ -229,7 +237,7 @@ export function proposeFromReadOnlyDomDiagnostic(
     if(s.userApproved!==true||s.requiresLogin!==false||
        !ID.test(s.id)||
        !SHA.test(s.scriptSha256)||
-       s.scriptSha256!==patch.expectedSourceSha256||
+       s.scriptSha256!==request.expectedSourceSha256||
        !Array.isArray(s.steps)||s.steps.length!==0||
        !Array.isArray(s.assertions)||s.assertions.length!==2)
       return blocked('INVALID_SCENARIO_LINK');
@@ -238,8 +246,8 @@ export function proposeFromReadOnlyDomDiagnostic(
     if(!old||!replacement||
        old.kind!=='selector-present'||replacement.kind!=='selector-present'||
        old.expectedText!==undefined||replacement.expectedText!==undefined||
-       old.selector!==patch.originalSelector||
-       replacement.selector!==patch.replacementSelector||
+       old.selector!==request.originalSelector||
+       replacement.selector!==request.replacementSelector||
        old.selector===replacement.selector)
       return blocked('INVALID_SCENARIO_LINK');
 
@@ -269,10 +277,10 @@ export function proposeFromReadOnlyDomDiagnostic(
        diagnosis.triage.evidenceIds.length!==1||
        diagnosis.triage.evidenceIds[0]!=='scenario_assertion_1')
       return blocked('NO_EXACT_SELECTOR_FAILURE');
-    if(patch.faultEvidenceId!=='scenario_assertion_1')
+    if(request.faultEvidenceId!=='scenario_assertion_1')
       return blocked('INVALID_SCENARIO_LINK');
 
-    const candidate=proposeLiteralSelectorPatch(patch);
+    const candidate=proposeLiteralSelectorPatch(request);
     if(candidate.status!=='CANDIDATE_ONLY')return blocked('PATCH_BLOCKED');
     // Use the immutable planner output, not caller-controlled patch getters
     // read a second time after SHA validation.
