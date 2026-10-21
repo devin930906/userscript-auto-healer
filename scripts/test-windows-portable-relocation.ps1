@@ -281,9 +281,19 @@ try {
       throw 'Share probe accepted a path outside its candidate directory'
     }
     Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
+    # Even a transient first denial must carry evidence before a later move
+    # might succeed. Reuse only this fixture's known file manifest.
+    $firstDenial=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
+    if(-not $firstDenial.Contains('sharing=[scan=ok probed=1 blockedExamples=1 names=payload.txt:Win32=') -or
+       -not $firstDenial.Contains('sibling=[control=move-ok]') -or
+       @((Get-ChildItem -LiteralPath $root -Recurse -Directory -Force) |
+          Where-Object { $_.Name -like 'uah-empty-rename-control-*' }).Count -ne 0) {
+      throw "First-denial diagnostic missed actual file lock or leaked temporary control: $firstDenial"
+    }
+    Write-Output 'PASS: first relocation denial records candidate file lock and sibling control without changing payload'
     $rejected=$false
     $rootFailure=$null
-    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
+    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 @($permanentFile) | Out-Null }
     catch {
       $rootError=$_.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
