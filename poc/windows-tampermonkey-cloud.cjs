@@ -38,6 +38,8 @@ let source=[
  '// @match https://example.com/*',
  '// @grant GM_getValue',
  '// @run-at '+runAt,
+ // Match the production disposable GM probe's explicit top-frame-only scope.
+ '// @noframes',
  '// ==/UserScript==',
  'const injectedReadyState=document.readyState;',
  'let gm=false;',
