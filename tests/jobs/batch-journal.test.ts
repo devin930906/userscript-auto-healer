@@ -196,6 +196,34 @@ test('TASK-013/TEST-022/026: a replaced pending checkpoint must not become the c
  });
 });
 
+test('TASK-013/TEST-022/026: post-rename matching bytes from a different inode must not attest a saved journal',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const realRename=fsPromises.rename;
+  const journal=join(directory,BATCH_JOURNAL_FILENAME);
+  const retained=join(directory,'owned-journal-retained-for-review');
+  let injected=false;
+  // Interpose precisely after the native rename: the replacement is byte-for-byte
+  // identical but a DIFFERENT inode. No arbitrary data is exposed or deleted.
+  (fsPromises as {rename:typeof realRename}).rename=async(from,to)=>{
+   await realRename(from,to);
+   if(to===journal){
+    injected=true;
+    const bytes=await readFile(journal);
+    await realRename(journal,retained);
+    await writeFile(journal,bytes);
+   }
+  };
+  try{
+   const output=await saveReadOnlyBatchJournal(directory,
+    new ReadOnlyBatchCoordinator(options,completed));
+   assert.equal(injected,true);
+   assert.deepEqual(output,{status:'BLOCKED',reason:'IO_FAILURE'});
+   assert.deepEqual(await readFile(journal),await readFile(retained));
+  }finally{(fsPromises as {rename:typeof realRename}).rename=realRename;}
+ });
+});
+
 test('TASK-013/TEST-022/026: losing the writer lock identity aborts publish and preserves foreign lock',async()=>{
  await withJournal(async directory=>{
   const native=new ReadOnlyBatchCoordinator(options,completed);
