@@ -278,7 +278,7 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
   let snapshots=0;
   ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
    snapshots++;
-   if(snapshots===3)mkdirSync(lock);
+   if(snapshots===4)mkdirSync(lock);
    return original.call(this);
   };
   try{
@@ -293,7 +293,7 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
  });
 });
 
-test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unsigned batch identities',async()=>{
+test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unbound batch identities',async()=>{
  await withJournal(async directory=>{
   let called=0;
   const worker=async()=>{called++;return 'DONE' as const;};
