@@ -8,7 +8,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
-import {link,lstat,open,unlink} from 'node:fs/promises';
+import {link,lstat,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {basename,isAbsolute,join} from 'node:path';
 import type {LiteralPatchRequest} from '../repair/patch-planner';
@@ -16,6 +16,7 @@ import {verifyStagedCandidateReadOnly} from './staged-candidate-recheck';
 import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 import {backupPrefix} from './verified-backup';
 import {hasUnsafePathLink} from './path-boundary';
+import {removeOwnedStagingPending} from './staging-pending-ownership';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'RECHECK_FAILED'|
   'UNSAFE_DESTINATION'|'CHECKPOINT_FAILED';
@@ -140,10 +141,15 @@ export async function stageRecoveryCheckpointOnly(
     const final=join(opts.backupDirectory,checkpointFileName);
     const pending=join(opts.backupDirectory,'.'+randomUUID()+'.pending');
     let tempCreated=false;
+    let pendingIdentity:BigIntStats|undefined;
     try{
       const file=await open(pending,'wx',0o600);
       tempCreated=true;
-      try{await file.writeFile(bytes);await file.sync();}
+      try{
+       await file.writeFile(bytes);
+       await file.sync();
+       pendingIdentity=await file.stat({bigint:true});
+      }
       finally{await file.close();}
       if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
         return block('CHECKPOINT_FAILED');
@@ -155,7 +161,8 @@ export async function stageRecoveryCheckpointOnly(
       // Atomic no-overwrite publication within the same directory. Partial
       // .pending files are never named/treated as recoverable checkpoints.
       await link(pending,final);
-      await unlink(pending);
+      if(!pendingIdentity||!await removeOwnedStagingPending(
+        pending,pendingIdentity,dir,final))return block('CHECKPOINT_FAILED');
       tempCreated=false;
       if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
         return block('CHECKPOINT_FAILED');
@@ -177,7 +184,8 @@ export async function stageRecoveryCheckpointOnly(
       });
     }catch{return block('CHECKPOINT_FAILED');}
     finally{
-      if(tempCreated)await unlink(pending).catch(()=>{});
+      if(tempCreated&&pendingIdentity)
+       await removeOwnedStagingPending(pending,pendingIdentity,dir);
     }
   }catch{
     // Never leak full paths or source contents in error messages.

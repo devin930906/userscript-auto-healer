@@ -9,7 +9,7 @@
  */
 import {randomUUID} from 'node:crypto';
 import {types as utilTypes} from 'node:util';
-import {lstat,link,open,unlink} from 'node:fs/promises';
+import {lstat,link,open} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {
   proposeLiteralSelectorPatch,type LiteralPatchRequest
@@ -22,6 +22,8 @@ import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {hasUnsafePathLink} from './path-boundary';
 import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
+import type {BigIntStats} from 'node:fs';
+import {removeOwnedStagingPending} from './staging-pending-ownership';
 
 type Failure='INVALID_REQUEST'|'NOT_AUTHORIZED'|'CANDIDATE_REJECTED'|
   'BACKUP_NOT_PREPARED'|'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|
@@ -132,10 +134,15 @@ export async function stageReviewedCandidateOnly(
     const final=join(options.backupDirectory,candidateFileName);
     const pending=join(options.backupDirectory,'.'+randomUUID()+'.pending');
     let tempCreated=false;
+    let pendingIdentity:BigIntStats|undefined;
     try{
       const handle=await open(pending,'wx',0o600);
       tempCreated=true;
-      try{await handle.writeFile(bytes);await handle.sync();}
+      try{
+       await handle.writeFile(bytes);
+       await handle.sync();
+       pendingIdentity=await handle.stat({bigint:true});
+      }
       finally{await handle.close();}
       // Temporary files can be externally replaced/grown; never read
       // unbounded bytes or trust pathname metadata without a descriptor.
@@ -155,7 +162,8 @@ export async function stageReviewedCandidateOnly(
         return block('UNSAFE_DESTINATION');
       // Never replace an existing file; refuse filesystems without hard links.
       await link(pending,final);
-      await unlink(pending);
+      if(!pendingIdentity||!await removeOwnedStagingPending(
+        pending,pendingIdentity,dirBefore,final))return block('STAGING_FAILED');
       tempCreated=false;
 
       if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
@@ -198,7 +206,8 @@ export async function stageReviewedCandidateOnly(
       });
     }catch{return block('STAGING_FAILED');}
     finally{
-      if(tempCreated)await unlink(pending).catch(()=>{});
+      if(tempCreated&&pendingIdentity)
+       await removeOwnedStagingPending(pending,pendingIdentity,dirBefore);
     }
   });
  }catch(e){

@@ -7,12 +7,14 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
-import {link,lstat,open,unlink} from 'node:fs/promises';
+import {link,lstat,open} from 'node:fs/promises';
 import {basename,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {hasUnsafePathLink} from './path-boundary';
 import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
+import type {BigIntStats} from 'node:fs';
+import {removeOwnedStagingPending} from './staging-pending-ownership';
 
 type Failure =
   'INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|'SOURCE_CHANGED'|
@@ -135,10 +137,15 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     const final=join(directory,name);
     const pending=join(directory,'.'+randomUUID()+'.pending');
     let tempCreated=false;
+    let pendingIdentity:BigIntStats|undefined;
     try {
       const out=await open(pending,'wx',0o600);
       tempCreated=true;
-      try {await out.writeFile(bytes);await out.sync();}
+      try{
+       await out.writeFile(bytes);
+       await out.sync();
+       pendingIdentity=await out.stat({bigint:true});
+      }
       finally {await out.close();}
       // Bound post-write verification and require stable inode, size and
       // timestamps. An external process can replace/grow a staging file.
@@ -162,7 +169,8 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       // inode. Do not report a standalone recovery copy while this temporary
       // hard link still exists: recovery-source rejects multiply linked files.
       // If cleanup fails, report failure and keep the potential backup.
-      await unlink(pending);
+      if(!pendingIdentity||!await removeOwnedStagingPending(
+        pending,pendingIdentity,backupDir,final))return deny('IO_FAILURE');
       tempCreated=false;
       const independent=await lstat(final,{bigint:true});
       if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
@@ -182,7 +190,8 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     }catch{
       return deny('IO_FAILURE');
     }finally{
-      if(tempCreated)await unlink(pending).catch(()=>{});
+      if(tempCreated&&pendingIdentity)
+       await removeOwnedStagingPending(pending,pendingIdentity,backupDir);
       // If post-publication verification failed, leave the unique recovery
       // copy for privileged reconciliation; never claim it was verified.
     }
