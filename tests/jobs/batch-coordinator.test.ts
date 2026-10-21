@@ -183,6 +183,51 @@ test('TEST-022: hostile proxy traps cannot leak errors through batch validation'
    {...snapshot,jobs:[badJob]}),/INVALID_BATCH_CHECKPOINT/);
 });
 
+test('TEST-022/026: untrusted batch Proxy inputs invoke zero reflection traps',()=>{
+ const worker=async()=> 'DONE' as const;
+ const hash=SCRIPT_A;
+ const checkpoint=new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:[hash]},worker).snapshot();
+ let traps=0;
+ const refuse=(label:string,make:()=>ReadOnlyBatchCoordinator)=>{
+  traps=0;
+  assert.throws(make,/INVALID_BATCH_(?:OPTIONS|CHECKPOINT)/,label);
+  assert.equal(traps,0,label+' must not execute Proxy traps');
+ };
+ const optionsProxy=new Proxy({count:1},{
+  ownKeys(target){traps++;return Reflect.ownKeys(target);}
+ });
+ refuse('options object',()=>new ReadOnlyBatchCoordinator(optionsProxy,worker));
+ const hashesProxy=new Proxy([hash],{
+  get(target,property,receiver){
+   traps++;return Reflect.get(target,property,receiver);
+  }
+ });
+ refuse('script identity array',()=>new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:hashesProxy},worker));
+ const checkpointProxy=new Proxy({...checkpoint},{
+  getPrototypeOf(target){traps++;return Reflect.getPrototypeOf(target);}
+ });
+ refuse('checkpoint record',()=>new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:[hash]},worker,checkpointProxy));
+ const jobsProxy=new Proxy([{ordinal:0,state:'QUEUED' as const,attempts:0}],{
+  get(target,property,receiver){
+   traps++;return Reflect.get(target,property,receiver);
+  }
+ });
+ refuse('checkpoint jobs array',()=>new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:[hash]},worker,{...checkpoint,jobs:jobsProxy}));
+ const jobProxy=new Proxy({ordinal:0,state:'QUEUED' as const,attempts:0},{
+  getPrototypeOf(target){traps++;return Reflect.getPrototypeOf(target);}
+ });
+ refuse('checkpoint job entry',()=>new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:[hash]},worker,{...checkpoint,jobs:[jobProxy]}));
+ const revoked=Proxy.revocable([hash],{});
+ revoked.revoke();
+ refuse('revoked script identity Proxy',()=>new ReadOnlyBatchCoordinator(
+  {count:1,jobHashes:revoked.proxy},worker));
+});
+
 test('TEST-022/NFR-009: cancellation settles without waiting for an unresponsive read-only worker',async()=>{
  let started!:()=>void;
  const entered=new Promise<void>(resolve=>{started=resolve;});
