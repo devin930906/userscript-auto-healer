@@ -313,6 +313,34 @@ async function main(){
   },variant==='product-original'
     ?{injected:'yes',gm:'true',business:'missing-target',action:null}
     :{injected:'yes',gm:'true',business:'recovered',action:'done'});
+  // TASK-007 / TEST-017/026: a matching-origin child frame is not an
+  // independent user-approved top-level script target. A genuine extension
+  // is present here; the browser must exercise the actual manager policy.
+  // The disposable frame is served locally via Playwright routing, without
+  // reading an account, user script, profile or third-party site data.
+  await context.route('https://example.com/uah-ci-nested-frame',route=>
+    route.fulfill({status:200,contentType:'text/html',
+      body:'<!doctype html><html><body><button id="uah-ci-target">Disposable iframe</button></body></html>'}));
+  await fixedPage.evaluate(()=>{
+    const child=document.createElement('iframe');
+    child.id='uah-ci-nested-frame';
+    child.src='https://example.com/uah-ci-nested-frame';
+    document.body.append(child);
+  });
+  const childFrame=fixedPage.frame({url:'https://example.com/uah-ci-nested-frame'})||
+    await fixedPage.waitForEvent('framenavigated',{predicate:f=>
+      f.url()==='https://example.com/uah-ci-nested-frame',timeout:15000});
+  await childFrame.waitForLoadState('load',{timeout:15000});
+  await childFrame.locator('#uah-ci-target').waitFor({timeout:10000});
+  await sleep(1200);
+  const childEvidence=await childFrame.evaluate(()=>({
+    injected:document.documentElement.dataset.uahCiInjected||null,
+    gm:document.documentElement.dataset.uahCiGm||null,
+    action:document.querySelector('#uah-ci-target')?.getAttribute('data-uah-ci-action')||null
+  }));
+  console.log('TAMPERMONKEY_UNAUTHORIZED_CHILD_FRAME '+JSON.stringify(childEvidence));
+  assert.deepEqual(childEvidence,{injected:null,gm:null,action:null},
+    'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
     ' fixture variant '+variant+' GM_getValue and expected business assertions.');
   if(variant==='product-original')
