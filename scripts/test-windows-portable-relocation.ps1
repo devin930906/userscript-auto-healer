@@ -152,6 +152,26 @@ try {
   }
   Write-Output 'PASS: redacted candidate-name process path refuses relocation'
 
+  # A failing or redacted CIM owner query must produce explicit diagnostic
+  # uncertainty without throwing and hiding a previous relocation error.
+  $queryFailureTrace=& {
+    function Get-CimInstance { throw 'Simulated CIM diagnostic query failure' }
+    Write-CandidatePortableProcessSnapshot $ownedExe 'after relocation failure'
+  }
+  if($queryFailureTrace -cne 'DIAGNOSTIC: after relocation failure candidate owners: live=unknown unknownPath=unknown query=failed') {
+    throw 'Candidate process tracing masked CIM failure instead of reporting uncertainty'
+  }
+  $opaqueTrace=& {
+    function Get-CimInstance {
+      [pscustomobject]@{ExecutablePath=$null}
+    }
+    Write-CandidatePortableProcessSnapshot $ownedExe 'after extracted smoke'
+  }
+  if($opaqueTrace -cne 'DIAGNOSTIC: after extracted smoke candidate owners: live=0 unknownPath=1 query=ok') {
+    throw 'Candidate process tracing did not preserve redacted identity ambiguity'
+  }
+  Write-Output 'PASS: candidate diagnostics fail safely without masking relocation exceptions'
+
   # An access-denied rename needs a read-only snapshot taken AT the denial,
   # not just the earlier pre-move process check. Report exact candidate matches,
   # but never mistake an inaccessible process path for proof of exit.
