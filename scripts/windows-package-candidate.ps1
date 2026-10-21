@@ -46,12 +46,7 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
       $failureReceipt=$receipt+'.failure'
       if(Test-Path -LiteralPath $failureReceipt -PathType Leaf) {
         $code=[IO.File]::ReadAllText($failureReceipt).Trim()
-        if($code -match '^[A-Z][A-Z0-9_]{4,90}$') {
-          Write-Warning "SHELL_SMOKE_FAILURE_CODE=$code"
-        }
-      }
-      throw "Electron smoke exit failure: $name"
-    }
+        if($code -match '^[A-Z][A-Z0-9_]{4,90}
   } finally { Remove-Item Env:\UAH_SMOKE_RECEIPT -ErrorAction SilentlyContinue }
   Require-File $receipt
   $r=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
