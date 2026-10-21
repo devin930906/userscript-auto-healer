@@ -483,3 +483,30 @@ test('TEST-017/018: untrusted GM reports and DOM snapshots reject accessors and 
  }
  assert.equal(called,0,'untrusted property getters/get traps must never execute');
 });
+
+test('TEST-018/026: observed iframe or shadow-root invalidates top-frame fixture DOM conclusion',()=>{
+ const observed={
+  ok:true as const,status:'LIMITED_DOM_OBSERVATION' as const,
+  observedAt:'2026-10-21T00:00:00.000Z',
+  originMatchesApproved:true as const,routeChanged:false,
+  summary:{elementCount:6,iframeCount:0,visibleShadowRoots:0,
+   blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']},
+  selectorCounts:{'#current-target':1,'#obsolete-target':0,
+   '[data-uah-probe-action="done"]':1,
+   '#current-target[data-uah-probe-action="done"]':1},
+  fullPageVerified:false as const,userscriptVerified:false as const
+ };
+ // The observer's generic closed-shadow blind spot appears even on a
+ // normal fixture; it alone must not disable the legitimate observation.
+ const clean=summarizeFixtureDomEvidence('fixed',observed);
+ assert.equal(clean.ok,true);
+ for(const summary of [
+  {...observed.summary,iframeCount:1},
+  {...observed.summary,visibleShadowRoots:1},
+  {...observed.summary,iframeCount:1,visibleShadowRoots:1}
+ ]){
+  const result=summarizeFixtureDomEvidence('fixed',{...observed,summary});
+  assert.deepEqual(result,{ok:false,code:'INVALID_FIXTURE_OBSERVATION'},
+   'Uninspected nested document or visible shadow tree cannot certify the controlled fixture');
+ }
+});
