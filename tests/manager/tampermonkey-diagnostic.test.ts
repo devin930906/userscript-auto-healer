@@ -517,7 +517,7 @@ test('TEST-018/026: forged or incomplete blind-spot lists cannot certify GM fixt
   observedAt:'2026-10-21T00:00:00.000Z',
   originMatchesApproved:true as const,routeChanged:false,
   summary:{elementCount:6,iframeCount:0,visibleShadowRoots:0,
-   blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN'] as readonly string[]},
+   blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN'] as const},
   selectorCounts:{'#current-target':1,'#obsolete-target':0,
    '[data-uah-probe-action="done"]':1,
    '#current-target[data-uah-probe-action="done"]':1},
