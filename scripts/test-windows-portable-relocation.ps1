@@ -28,6 +28,38 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # TEST-028: the reusable move helper must not rename any path outside its
+  # disposable runner namespace. Use a narrower, fake RUNNER_TEMP within the
+  # real runner temp to test denial without touching any user-owned directory.
+  $originalRunnerTemp=$env:RUNNER_TEMP
+  $sandbox=Join-Path $root 'isolated-runner'
+  New-Item -ItemType Directory -Path $sandbox | Out-Null
+  try {
+    $env:RUNNER_TEMP=$sandbox
+    foreach($base in @(
+      (Join-Path $root 'external'),
+      (Join-Path $root 'isolated-runner-sibling')
+    )) {
+      $sourceOutside=Join-Path $base 'source'
+      $destOutside=Join-Path $base 'moved'
+      New-Item -ItemType Directory -Path $sourceOutside -Force | Out-Null
+      $payload=Join-Path $sourceOutside 'preserve.txt'
+      [IO.File]::WriteAllText($payload,'original-bytes')
+      $blocked=$false
+      try { Move-CandidatePortableDirectory $sourceOutside $destOutside 1 0 | Out-Null }
+      catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*outside runner temp refused*') { throw }
+        $blocked=$true
+      }
+      if(-not $blocked -or (Test-Path -LiteralPath $destOutside) -or
+         -not (Test-Path -LiteralPath $payload -PathType Leaf) -or
+         [IO.File]::ReadAllText($payload) -cne 'original-bytes') {
+        throw 'Out-of-runner candidate move modified a source or destination'
+      }
+    }
+    Write-Output 'PASS: outside runner temp and prefix-sibling paths cannot be moved'
+  } finally { $env:RUNNER_TEMP=$originalRunnerTemp }
+
   # The smoke parent may exit before its child/utility image. Wait for only
   # the exact owned candidate binary, and never kill or move it while live.
   # cmd.exe is copied into a fresh RUNNER_TEMP folder as a self-contained,
