@@ -142,6 +142,30 @@ async function readJournal(path:string):Promise<string|null>{
   }finally{await h.close();}
  }catch{return null;}
 }
+/** Recheck both independent backups with the existing bounded, no-link
+ * descriptor verifier. A successful earlier read is not a durable receipt:
+ * an external editor can invalidate either backup while source or journal
+ * identity is being examined. This remains an observational snapshot only.
+ */
+async function backupsVerified(x:Input,j:Journal):Promise<boolean>{
+ for(const [name,sha] of [
+  [j.originalBackupFileName,j.originalSha256],
+  [j.displacedBackupFileName,j.displacedSha256]
+ ] as const){
+  const file=join(x.backupDirectory,name);
+  if(await hasUnsafePathLink(file))return false;
+  const st=await lstat(file,{bigint:true});
+  if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1n||
+     st.size<=0n||st.size>BigInt(MAX_SCRIPT_BYTES))return false;
+  const checked=await verifyBackupRecoverySource({
+   sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
+   backupFileName:name,expectedSha256:sha,
+   expectedByteLength:Number(st.size),userApproved:true
+  });
+  if(checked.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')return false;
+ }
+ return true;
+}
 /** Read-only: classify observed source bytes as old or restored, or refuse.
  * No finding permits any automatic retry, rename, manager action or rollback.
  */
@@ -165,24 +189,7 @@ export async function inspectNativeRestoreIntentReadOnly(
   if(contents===null)return deny('UNSAFE_JOURNAL');
   const j=parseJournal(contents,x.sourcePath);
   if(!j)return deny('UNSAFE_JOURNAL');
-  for(const [name,sha] of [
-   [j.originalBackupFileName,j.originalSha256],
-   [j.displacedBackupFileName,j.displacedSha256]
-  ] as const){
-   const file=join(x.backupDirectory,name);
-   if(await hasUnsafePathLink(file))return deny('BACKUP_UNVERIFIED');
-   const st=await lstat(file,{bigint:true});
-   if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1n||
-      st.size<=0n||st.size>BigInt(MAX_SCRIPT_BYTES))
-    return deny('BACKUP_UNVERIFIED');
-   const checked=await verifyBackupRecoverySource({
-    sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
-    backupFileName:name,expectedSha256:sha,
-    expectedByteLength:Number(st.size),userApproved:true
-   });
-   if(checked.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
-    return deny('BACKUP_UNVERIFIED');
-  }
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
   const original=await verifyApprovedSourceFingerprint({
    sourcePath:x.sourcePath,expectedSha256:j.originalSha256,userApproved:true
   });
@@ -203,6 +210,10 @@ export async function inspectNativeRestoreIntentReadOnly(
   // Recheck the exact journal after the filesystem operations. Any external
   // mutation requires a new inspection. It never yields write authority.
   if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Verify the two backups AGAIN after the asynchronous source/journal reads.
+  // Without this, an external writer can modify one after its first check
+  // and the user sees a false reconciled/verified status.
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
    sourceState,originalSha256:j.originalSha256,
    displacedSha256:j.displacedSha256,...noAuthority});
