@@ -10,7 +10,8 @@ const flags={extensionAuthenticityVerified:false as const,
   scriptInstallationVerified:false as const,gmApiVerified:false as const,businessVerified:false as const};
 const summary={
  status:'SELF_REPORTED_EXPECTATIONS_MATCH' as const,observedModes:2,
- reportedGmDefaultMatched:true,reportedBrokenFailed:true,
+ reportedGmDefaultMatched:true,reportedGmStorageRoundtripMatched:true,
+ reportedBrokenFailed:true,
  reportedFixedRecovered:true,...flags
 };
 const consistency={status:'CONSISTENT_UNVERIFIED_FIXTURE_ONLY' as const,comparedModes:2 as const,...flags};
@@ -36,10 +37,11 @@ test('TEST-017: report includes bounded unverified evidence but no source, token
  if(result.status!=='UNVERIFIED_REPORT_READY')return;
  const report=result.report;
  assert.equal(report.verdict,'NOT_VERIFIED');
- assert.equal(report.schema,'uah-manual-gm-fixture-v2');
+ assert.equal(report.schema,'uah-manual-gm-fixture-v3');
  assert.equal(report.browserVersion,'155.0.8059.40');
  assert.equal(report.runAt,'document-end');
  assert.equal(report.assessment.status,'SELF_REPORTED_EXPECTATIONS_MATCH');
+ assert.equal(report.assessment.reportedGmStorageRoundtripMatched,true);
  assert.equal(report.consistency.status,'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
  assert.equal(report.dom.broken?.actionCount,0);
  assert.equal(report.dom.fixed?.actionCount,1);
@@ -59,7 +61,8 @@ test('TEST-017: report includes bounded unverified evidence but no source, token
 test('TEST-017: incomplete or malformed self-reports fail closed; never claim real GM success',()=>{
  const awaiting={...session,snapshot:()=>({...summary,
    status:'AWAITING_BROWSER_VISITS' as const,observedModes:0,
-   reportedGmDefaultMatched:false,reportedBrokenFailed:false,reportedFixedRecovered:false}),
+   reportedGmDefaultMatched:false,reportedGmStorageRoundtripMatched:false,
+   reportedBrokenFailed:false,reportedFixedRecovered:false}),
    consistencySnapshot:()=>({...consistency,
      status:'AWAITING_BROWSER_VISITS' as const,comparedModes:0 as const}),
    domSnapshot:()=>({})};
@@ -213,6 +216,7 @@ test('TEST-017/026: coherent report semantics are required at capture and native
   const forged=[
    {...original,assessment:{...original.assessment,observedModes:1}},
    {...original,assessment:{...original.assessment,reportedBrokenFailed:false}},
+   {...original,assessment:{...original.assessment,reportedGmStorageRoundtripMatched:false}},
    {...original,assessment:{...original.assessment,status:'AWAITING_REPORTS',observedModes:2}},
    {...original,consistency:{...original.consistency,comparedModes:1}},
    {...original,consistency:{...original.consistency,status:'AWAITING_DOM_OBSERVATIONS'}},
