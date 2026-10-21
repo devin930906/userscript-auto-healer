@@ -177,3 +177,31 @@ test('TEST-023: output directory junction is not a manual export destination',as
     assert.deepEqual((await readdir(options.exportDirectory)).sort(),['redirected']);
   });
 });
+
+test('TEST-023/026: manual export rejects Proxy request, receipt and options before reflection',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  let traps=0;
+  const hostile=(value:object)=>new Proxy(value,{
+    getPrototypeOf(){
+      traps++;
+      throw new Error('untrusted Proxy reflection must not execute');
+    }
+  });
+  const cases=[
+    [hostile(request),staged,options],
+    [request,hostile(staged),options],
+    [request,staged,hostile(options)]
+  ] as const;
+  for(const [input,receipt,paths] of cases){
+    const result=await exportReviewedCandidateForManualInstall(input,receipt,paths);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.managerInstalled,false);
+  }
+  assert.equal(traps,0,'untrusted Proxy traps must not run');
+  assert.deepEqual(await readdir(options.exportDirectory),[]);
+  assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
+});
