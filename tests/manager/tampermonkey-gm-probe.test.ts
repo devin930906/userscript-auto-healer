@@ -51,6 +51,32 @@ test('TEST-017: separate temporary sessions never reuse a Tampermonkey userscrip
   assert.equal(await downloaded.text(),session.source);
  }
 });
+test('TEST-017/018/026: same-origin iframe cannot run disposable GM fixture or report',async t=>{
+ for(const runAt of ['document-start','document-idle'] as const){
+  const started=await startIsolatedTampermonkeyGmProbe(true,30000,runAt);
+  assert.equal(started.ok,true);
+  if(!started.ok)continue;
+  const probe=started.session;
+  t.after(()=>probe.stop());
+  const count={gm:0,query:0,action:0,report:0};
+  // Deliberately simulate a manager ignoring @noframes. A same-origin child
+  // with the exact approved URL must still not emit a diagnostic receipt.
+  const iframeWindow:{top:object}={top:{}};
+  runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   window:iframeWindow,
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   document:{readyState:'complete',querySelector:()=>{
+    count.query++;
+    return {setAttribute:()=>{count.action++;},getAttribute:()=> 'done'};
+   }},
+   GM_getValue:(_key:string,fallback:string)=>{count.gm++;return fallback;},
+   fetch:()=>{count.report++;return Promise.resolve();}
+  });
+  assert.deepEqual(count,{gm:0,query:0,action:0,report:0},runAt);
+  assert.deepEqual(probe.receiptSnapshot(),{},'no self-report should be recorded');
+ }
+});
 test('TEST-017: document-body and document-end accept each explicit run-at and defer DOM when parsing',async t=>{
  for(const runAt of ['document-body','document-end'] as const){
   const result=await startIsolatedTampermonkeyGmProbe(true,30000,runAt);
