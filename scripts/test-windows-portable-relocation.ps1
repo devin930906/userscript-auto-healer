@@ -37,15 +37,21 @@ try {
   $locked=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
   try {
     $rejected=$false
-    $conflictWarnings=@()
-    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 -WarningVariable +conflictWarnings | Out-Null }
-    catch {
-      $rootError=$_.Exception
+    # WarningVariable on a terminating function invocation is scoped to that
+    # invocation and need not survive its throw. Capture PowerShell stream 4
+    # outside an inner catch instead, so all emitted records remain testable.
+    $script:relocationLockError=$null
+    $conflictWarnings=@(& {
+      try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 | Out-Null }
+      catch { $script:relocationLockError=$_ }
+    } 4>&1)
+    if($null -ne $script:relocationLockError) {
+      $rootError=$script:relocationLockError.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
       $code=$rootError.HResult -band 0xFFFF
       if(($rootError -isnot [System.IO.IOException] -and
           $rootError -isnot [System.UnauthorizedAccessException]) -or
-          $code -notin @(5,32,33)) { throw }
+          $code -notin @(5,32,33)) { throw $script:relocationLockError }
       $rejected=$true
     }
     if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
