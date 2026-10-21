@@ -327,11 +327,12 @@ async function main(){
     child.src='https://example.com/uah-ci-nested-frame';
     document.body.append(child);
   });
-  const childFrame=fixedPage.frame({url:'https://example.com/uah-ci-nested-frame'})||
-    await fixedPage.waitForEvent('framenavigated',{predicate:f=>
-      f.url()==='https://example.com/uah-ci-nested-frame',timeout:15000});
+  await fixedPage.frameLocator('#uah-ci-nested-frame').locator('#uah-ci-target')
+    .waitFor({timeout:15000});
+  const childFrame=fixedPage.frames().find(frame=>
+    frame.url()==='https://example.com/uah-ci-nested-frame');
+  assert.ok(childFrame,'Disposable child frame did not reach the intended URL');
   await childFrame.waitForLoadState('load',{timeout:15000});
-  await childFrame.locator('#uah-ci-target').waitFor({timeout:10000});
   await sleep(1200);
   const childEvidence=await childFrame.evaluate(()=>({
     injected:document.documentElement.dataset.uahCiInjected||null,
