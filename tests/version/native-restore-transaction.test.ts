@@ -441,6 +441,71 @@ test('TEST-020/026: manual approval, exact journal name and untrusted Proxy are 
  });
 });
 
+test('TASK-011/TEST-020/026: post-rename journal corruption must not receive a success receipt',async t=>{
+ await fixture(async opts=>{
+  const snapshot=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const realVerify=snapshot.verifyApprovedSourceFingerprint;
+  let mutated=false;
+  t.mock.method(snapshot,'verifyApprovedSourceFingerprint',
+   async (input:Parameters<typeof realVerify>[0])=>{
+    const result=await realVerify(input);
+    // Only after the actual rename: this exact ORIGINAL hash cannot
+    // match the pre-restore edited source. A third party damages the
+    // already-published intent between source validation and success.
+    if(!mutated&&input.expectedSha256===sha(original)&&
+       result.status==='MATCHED_READ_ONLY'){
+      const journals=(await readdir(opts.backupDirectory))
+       .filter(name=>name.endsWith('.journal.json'));
+      assert.equal(journals.length,1);
+      mutated=true;
+      await writeFile(join(opts.backupDirectory,journals[0]),
+       Buffer.from('externally-corrupted-post-rename-journal'));
+    }
+    return result;
+   });
+  const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(mutated,true,'must inject after actual original-file replacement');
+  assert.deepEqual(receipt,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false});
+  assert.deepEqual(await readFile(opts.sourcePath),original,
+   'do not automatically undo an already completed rename');
+  assert.ok((await readdir(opts.backupDirectory))
+   .some(name=>name.endsWith('.backup.user.js')&&name!==opts.backupFileName),
+   'retain the displaced-version backup for manual reconciliation');
+ });
+});
+
+test('TASK-011/TEST-020/026: post-rename original backup corruption must not receive success',async t=>{
+ await fixture(async opts=>{
+  const snapshot=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const realVerify=snapshot.verifyApprovedSourceFingerprint;
+  let mutated=false;
+  t.mock.method(snapshot,'verifyApprovedSourceFingerprint',
+   async (input:Parameters<typeof realVerify>[0])=>{
+    const result=await realVerify(input);
+    if(!mutated&&input.expectedSha256===sha(original)&&
+       result.status==='MATCHED_READ_ONLY'){
+      mutated=true;
+      await writeFile(join(opts.backupDirectory,opts.backupFileName),
+       Buffer.from('externally-corrupted-original-backup'));
+    }
+    return result;
+   });
+  const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(mutated,true);
+  assert.deepEqual(receipt,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false});
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+  assert.ok((await readdir(opts.backupDirectory))
+   .some(name=>name.endsWith('.journal.json')),
+   'preserve published intent even when subsequent evidence is unsafe');
+ });
+});
+
 test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
  await fixture(async opts=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
