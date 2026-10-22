@@ -302,31 +302,54 @@ public static class UahCandidateRestartManagerProbe {
     ref uint provided, [Out] RM_PROCESS_INFO[] processes, out uint rebootReason);
   [DllImport("rstrtmgr.dll")]
   private static extern uint RmEndSession(uint h);
-  public static int CountAffected(string[] files) {
-    if(files==null || files.Length==0 || files.Length>40) return -1;
+  // No process names, PIDs, paths, services or application strings leave
+  // the native boundary. Count only documented RM_APP_TYPE categories.
+  // Indexes: total, window, service, explorer, console, critical, unknown.
+  public static int[] CountAffectedByType(string[] files) {
+    if(files==null || files.Length==0 || files.Length>40) return new int[]{-1};
     uint h;
-    if(RmStartSession(out h, 0, new StringBuilder(33))!=0) return -1;
+    if(RmStartSession(out h, 0, new StringBuilder(33))!=0) return new int[]{-1};
     try {
       if(RmRegisterResources(h, (uint)files.Length, files,
-          0, IntPtr.Zero, 0, IntPtr.Zero)!=0) return -1;
+          0, IntPtr.Zero, 0, IntPtr.Zero)!=0) return new int[]{-1};
       uint needed=0, provided=0, rebootReason=0;
       RM_PROCESS_INFO[] entries=new RM_PROCESS_INFO[0];
       for(int i=0;i<4;i++) {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
-        if(result==0) return (int)provided;
-        if(result!=234 || needed==0 || needed>128) return -1;
+        if(result==0) {
+          if(provided>(uint)entries.Length) return new int[]{-1};
+          int[] counts=new int[7];
+          counts[0]=(int)provided;
+          for(int j=0;j<(int)provided;j++) {
+            switch(entries[j].applicationType) {
+              case 1: case 2: counts[1]++; break; // window processes
+              case 3: counts[2]++; break; // service
+              case 4: counts[3]++; break; // Explorer
+              case 5: counts[4]++; break; // console
+              case 1000: counts[5]++; break; // critical / non-restartable
+              default: counts[6]++; break; // unknown and future values
+            }
+          }
+          return counts;
+        }
+        if(result!=234 || needed==0 || needed>128) return new int[]{-1};
         provided=needed;
         entries=new RM_PROCESS_INFO[(int)needed];
       }
-      return -1;
+      return new int[]{-1};
     } finally { RmEndSession(h); }
   }
 }
 '@ -ErrorAction Stop
     }
-    $affected=[UahCandidateRestartManagerProbe]::CountAffected([string[]]$sample)
-    if($affected -lt 0) { return 'rm=unavailable' }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$affected"
+    $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample)
+    if($null -eq $counts -or $counts.Length -ne 7 -or $counts[0] -lt 0) {
+      return 'rm=unavailable'
+    }
+    $classified=0
+    foreach($i in 1..6) { $classified+=$counts[$i] }
+    if($classified -ne $counts[0]) { return 'rm=unavailable' }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]"
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
