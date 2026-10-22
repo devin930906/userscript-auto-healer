@@ -59,6 +59,27 @@ test('TEST-017: supported run-at metadata is eligible but never attests injectio
    if(!result.ok)assert.equal(result.code,'RUN_AT_NOT_CONFIRMED');
  }
 });
+test('TEST-017/026: empty exclusion directives cannot masquerade as no exclusion rule',()=>{
+ // An explicit @exclude / @exclude-match has manager-specific semantics
+ // even if its value is blank or its parsed list is empty. Metadata-only
+ // eligibility must never infer that no exclusion directive was supplied.
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ for(const [tag,values] of [
+   ['exclude',[]],['exclude',['']],['exclude-match',[]],['exclude-match',['']]
+ ] as Array<[string,string[]]>) {
+   const outcome=inspect(report,metadata({...base,[tag]:values}));
+   assert.deepEqual(outcome,{
+     ok:false,status:'BLOCKED',code:'MATCH_NOT_CONFIRMED',
+     gmApiVerified:false,businessVerified:false
+   },'must reject explicit '+tag+' even if it carries no value');
+ }
+ // Normal metadata with no exclusions is still eligible for a limited
+ // preflight hint, not attestation of actual Tampermonkey execution.
+ const baseline=inspect(report,metadata(base));
+ assert.equal(baseline.ok,true);
+ if(baseline.ok)assert.equal(baseline.gmApiVerified,false);
+});
+
 test('TEST-017: remote dependencies and contradictory grants cannot pass metadata preflight',()=>{
  const baseline={grant:['GM_getValue'],match:['https://example.com/*']};
  for(const tags of [
