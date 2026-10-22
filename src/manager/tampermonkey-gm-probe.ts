@@ -101,12 +101,15 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  " if(typeof GM_setValue==='function'&&typeof GM_getValue==='function'&&",
  "    typeof GM_deleteValue==='function'){",
  '  const storageKey='+JSON.stringify('uah-gm-storage-'+token+'-')+'+mode;',
- '  let writeSucceeded=false;let readBack=false;let removed=false;',
+ '  let writeAttempted=false;let writeSucceeded=false;let readBack=false;let removed=false;',
  '  try{',
+ '   writeAttempted=true;',
  "   GM_setValue(storageKey,'gm-roundtrip-ok');writeSucceeded=true;",
  "   readBack=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
  '  }catch{}finally{',
- '   if(writeSucceeded){try{',
+ // A setter can mutate before throwing; always try to remove our unique
+ // disposable storage key, never use write success as the cleanup guard.
+ '   if(writeAttempted){try{',
  "    GM_deleteValue(storageKey);",
  "    removed=GM_getValue(storageKey,'gm-deleted')==='gm-deleted';",
  '   }catch{removed=false;}}',

@@ -352,7 +352,7 @@ test('TEST-017/018: isolated GM storage passes only after cleanup and read-after
    }
   });
   assert.equal(writes,1,scenario);
-  assert.equal(deletes,scenario==='write-denied'?0:1,scenario);
+  assert.equal(deletes,1,'cleanup is attempted even if GM_setValue fails: '+scenario);
   assert.equal(storage.size,scenario==='write-denied'||scenario==='delete-denied'?Number(scenario==='delete-denied'):0,scenario);
   assert.equal(reports.length,1,scenario);
   assert.equal(reports[0].gmDefaultMatched,true,scenario);
