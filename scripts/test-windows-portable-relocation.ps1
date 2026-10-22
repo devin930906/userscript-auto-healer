@@ -360,7 +360,12 @@ try {
       # Image categories are allowlisted labels, never arbitrary names/PIDs.
       # This actual lock must resolve to a time-matched PowerShell image.
       $images=0
-      foreach($kind in 9..24) { $images+=[int]$Matches[$kind] }
+      foreach($kind in 9..15) { $images+=[int]$Matches[$kind] }
+      $knownTools=0
+      foreach($kind in 16..24) { $knownTools+=[int]$Matches[$kind] }
+      if($knownTools -gt [int]$Matches[14]) {
+        throw 'Restart Manager tool-family subset exceeds other-image owners'
+      }
       if($images -ne $affected -or [int]$Matches[11] -lt 1) {
         throw 'Restart Manager did not classify its time-matched PowerShell file owner'
       }
