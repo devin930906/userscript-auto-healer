@@ -349,13 +349,18 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\]$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+)$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
       foreach($kind in 2..7) { $classified+=[int]$Matches[$kind] }
       if($affected -lt 1 -or $classified -ne $affected) {
         throw 'Restart Manager affected-type classification does not match its process count'
+      }
+      # This file handle was opened by THIS pwsh.exe process in this test.
+      # The PID must never be emitted; identity is checked within the probe.
+      if([int]$Matches[8] -ne 1) {
+        throw 'Restart Manager did not identify the current process as the fixture file owner'
       }
     } else {
       throw "Restart Manager missed classified disposable lock evidence: $rmLocked"
