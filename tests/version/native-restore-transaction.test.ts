@@ -357,6 +357,44 @@ test('TEST-020/026: restore inspection refuses a backup changed after its first 
  });
 });
 
+test('TEST-020/026: restore intent blocks source changed during final asynchronous backup recheck',async t=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const inspection={sourcePath:opts.sourcePath,
+   backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  const module=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const realVerify=module.verifyBackupRecoverySource;
+  let checks=0;
+  const externalBytes=Buffer.from('// independently edited while backups are rechecked\\n');
+  // The inspector initially checks both backups, then fingerprints source,
+  // then checks both backups again. Change the SOURCE only after that
+  // fourth asynchronous backup verification; the earlier source snapshot
+  // is now obsolete, even though both backup copies are still authentic.
+  t.mock.method(module,'verifyBackupRecoverySource',
+   async (input:Parameters<typeof realVerify>[0])=>{
+    const verified=await realVerify(input);
+    checks++;
+    if(checks===4)await writeFile(opts.sourcePath,externalBytes);
+    return verified;
+   });
+  const result=await inspectNativeRestoreIntentReadOnly(inspection);
+  assert.equal(checks>=4,true,'must exercise the late-backup-check window');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'SOURCE_DIVERGED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(opts.sourcePath),externalBytes,
+   'observation may not overwrite the external editor');
+  assert.deepEqual(await readFile(
+   join(opts.backupDirectory,opts.backupFileName)),original);
+ });
+});
+
 test('TEST-020/026: forged journal, tampered backup and diverged source never give a usable receipt',async()=>{
  await fixture(async opts=>{
   const restored=await restoreVerifiedOriginalNativeOnly(opts);
