@@ -138,7 +138,15 @@ if(require.main===module){
  try{
   if(process.argv.length!==4)fail();
   const [crxPath,zipPath]=process.argv.slice(2);
-  const verified=verifyCrx3PackageIntegrity(readFileSync(resolve(crxPath)));
+  // This CLI is ONLY the official Tampermonkey experiment. A CRX3 signed
+  // with any unrelated attacker's key is still a syntactically valid CRX3;
+  // explicitly pin the approved Tampermonkey signing-key-derived extension
+  // ID before writing a ZIP or loading executable extension code. Keep this
+  // ID aligned with TAMPERMONKEY_EXTENSION_ID in the application adapter.
+  // Pinning the key does not independently attest Web Store installation.
+  const expectedTampermonkeyKeyId='dhdgffkkebhmkfjojejmpbldmpobfkfo';
+  const verified=verifyCrx3PackageIntegrity(
+    readFileSync(resolve(crxPath)),expectedTampermonkeyKeyId);
   // Exclusive creation prevents an invalid package from overwriting an
   // existing extracted archive or silently continuing with stale bytes.
   writeFileSync(resolve(zipPath),verified.zip,{flag:'wx'});
