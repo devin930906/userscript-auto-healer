@@ -349,7 +349,7 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\]$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\] scope=\[insideCandidateTree=([0-9]+) outsideCandidateTree=([0-9]+) unknown=([0-9]+)\]$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
@@ -365,6 +365,13 @@ try {
       foreach($kind in 16..24) { $knownTools+=[int]$Matches[$kind] }
       if($knownTools -gt [int]$Matches[14]) {
         throw 'Restart Manager tool-family subset exceeds other-image owners'
+      }
+      $scopeCount=0
+      foreach($kind in 25..27) { $scopeCount+=[int]$Matches[$kind] }
+      # The pwsh fixture image runs outside the disposable candidate root,
+      # even though its real open file handle points INSIDE that root.
+      if($scopeCount -ne $affected -or [int]$Matches[26] -lt 1) {
+        throw 'Restart Manager did not classify external image location'
       }
       if($images -ne $affected -or [int]$Matches[11] -lt 1) {
         throw 'Restart Manager did not classify its time-matched PowerShell file owner'
@@ -444,6 +451,7 @@ try {
     $commandEvidence=Get-CandidatePortableRestartManagerSummary $commandRoot @($commandExe)
     if($commandEvidence -notlike '*images=[[]candidate=0 *' -or
        $commandEvidence -notlike '*tools=[[]command=1 *' -or
+       $commandEvidence -notmatch 'scope=\[insideCandidateTree=[1-9][0-9]* outsideCandidateTree=[0-9]+ unknown=[0-9]+\]$' -or
        $commandEvidence.Contains($commandRoot) -or
        (Get-FileHash -LiteralPath $commandExe -Algorithm SHA256).Hash -cne $commandHash) {
       throw "Restart Manager did not safely classify the real command image: $commandEvidence"

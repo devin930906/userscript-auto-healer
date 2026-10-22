@@ -332,25 +332,32 @@ public static class UahCandidateRestartManagerProbe {
         StringBuilder image=new StringBuilder((int)length);
         if(!QueryImage(handle, 0, image, ref length) || length==0) return 14;
         string full=Path.GetFullPath(image.ToString());
-        if(String.Equals(full, candidateExe, StringComparison.OrdinalIgnoreCase)) return 8;
+        // Image location is diagnostic, NOT process ancestry or authority
+        // to modify or terminate a process. Never emit this actual path.
+        string root=Path.GetDirectoryName(candidateExe);
+        int scope=!String.IsNullOrEmpty(root) &&
+          full.StartsWith(root+Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase) ? 256 : 0;
+        if(String.Equals(full, candidateExe, StringComparison.OrdinalIgnoreCase))
+          return 8+scope;
         switch(Path.GetFileName(full).ToLowerInvariant()) {
-          case "conhost.exe": case "openconsole.exe": return 9;
-          case "pwsh.exe": case "powershell.exe": return 10;
-          case "node.exe": return 11;
-          case "runner.worker.exe": case "runner.listener.exe": return 12;
+          case "conhost.exe": case "openconsole.exe": return 9+scope;
+          case "pwsh.exe": case "powershell.exe": return 10+scope;
+          case "node.exe": return 11+scope;
+          case "runner.worker.exe": case "runner.listener.exe": return 12+scope;
           // Additional allowlisted tool families only. These are supplemental
           // counts under the existing "other" image category, never process
           // ownership or permission to stop any executable.
-          case "cmd.exe": return 15;
-          case "explorer.exe": return 16;
-          case "dllhost.exe": return 17;
-          case "rundll32.exe": return 18;
-          case "werfault.exe": case "wermgr.exe": return 19;
-          case "compattelrunner.exe": return 20;
-          case "msmpeng.exe": case "securityhealthservice.exe": return 21;
-          case "csc.exe": case "vbc.exe": case "msbuild.exe": return 22;
-          case "svchost.exe": return 23;
-          default: return 13;
+          case "cmd.exe": return 15+scope;
+          case "explorer.exe": return 16+scope;
+          case "dllhost.exe": return 17+scope;
+          case "rundll32.exe": return 18+scope;
+          case "werfault.exe": case "wermgr.exe": return 19+scope;
+          case "compattelrunner.exe": return 20+scope;
+          case "msmpeng.exe": case "securityhealthservice.exe": return 21+scope;
+          case "csc.exe": case "vbc.exe": case "msbuild.exe": return 22+scope;
+          case "svchost.exe": return 23+scope;
+          default: return 13+scope;
         }
       }
     } catch { return 14; }
@@ -361,6 +368,8 @@ public static class UahCandidateRestartManagerProbe {
   // 8..14: exact candidate, console-host name, shell name, node name,
   // runner name, other known image, unavailable/time-mismatched identity.
   // 15..23: known tool families (a bounded subset of image category 13).
+  // 24..26: candidate-tree executable location, external, or unavailable.
+  // Location never establishes ancestry, directory ownership or a release gate.
   public static int[] CountAffectedByType(string[] files, string candidateExe) {
     if(files==null || files.Length==0 || files.Length>40) return new int[]{-1};
     uint h;
@@ -374,12 +383,16 @@ public static class UahCandidateRestartManagerProbe {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
         if(result==0) {
           if(provided>(uint)entries.Length) return new int[]{-1};
-          int[] counts=new int[24];
+          int[] counts=new int[27];
           counts[0]=(int)provided;
           int currentPid=Environment.ProcessId;
           for(int j=0;j<(int)provided;j++) {
             if(entries[j].process.pid==(uint)currentPid) counts[7]++;
             int category=ImageCategory(entries[j].process, candidateExe);
+            if((category & 256)!=0) counts[24]++;
+            else if(category==14) counts[26]++;
+            else counts[25]++;
+            category &= 255;
             if(category>=15 && category<=23) {
               counts[13]++; // tool families remain part of "other"
               counts[category]++;
@@ -409,16 +422,18 @@ public static class UahCandidateRestartManagerProbe {
     }
     $candidateExe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
     $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample,$candidateExe)
-    if($null -eq $counts -or $counts.Length -ne 24 -or $counts[0] -lt 0) {
+    if($null -eq $counts -or $counts.Length -ne 27 -or $counts[0] -lt 0) {
       return 'rm=unavailable'
     }
     $classified=0
     foreach($i in 1..6) { $classified+=$counts[$i] }
     $images=0
     foreach($i in 8..14) { $images+=$counts[$i] }
+    $imageScopes=$counts[24]+$counts[25]+$counts[26]
     if($classified -ne $counts[0] -or $images -ne $counts[0] -or
+       $imageScopes -ne $counts[0] -or
        $counts[7] -gt $counts[0]) { return 'rm=unavailable' }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]"
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " scope=[insideCandidateTree=$($counts[24]) outsideCandidateTree=$($counts[25]) unknown=$($counts[26])]"
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
