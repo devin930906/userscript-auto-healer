@@ -214,6 +214,25 @@ export async function inspectNativeRestoreIntentReadOnly(
   // Without this, an external writer can modify one after its first check
   // and the user sees a false reconciled/verified status.
   if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  // The final independent backup reads suspend execution. An external
+  // editor can replace the selected source AFTER our earlier fingerprint
+  // and sourceStart/sourceEnd identity check, but BEFORE this observation
+  // is returned. Recheck the exact previously observed version and source
+  // inode after those awaits; never issue a stale recovery observation.
+  // This is still a bounded read-only snapshot, not an exclusive file lock
+  // or permission to restore automatically.
+  const finalSource=await verifyApprovedSourceFingerprint({
+   sourcePath:x.sourcePath,
+   expectedSha256:sourceState==='ORIGINAL_PRESENT'
+    ?j.originalSha256:j.displacedSha256,
+   userApproved:true
+  });
+  if(finalSource.status!=='MATCHED_READ_ONLY')return deny('SOURCE_DIVERGED');
+  const lastSource=await lstat(x.sourcePath,{bigint:true});
+  const lastDir=await lstat(x.backupDirectory,{bigint:true});
+  if(!sameFile(sourceStart,lastSource)||lastSource.nlink!==1n||
+     !sameDir(dirStart,lastDir)||await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
    sourceState,originalSha256:j.originalSha256,
    displacedSha256:j.displacedSha256,...noAuthority});
