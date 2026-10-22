@@ -227,6 +227,10 @@ export async function restoreVerifiedOriginalNativeOnly(
   .update(opts.sourcePath,'utf8').digest('hex'));
  let owner:BigIntStats|undefined;
  let acquired=false;
+ // A renamed original is not a clean receipt until the restore path mutex
+ // itself has been released. A stranded mutex blocks subsequent recovery.
+ let completedRestore:NativeOriginalRestoreResult|undefined;
+ let lockReleased=false;
  let pending:string|undefined;
  let journalPending:string|undefined;
  let pendingIdentity:BigIntStats|undefined;
@@ -404,7 +408,8 @@ export async function restoreVerifiedOriginalNativeOnly(
   // Keep backups and the intent journal for independent native inspection.
   if(!owner||!await stillOwnNativeRestorePathLock(lock,owner))
    return block('RECOVERY_SAFETY_FAILED');
-  return Object.freeze({
+  // Do not return before finally; lock cleanup determines success.
+  completedRestore=Object.freeze({
    status:'RESTORED_NATIVE_ONLY' as const,
    originalSha256:opts.expectedOriginalSha256,
    displacedSha256:opts.expectedCurrentSha256,
@@ -426,8 +431,16 @@ export async function restoreVerifiedOriginalNativeOnly(
    try{
     const now=await lstat(lock,{bigint:true});
     if(owner&&now.isDirectory()&&!now.isSymbolicLink()&&
-       sameDirectory(owner,now))await rmdir(lock);
-   }catch{/* fail closed if an unknown lock remains */}
+       sameDirectory(owner,now)){
+     await rmdir(lock);
+     lockReleased=true;
+    }
+   }catch{/* Preserve unknown or busy lock evidence. */}
   }
  }
+ // Never acknowledge restoration if our path lock did not release. The
+ // original MAY already contain restored bytes: preserve all backups and
+ // the intent journal for explicit privileged native reconciliation.
+ return completedRestore&&lockReleased?
+  completedRestore:block('RECOVERY_SAFETY_FAILED');
 }
