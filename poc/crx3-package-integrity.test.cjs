@@ -38,8 +38,9 @@ test('TEST-017: a signed CRX3 developer proof authenticates its exact ZIP and ke
  assert.equal(checked.extensionId,id);
  assert.equal(checked.algorithm,'RSA-PSS-SHA256');
  assert.deepEqual(checked.zip,zip);
- assert.notEqual(checked.zip.buffer,bytes.buffer,
-  'returned ZIP must not alias caller-owned mutable package memory');
+ bytes[bytes.length-1]^=1;
+ assert.deepEqual(checked.zip,zip,
+  'returned ZIP must not change when caller mutates its CRX3 input');
 });
 test('TEST-017/026: content replacement and forged store identity never pass',()=>{
  const {bytes,id}=fixture();
