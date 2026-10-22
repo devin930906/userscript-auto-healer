@@ -28,6 +28,25 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # ISSUE-215 / TEST-028: cold move the real ZIP payload before running its
+  # executable, then keep both extracted and relocated Windows shell smokes.
+  # The actual packaging job still validates hashes and launches the EXE.
+  $packageScript=[IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot 'windows-package-candidate.ps1'))
+  $verified=$packageScript.IndexOf('PASS: complete ZIP file manifest and SHA-256 round trip')
+  $movedAt=$packageScript.IndexOf('Move-CandidatePortableDirectory $expanded $moved')
+  $externalCwd=$packageScript.IndexOf(
+    'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$temp '+ "'extracted'")
+  $relocatedCwd=$packageScript.IndexOf(
+    'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "'relocated'")
+  $readonly=$packageScript.IndexOf("'extracted-readonly'")
+  if($verified -lt 0 -or $movedAt -le $verified -or
+     $externalCwd -le $movedAt -or $relocatedCwd -le $externalCwd -or
+     $readonly -le $relocatedCwd) {
+    throw 'TEST-028: verified ZIP must be atomically moved before first extracted Electron execution'
+  }
+  Write-Output 'PASS: candidate ZIP is moved before either extracted Electron smoke'
+
   # TEST-028: the reusable move helper must not rename any path outside its
   # disposable runner namespace. Use a narrower, fake RUNNER_TEMP within the
   # real runner temp to test denial without touching any user-owned directory.

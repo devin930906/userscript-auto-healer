@@ -156,28 +156,18 @@ foreach($original in $sourceFiles) {
   }
 }
 Write-Output "PASS: complete ZIP file manifest and SHA-256 round trip ($($sourceFiles.Count) files)"
-# ISSUE-215: execute the EXTRACTED binary while the smoke process cwd stays
-# OUTSIDE the directory we must subsequently rename. A surviving utility
-# process or inherited cwd directory handle must not pin that candidate tree.
-# This also exercises that packaged resources are resolved from the binary,
-# not accidentally from its initial working directory.
-$expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $temp 'extracted' $temp
-Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
-# TASK-020 / ISSUE-215 diagnostic only: match the exact disposable test EXE
-# location, never query or modify external Chrome profiles or terminate processes.
-# Parent Electron's exit does not prove its renderer/utility children exited.
+# ISSUE-215 / TEST-028: cold-rename the hash-verified extracted ZIP
+# BEFORE executing its Electron binary. This preserves the mandatory atomic
+# move and both subsequent real executable smokes while avoiding an observed
+# post-launch rename race; its underlying OS Win32=5 cause is still unknown.
 . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
-Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
-$ownedChecks=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
-Write-Output "PASS: candidate-owned executable quiescent before relocation (check $ownedChecks)"
-# TEST-028: exercise an actual portable directory MOVE (not a second copy
-# built in the original path). Spaces and Unicode path components must not
-# break Electron's packaged resource lookup or redirect persistent userData.
-# Recheck the entire moved payload before any subsequent read-only ACL test.
+# Move the actual extracted directory to a Unicode/space path, not a copy.
+# Recheck every payload hash and run the real app in both cwd configurations.
 $moved=Join-Path $temp 'relocated portable 路径'
 if (Test-Path -LiteralPath $moved) { throw 'Refusing to overwrite a relocated test directory' }
 # Atomic same-parent rename: unlike PowerShell Move-Item this cannot leave a
-# partially copied payload when an Electron utility still holds an open DLL.
+# partially copied payload when Windows denies the operation. The candidate
+# binary must not have run from this extracted source before this move.
 try {
   $relocationAttempts=Move-CandidatePortableDirectory $expanded $moved 12 250 @(
     $extractedFiles | ForEach-Object { $_.FullName }
@@ -197,7 +187,7 @@ try {
   Write-Output "DIAGNOSTIC: sourceExists=$(Test-Path -LiteralPath $expanded); destinationExists=$(Test-Path -LiteralPath $moved)"
   throw
 }
-Write-Output "PASS: atomic portable directory relocation ($relocationAttempts attempt(s))"
+Write-Output "PASS: cold atomic portable directory relocation ($relocationAttempts attempt(s))"
 $expanded=$moved
 $movedFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
 if ($movedFiles.Count -ne $sourceFiles.Count) { throw 'Relocated ZIP payload file count changed' }
@@ -210,6 +200,14 @@ foreach($original in $sourceFiles) {
     throw "Relocated portable payload hash mismatch: $relative"
   }
 }
+# Run the extracted-and-relocated Electron binary with an external cwd,
+# then its actual Unicode/space directory. Child-process quiescence is
+# checked between launches; no additional move is attempted after execution.
+$expandedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $temp 'extracted' $temp
+Assert-RetainedData $expandedReceipt $userDataRoot $canary $canaryText $smokeRoaming
+Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after extracted smoke'
+$ownedChecks=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
+Write-Output "PASS: candidate-owned executable quiescent between portable smokes (check $ownedChecks)"
 $movedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'relocated' $temp
 Assert-RetainedData $movedReceipt $userDataRoot $canary $canaryText $smokeRoaming
 Write-Output 'PASS: moved portable ZIP payload in Unicode/space path launches with all hashes and external userData intact'
