@@ -100,6 +100,25 @@ test('TASK-001/TEST-026: config preflight ignores accessors and rejects hidden p
     {ok:true, config:allowed, verifiedOnDisk:false});
 });
 
+test('TASK-005/TEST-026: browser preflight never executes live or revoked Proxy traps', () => {
+  let traps = 0;
+  const hostile = new Proxy({...allowed}, {
+    getPrototypeOf() { traps++; return Object.prototype; },
+    ownKeys(target) { traps++; return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) {
+      traps++; return Reflect.getOwnPropertyDescriptor(target, key);
+    }
+  });
+  assert.deepEqual(validateBrowserConfig(hostile), {ok:false, code:'INVALID_SHAPE'});
+  assert.equal(traps, 0, 'no untrusted Proxy trap may run during validation');
+  const revoked = Proxy.revocable({...allowed}, {});
+  revoked.revoke();
+  assert.deepEqual(validateBrowserConfig(revoked.proxy), {ok:false, code:'INVALID_SHAPE'});
+  assert.deepEqual(validateBrowserConfig(allowed), {
+    ok:true, config:allowed, verifiedOnDisk:false
+  });
+});
+
 test('TASK-001: reject executable path injection and non-Chrome binaries', () => {
   for (const path of ['chrome.exe', String.raw`\\server\share\chrome.exe`,
     String.raw`C:\Apps\firefox.exe`, String.raw`C:\Apps\..\chrome.exe`,
