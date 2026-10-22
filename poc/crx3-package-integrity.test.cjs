@@ -4,6 +4,10 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {generateKeyPairSync,createHash,sign,constants}=require('node:crypto');
 const {verifyCrx3PackageIntegrity}=require('./crx3-package-integrity.cjs');
+const {spawnSync}=require('node:child_process');
+const {mkdtempSync,writeFileSync,existsSync,rmSync}=require('node:fs');
+const {tmpdir}=require('node:os');
+const {join}=require('node:path');
 function varint(n){
  const b=[];do{let byte=n%128;n=Math.floor(n/128);if(n)byte|=128;b.push(byte);}while(n);
  return Buffer.from(b);
@@ -70,4 +74,26 @@ test('TEST-017/026: forged proof, malformed protobuf and archive offsets fail cl
  assert.throws(()=>verifyCrx3PackageIntegrity({}),/CRX3_SIGNATURE_OR_FORMAT_INVALID/);
  assert.throws(()=>verifyCrx3PackageIntegrity(Buffer.alloc(16_000_000)),
   /CRX3_SIGNATURE_OR_FORMAT_INVALID/);
+});
+
+// Red regression: a self-signed CRX from an unrelated developer is a
+// cryptographically correct CRX3. The Tampermonkey-specific command MUST
+// reject it before writing any ZIP, even though generic proof validation
+// (correctly) accepts the key-derived ID. This also tests the real CLI used
+// by the Windows experiment, not just an optional verifier argument.
+test('TASK-007/TEST-017/026: Tampermonkey CLI rejects a foreign signed CRX without extracting ZIP',()=>{
+ const {bytes,id}=fixture();
+ assert.notEqual(id,'dhdgffkkebhmkfjojejmpbldmpobfkfo');
+ assert.equal(verifyCrx3PackageIntegrity(bytes,id).extensionId,id);
+ const root=mkdtempSync(join(tmpdir(),'uah-crx3-foreign-key-'));
+ try{
+  const crx=join(root,'foreign.crx');
+  const zip=join(root,'must-not-exist.zip');
+  writeFileSync(crx,bytes);
+  const attempt=spawnSync(process.execPath,[require.resolve('./crx3-package-integrity.cjs'),crx,zip],{
+   encoding:'utf8',timeout:10000,windowsHide:true
+  });
+  assert.equal(attempt.status,1,'foreign developer-signed CRX must not load');
+  assert.equal(existsSync(zip),false,'foreign package must not create a ZIP');
+ }finally{rmSync(root,{recursive:true,force:true});}
 });
