@@ -41,7 +41,7 @@ try {
     'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "'relocated'")
   $postUseMove=$packageScript.IndexOf('Move-CandidatePortableDirectory $expanded $postUse')
   $postUseSmoke=$packageScript.IndexOf(
-    'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "'after-use'")
+    'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "('after-use-'+`$postUseCycle)")
   $postUseWait=$packageScript.IndexOf(
     'Wait-CandidatePortableProcessExit (Join-Path $expanded '+ "'UserscriptAutoHealer.exe')",
     $relocatedCwd)
