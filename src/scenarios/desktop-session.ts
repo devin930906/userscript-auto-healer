@@ -7,6 +7,7 @@
  */
 import {ScenarioRegistry,type ScenarioInput,type ScenarioIssue,
   type ScenarioState} from './scenario-registry';
+import {types as nodeTypes} from 'node:util';
 
 const noAuthority={
  automaticPatchAllowed:false as const,
@@ -30,7 +31,8 @@ const payloadKeys=['id','scriptSha256','targetUrl','selector',
 const allowedFields=new Set<string>([...payloadKeys,'replacementSelector']);
 function fields(input:unknown):Record<string,unknown>|null{
  try{
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+    Array.isArray(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const props=Object.getOwnPropertyDescriptors(input);
