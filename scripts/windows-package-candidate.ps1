@@ -40,8 +40,19 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
   $p=$null
   try {
     $p=Start-Process -FilePath $exe -ArgumentList @('--uahtest-shell-only') -WorkingDirectory $cwd -PassThru
-    try { Wait-Process -Id $p.Id -Timeout 90 -ErrorAction Stop }
-    catch { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw "Shell smoke timeout: $name" }
+    # Wait on the SAME Process object that owns the launch handle, rather
+    # than open another PID-based Wait-Process observation while testing
+    # after-use portable directory rename (Issue #215). This is a bounded
+    # handle-lifetime mitigation, not proof of the underlying Win32=5 cause.
+    if(-not $p.WaitForExit(90000)) {
+      # Only terminate the specific Process instance launched by this smoke;
+      # never look up/stop an unrelated process by a potentially reused PID.
+      if(-not $p.HasExited) {
+        $p.Kill()
+        [void]$p.WaitForExit(5000)
+      }
+      throw "Shell smoke timeout: $name"
+    }
     $p.Refresh()
     if ($p.ExitCode -ne 0) {
       $failureReceipt=$receipt+'.failure'

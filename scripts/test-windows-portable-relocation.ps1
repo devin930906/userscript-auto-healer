@@ -53,6 +53,22 @@ try {
     throw 'TEST-028: verified ZIP must move cold, then move after-use once quiescent and restart'
   }
   Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering'
+  # ISSUE-215: prevent reintroducing a second Wait-Process PID-based
+  # handle after Start-Process already returned an owned Process instance.
+  # The same instance must wait and release its handle before directory moves.
+  $smokeStart=$packageScript.IndexOf('function Smoke(')
+  $smokeEnd=$packageScript.IndexOf('$root=', $smokeStart)
+  if($smokeStart -lt 0 -or $smokeEnd -le $smokeStart) {
+    throw 'TEST-028: candidate smoke function boundaries unavailable'
+  }
+  $smokeBody=$packageScript.Substring($smokeStart,$smokeEnd-$smokeStart)
+  if(-not $smokeBody.Contains('$p.WaitForExit(90000)') -or
+     $smokeBody -match 'Wait-Process\s+-Id\s+\$p\.Id' -or
+     -not $smokeBody.Contains('$p.Dispose()')) {
+    throw 'TEST-028: candidate smoke must wait and dispose its single owned process handle'
+  }
+  Write-Output 'PASS: smoke uses one owned process wait/Dispose lifetime (not separate PID wait)'
+
 
   # TEST-028: the reusable move helper must not rename any path outside its
   # disposable runner namespace. Use a narrower, fake RUNNER_TEMP within the
