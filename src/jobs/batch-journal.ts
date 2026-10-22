@@ -207,6 +207,19 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
      !stored.bytes.equals(bytes)||
      !await stillOwnWriterLock(directory,start,ownedLock))
     return deny('IO_FAILURE');
+  // The coordinator is mutable while the last filesystem awaits run.
+  // Its state can change even AFTER the earlier pre-publish check (for
+  // example a user cancellation as the atomic rename completes). Refuse a
+  // success receipt for an already-stale persisted snapshot. The previous
+  // journal is left intact for explicit, safe retry; never rewrite it here
+  // or grant repair authority. This is a final snapshot, not a claim of
+  // an inter-process transaction/lock or power-loss atomicity.
+  let publishedState:Buffer;
+  try{
+   publishedState=Buffer.from(JSON.stringify(
+    ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');
+  }catch{return deny('INVALID_CHECKPOINT');}
+  if(!publishedState.equals(bytes))return deny('INVALID_CHECKPOINT');
   return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
    sha256:createHash('sha256').update(bytes).digest('hex')});
  }catch{return deny('IO_FAILURE');}
