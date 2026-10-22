@@ -336,3 +336,43 @@ test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unbound ba
    {code:'ENOENT'});
  });
 });
+
+
+test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return a stale success receipt',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let cancelledDuringPublish=false;
+  // Reproduce the real async gap AFTER the earlier native snapshot check:
+  // the rename completed, then a user cancellation changed queued jobs
+  // before the original save() returned. No foreign file is introduced.
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   await nativeRename(from,to);
+   if(to===target){
+    cancelledDuringPublish=true;
+    coordinator.cancel();
+   }
+  };
+  try{
+   const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(cancelledDuringPublish,true,'test must hit the post-snapshot publication gap');
+   assert.deepEqual(saved,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'},
+    'a stale QUEUED journal must not receive a successful durability receipt');
+   const onDisk=JSON.parse(await readFile(target,'utf8'));
+   assert.deepEqual(onDisk.jobs.map((job:{state:string})=>job.state),
+    ['QUEUED','QUEUED'],'keep the prior bytes for a safe, explicit retry');
+   assert.deepEqual(coordinator.snapshot().jobs.map(job=>job.state),
+    ['CANCELLED','CANCELLED'],'do not erase a legitimate cancellation');
+  }finally{
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+  }
+  // A fresh, legitimate save of the current terminal state remains possible.
+  const retry=await saveReadOnlyBatchJournal(directory,coordinator);
+  assert.equal(retry.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const latest=JSON.parse(await readFile(target,'utf8'));
+  assert.deepEqual(latest.jobs.map((job:{state:string})=>job.state),
+   ['CANCELLED','CANCELLED']);
+ });
+});
