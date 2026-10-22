@@ -140,5 +140,8 @@ export async function inspectApprovedTampermonkeyRuntime(
  // has been cancelled; it must never revive a stale runtime observation.
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
+ // The session may be stopped while the final asynchronous owner check runs.
+ // Its old PID result cannot re-authorize an ended app-owned Chrome process.
+ if(!isLiveApprovedChromeSession(session))return {ok:false,code:'UNVERIFIED_BROWSER'};
  return inspectTampermonkeyTargetHints(payload);
 }
