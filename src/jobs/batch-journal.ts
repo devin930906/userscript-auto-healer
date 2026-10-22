@@ -219,6 +219,11 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    publishedState=Buffer.from(JSON.stringify(
     ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');
   }catch{return deny('INVALID_CHECKPOINT');}
+  // A lock may be substituted while taking that last native snapshot.
+  // Preserve the existing BUSY contract over a checkpoint mismatch; never
+  // report a successful write after losing cooperative writer ownership.
+  if(!await stillOwnWriterLock(directory,start,ownedLock))
+   return deny('BUSY');
   if(!publishedState.equals(bytes))return deny('INVALID_CHECKPOINT');
   return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
    sha256:createHash('sha256').update(bytes).digest('hex')});
