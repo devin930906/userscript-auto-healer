@@ -176,6 +176,37 @@ test('TEST-019/026: modified DOM selector methods cannot yield an offline repair
   })).status,'CANDIDATE_ONLY');
 });
 
+test('TEST-019/026: built-in calls that can override native selector methods fail closed',()=>{
+  for(const snippet of [
+    "Object.defineProperty(document, 'querySelector', {value: custom}); document.querySelector('#old');",
+    "Object.defineProperty(document, selectorKey, {value: custom}); document.querySelector('#old');",
+    "Object['defineProperty'](document, 'querySelectorAll', {value: custom}); document.querySelector('#old');",
+    "Object.defineProperties(document, {querySelector: {value: custom}}); document.querySelector('#old');",
+    "Object.assign(document, {querySelector: custom}); document.querySelector('#old');",
+    "Reflect.set(document, 'querySelectorAll', custom); document.querySelector('#old');",
+    "Reflect.defineProperty(document, 'querySelector', {value: custom}); document.querySelector('#old');",
+    "Object.setPrototypeOf(document, customPrototype); document.querySelector('#old');",
+    "Reflect.setPrototypeOf(document, customPrototype); document.querySelector('#old');"
+  ]){
+    const script=meta+snippet;
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    }));
+    assert.equal(result.status,'BLOCKED',snippet);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  for(const snippet of [
+    "Object.defineProperty(document, 'title', {value: 'ok'}); document.querySelector('#old');",
+    "Reflect.set(document, 'title', 'ok'); document.querySelector('#old');"
+  ]){
+    const script=meta+snippet;
+    assert.equal(proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    })).status,'CANDIDATE_ONLY',snippet);
+  }
+});
+
 test('TEST-014: exact call location prevents replacing repeated selectors globally',()=>{
   const repeated=meta+
     "document.querySelector('#old');\n"+

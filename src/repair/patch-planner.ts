@@ -99,6 +99,40 @@ function mayReplaceDomSelectorMethod(target:unknown):boolean{
     (property.name==='querySelector'||property.name==='querySelectorAll');
 }
 
+/** Built-in mutation APIs can replace native document selector methods without
+ * appearing as assignment AST nodes. The offline planner cannot establish
+ * call ordering or the final native method identity, so reject these direct
+ * document mutations even when a later querySelector call looks literal.
+ * This is a limited fail-closed check, not general alias analysis. */
+function mutatesDocumentThroughBuiltinCall(node:AstNode):boolean{
+  if(node.type!=='CallExpression')return false;
+  const callee=asNode(node.callee);
+  if(callee?.type!=='MemberExpression')return false;
+  const owner=asNode(callee.object);
+  if(owner?.type!=='Identifier'||
+     (owner.name!=='Object'&&owner.name!=='Reflect'))return false;
+  const property=asNode(callee.property);
+  const operation=callee.computed===true
+    ? (property?.type==='Literal'&&typeof property.value==='string'
+      ? property.value:null)
+    : (property?.type==='Identifier'?property.name:null);
+  const args=Array.isArray(node.arguments)?node.arguments:[];
+  const target=asNode(args[0]);
+  if(target?.type!=='Identifier'||target.name!=='document')return false;
+  if(owner.name==='Object'&&
+     (operation==='assign'||operation==='defineProperties'||
+      operation==='setPrototypeOf'))return true;
+  if(owner.name==='Reflect'&&operation==='setPrototypeOf')return true;
+  if((owner.name==='Object'&&operation==='defineProperty')||
+     (owner.name==='Reflect'&&
+      (operation==='defineProperty'||operation==='set'))){
+    const key=asNode(args[1]);
+    return key?.type!=='Literal'||typeof key.value!=='string'||
+      key.value==='querySelector'||key.value==='querySelectorAll';
+  }
+  return false;
+}
+
 /** Reject source whose `document` reference or selector methods cannot be
  * conservatively trusted. Direct eval and with-statements also make name
  * resolution ambiguous.
@@ -129,7 +163,8 @@ function ambiguousDocumentBinding(source:string):boolean{
        (node.type==='UnaryExpression'&&node.operator==='delete'&&
         mayReplaceDomSelectorMethod(node.argument))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
-        asNode(node.callee)?.name==='eval')){
+        asNode(node.callee)?.name==='eval')||
+       mutatesDocumentThroughBuiltinCall(node)){
       ambiguous=true;return;
     }
     for(const [key,value] of Object.entries(node)){
