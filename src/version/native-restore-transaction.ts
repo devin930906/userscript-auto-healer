@@ -419,6 +419,26 @@ export async function restoreVerifiedOriginalNativeOnly(
   // Keep backups and the intent journal for independent native inspection.
   if(!owner||!await stillOwnNativeRestorePathLock(lock,owner))
    return block('RECOVERY_SAFETY_FAILED');
+  // The backup and journal post-rename checks themselves await filesystem IO.
+  // An uncooperative writer may modify or replace the already-restored
+  // source while those checks are running, AFTER our first source digest.
+  // Do not acknowledge a restore without observing the ORIGINAL bytes and
+  // the SAME inode/mode again at this final receipt boundary. Failure must
+  // retain both recovery copies and the journal: never auto-overwrite edits.
+  // This still cannot lock out writes after the last observation.
+  const finalRestored=await verifyApprovedSourceFingerprint({
+   sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
+   userApproved:true
+  });
+  if(finalRestored.status!=='MATCHED_READ_ONLY')
+   return block('RECOVERY_SAFETY_FAILED');
+  const finalRestoredStat=await lstat(opts.sourcePath,{bigint:true});
+  if(!finalRestoredStat.isFile()||finalRestoredStat.isSymbolicLink()||
+     finalRestoredStat.nlink!==1n||
+     !sameFile(restoredMode,finalRestoredStat)||
+     (finalRestoredStat.mode&0o777n)!==(sourceStart.mode&0o777n)||
+     await hasUnsafePathLink(opts.sourcePath))
+   return block('RECOVERY_SAFETY_FAILED');
   // Do not return before finally; lock cleanup determines success.
   completedRestore=Object.freeze({
    status:'RESTORED_NATIVE_ONLY' as const,
