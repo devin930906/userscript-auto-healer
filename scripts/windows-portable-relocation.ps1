@@ -321,7 +321,12 @@ public static class UahCandidateRestartManagerProbe {
   // A basename category is NOT ownership or permission to stop a process.
   // Query by one limited-information handle and match RM's creation time,
   // so a recycled PID cannot be attributed to the original file user.
-  private static int ImageCategory(RM_UNIQUE_PROCESS identity, string candidateExe) {
+  private static int ImageCategory(RM_UNIQUE_PROCESS identity, string candidateExe,
+    string runnerTemp, out int imageScope) {
+    // 24: image INSIDE candidate tree; 25: other runner-temp image;
+    // 26: image outside runner temp; 27: unreadable/stale identity.
+    // Image scope is NOT process ancestry, lock causation or ownership.
+    imageScope=27;
     try {
       using(SafeProcessHandle handle=OpenProcess(0x1000, false, identity.pid)) {
         if(handle.IsInvalid) return 14;
@@ -332,6 +337,13 @@ public static class UahCandidateRestartManagerProbe {
         StringBuilder image=new StringBuilder((int)length);
         if(!QueryImage(handle, 0, image, ref length) || length==0) return 14;
         string full=Path.GetFullPath(image.ToString());
+        string candidatePrefix=Path.GetDirectoryName(candidateExe)+Path.DirectorySeparatorChar;
+        string runnerPrefix=runnerTemp+Path.DirectorySeparatorChar;
+        if(full.StartsWith(candidatePrefix,StringComparison.OrdinalIgnoreCase))
+          imageScope=24;
+        else if(full.StartsWith(runnerPrefix,StringComparison.OrdinalIgnoreCase))
+          imageScope=25;
+        else imageScope=26;
         if(String.Equals(full, candidateExe, StringComparison.OrdinalIgnoreCase)) return 8;
         switch(Path.GetFileName(full).ToLowerInvariant()) {
           case "conhost.exe": case "openconsole.exe": return 9;
@@ -361,8 +373,14 @@ public static class UahCandidateRestartManagerProbe {
   // 8..14: exact candidate, console-host name, shell name, node name,
   // runner name, other known image, unavailable/time-mismatched identity.
   // 15..23: known tool families (a bounded subset of image category 13).
-  public static int[] CountAffectedByType(string[] files, string candidateExe) {
-    if(files==null || files.Length==0 || files.Length>40) return new int[]{-1};
+  // 24..27: time-matched executable path scope, without recording its path.
+  // A child process can execute outside the candidate tree; do NOT equate
+  // "outsideRunner" with "not a descendant" or terminate anything.
+  public static int[] CountAffectedByType(string[] files, string candidateExe,
+    string runnerTemp) {
+    if(files==null || files.Length==0 || files.Length>40 ||
+       String.IsNullOrWhiteSpace(candidateExe) ||
+       String.IsNullOrWhiteSpace(runnerTemp)) return new int[]{-1};
     uint h;
     if(RmStartSession(out h, 0, new StringBuilder(33))!=0) return new int[]{-1};
     try {
@@ -374,12 +392,15 @@ public static class UahCandidateRestartManagerProbe {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
         if(result==0) {
           if(provided>(uint)entries.Length) return new int[]{-1};
-          int[] counts=new int[24];
+          int[] counts=new int[28];
           counts[0]=(int)provided;
           int currentPid=Environment.ProcessId;
           for(int j=0;j<(int)provided;j++) {
             if(entries[j].process.pid==(uint)currentPid) counts[7]++;
-            int category=ImageCategory(entries[j].process, candidateExe);
+            int scope;
+            int category=ImageCategory(entries[j].process, candidateExe,
+              runnerTemp, out scope);
+            counts[scope]++;
             if(category>=15 && category<=23) {
               counts[13]++; // tool families remain part of "other"
               counts[category]++;
@@ -408,17 +429,22 @@ public static class UahCandidateRestartManagerProbe {
 '@ -ErrorAction Stop
     }
     $candidateExe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
-    $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample,$candidateExe)
-    if($null -eq $counts -or $counts.Length -ne 24 -or $counts[0] -lt 0) {
+    $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType(
+      [string[]]$sample,$candidateExe,$runner)
+    if($null -eq $counts -or $counts.Length -ne 28 -or $counts[0] -lt 0) {
       return 'rm=unavailable'
     }
     $classified=0
     foreach($i in 1..6) { $classified+=$counts[$i] }
     $images=0
     foreach($i in 8..14) { $images+=$counts[$i] }
+    $scoped=0
+    foreach($i in 24..27) { $scoped+=$counts[$i] }
     if($classified -ne $counts[0] -or $images -ne $counts[0] -or
-       $counts[7] -gt $counts[0]) { return 'rm=unavailable' }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]"
+       $scoped -ne $counts[0] -or $counts[7] -gt $counts[0]) {
+      return 'rm=unavailable'
+    }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " imageScope=[candidateTree=$($counts[24]) runnerOther=$($counts[25]) outsideRunner=$($counts[26]) unknown=$($counts[27])]"
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.

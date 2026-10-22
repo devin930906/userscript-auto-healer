@@ -234,8 +234,11 @@ Write-Output 'PASS: moved portable ZIP payload in Unicode/space path launches wi
 # Exercise the original post-Electron atomic rename failure scenario too:
 # wait only for the EXACT disposable candidate executable, never kill other
 # Chrome, Electron or user processes. Failure remains a hard CI failure.
-# Issue #215 is intermittent. Three bounded real use/move/restart cycles
-# strengthen reproduction without changing retry limits or accepting a denial.
+# Issue #215 is intermittent. A genuine Win32=5 persisted across 12 x 250ms
+# retries while a time-matched Restart Manager file user had an executable
+# outside RUNNER_TEMP. That does not prove causal ownership, but justifies
+# allowing a brief, strictly bounded grace period for transient external use.
+# Keep all three real post-use move/restart cycles and fail closed on denial.
 for($postUseCycle=1; $postUseCycle -le 3; $postUseCycle++) {
   $cycleFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
   if($cycleFiles.Count -ne $sourceFiles.Count) { throw 'Post-use portable payload file count changed' }
@@ -244,7 +247,7 @@ for($postUseCycle=1; $postUseCycle -le 3; $postUseCycle++) {
   $postUse=Join-Path $temp ('after-use portable 复测-'+$postUseCycle)
   if(Test-Path -LiteralPath $postUse){throw 'Refusing to replace a post-use portable directory'}
   try {
-    $afterUseAttempts=Move-CandidatePortableDirectory $expanded $postUse 12 250 @(
+    $afterUseAttempts=Move-CandidatePortableDirectory $expanded $postUse 16 750 @(
       $cycleFiles | ForEach-Object { $_.FullName }
     )
   } catch {

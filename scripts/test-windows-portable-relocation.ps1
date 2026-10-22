@@ -52,7 +52,12 @@ try {
      $postUseSmoke -le $postUseMove -or $readonly -le $postUseSmoke) {
     throw 'TEST-028: verified ZIP must move cold, then move after-use once quiescent and restart'
   }
-  Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering'
+  # Win32=5 persisted beyond the former 12 x 250ms budget. Keep the
+  # post-use atomic move and use a bounded grace, never bypassing a denial.
+  if($packageScript -notmatch 'Move-CandidatePortableDirectory\s+\$expanded\s+\$postUse\s+16\s+750\s+@\(') {
+    throw 'TEST-028: post-use relocation must retain bounded external-user grace'
+  }
+  Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering with bounded grace'
   # ISSUE-215: prevent reintroducing a second Wait-Process PID-based
   # handle after Start-Process already returned an owned Process instance.
   # The same instance must wait and release its handle before directory moves.
@@ -349,7 +354,7 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\]$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\] imageScope=\[candidateTree=([0-9]+) runnerOther=([0-9]+) outsideRunner=([0-9]+) unknown=([0-9]+)\]$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
@@ -366,8 +371,11 @@ try {
       if($knownTools -gt [int]$Matches[14]) {
         throw 'Restart Manager tool-family subset exceeds other-image owners'
       }
-      if($images -ne $affected -or [int]$Matches[11] -lt 1) {
-        throw 'Restart Manager did not classify its time-matched PowerShell file owner'
+      $imageScoped=0
+      foreach($kind in 25..28) { $imageScoped+=[int]$Matches[$kind] }
+      if($images -ne $affected -or $imageScoped -ne $affected -or
+         [int]$Matches[11] -lt 1 -or [int]$Matches[27] -lt 1) {
+        throw 'Restart Manager did not scope its time-matched external PowerShell image'
       }
       # This file handle was opened by THIS pwsh.exe process in this test.
       # The PID must never be emitted; identity is checked within the probe.
@@ -444,6 +452,7 @@ try {
     $commandEvidence=Get-CandidatePortableRestartManagerSummary $commandRoot @($commandExe)
     if($commandEvidence -notlike '*images=[[]candidate=0 *' -or
        $commandEvidence -notlike '*tools=[[]command=1 *' -or
+        $commandEvidence -notlike '*imageScope=[[]candidateTree=1 runnerOther=0 outsideRunner=0 unknown=0[]]*' -or
        $commandEvidence.Contains($commandRoot) -or
        (Get-FileHash -LiteralPath $commandExe -Algorithm SHA256).Hash -cne $commandHash) {
       throw "Restart Manager did not safely classify the real command image: $commandEvidence"
@@ -581,7 +590,8 @@ try {
     $handle=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
     try {
       [IO.File]::WriteAllText($ready,'ready')
-      Start-Sleep -Milliseconds 1100
+      # Exceed the former three-second retry budget with a real file lease.
+      Start-Sleep -Milliseconds 4500
     } finally { $handle.Dispose() }
   } -ArgumentList $temporaryFile,$marker
   try {
@@ -593,7 +603,7 @@ try {
       }
       Start-Sleep -Milliseconds 50
     }
-    $attempts=Move-CandidatePortableDirectory $temporary $moved 12 200
+    $attempts=Move-CandidatePortableDirectory $temporary $moved 16 750
     if($attempts -lt 2 -or (Test-Path -LiteralPath $temporary) -or
         [IO.File]::ReadAllText((Join-Path $moved 'payload.txt')) -cne 'exact-content') {
       throw 'Transient lock recovery or relocated payload verification failed'
