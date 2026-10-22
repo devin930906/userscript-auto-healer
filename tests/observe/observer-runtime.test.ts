@@ -72,7 +72,14 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  assert.equal(session.ok,true,JSON.stringify(session));
  if(!session.ok)return;
  stop=session.stop;
- const tab=await openApprovedTarget(session,site,true);
+ const navigationStages:string[]=[];
+ const tab=await openApprovedTarget(session,site,true,undefined,
+  stage=>{if(navigationStages.length<96)navigationStages.push(stage);});
+ if(!tab.ok){
+  const counts:Record<string,number>={};
+  for(const stage of navigationStages)counts[stage]=(counts[stage]??0)+1;
+  t.diagnostic('CDP_TARGET_STAGE_COUNTS='+JSON.stringify(counts));
+ }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
  const notApproved=await observeApprovedDom(session,tab,site,false,['#initial']);

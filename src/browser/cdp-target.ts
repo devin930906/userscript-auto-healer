@@ -11,6 +11,10 @@ export type OpenTargetResult =
      readonly targetId:string;readonly businessVerified:false}
   | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'UNVERIFIED_BROWSER'|
       'INVALID_TARGET_URL'|'UNOWNED_LISTENER'|'CDP_COMMAND_FAILED'|'TARGET_NOT_CONFIRMED'|'CANCELLED'};
+/** Fixed, content-blind diagnostics for a verified, explicitly approved tab only. */
+export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
+  'LIST_TRANSPORT_FAILED'|'LIST_INVALID'|'LIST_NOT_MATCHED'|
+  'TARGET_ID_MISMATCH'|'MAIN_FRAME_PENDING'|'MAIN_FRAME_CONFIRMED';
 function validTarget(raw:string):boolean {
   if(raw.length>4096||raw.trim()!==raw)return false;
   try{
@@ -120,8 +124,14 @@ async function confirmsMainFrameNavigation(
 /** Never accept a raw third-party CDP socket or an unapproved website. */
 export async function openApprovedTarget(
   session:ManagedLaunchResult,targetUrl:string,userApproved:boolean,
-  signal?:AbortSignal
+  signal?:AbortSignal,
+  onTargetStage?: (stage:TargetNavigationStage)=>void
 ):Promise<OpenTargetResult>{
+  // This native-only, optional diagnostic can never grant authority.
+  // Report fixed labels only; suppress observer errors and private data.
+  const stage=(value:TargetNavigationStage)=>{
+    try{onTargetStage?.(value);}catch{/* non-authoritative */}
+  };
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!session || !session.ok||session.status!=='OWNED_CDP_BROWSER_VERIFIED'||
@@ -144,7 +154,8 @@ export async function openApprovedTarget(
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const created=await requestNewTab(session.browserWebsocket,targetUrl,signal);
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-  if(!created)return {ok:false,code:'CDP_COMMAND_FAILED'};
+  if(!created){stage('TAB_CREATION_FAILED');return {ok:false,code:'CDP_COMMAND_FAILED'};}
+  stage('TAB_CREATED');
   const began=Date.now();
   while(Date.now()-began<9000){
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
@@ -156,8 +167,11 @@ export async function openApprovedTarget(
       const json=await readBoundedCdpJson(response);
       if(signal?.aborted)return {ok:false,code:'CANCELLED'};
       const inspected=inspectCdpTargetList(json,port,targetUrl);
-      if(inspected.ok&&inspected.targetId===created&&
-         await confirmsMainFrameNavigation(inspected.websocketUrl,targetUrl,signal)) {
+      if(!Array.isArray(json))stage('LIST_INVALID');
+      else if(!inspected.ok)stage('LIST_NOT_MATCHED');
+      else if(inspected.targetId!==created)stage('TARGET_ID_MISMATCH');
+      else if(await confirmsMainFrameNavigation(inspected.websocketUrl,targetUrl,signal)) {
+        stage('MAIN_FRAME_CONFIRMED');
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
@@ -165,8 +179,11 @@ export async function openApprovedTarget(
         if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
-      }
-    }catch{ /* navigation is still pending; cancellation checked below */ }
+      }else stage('MAIN_FRAME_PENDING');
+    }catch{
+      stage('LIST_TRANSPORT_FAILED');
+      /* navigation is still pending; cancellation checked below */
+    }
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     try{await delay(250,undefined,{signal});}
     catch{return {ok:false,code:'CANCELLED'};}
