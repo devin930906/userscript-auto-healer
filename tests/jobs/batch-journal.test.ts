@@ -467,3 +467,37 @@ test('TASK-013/TEST-022/026: cancellation during writer lock cleanup never ackno
    (job:{state:string})=>job.state),['CANCELLED','CANCELLED']);
  });
 });
+
+test('TASK-013/TEST-022/026: lock cleanup denial cannot acknowledge an unusable checkpoint',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRmdir=fsPromises.rmdir;
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let denied=false;
+  // The checkpoint is atomically published, but OS lock cleanup fails.
+  // A successful receipt would strand every subsequent save/load as BUSY.
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
+   if(path===lock){
+    denied=true;
+    throw Object.assign(new Error('disposable lock directory is in use'),
+     {code:'EACCES'});
+   }
+   return nativeRmdir(path,...rest);
+  };
+  try{
+   const result=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(denied,true,'must exercise actual lock cleanup error');
+   assert.deepEqual(result,{status:'BLOCKED',reason:'BUSY'});
+   assert.deepEqual(JSON.parse(await readFile(file,'utf8')).jobs.map(
+    (job:{state:string})=>job.state),['QUEUED','QUEUED']);
+   assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+    {status:'BLOCKED',reason:'BUSY'});
+   assert.deepEqual(await saveReadOnlyBatchJournal(directory,coordinator),
+    {status:'BLOCKED',reason:'BUSY'});
+  }finally{
+   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;
+  }
+ });
+});
