@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'poc/windows-tampermonkey-cloud.cjs'
+      - 'poc/crx3-package-integrity.cjs'
+      - 'poc/crx3-package-integrity.test.cjs'
       - 'src/manager/tampermonkey-gm-probe.ts'
       - '.github/workflows/task007-tampermonkey-cloud.yml'
   workflow_dispatch:
