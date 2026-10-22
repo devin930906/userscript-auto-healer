@@ -234,35 +234,41 @@ Write-Output 'PASS: moved portable ZIP payload in Unicode/space path launches wi
 # Exercise the original post-Electron atomic rename failure scenario too:
 # wait only for the EXACT disposable candidate executable, never kill other
 # Chrome, Electron or user processes. Failure remains a hard CI failure.
-$quiescent=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
-Write-Output "DIAGNOSTIC: post-use candidate executable quiescent after check $quiescent"
-$postUse=Join-Path $temp 'after-use portable 复测'
-if(Test-Path -LiteralPath $postUse){throw 'Refusing to replace a post-use portable directory'}
-try {
-  $afterUseAttempts=Move-CandidatePortableDirectory $expanded $postUse 12 250 @(
-    $movedFiles | ForEach-Object { $_.FullName }
-  )
-} catch {
-  # Original move exception remains authoritative; never fake a clean
-  # directory rename, retry outside the bound or touch unknown processes.
-  Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after post-use relocation failure'
-  Write-Output ("DIAGNOSTIC: post-use sourceExists="+
-    (Test-Path -LiteralPath $expanded)+"; destinationExists="+(Test-Path -LiteralPath $postUse))
-  throw
-}
-$expanded=$postUse
-foreach($original in $sourceFiles) {
-  $relative=$original.FullName.Substring($stage.Length+1)
-  $afterUseFile=Join-Path $expanded $relative
-  Require-File $afterUseFile
-  if((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
-     (Get-FileHash -LiteralPath $afterUseFile -Algorithm SHA256).Hash) {
-    throw "Post-use portable payload hash mismatch: $relative"
+# Issue #215 is intermittent. Three bounded real use/move/restart cycles
+# strengthen reproduction without changing retry limits or accepting a denial.
+for($postUseCycle=1; $postUseCycle -le 3; $postUseCycle++) {
+  $cycleFiles=@(Get-ChildItem -LiteralPath $expanded -File -Recurse -Force)
+  if($cycleFiles.Count -ne $sourceFiles.Count) { throw 'Post-use portable payload file count changed' }
+  $quiescent=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
+  Write-Output "DIAGNOSTIC: post-use candidate executable quiescent after check $quiescent"
+  $postUse=Join-Path $temp ('after-use portable 复测-'+$postUseCycle)
+  if(Test-Path -LiteralPath $postUse){throw 'Refusing to replace a post-use portable directory'}
+  try {
+    $afterUseAttempts=Move-CandidatePortableDirectory $expanded $postUse 12 250 @(
+      $cycleFiles | ForEach-Object { $_.FullName }
+    )
+  } catch {
+    # Original move exception remains authoritative; never fake a clean
+    # directory rename, retry outside the bound or touch unknown processes.
+    Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after post-use relocation failure'
+    Write-Output ("DIAGNOSTIC: post-use sourceExists="+
+      (Test-Path -LiteralPath $expanded)+"; destinationExists="+(Test-Path -LiteralPath $postUse))
+    throw
   }
+  $expanded=$postUse
+  foreach($original in $sourceFiles) {
+    $relative=$original.FullName.Substring($stage.Length+1)
+    $afterUseFile=Join-Path $expanded $relative
+    Require-File $afterUseFile
+    if((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+       (Get-FileHash -LiteralPath $afterUseFile -Algorithm SHA256).Hash) {
+      throw "Post-use portable payload hash mismatch: $relative"
+    }
+  }
+  $afterUseReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded ('after-use-'+$postUseCycle) $temp
+  Assert-RetainedData $afterUseReceipt $userDataRoot $canary $canaryText $smokeRoaming
+  Write-Output "PASS: post-use atomic portable relocation cycle $postUseCycle/3 ($afterUseAttempts attempt(s)), full SHA-256 parity and Electron restart"
 }
-$afterUseReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'after-use' $temp
-Assert-RetainedData $afterUseReceipt $userDataRoot $canary $canaryText $smokeRoaming
-Write-Output "PASS: post-use atomic portable relocation ($afterUseAttempts attempt(s)), full SHA-256 parity and Electron restart"
 # REQ-028/TEST-028: a read-only extracted application directory must NOT be
 # required for data writes. Use real Windows NTFS ACLs (not merely the
 # directory ReadOnly attribute, which does not deny file creation).

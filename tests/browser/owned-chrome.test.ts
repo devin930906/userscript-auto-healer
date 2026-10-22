@@ -28,6 +28,33 @@ async function unusedLoopbackPort():Promise<number>{
   if(!address||typeof address==='string')throw Error('PORT_PROBE_FAILED');
   return address.port;
 }
+/** Read only existence of Chrome's bootstrap markers inside this test-owned
+ * disposable profile. Never read their contents or report paths, ports/PIDs,
+ * command lines, Chrome logs or user data. These hints are not CDP proof.
+ */
+async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
+  const exists=async(name:string)=>{
+    try { await access(join(profile,name)); return 1; } catch { return 0; }
+  };
+  const [state,endpoint]=await Promise.all([
+    exists('Local State'),exists('DevToolsActivePort')
+  ]);
+  return 'state='+state+' endpointMarker='+endpoint;
+}
+
+test('TEST-006: Chrome bootstrap diagnostics are bounded and content-blind',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'uah-bootstrap-evidence-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  assert.equal(await redactedChromeBootstrapMarkers(root),
+    'state=0 endpointMarker=0');
+  await writeFile(join(root,'Local State'),'PRIVATE_PROFILE_CONTENT');
+  await writeFile(join(root,'DevToolsActivePort'),'PRIVATE_ENDPOINT');
+  const evidence=await redactedChromeBootstrapMarkers(root);
+  assert.equal(evidence,'state=1 endpointMarker=1');
+  assert.equal(evidence.includes(root),false);
+  assert.equal(evidence.includes('PRIVATE_'),false);
+});
+
 test('TEST-007/008: never launch without approval or with bad config',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:false}),
@@ -85,6 +112,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const counts:Record<string,number>={};
     for(const stage of startupStages)counts[stage]=(counts[stage]??0)+1;
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
+    t.diagnostic('CDP_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
   }
   assert.equal(result.ok,true,JSON.stringify(result));
   const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
@@ -197,10 +225,18 @@ test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its
   const ready=await prepareApprovedIsolatedProfile(cfg,true);
   assert.equal(ready.ok,true,JSON.stringify(ready));
   let notifications=0;
+  const exitStartupStages:string[]=[];
   const browser=await launchApprovedIsolatedChrome(cfg,{
     userApproved:true,testHeadless:true,
-    onUnexpectedExit:()=>{notifications++;}
+    onUnexpectedExit:()=>{notifications++;},
+    onStartupStage:stage=>{exitStartupStages.push(stage);}
   });
+  if(!browser.ok){
+    const counts:Record<string,number>={};
+    for(const stage of exitStartupStages)counts[stage]=(counts[stage]??0)+1;
+    t.diagnostic('CDP_EXIT_TEST_STARTUP_STAGES='+JSON.stringify(counts));
+    t.diagnostic('CDP_EXIT_TEST_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
+  }
   assert.equal(browser.ok,true,JSON.stringify(browser));
   if(!browser.ok)return;
   t.after(()=>browser.stop());
