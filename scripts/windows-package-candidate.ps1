@@ -37,6 +37,7 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
   Require-File $exe
   $receipt=Join-Path $temp "shell-$name.json"
   $env:UAH_SMOKE_RECEIPT=$receipt
+  $p=$null
   try {
     $p=Start-Process -FilePath $exe -ArgumentList @('--uahtest-shell-only') -WorkingDirectory $cwd -PassThru
     try { Wait-Process -Id $p.Id -Timeout 90 -ErrorAction Stop }
@@ -52,7 +53,13 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
       }
       throw "Electron smoke exit failure: $name"
     }
-  } finally { Remove-Item Env:\UAH_SMOKE_RECEIPT -ErrorAction SilentlyContinue }
+  } finally {
+    # Wait-Process observes exit, but the returned Process object still owns
+    # a Windows process handle. Release it deterministically before testing
+    # a post-use atomic rename of the launched portable application tree.
+    if($null -ne $p) { $p.Dispose() }
+    Remove-Item Env:\UAH_SMOKE_RECEIPT -ErrorAction SilentlyContinue
+  }
   Require-File $receipt
   $r=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
   if ($r.shell -ne 'development-skeleton' -or
