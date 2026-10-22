@@ -113,6 +113,18 @@ export async function prepareReviewedLocalBackupOnly(
   if(after.status!=='MATCHED_READ_ONLY'||
      after.sha256!==before.sha256||after.byteLength!==before.byteLength)
     return blocked('SOURCE_CHANGED');
+  // An independent backup can change while the final source check awaits.
+  // Re-verify its bytes and source-bound identity before issuing the receipt.
+  // This remains a bounded native-only observation, not an exclusive lock.
+  const finalBackup=await verifyBackupRecoverySource({
+   sourcePath:options.sourcePath,backupDirectory:options.backupDirectory,
+   backupFileName:copy.backupFileName,expectedSha256:copy.sha256,
+   expectedByteLength:copy.byteLength,userApproved:true
+  });
+  if(finalBackup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+     finalBackup.sha256!==review.originalSha256||
+     finalBackup.byteLength!==before.byteLength)
+    return blocked('BACKUP_UNVERIFIED');
   return Object.freeze({
    status:'BACKUP_PREPARED_RUNTIME_UNVERIFIED' as const,
    backupFileName:copy.backupFileName,sourceSha256:review.originalSha256,

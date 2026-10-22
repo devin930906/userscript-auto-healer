@@ -65,6 +65,46 @@ test('TEST-019/020/021: audited patch plus disk SHA creates a separately verifie
  });
 });
 
+test('TASK-010/011 TEST-020/021: backup changed during final source check cannot be accepted',async t=>{
+ await fixture(async paths=>{
+  const sourceModule=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const real=sourceModule.verifyApprovedSourceFingerprint;
+  let reads=0;
+  let changedBackup='';
+  // The integration initially fingerprints source, creates/verifies an
+  // independent backup, then fingerprints source AGAIN. Corrupt the backup
+  // during the last source check, after its earlier successful verification.
+  t.mock.method(sourceModule,'verifyApprovedSourceFingerprint',
+   async (input:Parameters<typeof real>[0])=>{
+    const result=await real(input);
+    reads++;
+    if(reads===2&&result.status==='MATCHED_READ_ONLY'){
+     const names=await readdir(paths.backupDirectory);
+     assert.equal(names.length,1,'the first backup verification already ran');
+     changedBackup=join(paths.backupDirectory,names[0]);
+     await writeFile(changedBackup,'// independently edited after verification\\n');
+    }
+    return result;
+   });
+  const result=await prepareReviewedLocalBackupOnly(request,candidate,{
+   ...paths,userApproved:true
+  });
+  assert.equal(reads>=2,true,'must reach the asynchronous final source recheck');
+  assert.notEqual(changedBackup,'','must mutate the verified backup');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'BACKUP_UNVERIFIED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessRecoveredVerified:false
+  });
+  assert.equal(await readFile(paths.sourcePath,'utf8'),source,
+   'never replace the selected source during backup preparation');
+  assert.equal(await readFile(changedBackup,'utf8'),
+   '// independently edited after verification\\n',
+   'leave the independently edited backup for privileged reconciliation');
+ });
+});
+
 test('TEST-020/021: changed on-disk source fails closed before any backup is created',async()=>{
  await fixture(async(paths)=>{
   await writeFile(paths.sourcePath,source+'// external edit\n','utf8');
