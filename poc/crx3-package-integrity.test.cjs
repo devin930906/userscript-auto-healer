@@ -21,8 +21,7 @@ function fixture(){
  const size=Buffer.alloc(4);size.writeUInt32LE(signed.length);
  const message=Buffer.concat([Buffer.from('CRX3 SignedData\0'),size,signed,zip]);
  const signature=sign('sha256',message,{
-  key:privateKey,padding:constants.RSA_PKCS1_PSS_PADDING,
-  saltLength:constants.RSA_PSS_SALTLEN_DIGEST
+  key:privateKey,padding:constants.RSA_PKCS1_PADDING
  });
  const proof=Buffer.concat([field(1,publicDer),field(2,signature)]);
  const header=Buffer.concat([field(2,proof),field(10000,signed)]);
@@ -36,7 +35,7 @@ test('TEST-017: a signed CRX3 developer proof authenticates its exact ZIP and ke
  const {bytes,zip,id}=fixture();
  const checked=verifyCrx3PackageIntegrity(bytes,id);
  assert.equal(checked.extensionId,id);
- assert.equal(checked.algorithm,'RSA-PSS-SHA256');
+ assert.equal(checked.algorithm,'RSA-PKCS1-SHA256');
  assert.deepEqual(checked.zip,zip);
  bytes[bytes.length-1]^=1;
  assert.deepEqual(checked.zip,zip,
