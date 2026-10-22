@@ -44,6 +44,16 @@ jobs:
             variant: product-original
           - run_at: document-idle
             variant: product-candidate
+          # TASK-007 / TEST-017/018: Unlike the native GM-only fixture,
+          # these two jobs run actual application-generated AST original and
+          # audited candidate under document-start in separate disposable
+          # manager Profiles, checking failed selector vs restored DOM action.
+          # Only review evidence is produced; no script is auto-installed
+          # into user Chrome and no repair/rollback permissions are granted.
+          - run_at: document-start
+            variant: product-original
+          - run_at: document-start
+            variant: product-candidate
           # End-to-end manager installation of the actual native product fixture.
           # Unlike the AST-only PoC, this is the source served by production code.
           # Native product-generated GM diagnostic in every supported timing
