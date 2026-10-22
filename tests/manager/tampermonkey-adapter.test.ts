@@ -102,6 +102,31 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
    assert.equal(probe.scriptInjectionVerified,false);
    assert.equal(probe.extensionAuthenticityVerified,false);
  }
+
+ // A user can cancel while the final asynchronous owner/PID check runs.
+ // Even a legitimate listener match cannot revive cancelled authorization.
+ // Replace only this module export after the real Chrome launch, and restore
+ // it before the test exits; no browser/process or user script is modified.
+ const listenerModule=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+ const originalVerify=listenerModule.verifyWindowsLoopbackListenerPid;
+ const abort=new AbortController();
+ let ownerChecks=0;
+ (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+   .verifyWindowsLoopbackListenerPid=async(...args)=>{
+     const result=await originalVerify(...args);
+     ownerChecks++;
+     if(ownerChecks===2)abort.abort();
+     return result;
+   };
+ try{
+   const cancelled=await inspectApprovedTampermonkeyRuntime(session,true,abort.signal);
+   assert.equal(ownerChecks,2,'fixture must cancel inside the final real PID check');
+   assert.deepEqual(cancelled,{ok:false,code:'CANCELLED'},
+     'revoked user consent cannot return a post-verification runtime hint');
+ }finally{
+   (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+     .verifyWindowsLoopbackListenerPid=originalVerify;
+ }
 });
 
 test('TEST-017 stage: distinct ordinary Chrome targets remain ignorable but cannot forge identities',()=>{
