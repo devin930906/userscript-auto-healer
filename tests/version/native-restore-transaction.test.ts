@@ -453,7 +453,8 @@ test('TASK-011/TEST-020/026: post-rename journal corruption must not receive a s
     // Only after the actual rename: this exact ORIGINAL hash cannot
     // match the pre-restore edited source. A third party damages the
     // already-published intent between source validation and success.
-    if(!mutated&&input.expectedSha256===sha(original)&&
+    if(!mutated&&input!==null&&typeof input==='object'&&
+       'expectedSha256' in input&&input.expectedSha256===sha(original)&&
        result.status==='MATCHED_READ_ONLY'){
       const journals=(await readdir(opts.backupDirectory))
        .filter(name=>name.endsWith('.journal.json'));
@@ -486,7 +487,8 @@ test('TASK-011/TEST-020/026: post-rename original backup corruption must not rec
   t.mock.method(snapshot,'verifyApprovedSourceFingerprint',
    async (input:Parameters<typeof realVerify>[0])=>{
     const result=await realVerify(input);
-    if(!mutated&&input.expectedSha256===sha(original)&&
+    if(!mutated&&input!==null&&typeof input==='object'&&
+       'expectedSha256' in input&&input.expectedSha256===sha(original)&&
        result.status==='MATCHED_READ_ONLY'){
       mutated=true;
       await writeFile(join(opts.backupDirectory,opts.backupFileName),
