@@ -425,6 +425,31 @@ try {
     }
   } finally { $emptyHandle.Dispose() }
   Write-Output 'PASS: file-share scan includes locked empty candidate child directories'
+  # ISSUE-215 / TEST-028: the source tree can contain a NEW file after
+  # Electron smoke that did not appear in the original 144-file ZIP manifest.
+  # An unlisted child locked WITHOUT FILE_SHARE_DELETE must be discovered
+  # rather than producing a false zero-blocked-files share receipt.
+  $lateDirectory=Join-Path $permanent 'late-created'
+  New-Item -ItemType Directory -Path $lateDirectory | Out-Null
+  $lateFile=Join-Path $lateDirectory 'new-cache.bin'
+  [IO.File]::WriteAllText($lateFile,'do-not-touch-late-file')
+  $lateHandle=[IO.File]::Open($lateFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $lateSummary=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($lateSummary -notlike 'scan=ok probed=1 blockedExamples=1 names=late-created/new-cache.bin:Win32=* extraFiles=1' -or
+       [IO.File]::ReadAllText($lateFile) -cne 'do-not-touch-late-file') {
+      throw "Post-smoke unlisted file DELETE-sharing denial was missed: $lateSummary"
+    }
+  } finally { $lateHandle.Dispose() }
+  $lateUnlocked=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+  if($lateUnlocked -cne 'scan=ok probed=1 blockedExamples=0 names= extraFiles=1' -or
+     [IO.File]::ReadAllText($lateFile) -cne 'do-not-touch-late-file' -or
+     [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+    throw "Unlisted file scan altered fixture or misreported its count: $lateUnlocked"
+  }
+  Write-Output 'PASS: post-smoke unlisted files and their DELETE-sharing denials are counted read-only'
+
 
   # ISSUE-215: a directory's own DELETE probe cannot distinguish an ACL or
   # sharing denial on its parent. Hold ONLY a new disposable parent open with
