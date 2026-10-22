@@ -1,4 +1,5 @@
 import { win32 } from 'node:path';
+import { types as nodeTypes } from 'node:util';
 
 export type BrowserConfig = Readonly<{
   executablePath: string;
@@ -36,12 +37,13 @@ function safeWindowsDrivePath(value: unknown): value is string {
 }
 
 export function validateBrowserConfig(input: unknown): ConfigValidation {
-  // Renderer-supplied IPC objects have no authority to run getters or carry
-  // hidden/symbol properties. Snapshot exact own DATA descriptors first;
-  // revoked/hostile Proxies fail closed without leaking their error text.
+  // Renderer-supplied IPC objects have no authority to run getters, Proxy
+  // traps or carry hidden/symbol properties. Reject Proxies before reflection,
+  // then snapshot exact own DATA descriptors without leaking errors.
   let record: Record<string, unknown>;
   try {
-    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    if (input === null || typeof input !== 'object' ||
+        nodeTypes.isProxy(input) || Array.isArray(input)) {
       return { ok: false, code: 'INVALID_SHAPE' };
     }
     const proto = Object.getPrototypeOf(input);
