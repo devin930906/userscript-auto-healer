@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -302,22 +302,37 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
    called++;return 'DONE';
   });
   const original=ReadOnlyBatchCoordinator.prototype.snapshot;
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
   const lock=join(directory,'.uah-readonly-batch-v2.lock');
-  let snapshots=0;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  let firstJournalPublished=false,foreignLockInjected=false;
+  // Install the foreign lock ONLY after the first fully published journal
+  // has released its writer lock, just before the RUNNING transition tries
+  // to persist. Do not depend on how many safety snapshots save() takes.
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   await nativeRename(from,to);
+   if(to===target)firstJournalPublished=true;
+  };
   ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
-   snapshots++;
-   if(snapshots===4)mkdirSync(lock);
+   if(firstJournalPublished&&!foreignLockInjected&&!existsSync(lock)){
+    mkdirSync(lock);foreignLockInjected=true;
+   }
    return original.call(this);
   };
   try{
    const result=await runCheckpointedReadOnlyBatch(directory,coordinator);
+   assert.equal(foreignLockInjected,true,'inject real contention before second save');
    assert.deepEqual(result,{status:'BLOCKED',reason:'BUSY'});
    assert.equal(called,0,'worker must not start without persisted RUNNING attempt');
    assert.deepEqual(readdirSync(lock),[],'foreign lock evidence is retained');
    const bytes=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
    assert.deepEqual(bytes.jobs.map((job:{state:string})=>job.state),
     ['QUEUED','QUEUED']);
-  }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
+  }finally{
+   ReadOnlyBatchCoordinator.prototype.snapshot=original;
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+  }
  });
 });
 
