@@ -136,6 +136,9 @@ export async function inspectApprovedTampermonkeyRuntime(
  if(payload===null)return {ok:false,code:'CDP_FAILED'};
  if(!isLiveApprovedChromeSession(session))return {ok:false,code:'UNVERIFIED_BROWSER'};
  const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+ // An asynchronous listener ownership query may complete after consent
+ // has been cancelled; it must never revive a stale runtime observation.
+ if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
  return inspectTampermonkeyTargetHints(payload);
 }
