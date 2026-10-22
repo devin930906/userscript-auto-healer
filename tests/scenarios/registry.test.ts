@@ -136,3 +136,24 @@ test('TEST-005/026: scenario snapshots capture validated fields without late acc
   assert.equal(result.input.steps[0].selector,'#content');
   assert.equal(result.input.assertions[0].selector,'#submit');
 });
+
+test('TEST-005/026: live/revoked Proxy and nested array traps never run during preflight',()=>{
+  const valid:ScenarioInput={...bare,id:'proxy_gate',userApproved:true,
+    requiresLogin:false,targetUrl:'https://example.test/app'};
+  let traps=0;
+  const hostile=new Proxy(valid,{
+    getPrototypeOf(){traps++;throw Error('PRIVATE_SCENARIO_PROTOTYPE');},
+    ownKeys(){traps++;throw Error('PRIVATE_SCENARIO_KEYS');}
+  });
+  const nested=new Proxy([...valid.assertions],{
+    getPrototypeOf(){traps++;throw Error('PRIVATE_ASSERTION_ARRAY_PROTOTYPE');}
+  });
+  const revoked=Proxy.revocable(valid,{});
+  revoked.revoke();
+  for(const input of [hostile,{...valid,assertions:nested},revoked.proxy]){
+    const result=preflightScenario(input as ScenarioInput);
+    assert.equal(result.state,'INVALID');
+    assert.equal(result.issues.length>0,true);
+  }
+  assert.equal(traps,0,'untrusted Proxy reflection traps must never execute');
+});

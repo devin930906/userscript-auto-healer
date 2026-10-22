@@ -474,3 +474,26 @@ test('TEST-013: hostile serialized CDP samples fail closed without exceptions or
  assert.equal(seriesResult.checkedAssertions,0);
  assert.equal(seriesResult.automaticPatchAllowed,false);
 });
+
+test('TEST-013/026: diagnostic preflight never invokes caller consent or login getters',()=>{
+ let calls=0;
+ for(const name of ['userApproved','requiresLogin'] as const){
+  const scenario={...baseScenario};
+  Object.defineProperty(scenario,name,{enumerable:true,configurable:true,get(){
+    calls++;
+    return name==='userApproved'?true:false;
+  }});
+  const result=summarizeReadOnlyScenarioDom(scenario,sample(matched),true);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'INVALID_SCENARIO');
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+ assert.equal(calls,0,'reject accessor-based scenario before reading authorization');
+ const live=new Proxy({...baseScenario},{
+  getPrototypeOf(){calls++;throw Error('PRIVATE_SCENARIO_PROXY_PROTOTYPE');}
+ });
+ const result=summarizeReadOnlyScenarioDom(live,sample(matched),true);
+ assert.equal(result.status,'BLOCKED');
+ assert.equal(result.code,'INVALID_SCENARIO');
+ assert.equal(calls,0,'reject Proxy before any reflective access');
+});
