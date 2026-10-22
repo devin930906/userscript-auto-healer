@@ -349,13 +349,20 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+)$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\]$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
       foreach($kind in 2..7) { $classified+=[int]$Matches[$kind] }
       if($affected -lt 1 -or $classified -ne $affected) {
         throw 'Restart Manager affected-type classification does not match its process count'
+      }
+      # Image categories are allowlisted labels, never arbitrary names/PIDs.
+      # This actual lock must resolve to a time-matched PowerShell image.
+      $images=0
+      foreach($kind in 9..15) { $images+=[int]$Matches[$kind] }
+      if($images -ne $affected -or [int]$Matches[11] -lt 1) {
+        throw 'Restart Manager did not classify its time-matched PowerShell file owner'
       }
       # This file handle was opened by THIS pwsh.exe process in this test.
       # The PID must never be emitted; identity is checked within the probe.

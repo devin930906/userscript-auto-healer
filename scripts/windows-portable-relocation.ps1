@@ -274,8 +274,10 @@ function Get-CandidatePortableRestartManagerSummary(
     if(-not ('UahCandidateRestartManagerProbe' -as [type])) {
       Add-Type -TypeDefinition @'
 using System;
+using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 public static class UahCandidateRestartManagerProbe {
   [StructLayout(LayoutKind.Sequential)]
   private struct FILETIME { public uint lo; public uint hi; }
@@ -302,10 +304,51 @@ public static class UahCandidateRestartManagerProbe {
     ref uint provided, [Out] RM_PROCESS_INFO[] processes, out uint rebootReason);
   [DllImport("rstrtmgr.dll")]
   private static extern uint RmEndSession(uint h);
-  // No process names, PIDs, paths, services or application strings leave
-  // the native boundary. Count only documented RM_APP_TYPE categories.
-  // Indexes: total, window, service, explorer, console, critical, unknown, self.
-  public static int[] CountAffectedByType(string[] files) {
+  [DllImport("kernel32.dll", SetLastError=true)]
+  private static extern SafeProcessHandle OpenProcess(uint access,
+    [MarshalAs(UnmanagedType.Bool)] bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool GetProcessTimes(SafeProcessHandle process,
+    out FILETIME created, out FILETIME exited, out FILETIME kernel, out FILETIME user);
+  [DllImport("kernel32.dll", EntryPoint="QueryFullProcessImageNameW",
+    CharSet=CharSet.Unicode, SetLastError=true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool QueryImage(SafeProcessHandle process, uint flags,
+    StringBuilder image, ref uint length);
+
+  // Only allowlisted image-name categories leave this read-only boundary.
+  // A basename category is NOT ownership or permission to stop a process.
+  // Query by one limited-information handle and match RM's creation time,
+  // so a recycled PID cannot be attributed to the original file user.
+  private static int ImageCategory(RM_UNIQUE_PROCESS identity, string candidateExe) {
+    try {
+      using(SafeProcessHandle handle=OpenProcess(0x1000, false, identity.pid)) {
+        if(handle.IsInvalid) return 14;
+        FILETIME created, exited, kernel, user;
+        if(!GetProcessTimes(handle, out created, out exited, out kernel, out user) ||
+           created.lo!=identity.started.lo || created.hi!=identity.started.hi) return 14;
+        uint length=32768;
+        StringBuilder image=new StringBuilder((int)length);
+        if(!QueryImage(handle, 0, image, ref length) || length==0) return 14;
+        string full=Path.GetFullPath(image.ToString());
+        if(String.Equals(full, candidateExe, StringComparison.OrdinalIgnoreCase)) return 8;
+        switch(Path.GetFileName(full).ToLowerInvariant()) {
+          case "conhost.exe": case "openconsole.exe": return 9;
+          case "pwsh.exe": case "powershell.exe": return 10;
+          case "node.exe": return 11;
+          case "runner.worker.exe": case "runner.listener.exe": return 12;
+          default: return 13;
+        }
+      }
+    } catch { return 14; }
+  }
+
+  // No arbitrary image names, PIDs, paths, services or application strings
+  // leave the native boundary. Keep the original RM categories and self count.
+  // 8..14: exact candidate, console-host name, shell name, node name,
+  // runner name, other known image, unavailable/time-mismatched identity.
+  public static int[] CountAffectedByType(string[] files, string candidateExe) {
     if(files==null || files.Length==0 || files.Length>40) return new int[]{-1};
     uint h;
     if(RmStartSession(out h, 0, new StringBuilder(33))!=0) return new int[]{-1};
@@ -318,11 +361,12 @@ public static class UahCandidateRestartManagerProbe {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
         if(result==0) {
           if(provided>(uint)entries.Length) return new int[]{-1};
-          int[] counts=new int[8];
+          int[] counts=new int[15];
           counts[0]=(int)provided;
           int currentPid=Environment.ProcessId;
           for(int j=0;j<(int)provided;j++) {
             if(entries[j].process.pid==(uint)currentPid) counts[7]++;
+            counts[ImageCategory(entries[j].process, candidateExe)]++;
             switch(entries[j].applicationType) {
               case 1: case 2: counts[1]++; break; // window processes
               case 3: counts[2]++; break; // service
@@ -344,14 +388,18 @@ public static class UahCandidateRestartManagerProbe {
 }
 '@ -ErrorAction Stop
     }
-    $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample)
-    if($null -eq $counts -or $counts.Length -ne 8 -or $counts[0] -lt 0) {
+    $candidateExe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
+    $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample,$candidateExe)
+    if($null -eq $counts -or $counts.Length -ne 15 -or $counts[0] -lt 0) {
       return 'rm=unavailable'
     }
     $classified=0
     foreach($i in 1..6) { $classified+=$counts[$i] }
-    if($classified -ne $counts[0] -or $counts[7] -gt $counts[0]) { return 'rm=unavailable' }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7])"
+    $images=0
+    foreach($i in 8..14) { $images+=$counts[$i] }
+    if($classified -ne $counts[0] -or $images -ne $counts[0] -or
+       $counts[7] -gt $counts[0]) { return 'rm=unavailable' }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]"
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
