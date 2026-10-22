@@ -52,7 +52,12 @@ try {
      $postUseSmoke -le $postUseMove -or $readonly -le $postUseSmoke) {
     throw 'TEST-028: verified ZIP must move cold, then move after-use once quiescent and restart'
   }
-  Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering'
+  # Win32=5 persisted beyond the former 12 x 250ms budget. Keep the
+  # post-use atomic move and use a bounded grace, never bypassing a denial.
+  if($packageScript -notmatch 'Move-CandidatePortableDirectory\s+\$expanded\s+\$postUse\s+16\s+750\s+@\(') {
+    throw 'TEST-028: post-use relocation must retain bounded external-user grace'
+  }
+  Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering with bounded grace'
   # ISSUE-215: prevent reintroducing a second Wait-Process PID-based
   # handle after Start-Process already returned an owned Process instance.
   # The same instance must wait and release its handle before directory moves.
@@ -585,7 +590,8 @@ try {
     $handle=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
     try {
       [IO.File]::WriteAllText($ready,'ready')
-      Start-Sleep -Milliseconds 1100
+      # Exceed the former three-second retry budget with a real file lease.
+      Start-Sleep -Milliseconds 4500
     } finally { $handle.Dispose() }
   } -ArgumentList $temporaryFile,$marker
   try {
@@ -597,7 +603,7 @@ try {
       }
       Start-Sleep -Milliseconds 50
     }
-    $attempts=Move-CandidatePortableDirectory $temporary $moved 12 200
+    $attempts=Move-CandidatePortableDirectory $temporary $moved 16 750
     if($attempts -lt 2 -or (Test-Path -LiteralPath $temporary) -or
         [IO.File]::ReadAllText((Join-Path $moved 'payload.txt')) -cne 'exact-content') {
       throw 'Transient lock recovery or relocated payload verification failed'
