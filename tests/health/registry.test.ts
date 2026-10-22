@@ -109,3 +109,24 @@ test('TEST-024/NFR-002: hostile Proxy errors never escape the health input bound
   }
   assert.equal(registry.snapshot(A).status, 'UNTESTED');
 });
+
+test('TEST-024/026: reject live and revoked Proxy observations before any reflection', () => {
+  const registry = new LimitedHealthRegistry(() => 15);
+  let traps = 0;
+  const observation = unknown();
+  const hostile = new Proxy(observation, {
+    getPrototypeOf() { traps++; throw Error('PRIVATE_REFLECTION_TRAP'); },
+    ownKeys() { traps++; throw Error('PRIVATE_REFLECTION_TRAP'); },
+    getOwnPropertyDescriptor() { traps++; throw Error('PRIVATE_REFLECTION_TRAP'); }
+  });
+  assert.throws(() => registry.record(hostile), /INVALID_HEALTH_OBSERVATION/);
+  assert.equal(traps, 0, 'reject live Proxy before running reflection traps');
+  const revocable = Proxy.revocable(observation, {
+    getPrototypeOf() { traps++; throw Error('PRIVATE_REVOKED_REFLECTION'); }
+  });
+  revocable.revoke();
+  assert.throws(() => registry.record(revocable.proxy),
+    /INVALID_HEALTH_OBSERVATION/);
+  assert.equal(traps, 0);
+  assert.equal(registry.snapshot(A).status, 'UNTESTED');
+});
