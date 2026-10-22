@@ -402,3 +402,42 @@ test('TEST-020/026: manual approval, exact journal name and untrusted Proxy are 
   assert.deepEqual(await readFile(opts.sourcePath),original);
  });
 });
+
+test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
+ await fixture(async opts=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRmdir=fsPromises.rmdir;
+  const expectedLock=join(
+   join(opts.sourcePath,'..'),
+   '.uah-restore-path-'+createHash('sha256').update(opts.sourcePath,'utf8').digest('hex')
+  );
+  let denied=false;
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
+   if(path===expectedLock){
+    denied=true;
+    throw Object.assign(new Error('lock directory busy'),{code:'EACCES'});
+   }
+   return nativeRmdir(path,...rest);
+  };
+  try{
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(denied,true,'must inject a real final lock-cleanup error');
+   assert.deepEqual(result,{
+    status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   });
+   // The atomic rename may already have succeeded; do not falsely imply
+   // that the source is unchanged or erase its independent recovery copies.
+   assert.deepEqual(await readFile(opts.sourcePath),original);
+   const names=await readdir(opts.backupDirectory);
+   assert.ok(names.includes(opts.backupFileName));
+   assert.ok(names.some(n=>n.endsWith('.journal.json')));
+   assert.ok(names.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName));
+   assert.ok((await lstat(expectedLock)).isDirectory(),
+    'stranded cooperative lock must remain for explicit reconciliation');
+  }finally{
+   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;
+  }
+ });
+});
