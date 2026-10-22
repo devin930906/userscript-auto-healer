@@ -127,6 +127,30 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
    (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
      .verifyWindowsLoopbackListenerPid=originalVerify;
  }
+
+ // Closing the owned Chrome session during the FINAL asynchronous listener
+ // check must invalidate its runtime hint, even if that check saw the same PID.
+ // This is the test's disposable, app-launched Chrome: never an external PID.
+ let lifetimeChecks=0;
+ (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+   .verifyWindowsLoopbackListenerPid=async(...args)=>{
+     const result=await originalVerify(...args);
+     lifetimeChecks++;
+     if(lifetimeChecks===2){
+       assert.equal(result.ok,true,'fixture must own the listener until final check');
+       session.stop();
+     }
+     return result;
+   };
+ try{
+   const stopped=await inspectApprovedTampermonkeyRuntime(session,true);
+   assert.equal(lifetimeChecks,2,'fixture must stop after final listener check');
+   assert.deepEqual(stopped,{ok:false,code:'UNVERIFIED_BROWSER'},
+     'a stopped Chrome session cannot yield a post-verification runtime hint');
+ }finally{
+   (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+     .verifyWindowsLoopbackListenerPid=originalVerify;
+ }
 });
 
 test('TEST-017 stage: distinct ordinary Chrome targets remain ignorable but cannot forge identities',()=>{
