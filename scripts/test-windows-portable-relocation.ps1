@@ -342,6 +342,217 @@ try {
       throw 'Share probe accepted a path outside its candidate directory'
     }
     Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
+    # ISSUE-215: a Windows Restart Manager read-only query can identify
+    # processes holding registered CANDIDATE FILES even when the executable
+    # name-only CIM snapshot reports zero. Never enumerate unrelated paths,
+    # include PID/process names in logs, or shut down any returned process.
+    $rmLocked=Get-CandidatePortableRestartManagerSummary $permanent @($permanentFile)
+    if($rmLocked -notmatch '^rm=ok sampled=1 total=1 affected=[1-9][0-9]*
+    # might succeed. Reuse only this fixture's known file manifest.
+    $firstDenial=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
+    if(-not $firstDenial.Contains('sharing=[scan=ok probed=1 blockedExamples=1 names=payload.txt:Win32=') -or
+       -not $firstDenial.Contains('sibling=[control=move-ok]') -or
+       @((Get-ChildItem -LiteralPath $root -Recurse -Directory -Force) |
+          Where-Object { $_.Name -like 'uah-empty-rename-control-*' }).Count -ne 0) {
+      throw "First-denial diagnostic missed actual file lock or leaked temporary control: $firstDenial"
+    }
+    Write-Output 'PASS: first relocation denial records candidate file lock and sibling control without changing payload'
+    $rejected=$false
+    $rootFailure=$null
+    try { Move-CandidatePortableDirectory $permanent (Join-Path $root 'should-not-exist') 2 50 @($permanentFile) | Out-Null }
+    catch {
+      $rootError=$_.Exception
+      while($rootError.InnerException) { $rootError=$rootError.InnerException }
+      $code=$rootError.HResult -band 0xFFFF
+      if(($rootError -isnot [System.IO.IOException] -and
+          $rootError -isnot [System.UnauthorizedAccessException]) -or
+          $code -notin @(5,32,33)) { throw }
+      $rootFailure=$rootError
+      $rejected=$true
+    }
+    if(-not $rejected -or (Test-Path -LiteralPath (Join-Path $root 'should-not-exist'))) {
+      throw 'Persistent Windows file lock did not fail closed'
+    }
+    # Validate the production formatter against the actual Windows exception,
+    # with a fixed clock so the record can be independently asserted.
+    $fixedUtc=[DateTime]::new(2026,10,21,3,12,0,[DateTimeKind]::Utc)
+    $record=Format-CandidatePortableRelocationFailure 2 2 $rootFailure $true $false $fixedUtc
+    $expected=("TASK-020 relocation attempt 2/2 UTC=2026-10-21T03:12:00.000Z type={0} HRESULT=0x{1:X8} Win32={2} sourceExists=True destinationExists=False" -f
+      $rootFailure.GetType().Name,$rootFailure.HResult,$code)
+    if($record -cne $expected) {
+      throw 'Windows relocation diagnostic formatter lost the HRESULT, attempt or state'
+    }
+    Write-Output "PASS: Windows lock diagnostic recorded HRESULT and Win32=$code without full paths"
+  } finally { $locked.Dispose() }
+  if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
+      [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+    throw 'Persistent Windows file lock modified original payload'
+  }
+  Write-Output 'PASS: persistent lock blocks relocation without altering payload'
+
+  # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
+  # FILE_SHARE_DELETE still allows the old read-only probe to succeed, even
+  # though Windows will refuse to rename its parent. The new diagnostic must
+  # actually request DELETE access without deleting or changing any bytes.
+  $noDeleteShare=[IO.File]::Open($permanentFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $deleteAccess=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($deleteAccess -notlike '*blockedExamples=1*') {
+      throw "Delete-share omission was not detected: $deleteAccess"
+    }
+    if([IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+      throw 'Read-only delete-access diagnostic changed the fixture bytes'
+    }
+  } finally { $noDeleteShare.Dispose() }
+  Write-Output 'PASS: Windows delete-share omission is detected without changing source'
+
+  # ISSUE-215 / TEST-028: files alone do not cover an empty subdirectory.
+  # A surviving directory handle without FILE_SHARE_DELETE must be visible
+  # to the bounded diagnosis, even though no ZIP file has that directory
+  # in its ancestry. This fixture belongs solely to RUNNER_TEMP.
+  $emptyDirectory=Join-Path $permanent 'empty-child'
+  New-Item -ItemType Directory -Path $emptyDirectory | Out-Null
+  $emptyHandle=[UahCandidateDeleteAccessProbe]::Open($emptyDirectory,
+    [uint32]2147483648,[uint32]3,[IntPtr]::Zero,[uint32]3,
+    [uint32]0x02000000,[IntPtr]::Zero)
+  if($emptyHandle.IsInvalid) {
+    $emptyHandle.Dispose()
+    throw 'Windows empty-directory DELETE-sharing fixture could not be opened'
+  }
+  try {
+    $emptySummary=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($emptySummary -notlike '*blockedExamples=1*names=empty-child:Win32=*') {
+      throw "Empty candidate child directory lock was absent from diagnostics: $emptySummary"
+    }
+    if([IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+      throw 'Empty directory diagnostic altered the candidate file payload'
+    }
+  } finally { $emptyHandle.Dispose() }
+  Write-Output 'PASS: file-share scan includes locked empty candidate child directories'
+  # ISSUE-215 / TEST-028: the source tree can contain a NEW file after
+  # Electron smoke that did not appear in the original 144-file ZIP manifest.
+  # An unlisted child locked WITHOUT FILE_SHARE_DELETE must be discovered
+  # rather than producing a false zero-blocked-files share receipt.
+  $lateDirectory=Join-Path $permanent 'late-created'
+  New-Item -ItemType Directory -Path $lateDirectory | Out-Null
+  $lateFile=Join-Path $lateDirectory 'new-cache.bin'
+  [IO.File]::WriteAllText($lateFile,'do-not-touch-late-file')
+  $lateHandle=[IO.File]::Open($lateFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $lateSummary=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    if($lateSummary -notlike 'scan=ok probed=1 blockedExamples=1 names=late-created/new-cache.bin:Win32=* extraFiles=1' -or
+       [IO.File]::ReadAllText($lateFile) -cne 'do-not-touch-late-file') {
+      throw "Post-smoke unlisted file DELETE-sharing denial was missed: $lateSummary"
+    }
+  } finally { $lateHandle.Dispose() }
+  $lateUnlocked=Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+  if($lateUnlocked -cne 'scan=ok probed=1 blockedExamples=0 names= extraFiles=1' -or
+     [IO.File]::ReadAllText($lateFile) -cne 'do-not-touch-late-file' -or
+     [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+    throw "Unlisted file scan altered fixture or misreported its count: $lateUnlocked"
+  }
+  Write-Output 'PASS: post-smoke unlisted files and their DELETE-sharing denials are counted read-only'
+
+
+  # ISSUE-215: a directory's own DELETE probe cannot distinguish an ACL or
+  # sharing denial on its parent. Hold ONLY a new disposable parent open with
+  # exclusive sharing, then confirm that the extended diagnostic reports a
+  # bounded (parent) status without leaking an absolute path or changing data.
+  $parentFixture=Join-Path $root 'locked-parent-fixture'
+  $childFixture=Join-Path $parentFixture 'source'
+  New-Item -ItemType Directory -Path $parentFixture | Out-Null
+  New-Item -ItemType Directory -Path $childFixture | Out-Null
+  $childPayload=Join-Path $childFixture 'payload.txt'
+  [IO.File]::WriteAllText($childPayload,'keep-parent-fixture')
+  $parentHandle=[UahCandidateDeleteAccessProbe]::Open($parentFixture,
+    [uint32]2147483648,[uint32]0,[IntPtr]::Zero,[uint32]3,
+    [uint32]0x02000000,[IntPtr]::Zero)
+  if($parentHandle.IsInvalid) {
+    $parentHandle.Dispose()
+    throw 'Disposable parent fixture could not establish a sharing lock'
+  }
+  try {
+    $parentSummary=Get-CandidatePortableFileShareSummary $childFixture @($childPayload)
+    if($parentSummary -notlike 'scan=ok probed=1 blockedExamples=1 names=(parent):Win32=*') {
+      throw "Parent sharing denial was not distinguished from source file locks: $parentSummary"
+    }
+    if([IO.File]::ReadAllText($childPayload) -cne 'keep-parent-fixture') {
+      throw 'Parent sharing diagnostic changed disposable payload bytes'
+    }
+  } finally { $parentHandle.Dispose() }
+  Write-Output 'PASS: candidate parent rename-rights diagnostic detects exclusive parent handle'
+
+  # Never overwrite another relocated copy, even if the source is valid.
+  $source=Join-Path $root 'unmoved-source'
+  $existing=Join-Path $root 'existing-destination'
+  New-Item -ItemType Directory -Path $source,$existing | Out-Null
+  [IO.File]::WriteAllText((Join-Path $source 'source.txt'),'source-data')
+  [IO.File]::WriteAllText((Join-Path $existing 'existing.txt'),'do-not-touch')
+  $noOverwrite=$false
+  try { Move-CandidatePortableDirectory $source $existing 2 50 | Out-Null }
+  catch [System.InvalidOperationException] { $noOverwrite=$true }
+  if(-not $noOverwrite -or
+      [IO.File]::ReadAllText((Join-Path $existing 'existing.txt')) -cne 'do-not-touch' -or
+      [IO.File]::ReadAllText((Join-Path $source 'source.txt')) -cne 'source-data') {
+    throw 'Existing destination protection failed'
+  }
+  Write-Output 'PASS: existing destination is never replaced'
+
+  # A separate Windows process temporarily denies delete-sharing; the helper
+  # must retry ONLY until the lease is released, then perform one real move.
+  $temporary=Join-Path $root 'temporary-source'
+  $moved=Join-Path $root 'relocated portable 路径'
+  $marker=Join-Path $root 'lock-ready.txt'
+  New-Item -ItemType Directory -Path $temporary | Out-Null
+  $temporaryFile=Join-Path $temporary 'payload.txt'
+  [IO.File]::WriteAllText($temporaryFile,'exact-content')
+  $job=Start-Job -ScriptBlock {
+    param($path,$ready)
+    $handle=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+    try {
+      [IO.File]::WriteAllText($ready,'ready')
+      Start-Sleep -Milliseconds 1100
+    } finally { $handle.Dispose() }
+  } -ArgumentList $temporaryFile,$marker
+  try {
+    $deadline=[DateTime]::UtcNow.AddSeconds(15)
+    while(-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+      if($job.State -in @('Failed','Stopped','Completed') -or
+         [DateTime]::UtcNow -ge $deadline) {
+        throw 'Windows locking process did not establish the expected test lock'
+      }
+      Start-Sleep -Milliseconds 50
+    }
+    $attempts=Move-CandidatePortableDirectory $temporary $moved 12 200
+    if($attempts -lt 2 -or (Test-Path -LiteralPath $temporary) -or
+        [IO.File]::ReadAllText((Join-Path $moved 'payload.txt')) -cne 'exact-content') {
+      throw 'Transient lock recovery or relocated payload verification failed'
+    }
+    Write-Output "PASS: Windows transient lock resolved after $attempts bounded attempts"
+  } finally {
+    $null=Wait-Job -Job $job -Timeout 15
+    if($job.State -eq 'Running') { Stop-Job -Job $job -ErrorAction SilentlyContinue }
+    Receive-Job -Job $job -ErrorAction Stop | Out-Null
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  }
+} finally {
+  Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+}
+) {
+      throw "Real Windows exclusive file lock was not observed by Restart Manager: $rmLocked"
+    }
+    $rmOutside=Get-CandidatePortableRestartManagerSummary $permanent @(
+      (Join-Path $root 'outside-scope.txt'))
+    if($rmOutside -cne 'rm=unavailable') {
+      throw 'Restart Manager probe accepted an out-of-candidate path'
+    }
+    $rmDirectory=Get-CandidatePortableRestartManagerSummary $permanent @($permanent)
+    if($rmDirectory -cne 'rm=unavailable') {
+      throw 'Restart Manager probe accepted a directory instead of a file'
+    }
+    Write-Output 'PASS: Restart Manager read-only candidate file lock probe is scoped and detects an affected process'
     # Even a transient first denial must carry evidence before a later move
     # might succeed. Reuse only this fixture's known file manifest.
     $firstDenial=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
