@@ -93,35 +93,45 @@ function verifyCrx3PackageIntegrity(input,expectedId){
  const signedSize=Buffer.alloc(4);
  signedSize.writeUInt32LE(signed.length);
  const message=Buffer.concat([DOMAIN,signedSize,signed,zip]);
+ // Chromium's actual CRX3 verifier uses RSA_PKCS1_SHA256 (even
+ // though older crx3.proto commentary calls these proofs PSS), and verifies
+ // EVERY listed signature before accepting the full archive.
  let algorithm=null,matchedKeyId=0,parsedKeys=0,validSignatures=0;
  const proofs=header.filter(x=>x.number===2||x.number===3);
+ if(proofs.length===0||proofs.length>32)fail();
  for(const proof of proofs){
   if(proof.kind!==2)fail();
   const values=wireFields(proof.value);
   const keyBytes=oneBytes(values,1),signature=oneBytes(values,2);
   if(keyBytes.length<60||keyBytes.length>8192||
-     signature.length<32||signature.length>8192)continue;
-  if(!createHash('sha256').update(keyBytes).digest().subarray(0,16).equals(idBytes))
-   continue;
-  matchedKeyId++;
+     signature.length<32||signature.length>8192)fail();
+  const keyMatchesId=createHash('sha256').update(keyBytes).digest()
+    .subarray(0,16).equals(idBytes);
+  if(keyMatchesId)matchedKeyId++;
   try{
    const key=createPublicKey({key:keyBytes,format:'der',type:'spki'});
    parsedKeys++;
-   if(proof.number===2&&key.asymmetricKeyType==='rsa'&&
-      verify('sha256',message,{
-        key,padding:constants.RSA_PKCS1_PSS_PADDING,
-        saltLength:constants.RSA_PSS_SALTLEN_DIGEST
-      },signature)){algorithm='RSA-PSS-SHA256';validSignatures++;break;}
-   if(proof.number===3&&key.asymmetricKeyType==='ec'&&
-      key.asymmetricKeyDetails?.namedCurve==='prime256v1'&&
-      verify('sha256',message,key,signature)){
-     algorithm='ECDSA-P256-SHA256';validSignatures++;break;
+   let valid=false,kind=null;
+   if(proof.number===2&&key.asymmetricKeyType==='rsa'){
+    valid=verify('sha256',message,{
+      key,padding:constants.RSA_PKCS1_PADDING
+    },signature);
+    kind='RSA-PKCS1-SHA256';
+   }else if(proof.number===3&&key.asymmetricKeyType==='ec'&&
+      key.asymmetricKeyDetails?.namedCurve==='prime256v1'){
+    valid=verify('sha256',message,key,signature);
+    kind='ECDSA-P256-SHA256';
    }
-  }catch{/* An invalid proof must not authorize a package. */}
+   if(!valid)fail();
+   validSignatures++;
+   if(keyMatchesId)algorithm=kind;
+  }catch{
+   throw Error('CRX3_SIGNATURE_OR_FORMAT_INVALID '+
+     'proofs='+proofs.length+' matchedKeyId='+matchedKeyId+
+     ' parsedKeys='+parsedKeys+' validSignatures='+validSignatures);
+  }
  }
- if(!algorithm)throw Error('CRX3_SIGNATURE_OR_FORMAT_INVALID '+
-  'proofs='+proofs.length+' matchedKeyId='+matchedKeyId+
-  ' parsedKeys='+parsedKeys+' validSignatures='+validSignatures);
+ if(!algorithm||validSignatures!==proofs.length)fail();
  return Object.freeze({extensionId:id,algorithm,zip:Buffer.from(zip)});
 }
 if(require.main===module){
