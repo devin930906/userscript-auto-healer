@@ -352,7 +352,7 @@ test('TEST-017/018: isolated GM storage passes only after cleanup and read-after
    }
   });
   assert.equal(writes,1,scenario);
-  assert.equal(deletes,scenario==='write-denied'?0:1,scenario);
+  assert.equal(deletes,1,'cleanup is attempted even if GM_setValue fails: '+scenario);
   assert.equal(storage.size,scenario==='write-denied'||scenario==='delete-denied'?Number(scenario==='delete-denied'):0,scenario);
   assert.equal(reports.length,1,scenario);
   assert.equal(reports[0].gmDefaultMatched,true,scenario);
@@ -691,4 +691,43 @@ test('TEST-017/018: fixture rejects noncanonical route and delayed route drift',
  });
  assert.deepEqual(afterSet,{gm:1,query:1,action:1,read:0,report:0},
    'A route change during DOM action must not yield a stale success report');
+});
+
+test('TEST-017/018: partial GM write that throws still triggers disposable-key cleanup',async t=>{
+ const result=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(result.ok,true);
+ if(!result.ok)return;
+ t.after(()=>result.session.stop());
+ const storage=new Map<string,string>();
+ const effects={writes:0,deletes:0};
+ const reports:Array<Record<string,unknown>>=[];
+ runInNewContext(result.session.source,{
+  Date:class extends Date{static now(){return result.session.expiresAt-1000;}},URL,
+  location:{origin:result.session.origin,href:result.session.origin+'/?mode=fixed'},
+  document:{readyState:'complete',querySelector:()=>({
+   setAttribute:()=>{},getAttribute:()=> 'done'
+  })},
+  GM_getValue:(key:string,fallback:string)=>storage.get(key)??fallback,
+  GM_setValue:(key:string,value:string)=>{
+   effects.writes++;
+   storage.set(key,value);
+   // A manager can throw after persisting a value. Do not leave this
+   // disposable diagnostic key installed on a partially successful call.
+   throw Error('GM_WRITE_RETURN_ERROR_AFTER_PERSIST');
+  },
+  GM_deleteValue:(key:string)=>{
+   effects.deletes++;
+   storage.delete(key);
+  },
+  fetch:(_url:string,opts:{body:string})=>{
+   reports.push(JSON.parse(opts.body) as Record<string,unknown>);
+   return Promise.resolve();
+  }
+ });
+ assert.equal(effects.writes,1);
+ assert.equal(effects.deletes,1,'cleanup must be attempted after a mutating setter throws');
+ assert.equal(storage.size,0,'a failed probe must not retain disposable GM storage');
+ assert.equal(reports.length,1);
+ assert.equal(reports[0].gmStorageRoundtripMatched,false);
+ assert.equal(reports[0].businessAction,true);
 });
