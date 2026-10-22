@@ -1,5 +1,6 @@
 /** TASK-004 / REQ-005: local-only scenario contracts; this module never opens a browser. */
 import type { MetadataResult } from '../analyze/metadata-parser';
+import {types as nodeTypes} from 'node:util';
 
 export type ScenarioState = 'INVALID' | 'UNKNOWN' | 'READY_TO_TEST';
 export type ScenarioIssue =
@@ -79,7 +80,8 @@ export function suggestSites(metadata?:MetadataResult):SiteHint[] {
 function ownData(input:unknown, required:readonly string[], optional:readonly string[]=[]):
     Record<string,unknown>|null {
   try {
-    if(!input||typeof input!=='object'||Array.isArray(input))return null;
+    if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+       Array.isArray(input))return null;
     const proto=Object.getPrototypeOf(input);
     if(proto!==Object.prototype&&proto!==null)return null;
     const descriptors=Object.getOwnPropertyDescriptors(input);
@@ -97,7 +99,8 @@ function ownData(input:unknown, required:readonly string[], optional:readonly st
 function ownRows(input:unknown,max:number,required:readonly string[],
     optional:readonly string[]=[]):Record<string,unknown>[]|null {
   try {
-    if(!Array.isArray(input)||Object.getPrototypeOf(input)!==Array.prototype)
+    if(nodeTypes.isProxy(input)||!Array.isArray(input)||
+       Object.getPrototypeOf(input)!==Array.prototype)
       return null;
     const length=Object.getOwnPropertyDescriptor(input,'length')?.value;
     if(!Number.isSafeInteger(length)||length<0||length>max)return null;
