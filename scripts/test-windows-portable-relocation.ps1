@@ -39,13 +39,20 @@ try {
     'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$temp '+ "'extracted'")
   $relocatedCwd=$packageScript.IndexOf(
     'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "'relocated'")
+  $postUseMove=$packageScript.IndexOf('Move-CandidatePortableDirectory $expanded $postUse')
+  $postUseSmoke=$packageScript.IndexOf(
+    'Smoke (Join-Path $expanded '+ "'UserscriptAutoHealer.exe') " + '$expanded '+ "'after-use'")
+  $postUseWait=$packageScript.IndexOf(
+    'Wait-CandidatePortableProcessExit (Join-Path $expanded '+ "'UserscriptAutoHealer.exe')",
+    $relocatedCwd)
   $readonly=$packageScript.IndexOf("'extracted-readonly'")
   if($verified -lt 0 -or $movedAt -le $verified -or
      $externalCwd -le $movedAt -or $relocatedCwd -le $externalCwd -or
-     $readonly -le $relocatedCwd) {
-    throw 'TEST-028: verified ZIP must be atomically moved before first extracted Electron execution'
+     $postUseWait -le $relocatedCwd -or $postUseMove -le $postUseWait -or
+     $postUseSmoke -le $postUseMove -or $readonly -le $postUseSmoke) {
+    throw 'TEST-028: verified ZIP must move cold, then move after-use once quiescent and restart'
   }
-  Write-Output 'PASS: candidate ZIP is moved before either extracted Electron smoke'
+  Write-Output 'PASS: candidate ZIP supports cold move and mandatory post-use move/restart ordering'
 
   # TEST-028: the reusable move helper must not rename any path outside its
   # disposable runner namespace. Use a narrower, fake RUNNER_TEMP within the

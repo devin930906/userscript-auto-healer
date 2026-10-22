@@ -37,6 +37,7 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
   Require-File $exe
   $receipt=Join-Path $temp "shell-$name.json"
   $env:UAH_SMOKE_RECEIPT=$receipt
+  $p=$null
   try {
     $p=Start-Process -FilePath $exe -ArgumentList @('--uahtest-shell-only') -WorkingDirectory $cwd -PassThru
     try { Wait-Process -Id $p.Id -Timeout 90 -ErrorAction Stop }
@@ -52,7 +53,13 @@ function Smoke([string]$exe,[string]$cwd,[string]$name,[string]$temp) {
       }
       throw "Electron smoke exit failure: $name"
     }
-  } finally { Remove-Item Env:\UAH_SMOKE_RECEIPT -ErrorAction SilentlyContinue }
+  } finally {
+    # Wait-Process observes exit, but the returned Process object still owns
+    # a Windows process handle. Release it deterministically before testing
+    # a post-use atomic rename of the launched portable application tree.
+    if($null -ne $p) { $p.Dispose() }
+    Remove-Item Env:\UAH_SMOKE_RECEIPT -ErrorAction SilentlyContinue
+  }
   Require-File $receipt
   $r=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
   if ($r.shell -ne 'development-skeleton' -or
@@ -211,6 +218,40 @@ Write-Output "PASS: candidate-owned executable quiescent between portable smokes
 $movedReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'relocated' $temp
 Assert-RetainedData $movedReceipt $userDataRoot $canary $canaryText $smokeRoaming
 Write-Output 'PASS: moved portable ZIP payload in Unicode/space path launches with all hashes and external userData intact'
+# TASK-020/ISSUE-215: cold relocation avoids a first-launch contention,
+# but does NOT prove the portable folder can be moved after actual use.
+# Exercise the original post-Electron atomic rename failure scenario too:
+# wait only for the EXACT disposable candidate executable, never kill other
+# Chrome, Electron or user processes. Failure remains a hard CI failure.
+$quiescent=Wait-CandidatePortableProcessExit (Join-Path $expanded 'UserscriptAutoHealer.exe')
+Write-Output "DIAGNOSTIC: post-use candidate executable quiescent after check $quiescent"
+$postUse=Join-Path $temp 'after-use portable 复测'
+if(Test-Path -LiteralPath $postUse){throw 'Refusing to replace a post-use portable directory'}
+try {
+  $afterUseAttempts=Move-CandidatePortableDirectory $expanded $postUse 12 250 @(
+    $movedFiles | ForEach-Object { $_.FullName }
+  )
+} catch {
+  # Original move exception remains authoritative; never fake a clean
+  # directory rename, retry outside the bound or touch unknown processes.
+  Write-CandidatePortableProcessSnapshot (Join-Path $expanded 'UserscriptAutoHealer.exe') 'after post-use relocation failure'
+  Write-Output ("DIAGNOSTIC: post-use sourceExists="+
+    (Test-Path -LiteralPath $expanded)+"; destinationExists="+(Test-Path -LiteralPath $postUse))
+  throw
+}
+$expanded=$postUse
+foreach($original in $sourceFiles) {
+  $relative=$original.FullName.Substring($stage.Length+1)
+  $afterUseFile=Join-Path $expanded $relative
+  Require-File $afterUseFile
+  if((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+     (Get-FileHash -LiteralPath $afterUseFile -Algorithm SHA256).Hash) {
+    throw "Post-use portable payload hash mismatch: $relative"
+  }
+}
+$afterUseReceipt=Smoke (Join-Path $expanded 'UserscriptAutoHealer.exe') $expanded 'after-use' $temp
+Assert-RetainedData $afterUseReceipt $userDataRoot $canary $canaryText $smokeRoaming
+Write-Output "PASS: post-use atomic portable relocation ($afterUseAttempts attempt(s)), full SHA-256 parity and Electron restart"
 # REQ-028/TEST-028: a read-only extracted application directory must NOT be
 # required for data writes. Use real Windows NTFS ACLs (not merely the
 # directory ReadOnly attribute, which does not deny file creation).
