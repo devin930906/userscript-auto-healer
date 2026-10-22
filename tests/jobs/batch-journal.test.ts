@@ -391,3 +391,43 @@ test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return
    ['CANCELLED','CANCELLED']);
  });
 });
+
+test('TASK-013/TEST-022/026: cancellation during final writer-lock recheck refuses stale receipt',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
+  const nativeLstat=fsPromises.lstat;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let published=false,lockChecks=0,cancelledDuringFinalCheck=false;
+  // Interpose at the second post-publication lock identity read, AFTER
+  // the initial post-rename verification and before the save receipt.
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   await nativeRename(from,to);
+   if(to===target)published=true;
+  };
+  (fsPromises as {lstat:typeof nativeLstat}).lstat=(async(
+   ...args:Parameters<typeof nativeLstat>
+  )=>{
+   const result=await nativeLstat(...args);
+   if(published&&args[0]===lock&&++lockChecks===2){
+    cancelledDuringFinalCheck=true;
+    coordinator.cancel();
+   }
+   return result;
+  }) as typeof nativeLstat;
+  try{
+   const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(cancelledDuringFinalCheck,true,'inject cancellation during last async lock check');
+   assert.deepEqual(saved,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+   assert.deepEqual(JSON.parse(await readFile(target,'utf8')).jobs.map(
+    (job:{state:string})=>job.state),['QUEUED','QUEUED']);
+   assert.deepEqual(coordinator.snapshot().jobs.map(job=>job.state),
+    ['CANCELLED','CANCELLED']);
+  }finally{
+   (fsPromises as {lstat:typeof nativeLstat}).lstat=nativeLstat;
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+  }
+ });
+});

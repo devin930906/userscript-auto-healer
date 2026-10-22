@@ -214,16 +214,18 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   // journal is left intact for explicit, safe retry; never rewrite it here
   // or grant repair authority. This is a final snapshot, not a claim of
   // an inter-process transaction/lock or power-loss atomicity.
+  // Await the final ownership check FIRST. User cancellation can change
+  // state while the filesystem operation is pending: a snapshot captured
+  // before that await could incorrectly claim the stale checkpoint is saved.
+  if(!await stillOwnWriterLock(directory,start,ownedLock))
+   return deny('BUSY');
+  // Synchronously re-sample the native coordinator after the last check.
+  // This is only a same-process snapshot, NOT a cross-process transaction.
   let publishedState:Buffer;
   try{
    publishedState=Buffer.from(JSON.stringify(
     ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');
   }catch{return deny('INVALID_CHECKPOINT');}
-  // A lock may be substituted while taking that last native snapshot.
-  // Preserve the existing BUSY contract over a checkpoint mismatch; never
-  // report a successful write after losing cooperative writer ownership.
-  if(!await stillOwnWriterLock(directory,start,ownedLock))
-   return deny('BUSY');
   if(!publishedState.equals(bytes))return deny('INVALID_CHECKPOINT');
   return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
    sha256:createHash('sha256').update(bytes).digest('hex')});
