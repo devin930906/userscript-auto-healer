@@ -26,11 +26,11 @@ function safeWindowsDrivePath(value: unknown): value is string {
   if (value.slice(2).includes(':')) return false;
   if (value.split('\\').some(part => part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' '))) return false;
   // Win32 resolves reserved DOS device basenames before normal file lookup,
-  // including extensions (e.g. NUL.txt) and superscript COM/LPT digits.
+  // including extensions (e.g. NUL.txt), console CONIN$/CONOUT$ and superscript COM/LPT digits.
   // Reject every component before accepting a Chrome or isolated Profile path.
   const segments = value.slice(3).split('\\');
   if (segments.some(part =>
-    /^(?:CON|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(part))) {
+    /^(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(part))) {
     return false;
   }
   return true;
