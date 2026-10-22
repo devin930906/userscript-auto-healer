@@ -106,16 +106,14 @@ function preflightReadOnlyScenarioUnchecked(
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
  if(!input||typeof input!=='object'||Array.isArray(input))
    return {ok:false,code:'INVALID_SCENARIO'};
- const value=input as ScenarioInput;
- if(value.userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
- // Missing login intent must not silently become "no login needed".
- if(typeof value.requiresLogin!=='boolean'||
-    !Array.isArray(value.steps)||!Array.isArray(value.assertions))
-   return {ok:false,code:'INVALID_SCENARIO'};
- const preflight=preflightScenario(value);
- if(preflight.state!=='READY_TO_TEST'||!preflight.input.targetUrl)
-   return {ok:false,code:'INVALID_SCENARIO'};
+ // The registry captures only own, non-accessor data and rejects Proxies.
+ // Never read caller getters for authorization or login before preflight.
+ const preflight=preflightScenario(input as ScenarioInput);
+ if(preflight.state==='INVALID')return {ok:false,code:'INVALID_SCENARIO'};
  const normalized=preflight.input;
+ if(normalized.userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+ if(preflight.state!=='READY_TO_TEST'||!normalized.targetUrl)
+   return {ok:false,code:'INVALID_SCENARIO'};
  const approvedUrl=normalized.targetUrl;
  if(typeof approvedUrl!=='string')return {ok:false,code:'INVALID_SCENARIO'};
  // No login, navigation, clicks, text reads, JS evaluation or user script code.
