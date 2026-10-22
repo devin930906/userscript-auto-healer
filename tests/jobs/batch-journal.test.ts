@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -302,22 +302,37 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
    called++;return 'DONE';
   });
   const original=ReadOnlyBatchCoordinator.prototype.snapshot;
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
   const lock=join(directory,'.uah-readonly-batch-v2.lock');
-  let snapshots=0;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  let firstJournalPublished=false,foreignLockInjected=false;
+  // Install the foreign lock ONLY after the first fully published journal
+  // has released its writer lock, just before the RUNNING transition tries
+  // to persist. Do not depend on how many safety snapshots save() takes.
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   await nativeRename(from,to);
+   if(to===target)firstJournalPublished=true;
+  };
   ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
-   snapshots++;
-   if(snapshots===4)mkdirSync(lock);
+   if(firstJournalPublished&&!foreignLockInjected&&!existsSync(lock)){
+    mkdirSync(lock);foreignLockInjected=true;
+   }
    return original.call(this);
   };
   try{
    const result=await runCheckpointedReadOnlyBatch(directory,coordinator);
+   assert.equal(foreignLockInjected,true,'inject real contention before second save');
    assert.deepEqual(result,{status:'BLOCKED',reason:'BUSY'});
    assert.equal(called,0,'worker must not start without persisted RUNNING attempt');
    assert.deepEqual(readdirSync(lock),[],'foreign lock evidence is retained');
    const bytes=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
    assert.deepEqual(bytes.jobs.map((job:{state:string})=>job.state),
     ['QUEUED','QUEUED']);
-  }finally{ReadOnlyBatchCoordinator.prototype.snapshot=original;}
+  }finally{
+   ReadOnlyBatchCoordinator.prototype.snapshot=original;
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+  }
  });
 });
 
@@ -334,5 +349,45 @@ test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unbound ba
   assert.equal(called,0);
   await assert.rejects(readFile(join(directory,BATCH_JOURNAL_FILENAME)),
    {code:'ENOENT'});
+ });
+});
+
+
+test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return a stale success receipt',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let cancelledDuringPublish=false;
+  // Reproduce the real async gap AFTER the earlier native snapshot check:
+  // the rename completed, then a user cancellation changed queued jobs
+  // before the original save() returned. No foreign file is introduced.
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   await nativeRename(from,to);
+   if(to===target){
+    cancelledDuringPublish=true;
+    coordinator.cancel();
+   }
+  };
+  try{
+   const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(cancelledDuringPublish,true,'test must hit the post-snapshot publication gap');
+   assert.deepEqual(saved,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'},
+    'a stale QUEUED journal must not receive a successful durability receipt');
+   const onDisk=JSON.parse(await readFile(target,'utf8'));
+   assert.deepEqual(onDisk.jobs.map((job:{state:string})=>job.state),
+    ['QUEUED','QUEUED'],'keep the prior bytes for a safe, explicit retry');
+   assert.deepEqual(coordinator.snapshot().jobs.map(job=>job.state),
+    ['CANCELLED','CANCELLED'],'do not erase a legitimate cancellation');
+  }finally{
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+  }
+  // A fresh, legitimate save of the current terminal state remains possible.
+  const retry=await saveReadOnlyBatchJournal(directory,coordinator);
+  assert.equal(retry.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  const latest=JSON.parse(await readFile(target,'utf8'));
+  assert.deepEqual(latest.jobs.map((job:{state:string})=>job.state),
+   ['CANCELLED','CANCELLED']);
  });
 });
