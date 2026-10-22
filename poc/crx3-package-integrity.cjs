@@ -93,8 +93,9 @@ function verifyCrx3PackageIntegrity(input,expectedId){
  const signedSize=Buffer.alloc(4);
  signedSize.writeUInt32LE(signed.length);
  const message=Buffer.concat([DOMAIN,signedSize,signed,zip]);
- let algorithm=null;
- for(const proof of header.filter(x=>x.number===2||x.number===3)){
+ let algorithm=null,matchedKeyId=0,parsedKeys=0,validSignatures=0;
+ const proofs=header.filter(x=>x.number===2||x.number===3);
+ for(const proof of proofs){
   if(proof.kind!==2)fail();
   const values=wireFields(proof.value);
   const keyBytes=oneBytes(values,1),signature=oneBytes(values,2);
@@ -102,21 +103,25 @@ function verifyCrx3PackageIntegrity(input,expectedId){
      signature.length<32||signature.length>8192)continue;
   if(!createHash('sha256').update(keyBytes).digest().subarray(0,16).equals(idBytes))
    continue;
+  matchedKeyId++;
   try{
    const key=createPublicKey({key:keyBytes,format:'der',type:'spki'});
+   parsedKeys++;
    if(proof.number===2&&key.asymmetricKeyType==='rsa'&&
       verify('sha256',message,{
         key,padding:constants.RSA_PKCS1_PSS_PADDING,
         saltLength:constants.RSA_PSS_SALTLEN_DIGEST
-      },signature)){algorithm='RSA-PSS-SHA256';break;}
+      },signature)){algorithm='RSA-PSS-SHA256';validSignatures++;break;}
    if(proof.number===3&&key.asymmetricKeyType==='ec'&&
       key.asymmetricKeyDetails?.namedCurve==='prime256v1'&&
       verify('sha256',message,key,signature)){
-     algorithm='ECDSA-P256-SHA256';break;
+     algorithm='ECDSA-P256-SHA256';validSignatures++;break;
    }
   }catch{/* An invalid proof must not authorize a package. */}
  }
- if(!algorithm)fail();
+ if(!algorithm)throw Error('CRX3_SIGNATURE_OR_FORMAT_INVALID '+
+  'proofs='+proofs.length+' matchedKeyId='+matchedKeyId+
+  ' parsedKeys='+parsedKeys+' validSignatures='+validSignatures);
  return Object.freeze({extensionId:id,algorithm,zip:Buffer.from(zip)});
 }
 if(require.main===module){
@@ -130,8 +135,9 @@ if(require.main===module){
   process.stdout.write('CRX3 signed ZIP verified; algorithm='+verified.algorithm+
     '; developerKeyId='+verified.extensionId+
     '; storeAuthenticityVerified=false\n');
- }catch{
-  process.stderr.write('CRX3 signature/bounds validation failed; package NOT loaded\n');
+ }catch(e){
+  const reason=String(e?.message||'UNKNOWN').replace(/[^a-zA-Z0-9 _=-]/g,'').slice(0,180);
+  process.stderr.write('CRX3 signature/bounds validation failed; package NOT loaded: '+reason+'\n');
   process.exitCode=1;
  }
 }
