@@ -508,6 +508,46 @@ test('TASK-011/TEST-020/026: post-rename original backup corruption must not rec
  });
 });
 
+test('TASK-011/TEST-020/021: a source changed during final journal verification cannot receive a restore success receipt',async t=>{
+ await fixture(async opts=>{
+  const module=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const real=module.verifyExactCandidateBytesReadOnly;
+  const externalBytes=Buffer.from('// externally edited AFTER restored source was checked\\n');
+  let journalChecks=0;
+  let changedAfterRename=false;
+  // The native transaction checks the published journal once BEFORE
+  // source replacement, and again AFTER the source has been restored and
+  // independently verified. Mutate only during the SECOND check, simulating
+  // an uncooperative external writer while post-rename evidence is awaited.
+  t.mock.method(module,'verifyExactCandidateBytesReadOnly',
+   async (path:Parameters<typeof real>[0],expected:Parameters<typeof real>[1])=>{
+    const result=await real(path,expected);
+    if(path.endsWith('.journal.json')&&++journalChecks===2){
+     changedAfterRename=true;
+     assert.deepEqual(await readFile(opts.sourcePath),original,
+      'the restored original must already be installed before fault injection');
+     await writeFile(opts.sourcePath,externalBytes);
+    }
+    return result;
+   });
+  const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(changedAfterRename,true,'must execute the post-rename interleaving');
+  assert.deepEqual(receipt,{
+   status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(opts.sourcePath),externalBytes,
+   'never overwrite the external writer during receipt rejection');
+  const names=await readdir(opts.backupDirectory);
+  assert.ok(names.includes(opts.backupFileName));
+  assert.ok(names.some(x=>x.endsWith('.backup.user.js')&&x!==opts.backupFileName));
+  assert.ok(names.some(x=>x.endsWith('.journal.json')),
+   'retain the independent recovery evidence for manual reconciliation');
+ });
+});
+
 test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
  await fixture(async opts=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
