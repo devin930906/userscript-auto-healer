@@ -349,7 +349,7 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\]$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\]$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
@@ -360,7 +360,7 @@ try {
       # Image categories are allowlisted labels, never arbitrary names/PIDs.
       # This actual lock must resolve to a time-matched PowerShell image.
       $images=0
-      foreach($kind in 9..15) { $images+=[int]$Matches[$kind] }
+      foreach($kind in 9..24) { $images+=[int]$Matches[$kind] }
       if($images -ne $affected -or [int]$Matches[11] -lt 1) {
         throw 'Restart Manager did not classify its time-matched PowerShell file owner'
       }
@@ -424,6 +424,34 @@ try {
     throw 'Persistent Windows file lock modified original payload'
   }
   Write-Output 'PASS: persistent lock blocks relocation without altering payload'
+
+  # A real executable loaded from a disposable runner directory must be
+  # distinguished from the exact candidate path. Do not log its PID or path.
+  $commandRoot=Join-Path $root 'classification-command'
+  New-Item -ItemType Directory -Path $commandRoot | Out-Null
+  $commandExe=Join-Path $commandRoot 'cmd.exe'
+  Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -Destination $commandExe
+  $commandHash=(Get-FileHash -LiteralPath $commandExe -Algorithm SHA256).Hash
+  $commandProcess=Start-Process -FilePath $commandExe -ArgumentList '/d /c "ping -n 8 127.0.0.1 >nul"' -NoNewWindow -PassThru
+  try {
+    Start-Sleep -Milliseconds 200
+    if($commandProcess.HasExited) { throw 'Command classification fixture exited prematurely' }
+    $commandEvidence=Get-CandidatePortableRestartManagerSummary $commandRoot @($commandExe)
+    if($commandEvidence -notlike '*images=[[]candidate=0 *' -or
+       $commandEvidence -notlike '*tools=[[]command=1 *' -or
+       $commandEvidence.Contains($commandRoot) -or
+       (Get-FileHash -LiteralPath $commandExe -Algorithm SHA256).Hash -cne $commandHash) {
+      throw "Restart Manager did not safely classify the real command image: $commandEvidence"
+    }
+    Write-Output 'PASS: time-matched command file user is distinguished from exact candidate without identity disclosure'
+  } finally {
+    if(-not $commandProcess.WaitForExit(15000)) {
+      # Only the exact disposable Process instance created by THIS fixture.
+      if(-not $commandProcess.HasExited) { $commandProcess.Kill() }
+      [void]$commandProcess.WaitForExit(5000)
+    }
+    $commandProcess.Dispose()
+  }
 
   # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
   # FILE_SHARE_DELETE still allows the old read-only probe to succeed, even
