@@ -97,10 +97,14 @@ export async function runImportedReadOnlyAnalysisQueue(
  if(nodeTypes.isProxy(scripts)||!Array.isArray(scripts))return [];
  const count=scripts.length;
  if(count===0)return [];
- if(count>MAX_SELECTED_FILES)return Array.from({length:count},()=>unavailable('SKIPPED_BATCH_BUDGET'));
+ // Do not allocate per-slot placeholders for an invalid, potentially huge
+ // caller-controlled array length. The native importer permits at most 1000.
+ if(count>MAX_SELECTED_FILES)return [];
  const boundScripts=snapshotNativeScripts(scripts);
  if(!boundScripts)return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
- if(signal?.aborted)return scripts.map(()=>unavailable('SKIPPED_CANCELLED'));
+ // Do not call the caller's Array.prototype.map: an already-aborted native
+ // request still must avoid globally replaced/injected array methods.
+ if(signal?.aborted)return Array.from({length:count},()=>unavailable('SKIPPED_CANCELLED'));
  const segmentCount=Math.ceil(count/MAX_BATCH_PREVIEW_FILES);
  const groups=Array.from({length:segmentCount},(_,index)=>{
   const offset=index*MAX_BATCH_PREVIEW_FILES;
