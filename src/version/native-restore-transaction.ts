@@ -397,12 +397,23 @@ export async function restoreVerifiedOriginalNativeOnly(
    userApproved:true
   });
   const restoredMode=await lstat(opts.sourcePath,{bigint:true});
+  // TASK-011/TEST-020/026: the source rename does not freeze the
+  // separately published intent or either original/displaced backup.
+  // An independent editor could invalidate these AFTER the last pre-rename
+  // inspection. Refuse the success receipt unless all recovery evidence is
+  // still byte-verified at the post-rename acceptance boundary. This is a
+  // cooperative, bounded check, not an exclusive Windows handle guarantee.
+  // If it fails the source MAY already contain original bytes: leave both
+  // recovery backups and the journal for explicit native reconciliation.
   if(restored.status!=='MATCHED_READ_ONLY'||
      restoredMode.isSymbolicLink()||!restoredMode.isFile()||
      (restoredMode.mode&0o777n)!==(sourceStart.mode&0o777n)||
+     (await verifyBackupRecoverySource(originalInput)).status!==
+       'RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
      (await verifyBackupRecoverySource({
        ...displacedInput,sourcePath:opts.sourcePath
-     })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
+     })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+     await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
   // A lost lock after replacement must not yield a clean restore receipt.
   // Keep backups and the intent journal for independent native inspection.
