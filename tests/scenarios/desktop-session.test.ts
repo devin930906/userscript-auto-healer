@@ -74,6 +74,29 @@ test('TEST-005/026: malformed schema, foreign hashes and hostile getters fail cl
  assert.equal(getterCalls,0);
  assert.equal(session.register(request()).ok,true);
 });
+test('TEST-005/026: scenario staging rejects Proxies before any trap can run',()=>{
+ const session=new DesktopScenarioSession();
+ session.recordImported(digest);
+ let traps=0;
+ const hostile=new Proxy(request(),{
+  getPrototypeOf(){traps++;return Object.prototype;},
+  ownKeys(target){traps++;return Reflect.ownKeys(target);},
+  getOwnPropertyDescriptor(target,key){
+   traps++;return Reflect.getOwnPropertyDescriptor(target,key);
+  }
+ });
+ assert.deepEqual(session.register(hostile),{
+  ok:false,code:'INVALID_REQUEST',automaticPatchAllowed:false,
+  tampermonkeyVerified:false,businessVerified:false
+ });
+ assert.equal(traps,0,'scenario input validation must not invoke Proxy traps');
+ const revoked=Proxy.revocable(request(),{});
+ revoked.revoke();
+ assert.equal(session.register(revoked.proxy).ok,false);
+ assert.equal(session.register(request()).ok,true,
+  'rejecting a Proxy must not consume a scenario identifier');
+});
+
 test('TEST-005: a failed attempt does not consume a scenario identifier',()=>{
  const session=new DesktopScenarioSession();
  session.recordImported(digest);
