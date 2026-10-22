@@ -7,6 +7,8 @@
  * must be implemented later behind a trusted manager/business acceptance gate.
  * Never store script source, file paths, URLs, cookies, or unredacted errors.
  */
+import {types as nodeTypes} from 'node:util';
+
 export type LimitedObservationKind =
   'LIMITED_DOM_OBSERVATION' | 'INSUFFICIENT_EVIDENCE';
 export type LimitedHealthStatus =
@@ -40,7 +42,8 @@ type ObservationInput = {
 /** Read ONLY own data descriptor values: do not invoke getters from untrusted inputs. */
 function exactRecord(input: unknown, keys: readonly string[]): Record<string, unknown> | null {
   try {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    if (!input || typeof input !== 'object' || nodeTypes.isProxy(input) ||
+        Array.isArray(input)) return null;
     const proto = Object.getPrototypeOf(input);
     if (proto !== Object.prototype && proto !== null) return null;
     const descriptors = Object.getOwnPropertyDescriptors(input);
