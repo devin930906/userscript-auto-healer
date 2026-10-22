@@ -3,6 +3,7 @@
  * NEVER Tampermonkey, GM API, business, or repair verification.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {LimitedHealthRegistry, type LimitedHealthSnapshot} from './health-registry';
 import type {FaultTriageStatus} from '../diagnostics/fault-classifier';
 import type {PageExceptionSignalResult} from '../diagnostics/cdp-page-exceptions';
@@ -28,7 +29,8 @@ export function recordLimitedScenarioInspection(
 ): LimitedHealthSnapshot {
   let value: LimitedInspection;
   try {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error();
+    if (!raw || typeof raw !== 'object' || nodeTypes.isProxy(raw) ||
+        Array.isArray(raw)) throw Error();
     const proto = Object.getPrototypeOf(raw);
     if (proto !== Object.prototype && proto !== null) throw Error();
     const descriptors = Object.getOwnPropertyDescriptors(raw);
