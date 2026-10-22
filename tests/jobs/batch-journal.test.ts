@@ -431,3 +431,39 @@ test('TASK-013/TEST-022/026: cancellation during final writer-lock recheck refus
   }
  });
 });
+
+test('TASK-013/TEST-022/026: cancellation during writer lock cleanup never acknowledges stale checkpoint',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRmdir=fsPromises.rmdir;
+  const lock=join(directory,'.uah-readonly-batch-v2.lock');
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let cancelledInCleanup=false;
+  // Interpose at an actual asynchronous cleanup boundary, after the last
+  // in-try coordinator snapshot but BEFORE save() resolves to its caller.
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
+   await nativeRmdir(path,...rest);
+   if(path===lock){
+    cancelledInCleanup=true;
+    coordinator.cancel();
+   }
+  };
+  try{
+   const result=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(cancelledInCleanup,true,'exercise genuine post-check cleanup await');
+   assert.deepEqual(result,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'},
+    'do not acknowledge obsolete QUEUED bytes after an accepted cancellation');
+   assert.deepEqual(JSON.parse(await readFile(file,'utf8')).jobs.map(
+    (job:{state:string})=>job.state),['QUEUED','QUEUED']);
+   assert.deepEqual(coordinator.snapshot().jobs.map(job=>job.state),
+    ['CANCELLED','CANCELLED']);
+  }finally{
+   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;
+  }
+  const retry=await saveReadOnlyBatchJournal(directory,coordinator);
+  assert.equal(retry.status,'CHECKPOINT_SAVED_UNVERIFIED');
+  assert.deepEqual(JSON.parse(await readFile(file,'utf8')).jobs.map(
+   (job:{state:string})=>job.state),['CANCELLED','CANCELLED']);
+ });
+});

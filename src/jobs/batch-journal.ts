@@ -227,8 +227,9 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
     ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');
   }catch{return deny('INVALID_CHECKPOINT');}
   if(!publishedState.equals(bytes))return deny('INVALID_CHECKPOINT');
-  return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
-   sha256:createHash('sha256').update(bytes).digest('hex')});
+  // Do NOT return success from inside the try: the finally block below
+  // still awaits filesystem cleanup, during which a legitimate cancellation
+  // can turn a saved QUEUED snapshot into a stale success receipt.
  }catch{return deny('IO_FAILURE');}
  finally{
   if(staging&&ownedStaging&&
@@ -237,6 +238,17 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   if(acquired&&ownedLock&&await stillOwnWriterLock(directory,start,ownedLock))
    await rmdir(lock).catch(()=>undefined);
  }
+ // No further asynchronous suspension after this last native snapshot.
+ // Cancellation during any awaited cleanup must invalidate the receipt.
+ // This is a same-process check, not an atomic cross-process journal.
+ let afterCleanup:Buffer;
+ try{
+  afterCleanup=Buffer.from(JSON.stringify(
+   ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator)),'utf8');
+ }catch{return deny('INVALID_CHECKPOINT');}
+ if(!afterCleanup.equals(bytes))return deny('INVALID_CHECKPOINT');
+ return Object.freeze({status:'CHECKPOINT_SAVED_UNVERIFIED' as const,
+  sha256:createHash('sha256').update(bytes).digest('hex')});
 }
 /** Load only through the existing exact schema, SHA identity and timeout
  * validator. The returned coordinator remains unverified scheduling state.
