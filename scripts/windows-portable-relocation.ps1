@@ -104,6 +104,7 @@ function Get-CandidatePortableFileShareSummary(
     Assert-CandidatePortableNoReparsePath $runner $base
     $prefix=$base+[IO.Path]::DirectorySeparatorChar
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $manifestFiles=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $targets=[Collections.Generic.List[string]]::new()
     # ISSUE-215: the parent may deny FILE_ADD_SUBDIRECTORY or DELETE_CHILD
     # even while every file in the source tree permits DELETE access.
@@ -120,6 +121,7 @@ function Get-CandidatePortableFileShareSummary(
       if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
         return 'scan=unavailable'
       }
+      $null=$manifestFiles.Add($full)
       $parent=[IO.Path]::GetDirectoryName($full)
       while($parent.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
         if($seen.Add($parent)) { $targets.Add($parent) }
@@ -134,6 +136,8 @@ function Get-CandidatePortableFileShareSummary(
     $pending=[Collections.Generic.Queue[string]]::new()
     $pending.Enqueue($base)
     $directoryCount=0
+    $discoveredFiles=0
+    $extraFiles=0
     while($pending.Count -gt 0) {
       $parent=$pending.Dequeue()
       foreach($child in @(Get-ChildItem -LiteralPath $parent -Directory -Force -ErrorAction Stop)) {
@@ -146,6 +150,22 @@ function Get-CandidatePortableFileShareSummary(
         if($directoryCount -gt 512) { return 'scan=unavailable' }
         if($seen.Add($full)) { $targets.Add($full) }
         $pending.Enqueue($full)
+      }
+      # Enumerate every actual file as well as directories: Electron or a
+      # filesystem filter can create a file after the pre-launch ZIP manifest
+      # snapshot. Checking only the original $filePaths could misleadingly
+      # report blockedExamples=0 even when that NEW file denies DELETE access.
+      # This is read-only, runner-contained and bounded to 512 entries.
+      foreach($child in @(Get-ChildItem -LiteralPath $parent -File -Force -ErrorAction Stop)) {
+        $full=[IO.Path]::GetFullPath([string]$child.FullName)
+        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+           (([int]$child.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0)) {
+          return 'scan=unavailable'
+        }
+        $discoveredFiles++
+        if($discoveredFiles -gt 512) { return 'scan=unavailable' }
+        if(-not $manifestFiles.Contains($full)) { $extraFiles++ }
+        if($seen.Add($full)) { $targets.Add($full) }
       }
     }
     # Includes the root and every parent of a candidate file. Reparse paths
@@ -202,7 +222,7 @@ public static class UahCandidateDeleteAccessProbe {
       } finally { if($null -ne $handle) { $handle.Dispose() } }
     }
     # Candidate-relative names or fixed (parent)/(root), no absolute paths.
-    return "scan=ok probed=$($filePaths.Count) blockedExamples=$blockedCount names=$($blocked -join ';')"
+    return "scan=ok probed=$($filePaths.Count) blockedExamples=$blockedCount names=$($blocked -join ';') extraFiles=$extraFiles"
   } catch { return 'scan=unavailable' }
 }
 
