@@ -875,3 +875,37 @@ test('TASK-013/TEST-022: live final RUNNING may settle successfully but crashed 
  assert.deepEqual(restarted.snapshot().jobs.map(j=>j.state),['FAILED'],
   'a crashed final attempt must still exhaust its bounded retry budget');
 });
+
+test('TASK-013/TEST-022/026: invalid over-capacity imported batch is rejected without materializing reports',async()=>{
+ // Even a sparse array is allowed a huge length in JavaScript. The native
+ // importer limit is a refusal boundary, not a request to allocate one
+ // placeholder report per untrusted array slot.
+ const tooMany=new Array(1001) as ReturnType<typeof realNativeScript>[];
+ let progress=0;
+ const results=await runImportedReadOnlyAnalysisQueue(tooMany,undefined,
+  ()=>{progress++;});
+ assert.deepEqual(results,[],'an invalid over-capacity array must be rejected before allocation');
+ assert.equal(progress,0);
+});
+
+test('TASK-013/TEST-022/026: cancelled native batch never invokes a replaced Array.map',async()=>{
+ const scripts=[realNativeScript(100)];
+ const cancellation=new AbortController();
+ cancellation.abort();
+ const original=Array.prototype.map;
+ let invoked=0;
+ try{
+  // The validated native array has no accessor slots, but runtime global
+  // Array.prototype methods must not be treated as privileged native calls.
+  Array.prototype.map=function(){
+   invoked++;
+   throw Error('UNTRUSTED_ARRAY_MAP_CALLED');
+  };
+  const result=await runImportedReadOnlyAnalysisQueue(scripts,cancellation.signal);
+  assert.equal(result.length,1);
+  assert.equal(result[0].status,'SKIPPED_CANCELLED');
+ }finally{
+  Array.prototype.map=original;
+ }
+ assert.equal(invoked,0,'cancelled queue must use its own bounded result allocation');
+});
