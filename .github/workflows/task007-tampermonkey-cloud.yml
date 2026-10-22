@@ -74,17 +74,14 @@ jobs:
           # This URL is listed in the vendor's Q406 official-version FAQ.
           # This download is not a claim to have verified a Chrome Web Store signature.
           Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 120
-          $inputBytes = [IO.File]::ReadAllBytes($crx)
-          if ($inputBytes.Length -lt 64 -or $inputBytes.Length -gt 15000000) { throw 'Unexpected official package size' }
-          if ([Text.Encoding]::ASCII.GetString($inputBytes, 0, 4) -ne 'Cr24' -or [BitConverter]::ToUInt32($inputBytes, 4) -ne 3) {
-            throw 'Official-hosted package is not a CRX3 extension'
-          }
-          $headerLength = [BitConverter]::ToUInt32($inputBytes, 8)
-          $offset = 12 + [int64]$headerLength
-          if ($headerLength -lt 16 -or $offset + 4 -ge $inputBytes.Length) { throw 'CRX3 header bounds invalid' }
-          $stream = [IO.File]::Create($zip)
-          try { $stream.Write($inputBytes, [int]$offset, $inputBytes.Length - [int]$offset) }
-          finally { $stream.Dispose() }
+          # TEST-017/026: the CRX3 magic/header length alone does NOT
+          # authenticate ZIP bytes. Verify a developer-key proof over the
+          # exact signed header and archive before writing any ZIP for unzip.
+          # This still cannot attest Chrome Web Store publication/signature.
+          node --test ./poc/crx3-package-integrity.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature verifier regressions failed' }
+          node ./poc/crx3-package-integrity.cjs $crx $zip
+          if ($LASTEXITCODE -ne 0) { throw 'CRX3 signing key or ZIP integrity not verified' }
           $archive = [IO.Compression.ZipFile]::OpenRead($zip)
           try {
             if ($archive.Entries.Count -lt 10 -or $archive.Entries.Count -gt 10000) { throw 'Invalid CRX entry count' }
