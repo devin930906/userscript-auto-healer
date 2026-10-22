@@ -78,3 +78,24 @@ test('TEST-024: invalid or accessor-backed partial receipts fail closed with no 
   assert.equal(touched,false);
   assert.equal(history.snapshot(A).status,'UNTESTED');
 });
+
+test('TEST-024/026: valid-looking Proxy receipts cannot execute traps or enter history',()=>{
+  const history=new LimitedHealthRegistry(()=>1200);
+  let traps=0;
+  const proxy=new Proxy(valid(),{
+    getPrototypeOf(target){traps++;return Reflect.getPrototypeOf(target);},
+    ownKeys(target){traps++;return Reflect.ownKeys(target);},
+    getOwnPropertyDescriptor(target,key){
+      traps++;return Reflect.getOwnPropertyDescriptor(target,key);
+    }
+  });
+  assert.throws(()=>recordLimitedScenarioInspection(history,proxy),
+    /INVALID_LIMITED_INSPECTION/);
+  assert.equal(traps,0,'no untrusted reflection trap may run');
+
+  const revoked=Proxy.revocable(valid(),{});
+  revoked.revoke();
+  assert.throws(()=>recordLimitedScenarioInspection(history,revoked.proxy),
+    /INVALID_LIMITED_INSPECTION/);
+  assert.equal(history.snapshot(A).status,'UNTESTED');
+});
