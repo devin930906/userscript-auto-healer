@@ -226,6 +226,114 @@ public static class UahCandidateDeleteAccessProbe {
   } catch { return 'scan=unavailable' }
 }
 
+# ISSUE-215 / TEST-028: supplementary Windows Restart Manager evidence
+# for the actual candidate files when Directory.Move returned Win32=5/32/33.
+# Restart Manager can identify file users not visible in a query restricted
+# to the candidate executable name. This never ends/shuts down/restarts
+# processes, writes user files, publishes process IDs or claims no system-wide
+# locks when the sampled set is incomplete. The session is always closed.
+function Get-CandidatePortableRestartManagerSummary(
+  [string]$source,[string[]]$filePaths
+) {
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       $null -eq $filePaths -or $filePaths.Count -lt 1 -or
+       $filePaths.Count -gt 512 -or
+       -not [IO.Path]::IsPathRooted($source)) { return 'rm=unavailable' }
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@([char]92,[char]47))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@([char]92,[char]47))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return 'rm=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $prefix=$base+[IO.Path]::DirectorySeparatorChar
+    $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $paths=[Collections.Generic.List[string]]::new()
+    foreach($file in $filePaths) {
+      if([string]::IsNullOrWhiteSpace($file) -or
+         -not [IO.Path]::IsPathRooted($file)) { return 'rm=unavailable' }
+      $full=[IO.Path]::GetFullPath($file)
+      if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+         -not [IO.File]::Exists($full)) { return 'rm=unavailable' }
+      Assert-CandidatePortableNoReparsePath $runner $full
+      if($seen.Add($full)) { $paths.Add($full) }
+    }
+    if($paths.Count -eq 0) { return 'rm=unavailable' }
+    # Register a bounded sample rather than claiming to scan all app files.
+    # The application executable is sampled first; the remaining candidates
+    # are stable-sorted for reproducibility. RM cannot accept directories.
+    $ordered=@($paths | Sort-Object)
+    $exe=@($ordered | Where-Object {
+      [IO.Path]::GetFileName($_) -ceq 'UserscriptAutoHealer.exe'
+    })
+    $others=@($ordered | Where-Object {
+      [IO.Path]::GetFileName($_) -cne 'UserscriptAutoHealer.exe'
+    })
+    $sample=@(@($exe)+@($others) | Select-Object -First 40)
+    if(-not ('UahCandidateRestartManagerProbe' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class UahCandidateRestartManagerProbe {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct FILETIME { public uint lo; public uint hi; }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct RM_UNIQUE_PROCESS { public uint pid; public FILETIME started; }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  private struct RM_PROCESS_INFO {
+    public RM_UNIQUE_PROCESS process;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string appName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst=64)] public string service;
+    public uint applicationType;
+    public uint appStatus;
+    public uint terminalSession;
+    [MarshalAs(UnmanagedType.Bool)] public bool restartable;
+  }
+  [DllImport("rstrtmgr.dll", CharSet=CharSet.Unicode)]
+  private static extern uint RmStartSession(out uint h, uint flags, StringBuilder key);
+  [DllImport("rstrtmgr.dll", CharSet=CharSet.Unicode)]
+  private static extern uint RmRegisterResources(uint h, uint fileCount,
+    [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPWStr)] string[] files,
+    uint appCount, IntPtr apps, uint serviceCount, IntPtr services);
+  [DllImport("rstrtmgr.dll")]
+  private static extern uint RmGetList(uint h, out uint needed,
+    ref uint provided, [Out] RM_PROCESS_INFO[] processes, out uint rebootReason);
+  [DllImport("rstrtmgr.dll")]
+  private static extern uint RmEndSession(uint h);
+  public static int CountAffected(string[] files) {
+    if(files==null || files.Length==0 || files.Length>40) return -1;
+    uint h;
+    if(RmStartSession(out h, 0, new StringBuilder(33))!=0) return -1;
+    try {
+      if(RmRegisterResources(h, (uint)files.Length, files,
+          0, IntPtr.Zero, 0, IntPtr.Zero)!=0) return -1;
+      uint needed=0, provided=0, rebootReason=0;
+      RM_PROCESS_INFO[] entries=new RM_PROCESS_INFO[0];
+      for(int i=0;i<4;i++) {
+        uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
+        if(result==0) return (int)provided;
+        if(result!=234 || needed==0 || needed>128) return -1;
+        provided=needed;
+        entries=new RM_PROCESS_INFO[(int)needed];
+      }
+      return -1;
+    } finally { RmEndSession(h); }
+  }
+}
+'@ -ErrorAction Stop
+    }
+    $affected=[UahCandidateRestartManagerProbe]::CountAffected([string[]]$sample)
+    if($affected -lt 0) { return 'rm=unavailable' }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$affected"
+  } catch {
+    # Fail closed: an unavailable native diagnostic cannot alter an actual
+    # directory move result or be represented as zero affected processes.
+    return 'rm=unavailable'
+  }
+}
+
 # ISSUE-215 / TEST-028: collect candidate-only ACL metadata at the actual
 # rename failure. Successful DELETE-access handle opens and a successful
 # sibling-control rename cannot rule out differing directory ACL inheritance.
@@ -397,7 +505,8 @@ function Get-CandidatePortableFirstDenialSummary(
   $sharing=Get-CandidatePortableFileShareSummary $source $candidateFiles
   $sibling=Get-CandidatePortableSiblingRenameControl $source
   $acl=Get-CandidatePortableRenameAclSummary $source
-  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl"
+  $rm=Get-CandidatePortableRestartManagerSummary $source $candidateFiles
+  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm]"
 }
 
 function Move-CandidatePortableDirectory(

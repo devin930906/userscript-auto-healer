@@ -342,6 +342,23 @@ try {
       throw 'Share probe accepted a path outside its candidate directory'
     }
     Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
+    # ISSUE-215: Restart Manager can observe processes using candidate
+    # files even when the candidate executable process list is empty.
+    # Counts only, no process names or PIDs, and never stop a process.
+    $rmLocked=Get-CandidatePortableRestartManagerSummary $permanent @($permanentFile)
+    if($rmLocked -notmatch '^rm=ok sampled=1 total=1 affected=[1-9][0-9]*$') {
+      throw "Restart Manager missed the actual disposable file lock: $rmLocked"
+    }
+    $rmOutside=Get-CandidatePortableRestartManagerSummary $permanent @(
+      (Join-Path $root 'outside-scope.txt'))
+    if($rmOutside -cne 'rm=unavailable') {
+      throw 'Restart Manager accepted an out-of-candidate path'
+    }
+    $rmDirectory=Get-CandidatePortableRestartManagerSummary $permanent @($permanent)
+    if($rmDirectory -cne 'rm=unavailable') {
+      throw 'Restart Manager accepted a directory instead of a file'
+    }
+    Write-Output 'PASS: Restart Manager observes a real Windows lock with candidate-only read scope'
     # Even a transient first denial must carry evidence before a later move
     # might succeed. Reuse only this fixture's known file manifest.
     $firstDenial=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
