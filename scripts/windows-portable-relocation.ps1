@@ -304,7 +304,7 @@ public static class UahCandidateRestartManagerProbe {
   private static extern uint RmEndSession(uint h);
   // No process names, PIDs, paths, services or application strings leave
   // the native boundary. Count only documented RM_APP_TYPE categories.
-  // Indexes: total, window, service, explorer, console, critical, unknown.
+  // Indexes: total, window, service, explorer, console, critical, unknown, self.
   public static int[] CountAffectedByType(string[] files) {
     if(files==null || files.Length==0 || files.Length>40) return new int[]{-1};
     uint h;
@@ -318,9 +318,11 @@ public static class UahCandidateRestartManagerProbe {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
         if(result==0) {
           if(provided>(uint)entries.Length) return new int[]{-1};
-          int[] counts=new int[7];
+          int[] counts=new int[8];
           counts[0]=(int)provided;
+          int currentPid=Environment.ProcessId;
           for(int j=0;j<(int)provided;j++) {
+            if(entries[j].process.pid==(uint)currentPid) counts[7]++;
             switch(entries[j].applicationType) {
               case 1: case 2: counts[1]++; break; // window processes
               case 3: counts[2]++; break; // service
@@ -343,13 +345,13 @@ public static class UahCandidateRestartManagerProbe {
 '@ -ErrorAction Stop
     }
     $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType([string[]]$sample)
-    if($null -eq $counts -or $counts.Length -ne 7 -or $counts[0] -lt 0) {
+    if($null -eq $counts -or $counts.Length -ne 8 -or $counts[0] -lt 0) {
       return 'rm=unavailable'
     }
     $classified=0
     foreach($i in 1..6) { $classified+=$counts[$i] }
-    if($classified -ne $counts[0]) { return 'rm=unavailable' }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]"
+    if($classified -ne $counts[0] -or $counts[7] -gt $counts[0]) { return 'rm=unavailable' }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7])"
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
