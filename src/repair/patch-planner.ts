@@ -80,8 +80,28 @@ function bindsDocument(pattern:unknown):boolean{
   }
 }
 
-/** Reject source whose `document` reference cannot be conservatively trusted.
- * Direct eval and with-statements also make name resolution ambiguous.
+/** An otherwise literal call may target a script-overridden selector method,
+ * not the browser's native DOM API. Dynamic computed writes on document are
+ * also ambiguous: their property key might be a selector method at runtime.
+ * These checks intentionally apply across the entire source, as phase-one
+ * proposals cannot prove execution order or alias/side-effect boundaries. */
+function mayReplaceDomSelectorMethod(target:unknown):boolean{
+  const member=asNode(target);
+  if(member?.type!=='MemberExpression')return false;
+  const object=asNode(member.object);
+  if(object?.type!=='Identifier'||object.name!=='document')return false;
+  const property=asNode(member.property);
+  if(member.computed===true){
+    if(property?.type!=='Literal'||typeof property.value!=='string')return true;
+    return property.value==='querySelector'||property.value==='querySelectorAll';
+  }
+  return property?.type==='Identifier'&&
+    (property.name==='querySelector'||property.name==='querySelectorAll');
+}
+
+/** Reject source whose `document` reference or selector methods cannot be
+ * conservatively trusted. Direct eval and with-statements also make name
+ * resolution ambiguous.
  * This does NOT prove all remaining calls use the native browser DOM API;
  * resulting proposals remain review-only, never automatically applicable. */
 function ambiguousDocumentBinding(source:string):boolean{
@@ -102,8 +122,12 @@ function ambiguousDocumentBinding(source:string):boolean{
        // appearing as AssignmentExpression nodes in the parsed AST.
        ((node.type==='ForInStatement'||node.type==='ForOfStatement')&&
         bindsDocument(node.left))||
-       (node.type==='AssignmentExpression'&&bindsDocument(node.left))||
-       (node.type==='UpdateExpression'&&bindsDocument(node.argument))||
+       (node.type==='AssignmentExpression'&&
+        (bindsDocument(node.left)||mayReplaceDomSelectorMethod(node.left)))||
+       (node.type==='UpdateExpression'&&
+        (bindsDocument(node.argument)||mayReplaceDomSelectorMethod(node.argument)))||
+       (node.type==='UnaryExpression'&&node.operator==='delete'&&
+        mayReplaceDomSelectorMethod(node.argument))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
         asNode(node.callee)?.name==='eval')){
       ambiguous=true;return;
