@@ -376,7 +376,14 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  if(!probe.ok)return;
  t.after(()=>probe.session.stop());
  const url=probe.session.origin+'/?mode=fixed';
- const tab=await openApprovedTarget(opened,url,true);
+ const navigationStages:string[]=[];
+ const tab=await openApprovedTarget(opened,url,true,undefined,
+  stage=>{if(navigationStages.length<96)navigationStages.push(stage);});
+ if(!tab.ok){
+  const counts:Record<string,number>={};
+  for(const stage of navigationStages)counts[stage]=(counts[stage]??0)+1;
+  t.diagnostic('CDP_TARGET_STAGE_COUNTS='+JSON.stringify(counts));
+ }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
  const scenario={...baseScenario,targetUrl:url};

@@ -158,6 +158,19 @@ test('TASK-005/TEST-007/026: reject Windows DOS device aliases in Chrome and pro
   }).ok, true, 'non-reserved multi-digit components remain allowed');
 });
 
+test('TASK-005/TEST-007/026: reject reserved console device names without disk access', () => {
+  // Windows CONIN$/CONOUT$ resolve to console devices, not ordinary folders.
+  for (const path of ["C:\\CONIN$\\Chrome\\chrome.exe", "C:\\Portable Apps\\CONOUT$.txt\\chrome.exe"]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, executablePath: path}),
+      {ok:false, code:'INVALID_EXECUTABLE'});
+  }
+  for (const path of ["D:\\Authorized\\CONOUT$\\UAH-Test-Profile", "D:\\Authorized\\conin$.log"]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, userDataDir: path}),
+      {ok:false, code:'UNSAFE_PROFILE'});
+  }
+  assert.equal(validateBrowserConfig(allowed).ok, true);
+});
+
 test('TASK-001: reject daily Chrome User Data, drive roots and traversal', () => {
   for (const path of [String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data`,
     String.raw`C:\Users\Person\AppData\Local\Google\Chrome\User Data\Default`,
