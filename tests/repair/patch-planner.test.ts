@@ -154,6 +154,28 @@ test('TEST-019: shadowed or reassigned document never yields a DOM patch candida
   })).status,'CANDIDATE_ONLY');
 });
 
+test('TEST-019/026: modified DOM selector methods cannot yield an offline repair candidate',()=>{
+  for(const snippet of [
+    "document.querySelector = () => null; document.querySelector('#old');",
+    "document['querySelector'] = customQuery; document.querySelector('#old');",
+    "delete document.querySelector; document.querySelector('#old');",
+    "document[methodName] = customQuery; document.querySelector('#old');",
+    "document.querySelectorAll = customQuery; document.querySelector('#old');"
+  ]){
+    const script=meta+snippet;
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    }));
+    assert.equal(result.status,'BLOCKED',snippet);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  const unrelated=meta+"document.title = 'ok'; document.querySelector('#old');";
+  assert.equal(proposeLiteralSelectorPatch(request(unrelated,{
+    callOffset:unrelated.lastIndexOf('document.querySelector(')
+  })).status,'CANDIDATE_ONLY');
+});
+
 test('TEST-014: exact call location prevents replacing repeated selectors globally',()=>{
   const repeated=meta+
     "document.querySelector('#old');\n"+
