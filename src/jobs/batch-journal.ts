@@ -115,6 +115,9 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
  const target=join(directory,BATCH_JOURNAL_FILENAME);
  const lock=join(directory,BATCH_JOURNAL_LOCK_FILENAME);
  let acquired=false,staging:string|undefined;
+ // A committed journal cannot be acknowledged while its writer mutex
+ // is stranded: future checkpoint saves and loads would remain BUSY.
+ let releasedOwnedLock=false;
  let ownedLock:Identity|undefined,ownedStaging:Identity|undefined;
  let previousTarget:Identity|undefined;
  try{
@@ -235,9 +238,17 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
   if(staging&&ownedStaging&&
      await stillOwnStagingFile(directory,staging,start,ownedStaging))
    await rm(staging,{force:true}).catch(()=>undefined);
-  if(acquired&&ownedLock&&await stillOwnWriterLock(directory,start,ownedLock))
-   await rmdir(lock).catch(()=>undefined);
+  if(acquired&&ownedLock&&await stillOwnWriterLock(directory,start,ownedLock)){
+   try{await rmdir(lock);releasedOwnedLock=true;}
+   catch{/* Retain unknown or busy lock evidence; never steal/delete it. */}
+  }
  }
+ // An unresolved owned lock blocks all subsequent saves/restarts. Even if
+ // rmdir returned, refuse success when a new competing lock appeared.
+ // Neither failure changes the already-published journal; recovery is manual.
+ if(!releasedOwnedLock)return deny('BUSY');
+ try{if(await writerLockExists(directory))return deny('BUSY');}
+ catch{return deny('IO_FAILURE');}
  // No further asynchronous suspension after this last native snapshot.
  // Cancellation during any awaited cleanup must invalidate the receipt.
  // This is a same-process check, not an atomic cross-process journal.
