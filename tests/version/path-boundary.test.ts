@@ -27,6 +27,23 @@ test('TEST-020/026: Windows trailing dot/space ancestor aliases are rejected',as
    assert.equal(await hasUnsafePathLink(unsafe),true,
     'ambiguous Win32 ancestor must fail closed before following its alias: '+alias);
   }
+  // Reserved Win32 device names also accept extensions. They must be
+  // denied lexically, before lstat or any future privileged path operation.
+  for(const alias of ['CON','con.txt','PRN','AUX','NUL',
+    'COM1','LPT9','COM¹','LPT²','CONIN
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+,'CONOUT
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+]){
+   assert.equal(await hasUnsafePathLink(join(root,alias,'safe.user.js')),true,
+    'Win32 device namespace must not be used as an ancestor: '+alias);
+  }
+  for(const alias of ['CON.user.js','NUL.txt','COM3.user.js']){
+   assert.equal(await hasUnsafePathLink(join(parent,alias)),true,
+    'Win32 device namespace must not be selected as source: '+alias);
+  }
   assert.deepEqual(await readFile(source),bytes,'boundary does not alter source');
  }finally{await rm(root,{recursive:true,force:true});}
 });

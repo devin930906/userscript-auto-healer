@@ -16,6 +16,11 @@ export async function hasUnsafePathLink(path:string):Promise<boolean>{
     // A colon within a component can name an NTFS stream. A drive letter
     // is already part of the parsed root and remains valid.
     if(component.includes(':'))return true;
+    // Device aliases (including extension suffixes) may resolve to Win32
+    // DOS device namespaces rather than the source path the user selected.
+    // Reject before any filesystem lookup or source-derived lock identity.
+    if(process.platform==='win32'&&
+       /^(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(component))return true;
     // Win32 APIs may resolve "folder." or "folder " to "folder" (without
     // the explicit extended-path namespace). Their spelling can therefore
     // bypass source-path-derived backup identities or cooperative mutexes.
