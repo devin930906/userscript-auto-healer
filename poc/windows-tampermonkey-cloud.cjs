@@ -36,6 +36,7 @@ if(variant==='product-original'||variant==='product-candidate')
     'AST product cases must use reviewed matrix injection modes');
 assert.ok(RUN_AT_MODES.includes(runAt),
   'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
+let reviewedCandidateForExport=null;
 let source=[
  '// ==UserScript==',
  '// @name UAH disposable Tampermonkey CI fixture '+runAt,
@@ -111,8 +112,75 @@ if(variant==='product-original'||variant==='product-candidate'){
     candidateSha256:sha(proposal.candidateSource),audit:audit.status,
     automaticPatchAllowed:proposal.automaticPatchAllowed
   }));
+  if(variant==='product-candidate')reviewedCandidateForExport={original,request,proposal};
   source=variant==='product-candidate'?proposal.candidateSource:original;
 }
+
+/** TASK-012 / TEST-023: exercise the REAL native stage and manual-export
+ * implementation before asking the disposable Tampermonkey to install bytes.
+ * Every file is CI-created under a fresh temp root; no real user script or
+ * manager profile is read or modified by the native export operation.
+ */
+async function prepareNativeManualExportForManager(reviewed){
+ const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'uah-product-export-'));
+ try{
+  const sourcePath=path.join(root,'broken-original.user.js');
+  const backupDirectory=path.join(root,'backups');
+  const exportDirectory=path.join(root,'manual-exports');
+  fs.mkdirSync(backupDirectory);
+  fs.mkdirSync(exportDirectory);
+  fs.writeFileSync(sourcePath,reviewed.original,{flag:'wx'});
+  const opts={sourcePath,backupDirectory,exportDirectory,userApproved:true};
+  const {stageReviewedCandidateOnly}=
+    require('../dist/src/version/staged-candidate.js');
+  const {exportReviewedCandidateForManualInstall}=
+    require('../dist/src/export/manual-candidate-export.js');
+  // Staging has its own three-field exact-data contract; the fourth export
+  // directory is only accepted by the subsequent manual-export interface.
+  const staged=await stageReviewedCandidateOnly(reviewed.request,reviewed.proposal,{
+   sourcePath,backupDirectory,userApproved:true
+  });
+  assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED',
+    'Native candidate must have a separately verified original backup: '+JSON.stringify(staged));
+  assert.equal(staged.automaticPatchAllowed,false);
+  assert.equal(staged.automaticRollbackAllowed,false);
+  const exported=await exportReviewedCandidateForManualInstall(
+    reviewed.request,staged,opts);
+  assert.equal(exported.status,'EXPORTED_RUNTIME_UNVERIFIED',
+    'The actual native manual exporter must produce a reviewed .user.js: '+JSON.stringify(exported));
+  assert.equal(exported.managerInstalled,false);
+  assert.equal(exported.automaticPatchAllowed,false);
+  assert.equal(exported.automaticRollbackAllowed,false);
+  assert.equal(exported.tampermonkeyVerified,false);
+  assert.equal(exported.businessVerified,false);
+  const exportedPath=path.join(exportDirectory,exported.exportFileName);
+  const originalRecoveryPath=path.join(exportDirectory,exported.recoveryExportFileName);
+  const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+  const candidateBytes=fs.readFileSync(exportedPath);
+  const originalBytes=Buffer.from(reviewed.original,'utf8');
+  assert.deepEqual(candidateBytes,Buffer.from(reviewed.proposal.candidateSource,'utf8'),
+    'The actual manager-facing source must come from the native manual export');
+  assert.equal(sha(candidateBytes),reviewed.proposal.candidateSha256);
+  assert.deepEqual(fs.readFileSync(originalRecoveryPath),originalBytes,
+    'The independent manual recovery export must retain exact original bytes');
+  assert.deepEqual(fs.readFileSync(path.join(backupDirectory,staged.backupFileName)),
+    originalBytes,'Native independent backup must retain the actual original');
+  assert.deepEqual(fs.readFileSync(sourcePath),originalBytes,
+    'Native export must not overwrite the imported original script');
+  assert.equal(exported.candidateSha256,reviewed.proposal.candidateSha256);
+  assert.equal(exported.byteLength,candidateBytes.byteLength);
+  console.log('NATIVE_MANUAL_EXPORT_FOR_REAL_MANAGER '+JSON.stringify({
+   runAt,originalSha256:sha(originalBytes),candidateSha256:sha(candidateBytes),
+   recoveryExportBytes:originalBytes.byteLength,stage:staged.status,
+   export:exported.status,automaticPatchAllowed:false,managerInstalled:false
+  }));
+  return {root,exportedPath,sourcePath,originalBytes,candidateSha256:sha(candidateBytes)};
+ }catch(error){
+  fs.rmSync(root,{recursive:true,force:true});
+  throw error;
+ }
+}
+
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function extensionCards(context){
  const page=await context.newPage();
@@ -168,11 +236,31 @@ async function optIn(context,id){
  }finally{await page.close();}
 }
 async function main(){
+ const nativeExport=reviewedCandidateForExport
+  ?await prepareNativeManualExportForManager(reviewedCandidateForExport):null;
  const server=http.createServer((req,res)=>{
   if(req.url==='/test.user.js'){
+   // The product-candidate variant must install EXACT bytes created by the
+   // native manual exporter, not the in-memory AST proposal. If another
+   // process changes the disposable file, fail closed before returning 200.
+   let bytes=source;
+   if(nativeExport){
+    try{
+     const disk=fs.readFileSync(nativeExport.exportedPath);
+     if(createHash('sha256').update(disk).digest('hex')!==
+        nativeExport.candidateSha256){
+      res.writeHead(409,{'Cache-Control':'no-store'});
+      return res.end('DISPOSABLE_EXPORT_CHANGED');
+     }
+     bytes=disk;
+    }catch{
+     res.writeHead(409,{'Cache-Control':'no-store'});
+     return res.end('DISPOSABLE_EXPORT_UNAVAILABLE');
+    }
+   }
    res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8',
      'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
-   return res.end(source);
+   return res.end(bytes);
   }
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8',
     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
@@ -495,13 +583,22 @@ async function main(){
     ' fixture variant '+variant+' GM_getValue default + GM_setValue/readback and expected business assertions.');
   if(variant==='product-original')
     console.log('EXPECTED_PRODUCT_ORIGINAL_FAILURE: unchanged selector fails on target-present page');
-  if(variant==='product-candidate')
-    console.log('PRODUCT_AST_CANDIDATE_RUNTIME_RECOVERY_ONLY: reviewed candidate worked in disposable manager; never applied to original files');
+  if(variant==='product-candidate'){
+    assert.ok(nativeExport,'Product candidate must have a real native manual export');
+    assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
+      'Actual Tampermonkey installation must not mutate the original native script');
+    assert.equal(createHash('sha256').update(
+      fs.readFileSync(nativeExport.exportedPath)).digest('hex'),
+      nativeExport.candidateSha256,
+      'The tested installed source must still match the reviewed on-disk export');
+    console.log('PRODUCT_MANUAL_EXPORT_RUNTIME_RECOVERY_ONLY: native-backed candidate worked in disposable manager; original and recovery export were preserved; no automatic application');
+  }
   console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
   if(nativeProbe)await nativeProbe.stop();
   await new Promise(resolve=>server.close(resolve));
+  if(nativeExport)fs.rmSync(nativeExport.root,{recursive:true,force:true});
  }
 }
 main().catch(error=>{
