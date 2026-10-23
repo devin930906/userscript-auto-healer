@@ -118,3 +118,72 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  assert.ok(observed.samples.some(s=>s.summary.blindSpots.includes(
    'CROSS_ORIGIN_FRAME_UNVERIFIED')));
 });
+
+
+test('TEST-010/012: owned Chrome can confirm the approved page when its first navigation stalls',async t=>{
+ if(process.platform!=='win32'){t.skip('Requires actual Windows Chrome');return;}
+ let chrome:string|undefined;
+ for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+   if(!base)continue;
+   const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+   try{await access(candidate);chrome=candidate;break;}catch{/* absent */}
+ }
+ assert.ok(chrome,'Windows runner needs real Chrome for navigation recovery');
+ const root=await mkdtemp(join(tmpdir(),'uah-stalled-cdp-nav-'));
+ let stop=()=>{};
+ let requests=0;
+ const fixture=createServer((req,res)=>{
+   if(req.url!=='/stalled'){res.writeHead(404);res.end();return;}
+   requests++;
+   if(requests===1){
+     // No headers or response body: this real tab is mid-navigation, not
+     // an authenticated finished page. A second explicit, same-URL
+     // navigation can recover it, without evaluating any page JavaScript.
+     return;
+   }
+   res.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
+   res.end('<!doctype html><title>Approved recovered target</title><main id="recovered-ready">ok</main>');
+ });
+ await new Promise<void>((resolve,reject)=>{
+   fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
+ });
+ t.after(async()=>{
+   stop();
+   fixture.closeAllConnections();
+   await new Promise<void>(resolve=>fixture.close(()=>resolve()));
+   await delay(350);
+   await rm(root,{recursive:true,force:true}).catch(()=>undefined);
+ });
+ const addr=fixture.address();
+ if(!addr||typeof addr==='string')throw Error('NO_STALLED_FIXTURE');
+ const site='http://127.0.0.1:'+addr.port+'/stalled';
+ const cfg={executablePath:chrome!,userDataDir:join(root,'profile'),
+   remoteDebuggingPort:await availablePort(),bindAddress:'127.0.0.1' as const};
+ assert.equal((await prepareApprovedIsolatedProfile(cfg,true)).ok,true);
+ const session=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+ assert.equal(session.ok,true,JSON.stringify(session));
+ if(!session.ok)return;
+ stop=session.stop;
+ const stages:string[]=[];
+ const target=await openApprovedTarget(session,site,true,undefined,
+   stage=>{if(stages.length<100)stages.push(stage);});
+ if(!target.ok)t.diagnostic('STALLED_NAV_STAGES='+JSON.stringify(
+   stages.reduce<Record<string,number>>((counts,stage)=>{
+     counts[stage]=(counts[stage]??0)+1;return counts;
+   },{})));
+ assert.equal(target.ok,true,JSON.stringify(target));
+ if(!target.ok)return;
+ assert.equal(target.businessVerified,false);
+ assert.equal(requests,2,'Only one extra approved initial page navigation is allowed');
+ let seen=false;
+ for(let i=0;i<20;i++){
+   const observed=await observeApprovedDom(session,target,site,true,['#recovered-ready']);
+   if(observed.ok&&observed.selectorCounts['#recovered-ready']===1){
+     assert.equal(observed.userscriptVerified,false);
+     assert.equal(observed.fullPageVerified,false);
+     seen=true;break;
+   }
+   await delay(150);
+ }
+ assert.equal(seen,true,'Real recovery must have a readable approved main-frame DOM');
+});
