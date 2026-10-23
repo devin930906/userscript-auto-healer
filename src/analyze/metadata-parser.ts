@@ -3,10 +3,14 @@ import type { ImportedScript } from '../import/import-service';
 
 const KNOWN = new Set([
   'name','namespace','version','description','author','match','include',
-  'exclude','run-at','grant','require','resource','connect','updateurl',
+  'exclude','exclude-match','run-at','grant','require','resource','connect','updateurl',
   'downloadurl','icon','icon64','license','homepage','homepageurl','supporturl',
   'noframes','unwrap'
 ]);
+/** The untrusted report boundary must only accept parser-canonical tag keys. */
+export function isCanonicalKnownUserscriptMetadataTag(name:string):boolean {
+ return name===name.toLowerCase()&&KNOWN.has(name);
+}
 export interface MetadataLine {
   readonly line: number;
   readonly raw: string;
