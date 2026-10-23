@@ -223,8 +223,14 @@ export async function restoreVerifiedOriginalNativeOnly(
  if(opts.expectedCurrentSha256===opts.expectedOriginalSha256)
   return block('SOURCE_UNCHANGED');
  const parent=dirname(opts.sourcePath);
+ // Windows default file lookup is case-insensitive. Hashing the raw spelling
+ // would let two aliases to one .user.js acquire DISTINCT mutex directories.
+ // Coalesce case aliases conservatively; this is not an OS file handle lock
+ // and does not authenticate other aliases (8.3 names or file hard links).
+ const lockIdentity=process.platform==='win32'?
+  opts.sourcePath.toLowerCase():opts.sourcePath;
  const lock=join(parent,'.uah-restore-path-'+createHash('sha256')
-  .update(opts.sourcePath,'utf8').digest('hex'));
+  .update(lockIdentity,'utf8').digest('hex'));
  let owner:BigIntStats|undefined;
  let acquired=false;
  // A renamed original is not a clean receipt until the restore path mutex

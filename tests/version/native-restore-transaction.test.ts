@@ -548,13 +548,45 @@ test('TASK-011/TEST-020/021: a source changed during final journal verification 
  });
 });
 
+
+test('TASK-011/TEST-020/026: Windows case aliases must share a native restore path lock',
+ {skip:process.platform!=='win32'},async()=>{
+ await fixture(async opts=>{
+  // A Windows path normally names the same file regardless of component case.
+  // Pre-hold its canonical mutex before either spelling is admitted. No
+  // replacement or new backup may occur; the existing source is user data.
+  const canonicalKey=opts.sourcePath.toLowerCase();
+  const expectedLock=join(join(opts.sourcePath,'..'),
+   '.uah-restore-path-'+createHash('sha256').update(canonicalKey,'utf8').digest('hex'));
+  await mkdir(expectedLock);
+  try{
+   const before=await readdir(opts.backupDirectory);
+   const alternate=opts.sourcePath.toUpperCase();
+   assert.notEqual(alternate,opts.sourcePath,'fixture must exercise a different spelling');
+   for(const sourcePath of [opts.sourcePath,alternate]){
+    const result=await restoreVerifiedOriginalNativeOnly({...opts,sourcePath});
+    assert.deepEqual(result,{
+     status:'BLOCKED',reason:'SOURCE_LOCKED',
+     automaticPatchAllowed:false,automaticRollbackAllowed:false,
+     tampermonkeyVerified:false,businessVerified:false
+    },'alias spelling must never bypass an existing recovery mutex');
+   }
+   assert.deepEqual(await readFile(opts.sourcePath),changed);
+   assert.deepEqual(await readdir(opts.backupDirectory),before,
+    'blocked aliases must not publish a backup, intent, or staged restore');
+  }finally{await rm(expectedLock,{recursive:true,force:true});}
+ });
+});
+
 test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
  await fixture(async opts=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
   const nativeRmdir=fsPromises.rmdir;
   const expectedLock=join(
    join(opts.sourcePath,'..'),
-   '.uah-restore-path-'+createHash('sha256').update(opts.sourcePath,'utf8').digest('hex')
+   '.uah-restore-path-'+createHash('sha256').update(
+    process.platform==='win32'?opts.sourcePath.toLowerCase():opts.sourcePath,
+    'utf8').digest('hex')
   );
   let denied=false;
   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
