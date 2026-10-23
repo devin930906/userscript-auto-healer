@@ -42,6 +42,33 @@ async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
   return 'state='+state+' endpointMarker='+endpoint;
 }
 
+/** A bounded CI-only recovery for Chrome that has not even touched its
+ * disposable test profile. Never retry PID, version, WebSocket or permission
+ * failures, or a partially bootstrapped browser; each fresh attempt must still
+ * pass the complete real-browser ownership and CDP assertions.
+ */
+function mayRetryUntouchedChromeBootstrap(
+ result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>,
+ markers:string,attempt:number,ci:boolean
+):boolean {
+ return ci&&attempt===0&&!result.ok&&result.code==='CDP_TIMEOUT'&&
+   markers==='state=0 endpointMarker=0';
+}
+test('TEST-006/008/009: only an untouched Chrome bootstrap can receive one fresh CI attempt',()=>{
+ const timeout={ok:false as const,code:'CDP_TIMEOUT' as const};
+ assert.equal(mayRetryUntouchedChromeBootstrap(timeout,'state=0 endpointMarker=0',0,true),true);
+ for(const [result,markers,attempt,ci] of [
+  [timeout,'state=1 endpointMarker=0',0,true],
+  [timeout,'state=0 endpointMarker=1',0,true],
+  [timeout,'state=0 endpointMarker=0',1,true],
+  [timeout,'state=0 endpointMarker=0',0,false],
+  [{ok:false,code:'OWNER_MISMATCH'},'state=0 endpointMarker=0',0,true],
+  [{ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'},'state=0 endpointMarker=0',0,true]
+ ] as const){
+   assert.equal(mayRetryUntouchedChromeBootstrap(result,markers,attempt,ci),false);
+ }
+});
+
 test('TEST-006: Chrome bootstrap diagnostics are bounded and content-blind',async t=>{
   const root=await mkdtemp(join(tmpdir(),'uah-bootstrap-evidence-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
@@ -83,7 +110,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   }
   if(!chrome){t.skip('No official Chrome binary on runner');return;}
   const root=await mkdtemp(join(tmpdir(),'uah-owned-chrome-test-'));
-  const profile=join(root,'profile');
+  let profile=join(root,'profile');
   let stop:()=>void=()=>{};
   let unexpectedExits=0;
   t.after(async()=>{
@@ -91,8 +118,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     await delay(800);
     await rm(root,{recursive:true,force:true}).catch(()=>undefined);
   });
-  const port=await unusedLoopbackPort();
-  const configForTest=config(chrome,profile,port);
+  let port=await unusedLoopbackPort();
+  let configForTest=config(chrome,profile,port);
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,false),
     {ok:false,code:'NOT_AUTHORIZED'});
   const prepared=await prepareApprovedIsolatedProfile(configForTest,true);
@@ -105,7 +132,22 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   const launchOptions={userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
     onStartupStage:(stage:string)=>{startupStages.push(stage);}};
-  const result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+  let result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+  if(!result.ok){
+    const markers=await redactedChromeBootstrapMarkers(profile);
+    if(mayRetryUntouchedChromeBootstrap(result,markers,0,
+        process.env.GITHUB_ACTIONS==='true')){
+      t.diagnostic('CDP_FIRST_BOOTSTRAP_UNTOUCHED_RETRY_ONCE');
+      // Never reuse or overwrite the first test profile, even on failure.
+      profile=join(root,'retry-profile');
+      port=await unusedLoopbackPort();
+      configForTest=config(chrome,profile,port);
+      const secondPrepared=await prepareApprovedIsolatedProfile(configForTest,true);
+      assert.equal(secondPrepared.ok,true,JSON.stringify(secondPrepared));
+      startupStages.length=0;
+      result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+    }
+  }
   // Print only fixed stage labels and their counts on failure: no Chrome PID,
   // profile path, port, endpoint URL, version or returned response body.
   if(!result.ok){
@@ -218,19 +260,34 @@ test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its
   }
   if(!chrome){t.skip('No official Chrome binary on runner');return;}
   const root=await mkdtemp(join(tmpdir(),'uah-chrome-exit-test-'));
-  const profile=join(root,'profile');
-  const port=await unusedLoopbackPort();
-  const cfg=config(chrome,profile,port);
+  let profile=join(root,'profile');
+  let port=await unusedLoopbackPort();
+  let cfg=config(chrome,profile,port);
   t.after(async()=>{await delay(800);await rm(root,{recursive:true,force:true}).catch(()=>undefined);});
   const ready=await prepareApprovedIsolatedProfile(cfg,true);
   assert.equal(ready.ok,true,JSON.stringify(ready));
   let notifications=0;
   const exitStartupStages:string[]=[];
-  const browser=await launchApprovedIsolatedChrome(cfg,{
+  const launchOptions={
     userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{notifications++;},
-    onStartupStage:stage=>{exitStartupStages.push(stage);}
-  });
+    onStartupStage:(stage:string)=>{exitStartupStages.push(stage);}
+  };
+  let browser=await launchApprovedIsolatedChrome(cfg,launchOptions);
+  if(!browser.ok){
+    const markers=await redactedChromeBootstrapMarkers(profile);
+    if(mayRetryUntouchedChromeBootstrap(browser,markers,0,
+        process.env.GITHUB_ACTIONS==='true')){
+      t.diagnostic('CDP_EXIT_FIRST_BOOTSTRAP_UNTOUCHED_RETRY_ONCE');
+      profile=join(root,'retry-profile');
+      port=await unusedLoopbackPort();
+      cfg=config(chrome,profile,port);
+      const retryReady=await prepareApprovedIsolatedProfile(cfg,true);
+      assert.equal(retryReady.ok,true,JSON.stringify(retryReady));
+      exitStartupStages.length=0;
+      browser=await launchApprovedIsolatedChrome(cfg,launchOptions);
+    }
+  }
   if(!browser.ok){
     const counts:Record<string,number>={};
     for(const stage of exitStartupStages)counts[stage]=(counts[stage]??0)+1;
