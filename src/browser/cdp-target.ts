@@ -14,7 +14,8 @@ export type OpenTargetResult =
 /** Fixed, content-blind diagnostics for a verified, explicitly approved tab only. */
 export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'LIST_TRANSPORT_FAILED'|'LIST_INVALID'|'LIST_NOT_MATCHED'|
-  'TARGET_ID_MISMATCH'|'MAIN_FRAME_PENDING'|'MAIN_FRAME_CONFIRMED';
+  'TARGET_ID_MISMATCH'|'MAIN_FRAME_PENDING'|'MAIN_FRAME_CONFIRMED'|
+  'UNVERIFIED_TAB_CLOSED'|'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED';
 function validTarget(raw:string):boolean {
   if(raw.length>4096||raw.trim()!==raw)return false;
   try{
@@ -67,6 +68,66 @@ async function requestNewTab(
       ws.addEventListener('close',()=>finish(null));
     }catch{finish(null);}
   });
+}
+
+
+/** Undo only the page ID minted by THIS Target.createTarget call. This
+ * bounded cleanup runs even after the original navigation consent is
+ * cancelled; it never replays the URL, executes script, closes other tabs
+ * or elevates a failed page into a trusted observation. The live Chrome
+ * process and listener PID must be rechecked by the caller first.
+ */
+async function closeUnverifiedNewTab(
+  browserWebsocket:string,targetId:string,port:number
+):Promise<boolean>{
+  const acknowledged=await new Promise<boolean>(resolve=>{
+    let socket:WebSocket|undefined,done=false;
+    const finish=(ok:boolean)=>{
+      if(done)return;
+      done=true;clearTimeout(timer);
+      try{socket?.close();}catch{/* already closed */}
+      resolve(ok);
+    };
+    const timer=setTimeout(()=>finish(false),2000);
+    try{
+      socket=new WebSocket(browserWebsocket);
+      socket.addEventListener('open',()=>{
+        if(done)return;
+        try{socket?.send(JSON.stringify({id:3,method:'Target.closeTarget',
+          params:{targetId}}));}
+        catch{finish(false);}
+      });
+      socket.addEventListener('message',event=>{
+        if(done)return;
+        try{
+          const raw=String(event.data);
+          if(raw.length>16384){finish(false);return;}
+          const data=JSON.parse(raw) as {id?:unknown;result?:{success?:unknown};
+            error?:unknown};
+          if(data.id!==3)return;
+          finish(!data.error&&data.result?.success===true);
+        }catch{finish(false);}
+      });
+      socket.addEventListener('error',()=>finish(false));
+      socket.addEventListener('close',()=>finish(false));
+    }catch{finish(false);}
+  });
+  if(!acknowledged)return false;
+  // CDP's close acknowledgement can precede removal from /json/list.
+  // Require a fresh, bounded read-only target-list receipt before asserting
+  // cleanup. Unavailable or malformed receipts remain UNCONFIRMED.
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
+        redirect:'error',signal:AbortSignal.timeout(1000)});
+      const json=await readBoundedCdpJson(response);
+      if(Array.isArray(json)&&!json.some(item=>
+        item&&typeof item==='object'&&!Array.isArray(item)&&
+        (item as {id?:unknown}).id===targetId))return true;
+    }catch{/* bounded verification retry */}
+    await delay(100);
+  }
+  return false;
 }
 
 /** A target-list URL can advance ahead of the page's CDP main frame during
@@ -153,10 +214,17 @@ export async function openApprovedTarget(
   if(!isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const created=await requestNewTab(session.browserWebsocket,targetUrl,signal);
-  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-  if(!created){stage('TAB_CREATION_FAILED');return {ok:false,code:'CDP_COMMAND_FAILED'};}
+  if(!created){
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+    stage('TAB_CREATION_FAILED');return {ok:false,code:'CDP_COMMAND_FAILED'};
+  }
   stage('TAB_CREATED');
-  const began=Date.now();
+  let verified=false;
+  try {
+    // Cancellation after the tab's creation still requires best-effort
+    // cleanup. The finally block never replays the approved navigation.
+    if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+    const began=Date.now();
   while(Date.now()-began<9000){
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     try{
@@ -177,6 +245,7 @@ export async function openApprovedTarget(
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
         if(signal?.aborted)return {ok:false,code:'CANCELLED'};
         if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
+        verified=true;
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
       }else stage('MAIN_FRAME_PENDING');
@@ -188,6 +257,24 @@ export async function openApprovedTarget(
     try{await delay(250,undefined,{signal});}
     catch{return {ok:false,code:'CANCELLED'};}
   }
-  return signal?.aborted?{ok:false,code:'CANCELLED'}:
-    {ok:false,code:'TARGET_NOT_CONFIRMED'};
+    return signal?.aborted?{ok:false,code:'CANCELLED'}:
+      {ok:false,code:'TARGET_NOT_CONFIRMED'};
+  } finally {
+    if(!verified){
+      // Only close the target minted above, only if the ORIGINAL owned
+      // Chrome is still live and owns this exact loopback listener.
+      // Cleanup failure is not permission to trust or relaunch the page.
+      try{
+        if(isLiveApprovedChromeSession(session)){
+          const owner=await verifyWindowsLoopbackListenerPid(port,session.pid);
+          if(owner.ok&&isLiveApprovedChromeSession(session)){
+            const cleaned=await closeUnverifiedNewTab(
+              session.browserWebsocket,created,port);
+            stage(cleaned?'UNVERIFIED_TAB_CLOSED':
+              'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED');
+          }else stage('UNVERIFIED_TAB_CLEANUP_UNCONFIRMED');
+        }
+      }catch{stage('UNVERIFIED_TAB_CLEANUP_UNCONFIRMED');}
+    }
+  }
 }
