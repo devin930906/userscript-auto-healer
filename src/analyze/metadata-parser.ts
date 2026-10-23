@@ -7,6 +7,10 @@ const KNOWN = new Set([
   'downloadurl','icon','icon64','license','homepage','homepageurl','supporturl',
   'noframes','unwrap'
 ]);
+/** The untrusted report boundary must only accept parser-canonical tag keys. */
+export function isCanonicalKnownUserscriptMetadataTag(name:string):boolean {
+ return name===name.toLowerCase()&&KNOWN.has(name);
+}
 export interface MetadataLine {
   readonly line: number;
   readonly raw: string;

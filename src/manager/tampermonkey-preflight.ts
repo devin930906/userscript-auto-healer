@@ -5,7 +5,7 @@
  * Actual TEST-017/018 must use independently observed browser execution.
  */
 import {types as nodeTypes} from 'node:util';
-import type {MetadataResult} from '../analyze/metadata-parser';
+import {isCanonicalKnownUserscriptMetadataTag,type MetadataResult} from '../analyze/metadata-parser';
 import type {ManagerPresenceResult} from './tampermonkey-adapter';
 import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
@@ -217,6 +217,10 @@ export function inspectReportedTampermonkeyPreflight(
   if(!rawTags||!unknownNames)return blocked('INVALID_INPUT');
   const tags:Record<string,string[]>=Object.create(null);
   for(const [name,rawValues] of Object.entries(rawTags)){
+   // A caller can forge unknownNames=[] or submit mixed-case aliases. Never
+   // let unreviewed execution/update directives evade the canonical parser.
+   if(!isCanonicalKnownUserscriptMetadataTag(name))
+    return blocked('INVALID_SCRIPT_METADATA');
    const values=stringListSnapshot(rawValues);
    if(!values)return blocked('INVALID_INPUT');
    tags[name]=values;
