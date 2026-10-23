@@ -130,6 +130,51 @@ test('TEST-017: document-body and document-end accept each explicit run-at and d
   assert.deepEqual(count,{gm:1,query:1,report:1},runAt);
  }
 });
+test('TEST-017/018: document-idle injected while loading must wait before reporting a missing target',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-idle');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const topWindow:{top?:object}={};
+ topWindow.top=topWindow;
+ let ready:(()=>void)|undefined;
+ let targetPresent=false;
+ const effects={gm:0,query:0,action:0,reports:[] as boolean[]};
+ runInNewContext(probe.source,{
+  Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+  window:topWindow,
+  location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+  document:{
+   readyState:'loading',
+   addEventListener:(type:string,callback:()=>void,options:{once:boolean})=>{
+    assert.equal(type,'DOMContentLoaded');
+    assert.equal(options.once,true);
+    ready=callback;
+   },
+   querySelector:()=>{
+    effects.query++;
+    return targetPresent?{
+     setAttribute:()=>{effects.action++;},
+     getAttribute:()=> 'done'
+    }:null;
+   }
+  },
+  GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+  fetch:(_url:string,options:{body:string})=>{
+   effects.reports.push((JSON.parse(options.body) as {businessAction:boolean}).businessAction);
+   return Promise.resolve();
+  }
+ });
+ assert.deepEqual(effects,{gm:1,query:0,action:0,reports:[]},
+  'Before parsing completes a delayed target is not evidence of a broken userscript');
+ assert.equal(typeof ready,'function');
+ targetPresent=true;
+ ready?.();
+ assert.deepEqual(effects,{gm:1,query:1,action:1,reports:[true]},
+  'After DOM readiness the fixture may report only the now-observed action');
+});
+
 test('TEST-017: document-start invokes GM at injection and defers DOM until ready',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-start');
  assert.equal(started.ok,true);

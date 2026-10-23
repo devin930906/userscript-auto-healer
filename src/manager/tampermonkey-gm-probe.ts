@@ -120,8 +120,9 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // deadline. Abort before every subsequent side effect, not only at entry.
  ' if(Date.now()>='+expiresAt+')return;',
   ' if(location.href!==expectedUrl)return;',
- // document-start can run before the target exists; GM is still called at
- // the selected injection point, but DOM work waits for parsing to finish.
+ // A declared document-idle mode does not independently prove that DOM
+ // parsing has completed. Always defer the business assertion while loading;
+ // GM reads remain at the requested injection point.
  ' const checkDomAndReport=()=>{',
  ' if(Date.now()>='+expiresAt+')return;',
   ' if(location.href!==expectedUrl)return;',
@@ -144,12 +145,10 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  " gmDefaultMatched:gmMatched,gmStorageRoundtripMatched:gmStorageRoundtrip,",
  " businessAction:actionConfirmed})}).catch(()=>{});",
  ' };',
- ...(runAt!=='document-idle' ? [
-   " if(document.readyState==='loading'){",
-   "  document.addEventListener('DOMContentLoaded',checkDomAndReport,{once:true});",
-   '  return;',
-   ' }'
- ] : []),
+ " if(document.readyState==='loading'){",
+ "  document.addEventListener('DOMContentLoaded',checkDomAndReport,{once:true});",
+ '  return;',
+ ' }',
  ' checkDomAndReport();',
  '})();'
  ];
