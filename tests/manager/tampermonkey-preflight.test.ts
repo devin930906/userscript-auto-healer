@@ -379,3 +379,28 @@ test('TEST-017/026: empty exclusion directive arrays must not bypass metadata-on
    code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false},directive);
  }
 });
+
+test('TEST-017/026: forged unknown or noncanonical metadata tag keys never pass preflight',()=>{
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ // A serialized metadata report can lie about unknownNames or casing. Real
+ // parser output is canonical, but a caller-provided tag map is not trusted.
+ for(const [tag,value] of [
+  ['inject-into','page'],
+  ['Require','https://cdn.example.net/unreviewed.js'],
+  ['UpdateURL','https://updates.example.net/next.user.js'],
+  ['Grant','GM_xmlhttpRequest']
+ ] as const){
+  const result=inspect(report,metadata({...base,[tag]:[value]}));
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_SCRIPT_METADATA',gmApiVerified:false,businessVerified:false},tag);
+ }
+ // Preserve safe, canonical metadata-only eligibility without claiming
+ // extension authentication, actual GM execution or restored business logic.
+ const safe=inspect(report,metadata({...base,name:['Limited GM test'],license:['MIT']}));
+ assert.equal(safe.ok,true);
+ if(safe.ok){
+  assert.equal(safe.extensionAuthenticityVerified,false);
+  assert.equal(safe.gmApiVerified,false);
+  assert.equal(safe.businessVerified,false);
+ }
+});
