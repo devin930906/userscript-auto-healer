@@ -451,6 +451,38 @@ try {
       throw 'Windows relocation diagnostic formatter lost the HRESULT, attempt or state'
     }
     Write-Output "PASS: Windows lock diagnostic recorded HRESULT and Win32=$code without full paths"
+
+    # ISSUE-215 / TEST-028: a read-only failure-evidence collector is
+    # best-effort. A fault in it must not replace the real Windows rename
+    # access-denied error, shorten the bound, or alter original bytes.
+    $originalFirstDenial=(Get-Item 'Function:\Get-CandidatePortableFirstDenialSummary').ScriptBlock
+    $diagnosticFaultDestination=Join-Path $root 'diagnostic-fault-move'
+    try {
+      Set-Item 'Function:\Get-CandidatePortableFirstDenialSummary' -Value {
+        param([string]$source,[string[]]$candidateFiles)
+        throw [InvalidOperationException]::new('TEST-028 injected diagnostic fault')
+      }
+      $preservedOriginal=$false
+      try {
+        Move-CandidatePortableDirectory $permanent $diagnosticFaultDestination 1 0 @($permanentFile) | Out-Null
+      } catch {
+        $actual=$_.Exception
+        while($actual.InnerException) { $actual=$actual.InnerException }
+        if(($actual -is [System.IO.IOException] -or
+            $actual -is [System.UnauthorizedAccessException]) -and
+           (($actual.HResult -band 0xFFFF) -in @(5,32,33))) {
+          $preservedOriginal=$true
+        } else { throw }
+      }
+      if(-not $preservedOriginal -or
+         (Test-Path -LiteralPath $diagnosticFaultDestination) -or
+         [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+        throw 'A failing read-only diagnostic replaced the original Win32 error or changed the payload'
+      }
+      Write-Output 'PASS: diagnostic failure preserves original Windows rename exception and payload'
+    } finally {
+      Set-Item 'Function:\Get-CandidatePortableFirstDenialSummary' -Value $originalFirstDenial
+    }
   } finally { $locked.Dispose() }
   if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
