@@ -244,21 +244,28 @@ async function main(){
  const nativeExport=reviewedCandidateForExport
   ?await prepareNativeManualExportForManager(reviewedCandidateForExport):null;
  const server=http.createServer((req,res)=>{
-  if(req.url==='/test.user.js'){
+  if(req.url==='/test.user.js'||req.url==='/test.user.js?manual-recovery=1'){
+   const restoringInstalledCandidate=req.url.endsWith('?manual-recovery=1');
+   if(restoringInstalledCandidate&&(variant!=='product-candidate'||!nativeExport)){
+    res.writeHead(404,{'Cache-Control':'no-store'});
+    return res.end('UNAUTHORIZED_DISPOSABLE_RESTORE_URL');
+   }
    // A product-original control installs the actual native ORIGINAL recovery
    // file in its own manager Profile. Candidate installs the independently
    // exported reviewed candidate. Neither test ever updates a user's script.
    // A missing or modified disk artifact MUST NOT get an HTTP 200 response.
    let bytes=source;
    if(nativeExport){
-    const installFile=variant==='product-original'
+    const fromOriginal=variant==='product-original'||restoringInstalledCandidate;
+    const installFile=fromOriginal
       ?nativeExport.originalRecoveryPath:nativeExport.exportedPath;
-    const expectedSha=variant==='product-original'
+    const expectedSha=fromOriginal
       ?nativeExport.originalSha256:nativeExport.candidateSha256;
+    const expectedBytes=fromOriginal?nativeExport.originalBytes:Buffer.from(source,'utf8');
     try{
      const disk=fs.readFileSync(installFile);
      if(createHash('sha256').update(disk).digest('hex')!==expectedSha ||
-        !disk.equals(Buffer.from(source,'utf8'))){
+        !disk.equals(expectedBytes)){
       res.writeHead(409,{'Cache-Control':'no-store'});
       return res.end('DISPOSABLE_EXPORT_CHANGED');
      }
@@ -611,6 +618,88 @@ async function main(){
       nativeExport.candidateSha256,
       'The tested installed source must still match the reviewed on-disk export');
     console.log('PRODUCT_MANUAL_EXPORT_RUNTIME_RECOVERY_ONLY: native-backed candidate worked in disposable manager; original and recovery export were preserved; no automatic application');
+   if(runAt==='document-idle'){
+    // TASK-012 / TEST-023: the SAME disposable manager profile must now
+    // explicitly reinstall the separately exported original recovery bytes.
+    // This is a user-clicked isolated manager lifecycle, NOT an application
+    // auto-rollback or an attestation of production recovery authority.
+    for(const old of context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/')&&
+        /confirm|install|\/ask\.html(?:\?|$)/i.test(p.url())))
+      await old.close();
+    const restoreUrl='http://127.0.0.1:'+port+'/test.user.js?manual-recovery=1';
+    const restoreTab=await context.newPage();
+    try{await restoreTab.goto(restoreUrl,{timeout:12000});}
+    catch(error){console.log('DIRECT_MANUAL_RESTORE_NAVIGATION '+String(error).slice(0,130));}
+    await sleep(2300);
+    let restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
+    const restoreAsk=restorePages.find(p=>/\/ask\.html(?:\?|$)/i.test(p.url()));
+    if(restoreAsk){
+     const actions=await restoreAsk.locator('button,input[type="button"],input[type="submit"]')
+      .evaluateAll(nodes=>nodes.map(el=>({name:(el.innerText||el.value||'').trim(),id:el.id||''})));
+     const allowed=actions.filter(x=>/^(allow|grant|continue|proceed|always allow)$/i.test(x.name));
+     // The native ask.html page can ALREADY be the explicit
+     // Install/Cancel confirmation. It is not an intermediate Allow page.
+     // Only click an unambiguous intermediate permission button; otherwise
+     // the strict manager Install confirmation below remains mandatory.
+     if(allowed.length>1)throw Error('Ambiguous manager recovery permission controls');
+     if(allowed.length===1){
+      const chosen=allowed[0].id?restoreAsk.locator('#'+allowed[0].id):
+       restoreAsk.getByRole('button',{name:allowed[0].name,exact:true});
+      await chosen.first().click({timeout:8000});
+      await sleep(1600);
+     }
+    }
+    restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
+    const restoreConfirm=restorePages.find(p=>/confirm|install|\/ask\.html(?:\?|$)/i.test(p.url()));
+    assert.ok(restoreConfirm,'Native manager did not prompt to reinstall original recovery export');
+    const recoveryText=await restoreConfirm.locator('body').innerText();
+    assert.ok(recoveryText.includes('UAH disposable Tampermonkey CI fixture '+runAt),
+      'Native manager recovery confirmation does not identify the isolated fixture');
+    let reinstallClicked=false;
+    for(const selector of ['#confirm','#install','#btnInstall','button:has-text("Reinstall")',
+      'button:has-text("Update")','button:has-text("Install")',
+      'input[value="Reinstall"]','input[value="Update"]','input[value="Install"]']){
+     const control=restoreConfirm.locator(selector);
+     if(await control.count()&&await control.first().isVisible()){
+      await control.first().click({timeout:10000});reinstallClicked=true;break;
+     }
+    }
+    assert.equal(reinstallClicked,true,'No explicit real manager manual restore installation click');
+    await sleep(1900);
+    const restoredPage=await context.newPage();
+    await restoredPage.addInitScript(()=>{
+     if(window.top!==window)return;
+     document.addEventListener('DOMContentLoaded',()=>{
+      const el=document.createElement('button');el.id='uah-ci-target';
+      document.body?.append(el);
+     },{once:true});
+    });
+    await restoredPage.goto('https://example.com/',{
+     waitUntil:'domcontentloaded',timeout:30000});
+    const restored=await readBusiness(restoredPage);
+    assert.equal(restored.runAt,runAt);
+    assert.deepEqual({injected:restored.injected,gm:restored.gm,
+     gmDefault:restored.gmDefault,gmRoundtrip:restored.gmRoundtrip,
+     business:restored.business,action:restored.action},{
+      injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',
+      business:'missing-target',action:null
+     },'After explicit in-manager recovery, a fresh target-present page must execute the ORIGINAL broken script');
+    assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
+     'Manual manager recovery may not modify the original native script');
+    assert.deepEqual(fs.readFileSync(nativeExport.originalRecoveryPath),nativeExport.originalBytes,
+     'Manual manager recovery may not modify the recovery export');
+    assert.equal(createHash('sha256').update(fs.readFileSync(nativeExport.exportedPath)).digest('hex'),
+     nativeExport.candidateSha256,'The separate candidate export must remain available');
+    console.log('PRODUCT_REAL_MANAGER_MANUAL_INSTALLED_VERSION_RESTORE '+JSON.stringify({
+     runAt,originalSha256:nativeExport.originalSha256,
+     candidateSha256:nativeExport.candidateSha256,
+     before:'reviewed-candidate-recovered/done',after:'manual-original-missing-target',
+     gmDefault:restored.gmDefault,gmRoundtrip:restored.gmRoundtrip,
+     originalBytesPreserved:true,automaticRollbackAllowed:false,
+     stableManagerAttestation:false
+    }));
+    await restoredPage.close();
+   }
   }
   console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
  }finally{
