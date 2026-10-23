@@ -5,7 +5,7 @@
  * Actual TEST-017/018 must use independently observed browser execution.
  */
 import {types as nodeTypes} from 'node:util';
-import {isCanonicalKnownUserscriptMetadataTag,type MetadataResult} from '../analyze/metadata-parser';
+import {isCanonicalKnownUserscriptMetadataTag,parseUserscriptMetadata,type MetadataResult} from '../analyze/metadata-parser';
 import type {ManagerPresenceResult} from './tampermonkey-adapter';
 import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
@@ -147,6 +147,25 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  if(metadata.tags.match.length!==1)return blocked('MATCH_NOT_CONFIRMED');
  const pattern=metadata.tags.match[0];
  if(!matchingExactOriginPattern(pattern,target))return blocked('MATCH_NOT_CONFIRMED');
+ // Untrusted reports can conceal @require, extra grants and exclusion rules
+ // by submitting a safe tag map unrelated to the supplied original header.
+ // Reparse that bounded header and compare canonical keys AND value arrays.
+ // This is metadata consistency only, never GM or manager authentication.
+ if(typeof metadata.header!=='string'||metadata.header.length>65536)
+   return blocked('INVALID_SCRIPT_METADATA');
+ const parsed=parseUserscriptMetadata({
+   bytes:new TextEncoder().encode(metadata.header),textEncoding:'utf-8'
+ });
+ if(parsed.status!=='OK'||parsed.header!==metadata.header||
+    parsed.unknownNames.length!==0)return blocked('INVALID_SCRIPT_METADATA');
+ const suppliedNames=Object.keys(metadata.tags);
+ const parsedNames=Object.keys(parsed.tags);
+ if(suppliedNames.length!==parsedNames.length||
+    suppliedNames.some(name=>{
+      const supplied=metadata.tags[name],original=parsed.tags[name];
+      return !original||original.length!==supplied.length||
+        original.some((value,index)=>value!==supplied[index]);
+    }))return blocked('INVALID_SCRIPT_METADATA');
  return {ok:true,status:'METADATA_ELIGIBLE_ONLY',
    extensionId:TAMPERMONKEY_EXTENSION_ID,reportedVersion:report.version,
    scriptMatchPattern:pattern,extensionAuthenticityVerified:false,
