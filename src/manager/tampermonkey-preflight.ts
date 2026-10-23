@@ -139,8 +139,8 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  // @exclude can overrule @match. Conservatively refuse it until a real
  // extension test evaluates manager-specific exclusion/precedence rules.
  if(metadata.tags.include!==undefined||
-    (metadata.tags.exclude?.length??0)>0||
-    (metadata.tags['exclude-match']?.length??0)>0)
+    metadata.tags.exclude!==undefined||
+    metadata.tags['exclude-match']!==undefined)
     return blocked('MATCH_NOT_CONFIRMED');
  // This explicitly consented GM fixture must not silently inject on extra
  // sites. Even one matching entry cannot bless a second @match (or duplicate).
