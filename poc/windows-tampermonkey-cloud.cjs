@@ -644,7 +644,7 @@ async function main(){
      await sleep(1600);
     }
     restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
-    const restoreConfirm=restorePages.find(p=>/confirm|install|\\/ask\\.html(?:\\?|$)/i.test(p.url()));
+    const restoreConfirm=restorePages.find(p=>/confirm|install|\/ask\.html(?:\?|$)/i.test(p.url()));
     assert.ok(restoreConfirm,'Native manager did not prompt to reinstall original recovery export');
     const recoveryText=await restoreConfirm.locator('body').innerText();
     assert.ok(recoveryText.includes('UAH disposable Tampermonkey CI fixture '+runAt),
