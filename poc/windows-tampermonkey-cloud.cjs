@@ -135,7 +135,11 @@ async function prepareNativeManualExportForManager(reviewed){
     require('../dist/src/version/staged-candidate.js');
   const {exportReviewedCandidateForManualInstall}=
     require('../dist/src/export/manual-candidate-export.js');
-  const staged=await stageReviewedCandidateOnly(reviewed.request,reviewed.proposal,opts);
+  // Staging has its own three-field exact-data contract; the fourth export
+  // directory is only accepted by the subsequent manual-export interface.
+  const staged=await stageReviewedCandidateOnly(reviewed.request,reviewed.proposal,{
+   sourcePath,backupDirectory,userApproved:true
+  });
   assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED',
     'Native candidate must have a separately verified original backup: '+JSON.stringify(staged));
   assert.equal(staged.automaticPatchAllowed,false);
