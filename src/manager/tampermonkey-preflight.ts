@@ -122,10 +122,15 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  const connects=metadata.tags.connect;
  const updateUrl=metadata.tags.updateurl;
  const downloadUrl=metadata.tags.downloadurl;
+ // Manager UI icons may trigger additional resource loading on install or
+ // display. Treat both recognized icon forms as unverified dependencies;
+ // do not silently extend the consented, network-isolated GM preflight.
+ const icon=metadata.tags.icon;
+ const icon64=metadata.tags.icon64;
  // A reported successful @match does not authorize additional outbound
  // contacts, remote code/resource loading or self-update supply chains.
  if(requires!==undefined||resources!==undefined||connects!==undefined||
-    updateUrl!==undefined||downloadUrl!==undefined)
+    updateUrl!==undefined||downloadUrl!==undefined||icon!==undefined||icon64!==undefined)
     return blocked('EXTERNAL_RESOURCES_UNVERIFIED');
  let target:URL;
  try{target=new URL(targetUrl);}catch{return blocked('INVALID_INPUT');}

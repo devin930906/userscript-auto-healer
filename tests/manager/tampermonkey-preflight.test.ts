@@ -59,6 +59,28 @@ test('TEST-017: supported run-at metadata is eligible but never attests injectio
    if(!result.ok)assert.equal(result.code,'RUN_AT_NOT_CONFIRMED');
  }
 });
+test('TEST-017/026: unverified userscript icon resources cannot pass consented preflight',()=>{
+ const base={grant:['GM_getValue'],match:['https://example.com/*']};
+ for(const [tag,value] of [
+  ['icon','https://tracker.example.net/probe.png'],
+  ['icon64','https://tracker.example.net/probe-large.png'],
+  ['icon','data:image/svg+xml,%3Csvg%20onload=alert(1)%3E']
+ ] as const){
+  const result=inspect(report,metadata({...base,[tag]:[value]}));
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'EXTERNAL_RESOURCES_UNVERIFIED',gmApiVerified:false,businessVerified:false},tag);
+ }
+ const source=['// ==UserScript==','// @name Limited GM test',
+  '// @match https://example.com/*','// @grant GM_getValue',
+  '// @icon https://tracker.example.net/probe.png',
+  '// ==/UserScript==','void 0;'].join('\\n').replace(/\\n/g,'\n');
+ const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(source),
+  textEncoding:'utf-8'});
+ assert.equal(parsed.status,'OK');
+ assert.equal(inspect(report,parsed).ok,false,
+  'real parser metadata must not bypass external icon resource review');
+});
+
 test('TEST-017: remote dependencies and contradictory grants cannot pass metadata preflight',()=>{
  const baseline={grant:['GM_getValue'],match:['https://example.com/*']};
  for(const tags of [
