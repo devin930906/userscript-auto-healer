@@ -395,6 +395,26 @@ try {
       throw 'Restart Manager accepted a directory instead of a file'
     }
     Write-Output 'PASS: Restart Manager observes a real Windows lock with candidate-only read scope'
+    # ISSUE-215: a real exclusive lock at the END of a 41-file manifest.
+    # The original first-40-file RM sample cannot see this lock.
+    $batchRoot=Join-Path $root 'rm-later-batch'
+    New-Item -ItemType Directory -Path $batchRoot -ErrorAction Stop | Out-Null
+    $batchFiles=@(1..41 | ForEach-Object {
+      $path=Join-Path $batchRoot ("fixture-{0:D3}.txt" -f $_)
+      [IO.File]::WriteAllText($path,'disposable')
+      $path
+    })
+    $tailHandle=[IO.File]::Open($batchFiles[40],[IO.FileMode]::Open,
+      [IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try {
+      $batchRm=Get-CandidatePortableRestartManagerSummary $batchRoot $batchFiles
+      if($batchRm -cnotmatch 'coverage=\[batches=2 sampled=41 total=41 complete=true extraAffectedObservations=([0-9]+) unavailableBatches=0\]' -or
+         [int]$Matches[1] -lt 1 -or
+         $batchRm.Contains($batchRoot)) {
+        throw 'Restart Manager did not observe exclusively locked last candidate file in later batch'
+      }
+    } finally { $tailHandle.Dispose() }
+    Write-Output 'PASS: bounded Restart Manager batches inspect later candidate file locks without leaking paths'
     # Even a transient first denial must carry evidence before a later move
     # might succeed. Reuse only this fixture's known file manifest.
     $firstDenial=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
