@@ -637,11 +637,17 @@ async function main(){
      const actions=await restoreAsk.locator('button,input[type="button"],input[type="submit"]')
       .evaluateAll(nodes=>nodes.map(el=>({name:(el.innerText||el.value||'').trim(),id:el.id||''})));
      const allowed=actions.filter(x=>/^(allow|grant|continue|proceed|always allow)$/i.test(x.name));
-     assert.equal(allowed.length,1,'Unexpected manager recovery ask authorization controls');
-     const chosen=allowed[0].id?restoreAsk.locator('#'+allowed[0].id):
-      restoreAsk.getByRole('button',{name:allowed[0].name,exact:true});
-     await chosen.first().click({timeout:8000});
-     await sleep(1600);
+     // The native ask.html page can ALREADY be the explicit
+     // Install/Cancel confirmation. It is not an intermediate Allow page.
+     // Only click an unambiguous intermediate permission button; otherwise
+     // the strict manager Install confirmation below remains mandatory.
+     if(allowed.length>1)throw Error('Ambiguous manager recovery permission controls');
+     if(allowed.length===1){
+      const chosen=allowed[0].id?restoreAsk.locator('#'+allowed[0].id):
+       restoreAsk.getByRole('button',{name:allowed[0].name,exact:true});
+      await chosen.first().click({timeout:8000});
+      await sleep(1600);
+     }
     }
     restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
     const restoreConfirm=restorePages.find(p=>/confirm|install|\/ask\.html(?:\?|$)/i.test(p.url()));
