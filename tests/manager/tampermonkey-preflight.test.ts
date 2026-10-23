@@ -368,3 +368,14 @@ test('TEST-017: exact 127.0.0.1 userscript match supports disposable fixture por
  const forged=metadata({grant:['GM_getValue'],match:['http://127.0.0.1:41235/*']});
  assert.equal(inspect(report,forged,'http://127.0.0.1:41235/').ok,false);
 });
+
+test('TEST-017/026: empty exclusion directive arrays must not bypass metadata-only scope review',()=>{
+ const baseline={grant:['GM_getValue'],match:['https://example.com/*']};
+ // Imported metadata is untrusted; the directive's presence matters even
+ // when a synthetic payload gives it zero entries.
+ for(const directive of ['exclude','exclude-match'] as const){
+  const result=inspect(report,metadata({...baseline,[directive]:[]}));
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false},directive);
+ }
+});
