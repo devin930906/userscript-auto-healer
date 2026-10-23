@@ -9,7 +9,7 @@ import {lstat,open} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,resolve} from 'node:path';
 import {verifyExactCandidateBytesReadOnly} from '../version/candidate-bytes';
 import {hasUnsafePathLink} from '../version/path-boundary';
-import {isSupportedGmProbeRunAt} from './tampermonkey-gm-probe';
+import {isSupportedGmProbeRunAt,MAX_GM_PROBE_TTL_MS} from './tampermonkey-gm-probe';
 import type {ManualTampermonkeyDiagnosticSession} from './tampermonkey-diagnostic';
 
 const flags=Object.freeze({
@@ -151,11 +151,16 @@ function chronologicalLimitedEvidence(
 ):boolean{
  const collected=Date.parse(report.collectedAt);
  const expires=Date.parse(report.expiresAt);
- if(collected>=expires)return false;
+ // The isolated probe always expires within MAX_GM_PROBE_TTL_MS of its
+ // creation. Even an otherwise plausible, still UNVERIFIED snapshot cannot
+ // precede the earliest possible consented session start.
+ const earliestPossibleStart=expires-MAX_GM_PROBE_TTL_MS;
+ if(collected>=expires||collected<earliestPossibleStart)return false;
  for(const sample of [report.dom.broken,report.dom.fixed]){
   if(sample===null)continue;
   const observed=Date.parse(sample.observedAt);
-  if(observed>collected||observed>=expires)return false;
+  if(observed<earliestPossibleStart||
+     observed>collected||observed>=expires)return false;
  }
  return true;
 }
