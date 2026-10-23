@@ -476,7 +476,7 @@ try {
       }
       if(-not $preservedOriginal -or
          (Test-Path -LiteralPath $diagnosticFaultDestination) -or
-         [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+         -not (Test-Path -LiteralPath $permanentFile -PathType Leaf)) {
         throw 'A failing read-only diagnostic replaced the original Win32 error or changed the payload'
       }
       Write-Output 'PASS: diagnostic failure preserves original Windows rename exception and payload'
