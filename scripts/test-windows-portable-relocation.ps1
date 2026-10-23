@@ -189,6 +189,23 @@ try {
       $refused=$true
     }
     if(-not $refused) { throw 'Live candidate-owned executable was not blocked' }
+    # ISSUE-215 / TEST-028: a caller promoting warnings must still receive
+    # the authoritative bounded candidate-live error, not a warning exception.
+    # The real disposable Windows process remains alive during this check.
+    $oldWaitWarningPreference=$WarningPreference
+    try {
+      $WarningPreference='Stop'
+      $liveDenialPreserved=$false
+      try { Wait-CandidatePortableProcessExit $ownedExe 1 0 | Out-Null }
+      catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*did not exit before relocation*') { throw }
+        $liveDenialPreserved=$true
+      }
+      if(-not $liveDenialPreserved) {
+        throw 'TEST-028: warning promotion replaced the live-candidate refusal'
+      }
+    } finally { $WarningPreference=$oldWaitWarningPreference }
+    Write-Output 'PASS: candidate process wait preserves live-process refusal under warning escalation'
     $null=Wait-Process -Id $owned.Id -Timeout 20 -ErrorAction Stop
     $checks=Wait-CandidatePortableProcessExit $ownedExe 3 100
     if($checks -lt 1) { throw 'Stopped owned executable remained live' }
