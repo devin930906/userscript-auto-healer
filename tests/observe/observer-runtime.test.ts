@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,win32} from 'node:path';
 import {createServer} from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
-import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
+import {launchApprovedIsolatedChrome,readBoundedCdpJson} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {observeApprovedDomSeries,observeApprovedDom} from '../../src/observe/dom-observer';
@@ -120,7 +120,8 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
 });
 
 
-test('TEST-010/012: owned Chrome can confirm the approved page when its first navigation stalls',async t=>{
+
+test('TEST-010/012/026: unverified initial navigation must not leave a newly created Chrome tab',async t=>{
  if(process.platform!=='win32'){t.skip('Requires actual Windows Chrome');return;}
  let chrome:string|undefined;
  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
@@ -128,21 +129,15 @@ test('TEST-010/012: owned Chrome can confirm the approved page when its first na
    const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
    try{await access(candidate);chrome=candidate;break;}catch{/* absent */}
  }
- assert.ok(chrome,'Windows runner needs real Chrome for navigation recovery');
- const root=await mkdtemp(join(tmpdir(),'uah-stalled-cdp-nav-'));
+ assert.ok(chrome,'Windows runner needs real Chrome for abandoned-tab cleanup');
+ const root=await mkdtemp(join(tmpdir(),'uah-abandoned-cdp-tab-'));
  let stop=()=>{};
  let requests=0;
  const fixture=createServer((req,res)=>{
    if(req.url!=='/stalled'){res.writeHead(404);res.end();return;}
    requests++;
-   if(requests===1){
-     // No headers or response body: this real tab is mid-navigation, not
-     // an authenticated finished page. A second explicit, same-URL
-     // navigation can recover it, without evaluating any page JavaScript.
-     return;
-   }
-   res.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});
-   res.end('<!doctype html><title>Approved recovered target</title><main id="recovered-ready">ok</main>');
+   // Never send response headers. The site is NOT an approved loaded page.
+   // Cleanup must not replay this potentially side-effectful user URL.
  });
  await new Promise<void>((resolve,reject)=>{
    fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
@@ -164,26 +159,33 @@ test('TEST-010/012: owned Chrome can confirm the approved page when its first na
  assert.equal(session.ok,true,JSON.stringify(session));
  if(!session.ok)return;
  stop=session.stop;
+ // Record real page target IDs before the newly authorized tab exists.
+ // The test asserts no NEW tab remains, regardless of /json/list URL text.
+ const pageIds=async():Promise<Set<string>>=>{
+   const response=await fetch('http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/list',{
+     redirect:'error',signal:AbortSignal.timeout(1500)});
+   const json=await readBoundedCdpJson(response);
+   assert.ok(Array.isArray(json),'owned Chrome target-list must be readable');
+   const ids=new Set<string>();
+   for(const raw of json){
+     if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.type==='page'&&
+        typeof raw.id==='string')ids.add(raw.id);
+   }
+   return ids;
+ };
+ const before=await pageIds();
  const stages:string[]=[];
  const target=await openApprovedTarget(session,site,true,undefined,
    stage=>{if(stages.length<100)stages.push(stage);});
- if(!target.ok)t.diagnostic('STALLED_NAV_STAGES='+JSON.stringify(
+ t.diagnostic('STALLED_TAB_STAGE_COUNTS='+JSON.stringify(
    stages.reduce<Record<string,number>>((counts,stage)=>{
      counts[stage]=(counts[stage]??0)+1;return counts;
    },{})));
- assert.equal(target.ok,true,JSON.stringify(target));
- if(!target.ok)return;
- assert.equal(target.businessVerified,false);
- assert.equal(requests,2,'Only one extra approved initial page navigation is allowed');
- let seen=false;
- for(let i=0;i<20;i++){
-   const observed=await observeApprovedDom(session,target,site,true,['#recovered-ready']);
-   if(observed.ok&&observed.selectorCounts['#recovered-ready']===1){
-     assert.equal(observed.userscriptVerified,false);
-     assert.equal(observed.fullPageVerified,false);
-     seen=true;break;
-   }
-   await delay(150);
- }
- assert.equal(seen,true,'Real recovery must have a readable approved main-frame DOM');
+ assert.deepEqual(target,{ok:false,code:'TARGET_NOT_CONFIRMED'},
+   'A stalled first navigation must stay unverified');
+ assert.ok(stages.includes('TAB_CREATED'));
+ assert.equal(requests,1,'A failed confirmation must NEVER reload the approved URL');
+ const after=await pageIds();
+ assert.deepEqual([...after].filter(id=>!before.has(id)),[],
+   'The specific newly created but unverified browser tab must be closed');
 });
