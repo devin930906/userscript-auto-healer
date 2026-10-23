@@ -736,8 +736,14 @@ function Move-CandidatePortableDirectory(
       if($attempt -eq 1) {
         # Diagnostics are strictly observational. Even a successful sibling
         # control cannot bypass or shorten this move's fail-closed retries.
-        Write-Warning ("TASK-020 first relocation denial: "+(
-          Get-CandidatePortableFirstDenialSummary $from $candidateFiles))
+        # Read-only evidence is best-effort: if a probe unexpectedly throws,
+        # preserve the original Windows rename error and bounded retry path.
+        # Diagnostics must not introduce a new packaging failure reason.
+        $firstDenial='diagnostic=unavailable'
+        try {
+          $firstDenial=Get-CandidatePortableFirstDenialSummary $from $candidateFiles
+        } catch { }
+        Write-Warning ("TASK-020 first relocation denial: "+$firstDenial)
       }
       if($attempt -eq $maxAttempts) {
         # Do not mask/replace the original .NET access exception when CIM is
