@@ -16,6 +16,13 @@ export async function hasUnsafePathLink(path:string):Promise<boolean>{
     // A colon within a component can name an NTFS stream. A drive letter
     // is already part of the parsed root and remains valid.
     if(component.includes(':'))return true;
+    // Win32 APIs may resolve "folder." or "folder " to "folder" (without
+    // the explicit extended-path namespace). Their spelling can therefore
+    // bypass source-path-derived backup identities or cooperative mutexes.
+    // Reject those ambiguous ancestors before lstat follows an alias.
+    // Hidden names such as ".config" and interior spaces remain legitimate.
+    if(process.platform==='win32'&&
+       (component.endsWith('.')||component.endsWith(' ')))return true;
     current=join(current,component);
     if((await lstat(current,{bigint:true})).isSymbolicLink())return true;
   }
