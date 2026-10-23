@@ -341,3 +341,46 @@ test('TEST-017/026: report chronology rejects future DOM and post-expiry evidenc
   assert.deepEqual(await readdir(root),[]);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TEST-017/026: a GM fixture report cannot predate the maximum consent lifetime',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-before-session-'));
+ try{
+  const collected=Date.parse('2026-10-19T02:02:00.000Z');
+  // The probe accepts at most a 300000 ms TTL. With an expiry at 02:05,
+  // neither an observation nor a report collection at 01:59:59 can be from
+  // this session, even if all flags, hashes and DOM counts look consistent.
+  const impossibleSample={...session,domSnapshot:()=>({
+    broken:{...dom('broken',0),observedAt:'2026-10-19T01:59:59.000Z'},
+    fixed:dom('fixed',1)
+  })};
+  assert.equal(createLimitedGmReport(impossibleSample,collected).status,
+    'BLOCKED','observation outside every possible approved session');
+  const noObservations={...session,
+   snapshot:()=>({...summary,status:'AWAITING_BROWSER_VISITS' as const,
+    observedModes:0,reportedGmDefaultMatched:false,
+    reportedGmStorageRoundtripMatched:false,
+    reportedBrokenFailed:false,reportedFixedRecovered:false}),
+   consistencySnapshot:()=>({...consistency,
+    status:'AWAITING_BROWSER_VISITS' as const,comparedModes:0 as const}),
+   domSnapshot:()=>({})
+  };
+  assert.equal(createLimitedGmReport(noObservations,
+    Date.parse('2026-10-19T01:59:59.000Z')).status,'BLOCKED',
+    'collection itself must belong to a possible live session');
+
+  const ready=createLimitedGmReport(session,collected);
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const forged=[
+    {...ready.report,collectedAt:'2026-10-19T01:59:59.000Z'},
+    {...ready.report,dom:{...ready.report.dom,broken:{
+      ...ready.report.dom.broken,observedAt:'2026-10-19T01:59:59.000Z'}}}
+  ];
+  for(const [index,report] of forged.entries()){
+   const saved=await saveLimitedGmReportOnly(report as typeof ready.report,
+     join(root,'impossible-'+index+'.json'),true);
+   assert.equal(saved.status,'BLOCKED','no impossible timing can be saved');
+  }
+  assert.deepEqual(await readdir(root),[],'no forged evidence published');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
