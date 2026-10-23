@@ -112,12 +112,16 @@ if(variant==='product-original'||variant==='product-candidate'){
     candidateSha256:sha(proposal.candidateSource),audit:audit.status,
     automaticPatchAllowed:proposal.automaticPatchAllowed
   }));
-  if(variant==='product-candidate')reviewedCandidateForExport={original,request,proposal};
+  // Both independent product variants must install real on-disk exports:
+  // the candidate file OR the separately emitted ORIGINAL recovery .user.js.
+  reviewedCandidateForExport={original,request,proposal};
   source=variant==='product-candidate'?proposal.candidateSource:original;
 }
 
 /** TASK-012 / TEST-023: exercise the REAL native stage and manual-export
  * implementation before asking the disposable Tampermonkey to install bytes.
+ * The product-original control must actually install the original recovery
+ * export from disk; a byte-equal artifact alone is not manager acceptance.
  * Every file is CI-created under a fresh temp root; no real user script or
  * manager profile is read or modified by the native export operation.
  */
@@ -174,7 +178,8 @@ async function prepareNativeManualExportForManager(reviewed){
    recoveryExportBytes:originalBytes.byteLength,stage:staged.status,
    export:exported.status,automaticPatchAllowed:false,managerInstalled:false
   }));
-  return {root,exportedPath,sourcePath,originalBytes,candidateSha256:sha(candidateBytes)};
+  return {root,exportedPath,originalRecoveryPath,sourcePath,originalBytes,
+   originalSha256:sha(originalBytes),candidateSha256:sha(candidateBytes)};
  }catch(error){
   fs.rmSync(root,{recursive:true,force:true});
   throw error;
@@ -240,15 +245,20 @@ async function main(){
   ?await prepareNativeManualExportForManager(reviewedCandidateForExport):null;
  const server=http.createServer((req,res)=>{
   if(req.url==='/test.user.js'){
-   // The product-candidate variant must install EXACT bytes created by the
-   // native manual exporter, not the in-memory AST proposal. If another
-   // process changes the disposable file, fail closed before returning 200.
+   // A product-original control installs the actual native ORIGINAL recovery
+   // file in its own manager Profile. Candidate installs the independently
+   // exported reviewed candidate. Neither test ever updates a user's script.
+   // A missing or modified disk artifact MUST NOT get an HTTP 200 response.
    let bytes=source;
    if(nativeExport){
+    const installFile=variant==='product-original'
+      ?nativeExport.originalRecoveryPath:nativeExport.exportedPath;
+    const expectedSha=variant==='product-original'
+      ?nativeExport.originalSha256:nativeExport.candidateSha256;
     try{
-     const disk=fs.readFileSync(nativeExport.exportedPath);
-     if(createHash('sha256').update(disk).digest('hex')!==
-        nativeExport.candidateSha256){
+     const disk=fs.readFileSync(installFile);
+     if(createHash('sha256').update(disk).digest('hex')!==expectedSha ||
+        !disk.equals(Buffer.from(source,'utf8'))){
       res.writeHead(409,{'Cache-Control':'no-store'});
       return res.end('DISPOSABLE_EXPORT_CHANGED');
      }
@@ -581,8 +591,17 @@ async function main(){
     'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
     ' fixture variant '+variant+' GM_getValue default + GM_setValue/readback and expected business assertions.');
-  if(variant==='product-original')
-    console.log('EXPECTED_PRODUCT_ORIGINAL_FAILURE: unchanged selector fails on target-present page');
+  if(variant==='product-original'){
+    assert.ok(nativeExport,'Original manager control must use the native recovery export');
+    assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
+      'Installing exported original in Tampermonkey must not rewrite original native script');
+    assert.deepEqual(fs.readFileSync(nativeExport.originalRecoveryPath),nativeExport.originalBytes,
+      'Manager-tested manual recovery export must retain original bytes');
+    assert.equal(createHash('sha256').update(
+      fs.readFileSync(nativeExport.originalRecoveryPath)).digest('hex'),
+      nativeExport.originalSha256);
+    console.log('PRODUCT_MANUAL_RECOVERY_EXPORT_REAL_MANAGER_ORIGINAL_BEHAVIOR_ONLY: native original recovery .user.js installed in independent disposable Tampermonkey; unchanged original still fails on target-present synthetic page; no installed-candidate rollback attested');
+  }
   if(variant==='product-candidate'){
     assert.ok(nativeExport,'Product candidate must have a real native manual export');
     assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
