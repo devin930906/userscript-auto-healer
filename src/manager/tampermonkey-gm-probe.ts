@@ -49,6 +49,7 @@ export type GmProbeStartResult=
  |{readonly ok:false;readonly code:'NOT_AUTHORIZED'|'INVALID_OPTIONS'|'BIND_FAILED'}
  |{readonly ok:true;readonly session:GmProbeSession};
 
+export const MAX_GM_PROBE_TTL_MS=300000 as const;
 const MAX_BODY_BYTES=1024;
 const PROBE_DEFAULT='UAH_GM_PROBE_DEFAULT';
 function isObject(value:unknown):value is Record<string,unknown>{
@@ -161,7 +162,7 @@ export async function startIsolatedTampermonkeyGmProbe(
  userApproved:boolean,ttlMs=60000,runAt:GmProbeRunAt='document-idle'
 ):Promise<GmProbeStartResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
- if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>300000||
+ if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>MAX_GM_PROBE_TTL_MS||
     !isSupportedGmProbeRunAt(runAt))
    return {ok:false,code:'INVALID_OPTIONS'};
  const token=randomBytes(32).toString('hex');
