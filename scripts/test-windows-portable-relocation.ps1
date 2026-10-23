@@ -483,6 +483,32 @@ try {
     } finally {
       Set-Item 'Function:\Get-CandidatePortableFirstDenialSummary' -Value $originalFirstDenial
     }
+
+    # TASK-020 / TEST-028: PowerShell callers may promote warnings to
+    # terminating errors. Diagnostic warnings must never replace the original
+    # .NET rename denial or cause candidate bytes to be changed.
+    $previousWarningPreference=$WarningPreference
+    try {
+      $WarningPreference='Stop'
+      $warningStopDestination=Join-Path $root 'warning-stop-destination'
+      $originalRenameDenial=$false
+      try {
+        Move-CandidatePortableDirectory $permanent $warningStopDestination 1 0 @($permanentFile) | Out-Null
+      } catch {
+        $cause=$_.Exception
+        while($cause.InnerException) { $cause=$cause.InnerException }
+        $originalRenameDenial=(
+          ($cause -is [System.IO.IOException] -or
+           $cause -is [System.UnauthorizedAccessException]) -and
+          (($cause.HResult -band 0xFFFF) -in @(5,32,33)))
+      }
+      if(-not $originalRenameDenial -or
+         (Test-Path -LiteralPath $warningStopDestination) -or
+         -not (Test-Path -LiteralPath $permanentFile -PathType Leaf)) {
+        throw 'TEST-028: WarningPreference Stop masked the original Windows rename denial'
+      }
+    } finally { $WarningPreference=$previousWarningPreference }
+    Write-Output 'PASS: warning promotion does not mask the original Windows rename denial'
   } finally { $locked.Dispose() }
   if(-not (Test-Path -LiteralPath $permanentFile -PathType Leaf) -or
       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
