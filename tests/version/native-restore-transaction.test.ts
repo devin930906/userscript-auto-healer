@@ -584,7 +584,9 @@ test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native res
   const nativeRmdir=fsPromises.rmdir;
   const expectedLock=join(
    join(opts.sourcePath,'..'),
-   '.uah-restore-path-'+createHash('sha256').update(opts.sourcePath,'utf8').digest('hex')
+   '.uah-restore-path-'+createHash('sha256').update(
+    process.platform==='win32'?opts.sourcePath.toLowerCase():opts.sourcePath,
+    'utf8').digest('hex')
   );
   let denied=false;
   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
