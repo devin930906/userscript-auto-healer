@@ -14,7 +14,13 @@ const report={
  scriptInstalled:true,scriptEnabled:true
 };
 const metadata=(tags:Record<string,string[]>):MetadataResult=>({
- status:'OK',header:'// ==UserScript==',lines:[],tags,unknownNames:[]
+ status:'OK',
+ // Synthetic reports remain non-attesting but must be internally consistent.
+ header:['// ==UserScript==',
+  ...Object.entries(tags).flatMap(([name,values])=>
+    values.map(value=>'// @'+name+(value?' '+value:''))),
+  '// ==/UserScript=='].join('\n'),
+ lines:[],tags,unknownNames:[]
 });
 const normal=metadata({grant:['GM_getValue'],match:['https://example.com/*']});
 const inspect=(source:typeof report=report,meta:MetadataResult=normal,
