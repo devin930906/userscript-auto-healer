@@ -728,7 +728,7 @@ function Move-CandidatePortableDirectory(
       # Windows failure after extracted Electron smoke. Record each attempt
       # without leaking full temp paths or changing the retry/error policy.
       # On an exhausted retry the original exception is still rethrown.
-      Write-Warning (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
+      Write-Warning -WarningAction Continue (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
         [IO.Directory]::Exists($from)) (Test-Path -LiteralPath $to) ([DateTime]::UtcNow))
       if($rootError -isnot [System.IO.IOException] -and
          $rootError -isnot [System.UnauthorizedAccessException]) { throw }
@@ -743,14 +743,14 @@ function Move-CandidatePortableDirectory(
         try {
           $firstDenial=Get-CandidatePortableFirstDenialSummary $from $candidateFiles
         } catch { }
-        Write-Warning ("TASK-020 first relocation denial: "+$firstDenial)
+        Write-Warning -WarningAction Continue ("TASK-020 first relocation denial: "+$firstDenial)
       }
       if($attempt -eq $maxAttempts) {
         # Do not mask/replace the original .NET access exception when CIM is
         # unavailable; this is diagnostic evidence, not an unlock mechanism.
         $owners=Get-CandidatePortableRelocationOwnerSummary (
           Join-Path $from 'UserscriptAutoHealer.exe')
-        Write-Warning "TASK-020 final relocation denial candidate owners: $owners"
+        Write-Warning -WarningAction Continue "TASK-020 final relocation denial candidate owners: $owners"
         throw
       }
       if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
