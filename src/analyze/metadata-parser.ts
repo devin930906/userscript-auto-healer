@@ -3,7 +3,7 @@ import type { ImportedScript } from '../import/import-service';
 
 const KNOWN = new Set([
   'name','namespace','version','description','author','match','include',
-  'exclude','run-at','grant','require','resource','connect','updateurl',
+  'exclude','exclude-match','run-at','grant','require','resource','connect','updateurl',
   'downloadurl','icon','icon64','license','homepage','homepageurl','supporturl',
   'noframes','unwrap'
 ]);

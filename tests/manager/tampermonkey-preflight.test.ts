@@ -404,3 +404,17 @@ test('TEST-017/026: forged unknown or noncanonical metadata tag keys never pass 
   assert.equal(safe.businessVerified,false);
  }
 });
+
+test('TEST-017/026: parsed exclude-match stays recognized and explicitly blocks scope confirmation',()=>{
+ const source=['// ==UserScript==','// @name Exclusion fixture',
+  '// @match https://example.com/*',
+  '// @exclude-match https://example.com/private/*',
+  '// @grant GM_getValue','// ==/UserScript==','void 0;'].join('\n');
+ const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(source),
+  textEncoding:'utf-8'});
+ assert.equal(parsed.status,'OK');
+ assert.deepEqual(parsed.unknownNames,[]);
+ assert.deepEqual(parsed.tags['exclude-match'],['https://example.com/private/*']);
+ assert.deepEqual(inspect(report,parsed),{ok:false,status:'BLOCKED',
+  code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false});
+});
