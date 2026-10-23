@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,win32} from 'node:path';
 import {createServer} from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
-import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
+import {launchApprovedIsolatedChrome,readBoundedCdpJson} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {observeApprovedDomSeries,observeApprovedDom} from '../../src/observe/dom-observer';
@@ -117,4 +117,75 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
    'IFRAME_CONTENT_UNVERIFIED')));
  assert.ok(observed.samples.some(s=>s.summary.blindSpots.includes(
    'CROSS_ORIGIN_FRAME_UNVERIFIED')));
+});
+
+
+
+test('TEST-010/012/026: unverified initial navigation must not leave a newly created Chrome tab',async t=>{
+ if(process.platform!=='win32'){t.skip('Requires actual Windows Chrome');return;}
+ let chrome:string|undefined;
+ for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+   if(!base)continue;
+   const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+   try{await access(candidate);chrome=candidate;break;}catch{/* absent */}
+ }
+ assert.ok(chrome,'Windows runner needs real Chrome for abandoned-tab cleanup');
+ const root=await mkdtemp(join(tmpdir(),'uah-abandoned-cdp-tab-'));
+ let stop=()=>{};
+ let requests=0;
+ const fixture=createServer((req,res)=>{
+   if(req.url!=='/stalled'){res.writeHead(404);res.end();return;}
+   requests++;
+   // Never send response headers. The site is NOT an approved loaded page.
+   // Cleanup must not replay this potentially side-effectful user URL.
+ });
+ await new Promise<void>((resolve,reject)=>{
+   fixture.once('error',reject);fixture.listen(0,'127.0.0.1',resolve);
+ });
+ t.after(async()=>{
+   stop();
+   fixture.closeAllConnections();
+   await new Promise<void>(resolve=>fixture.close(()=>resolve()));
+   await delay(350);
+   await rm(root,{recursive:true,force:true}).catch(()=>undefined);
+ });
+ const addr=fixture.address();
+ if(!addr||typeof addr==='string')throw Error('NO_STALLED_FIXTURE');
+ const site='http://127.0.0.1:'+addr.port+'/stalled';
+ const cfg={executablePath:chrome!,userDataDir:join(root,'profile'),
+   remoteDebuggingPort:await availablePort(),bindAddress:'127.0.0.1' as const};
+ assert.equal((await prepareApprovedIsolatedProfile(cfg,true)).ok,true);
+ const session=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+ assert.equal(session.ok,true,JSON.stringify(session));
+ if(!session.ok)return;
+ stop=session.stop;
+ // Record real page target IDs before the newly authorized tab exists.
+ // The test asserts no NEW tab remains, regardless of /json/list URL text.
+ const pageIds=async():Promise<Set<string>>=>{
+   const response=await fetch('http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/list',{
+     redirect:'error',signal:AbortSignal.timeout(1500)});
+   const json=await readBoundedCdpJson(response);
+   assert.ok(Array.isArray(json),'owned Chrome target-list must be readable');
+   const ids=new Set<string>();
+   for(const raw of json){
+     if(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.type==='page'&&
+        typeof raw.id==='string')ids.add(raw.id);
+   }
+   return ids;
+ };
+ const before=await pageIds();
+ const stages:string[]=[];
+ const target=await openApprovedTarget(session,site,true,undefined,
+   stage=>{if(stages.length<100)stages.push(stage);});
+ t.diagnostic('STALLED_TAB_STAGE_COUNTS='+JSON.stringify(
+   stages.reduce<Record<string,number>>((counts,stage)=>{
+     counts[stage]=(counts[stage]??0)+1;return counts;
+   },{})));
+ assert.deepEqual(target,{ok:false,code:'TARGET_NOT_CONFIRMED'},
+   'A stalled first navigation must stay unverified');
+ assert.ok(stages.includes('TAB_CREATED'));
+ assert.equal(requests,1,'A failed confirmation must NEVER reload the approved URL');
+ const after=await pageIds();
+ assert.deepEqual([...after].filter(id=>!before.has(id)),[],
+   'The specific newly created but unverified browser tab must be closed');
 });
