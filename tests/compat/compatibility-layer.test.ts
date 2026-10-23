@@ -101,6 +101,51 @@ test('TEST-025: hostile descriptors, arrays and secret fields fail closed withou
   assert.equal(getterHit,false);
 });
 
+
+test('TASK-016/TEST-025/026: reject live and revoked Proxy inputs without executing traps', () => {
+  let trapCalls=0;
+  const hostile={
+    getPrototypeOf(){trapCalls++;throw Error('SECRET_PROXY_TRAP');},
+    ownKeys(){trapCalls++;throw Error('SECRET_PROXY_TRAP');},
+    getOwnPropertyDescriptor(){trapCalls++;throw Error('SECRET_PROXY_TRAP');},
+    get(){trapCalls++;throw Error('SECRET_PROXY_TRAP');}
+  };
+  const asProxy=<T extends object>(value:T):T=>new Proxy(value,hostile);
+  // Initial, candidate, both collections and individual records are all
+  // untrusted input boundaries; rejecting only top-level proxies is not enough.
+  assert.throws(()=>new LimitedCompatibilityLayer(asProxy(initial)), /INVALID_COMPAT_DEFINITION/);
+  assert.throws(()=>new LimitedCompatibilityLayer({
+    ...initial,consumers:asProxy([...initial.consumers])
+  }), /INVALID_COMPAT_ARRAY/);
+  assert.throws(()=>new LimitedCompatibilityLayer({
+    ...initial,bindings:[asProxy({...initial.bindings[0]}), initial.bindings[1]]
+  }), /INVALID_COMPAT_BINDING|INVALID_COMPAT_DEFINITION/);
+  for(const [candidate,reports] of [
+    [asProxy(newer),checks],
+    [{...newer,consumers:asProxy([...newer.consumers])},checks],
+    [{...newer,bindings:asProxy([...newer.bindings])},checks],
+    [{...newer,bindings:[asProxy({...newer.bindings[0]}),newer.bindings[1]]},checks],
+    [newer,asProxy([...checks])],
+    [newer,[asProxy({...checks[0]}),checks[1]]]
+  ] as const){
+    const layer=new LimitedCompatibilityLayer(initial);
+    const result=layer.previewUpgrade(candidate,reports);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(result.automaticActivationAllowed,false);
+    assert.equal(JSON.stringify(result).includes('SECRET_PROXY_TRAP'),false);
+  }
+  const revokedRecord=Proxy.revocable(newer,{});
+  const revokedArray=Proxy.revocable([...checks],{});
+  revokedRecord.revoke();
+  revokedArray.revoke();
+  const layer=new LimitedCompatibilityLayer(initial);
+  assert.equal(layer.previewUpgrade(revokedRecord.proxy,checks).status,'BLOCKED');
+  assert.equal(layer.previewUpgrade(newer,revokedArray.proxy).status,'BLOCKED');
+  assert.equal(layer.snapshot().preview,null);
+  assert.equal(trapCalls,0,'no untrusted Proxy trap may execute');
+});
+
 test('TEST-025: staged review cannot be mistaken for a Tampermonkey test or write approval', () => {
   const layer=new LimitedCompatibilityLayer(initial);
   const first=layer.previewUpgrade(newer,checks);

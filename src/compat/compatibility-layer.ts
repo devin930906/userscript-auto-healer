@@ -7,6 +7,8 @@
  * proposed upgrade. Callers must supply their own isolated test fixtures;
  * reported check outcomes are NOT trusted runtime evidence or write authority.
  */
+import { types as nodeTypes } from 'node:util';
+
 export type LocatorBinding = Readonly<{
   key:string;
   selector:string;
@@ -52,7 +54,7 @@ const SEMVER=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const MAX_CONSUMERS=64, MAX_BINDINGS=32;
 
 function exact(input:unknown, keys:readonly string[]):Record<string,unknown>|null {
-  if(!input||typeof input!=='object'||Array.isArray(input))return null;
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||Array.isArray(input))return null;
   const proto=Object.getPrototypeOf(input);
   if(proto!==Object.prototype&&proto!==null)return null;
   const descriptors=Object.getOwnPropertyDescriptors(input);
@@ -65,7 +67,7 @@ function exact(input:unknown, keys:readonly string[]):Record<string,unknown>|nul
   return out;
 }
 function safeArray(input:unknown,limit:number):readonly unknown[] {
-  if(!Array.isArray(input)||Object.getPrototypeOf(input)!==Array.prototype||
+  if(nodeTypes.isProxy(input)||!Array.isArray(input)||Object.getPrototypeOf(input)!==Array.prototype||
     input.length<1||input.length>limit||
     Reflect.ownKeys(input).length!==input.length+1)throw Error('INVALID_COMPAT_ARRAY');
   const descriptors=Object.getOwnPropertyDescriptors(input);
