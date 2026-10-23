@@ -37,7 +37,9 @@ function Wait-CandidatePortableProcessExit(
         [StringComparison]::OrdinalIgnoreCase)
     })
     if($matches.Count -eq 0) { return $check }
-    Write-Warning ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
+    # A caller's WarningPreference=Stop must not replace our bounded,
+    # authoritative live-process refusal with a diagnostic warning exception.
+    Write-Warning -WarningAction Continue ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
       $matches.Count,$check,$maxChecks)
     if($check -eq $maxChecks) {
       throw [InvalidOperationException]::new('Candidate-owned executable did not exit before relocation')
