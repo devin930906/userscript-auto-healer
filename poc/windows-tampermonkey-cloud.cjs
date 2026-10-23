@@ -236,22 +236,27 @@ async function main(){
   ?await prepareNativeManualExportForManager(reviewedCandidateForExport):null;
  const server=http.createServer((req,res)=>{
   if(req.url==='/test.user.js'){
-   res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8',
-     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
-   // For the product candidate, install the EXACT bytes produced by native
-   // disk export. A post-export mutation must refuse installation, not serve
-   // an unreviewed replacement from the disposable file.
+   // The product-candidate variant must install EXACT bytes created by the
+   // native manual exporter, not the in-memory AST proposal. If another
+   // process changes the disposable file, fail closed before returning 200.
+   let bytes=source;
    if(nativeExport){
     try{
-     const bytes=fs.readFileSync(nativeExport.exportedPath);
-     if(createHash('sha256').update(bytes).digest('hex')!==
+     const disk=fs.readFileSync(nativeExport.exportedPath);
+     if(createHash('sha256').update(disk).digest('hex')!==
         nativeExport.candidateSha256){
-      res.statusCode=409;return res.end('DISPOSABLE_EXPORT_CHANGED');
+      res.writeHead(409,{'Cache-Control':'no-store'});
+      return res.end('DISPOSABLE_EXPORT_CHANGED');
      }
-     return res.end(bytes);
-    }catch{res.statusCode=409;return res.end('DISPOSABLE_EXPORT_UNAVAILABLE');}
+     bytes=disk;
+    }catch{
+     res.writeHead(409,{'Cache-Control':'no-store'});
+     return res.end('DISPOSABLE_EXPORT_UNAVAILABLE');
+    }
    }
-   return res.end(source);
+   res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8',
+     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+   return res.end(bytes);
   }
   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8',
     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
