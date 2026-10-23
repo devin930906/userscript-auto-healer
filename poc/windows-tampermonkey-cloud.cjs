@@ -624,7 +624,7 @@ async function main(){
     // This is a user-clicked isolated manager lifecycle, NOT an application
     // auto-rollback or an attestation of production recovery authority.
     for(const old of context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/')&&
-        /confirm|install|\\/ask\\.html(?:\\?|$)/i.test(p.url())))
+        /confirm|install|\/ask\.html(?:\?|$)/i.test(p.url())))
       await old.close();
     const restoreUrl='http://127.0.0.1:'+port+'/test.user.js?manual-recovery=1';
     const restoreTab=await context.newPage();
@@ -632,7 +632,7 @@ async function main(){
     catch(error){console.log('DIRECT_MANUAL_RESTORE_NAVIGATION '+String(error).slice(0,130));}
     await sleep(2300);
     let restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
-    const restoreAsk=restorePages.find(p=>/\\/ask\\.html(?:\\?|$)/i.test(p.url()));
+    const restoreAsk=restorePages.find(p=>/\/ask\.html(?:\?|$)/i.test(p.url()));
     if(restoreAsk){
      const actions=await restoreAsk.locator('button,input[type="button"],input[type="submit"]')
       .evaluateAll(nodes=>nodes.map(el=>({name:(el.innerText||el.value||'').trim(),id:el.id||''})));
