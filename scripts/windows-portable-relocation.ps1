@@ -270,7 +270,8 @@ function Get-CandidatePortableRestartManagerSummary(
     $others=@($ordered | Where-Object {
       [IO.Path]::GetFileName($_) -cne 'UserscriptAutoHealer.exe'
     })
-    $sample=@(@($exe)+@($others) | Select-Object -First 40)
+    $probeOrder=@(@($exe)+@($others))
+    $sample=@($probeOrder | Select-Object -First 40)
     if(-not ('UahCandidateRestartManagerProbe' -as [type])) {
       Add-Type -TypeDefinition @'
 using System;
@@ -444,7 +445,45 @@ public static class UahCandidateRestartManagerProbe {
        $scoped -ne $counts[0] -or $counts[7] -gt $counts[0]) {
       return 'rm=unavailable'
     }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " imageScope=[candidateTree=$($counts[24]) runnerOther=$($counts[25]) outsideRunner=$($counts[26]) unknown=$($counts[27])]"
+    # The initial RM registration sees only the first 40 candidate files.
+    # Inspect the rest in bounded, read-only sessions (up to 512 total).
+    # A process may appear in multiple batches: count *observations*, not
+    # unique owners, and never turn an unavailable batch into a zero count.
+    $coverage=''
+    if($probeOrder.Count -gt $sample.Count) {
+      $checked=$sample.Count
+      $unavailable=0
+      $extraAffectedObservations=0
+      $batches=1
+      for($offset=$sample.Count; $offset -lt $probeOrder.Count; $offset+=40) {
+        $batches++
+        $next=@($probeOrder | Select-Object -Skip $offset -First 40)
+        $extra=[UahCandidateRestartManagerProbe]::CountAffectedByType(
+          [string[]]$next,$candidateExe,$runner)
+        if($null -eq $extra -or $extra.Length -ne 28 -or $extra[0] -lt 0) {
+          $unavailable++
+          continue
+        }
+        $extraTypes=0
+        foreach($i in 1..6) { $extraTypes+=$extra[$i] }
+        $extraImages=0
+        foreach($i in 8..14) { $extraImages+=$extra[$i] }
+        $extraScopes=0
+        foreach($i in 24..27) { $extraScopes+=$extra[$i] }
+        if($extraTypes -ne $extra[0] -or $extraImages -ne $extra[0] -or
+           $extraScopes -ne $extra[0] -or $extra[7] -gt $extra[0]) {
+          $unavailable++
+          continue
+        }
+        $checked+=$next.Count
+        $extraAffectedObservations+=$extra[0]
+      }
+      $complete=if($unavailable -eq 0 -and $checked -eq $probeOrder.Count) {
+        'true'
+      } else { 'false' }
+      $coverage=" coverage=[batches=$batches sampled=$checked total=$($probeOrder.Count) complete=$complete extraAffectedObservations=$extraAffectedObservations unavailableBatches=$unavailable]"
+    }
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " imageScope=[candidateTree=$($counts[24]) runnerOther=$($counts[25]) outsideRunner=$($counts[26]) unknown=$($counts[27])]" + $coverage
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
