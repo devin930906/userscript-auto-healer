@@ -30,13 +30,7 @@ test('TEST-020/026: Windows trailing dot/space ancestor aliases are rejected',as
   // Reserved Win32 device names also accept extensions. They must be
   // denied lexically, before lstat or any future privileged path operation.
   for(const alias of ['CON','con.txt','PRN','AUX','NUL',
-    'COM1','LPT9','COM¹','LPT²','CONIN
- }finally{await rm(root,{recursive:true,force:true});}
-});
-,'CONOUT
- }finally{await rm(root,{recursive:true,force:true});}
-});
-]){
+    'COM1','LPT9','COM¹','LPT²','CONIN$','CONOUT$']){
    assert.equal(await hasUnsafePathLink(join(root,alias,'safe.user.js')),true,
     'Win32 device namespace must not be used as an ancestor: '+alias);
   }
