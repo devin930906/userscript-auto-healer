@@ -418,3 +418,31 @@ test('TEST-017/026: parsed exclude-match stays recognized and explicitly blocks 
  assert.deepEqual(inspect(report,parsed),{ok:false,status:'BLOCKED',
   code:'MATCH_NOT_CONFIRMED',gmApiVerified:false,businessVerified:false});
 });
+
+test('TEST-017/026: preflight rejects a forged tag map inconsistent with the supplied source header',()=>{
+ const safe=['// ==UserScript==','// @name Consented GM fixture',
+  '// @grant GM_getValue','// @match https://example.com/*',
+  '// ==/UserScript==','void 0;'].join('\n');
+ const parsedSafe=parseUserscriptMetadata({bytes:new TextEncoder().encode(safe),
+  textEncoding:'utf-8'});
+ assert.equal(inspect(report,parsedSafe).ok,true,
+  'a real parser result must retain metadata-only eligibility');
+ for(const hidden of [
+  '// @require https://unreviewed.example/library.js',
+  '// @exclude https://example.com/private/*',
+  '// @grant GM_xmlhttpRequest',
+  '// @inject-into page'
+ ]){
+  const tampered=safe.replace('// ==/UserScript==',hidden+'\n// ==/UserScript==');
+  const parsed=parseUserscriptMetadata({bytes:new TextEncoder().encode(tampered),
+   textEncoding:'utf-8'});
+  assert.equal(parsed.status,'OK');
+  // Caller-supplied metadata has matching benign tags but the original
+  // header discloses an unreviewed directive. Never trust the tag map alone.
+  const forged={...parsed,tags:parsedSafe.tags,unknownNames:[]};
+  assert.deepEqual(inspect(report,forged),{
+   ok:false,status:'BLOCKED',code:'INVALID_SCRIPT_METADATA',
+   gmApiVerified:false,businessVerified:false
+  },hidden);
+ }
+});
