@@ -272,3 +272,10 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - 写入须先通过现有本机 Chrome 场景访问授权，并在 UI 显示本地归档告知；无 renderer 文件路径入口。新持久文件采用有界读取、身份复核、临时文件 fsync、首次硬链接不覆盖发布及本应用协作式路径互斥；存在未知文件、重解析路径、篡改或无法可靠清理时安全拒绝。不宣称对外部并发修改有 OS 级事务保证。
 - [Windows RED #40086563849](https://github.com/devin930906/userscript-auto-healer/actions/runs/40086563849) 为能力未实现的预期 3 失败；[中间运行 #40086990077](https://github.com/devin930906/userscript-auto-healer/actions/runs/40086990077) 与 [#40087238993](https://github.com/devin930906/userscript-auto-healer/actions/runs/40087238993) 保留真实开发/测试夹具失败；[GREEN #40087382259](https://github.com/devin930906/userscript-auto-healer/actions/runs/40087382259) 基于源 SHA `0910d093b3698332a71e403a9b62aa81e950d9b4`，536 项测试中 535 pass / 0 fail / 1 conditional skip，Windows Electron shell smoke 成功。
 - 这只满足 TEST-024 的受限本机历史持久化增量：**真实周期复检、Tampermonkey/GM/业务状态、跨真实应用重启的完整 GUI E2E、可信用户数据恢复及所有 Stable GATE 仍未全部验收**；不得据此声称正式健康监控完成、TEST-024/GATE-010 通过或 Stable 已完成。完整结果和整合以对应 PR/main 最新 CI 为准。
+
+## 2026-10-24 TASK-015 / TEST-024/026 · 拒绝未来时间归档污染（局部防护）
+
+- 只读健康历史归档的旧数据若格式正确但带有明显超前的 `observedAtMs`，原实现会把它展示为历史记录，并可能跳过后续真实观察；非真实、畸形或时间异常的历史均不得成为当前脚本健康证明。
+- 对本机已存记录及本次原生状态快照增加一致的时间上界（相对当前系统时间允许不超过五分钟的容差）；超过界限时只返回 `BLOCKED`，不得覆盖原归档、伪造成功记录或扩大自动修复权。此校验不能证明本机 JSON 记录的作者身份，不应宣称防篡改认证；本地系统时钟严重漂移时需人工检查，不自动重写历史。
+- Windows TDD RED：[Actions #40090211582](https://github.com/devin930906/userscript-auto-healer/actions/runs/40090211582)，修复前源码 `380d05977d266016952e8471516d61be18f53618`，538 tests / 535 passed / **2 新增失败** / 1 conditional skip。GREEN：[Actions #40090483982](https://github.com/devin930906/userscript-auto-healer/actions/runs/40090483982)，修复源码 `66e3264192151b8da4013650045ce88650f961ca`，538 tests / **537 passed / 0 failed** / 1 conditional skip，真实 Windows Electron sandbox/preload IPC smoke 通过。
+- 这仅为 TASK-015/TEST-024/026 时间序列安全增量，真实授权周期复检、Tampermonkey/GM/业务状态、跨真实用户 Windows 安装重启/迁移及完整 TEST-024、全部 GATE 仍未通过。
