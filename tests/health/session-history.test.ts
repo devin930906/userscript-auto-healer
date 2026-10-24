@@ -124,7 +124,7 @@ test('TEST-024/026: malformed, unregistered and non-readonly scenario ids fail c
 
 test('TASK-015/TEST-024: native limited history survives restart but never replays current health authority',async()=>{
  // Resolve dynamically so the RED is a behavioral assertion, not a missing TS import error.
- const feature=require('../../src/health/limited-health-archive') as
+ const feature=(()=>{try{return require('../../src/health/limited-health-archive');}catch{return {};}})() as
   {saveLimitedHealthArchive?:Function;readLimitedHealthArchive?:Function};
  assert.equal(typeof feature.saveLimitedHealthArchive,'function');
  assert.equal(typeof feature.readLimitedHealthArchive,'function');
@@ -164,7 +164,7 @@ test('TASK-015/TEST-024: native limited history survives restart but never repla
 });
 
 test('TASK-015/TEST-024: archived history is per-scenario and capped at 32, preserving prior events',async()=>{
- const feature=require('../../src/health/limited-health-archive') as any;
+ const feature=(()=>{try{return require('../../src/health/limited-health-archive');}catch{return {};}})() as any;
  assert.equal(typeof feature.saveLimitedHealthArchive,'function');
  const home=await mkdtemp(join(tmpdir(),'uah-health-retention-'));
  try{
@@ -188,7 +188,7 @@ test('TASK-015/TEST-024: archived history is per-scenario and capped at 32, pres
 });
 
 test('TASK-015/TEST-024/026: tampered or linked archive never becomes trusted or overwritten',async()=>{
- const feature=require('../../src/health/limited-health-archive') as any;
+ const feature=(()=>{try{return require('../../src/health/limited-health-archive');}catch{return {};}})() as any;
  assert.equal(typeof feature.readLimitedHealthArchive,'function');
  const home=await mkdtemp(join(tmpdir(),'uah-health-block-'));
  try{
