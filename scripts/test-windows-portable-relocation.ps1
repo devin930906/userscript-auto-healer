@@ -444,10 +444,22 @@ try {
     }
     $outsideShare=Get-CandidatePortableFileShareSummary $permanent @(
       (Join-Path $root 'outside-scope.txt'))
-    if($outsideShare -cne 'scan=unavailable') {
-      throw 'Share probe accepted a path outside its candidate directory'
+    if($outsideShare -cne 'scan=unavailable stage=manifest-scope') {
+      throw 'Share probe did not distinguish out-of-scope input without exposing a path'
     }
-    Write-Output 'PASS: file-sharing probe detects owned exclusive lock and rejects out-of-scope paths'
+    # ISSUE-215: the real post-Electron failure currently reports
+    # scan=unavailable, discarding the stage needed to locate the limitation.
+    # Force a read-only enumeration failure without changing candidate files;
+    # diagnostic exceptions must never leak arbitrary error strings or paths.
+    $enumerationUnavailable=& {
+      function Get-ChildItem { throw 'DO-NOT-LEAK-disposable-secret-path' }
+      Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
+    }
+    if($enumerationUnavailable -cne 'scan=unavailable stage=enumeration' -or
+       $enumerationUnavailable.Contains('DO-NOT-LEAK')) {
+      throw "Share probe must report bounded enumeration failure stage: $enumerationUnavailable"
+    }
+    Write-Output 'PASS: file-sharing probe distinguishes rejected scope from enumeration failure without exposing paths'
     # ISSUE-215: Restart Manager can observe processes using candidate
     # files even when the candidate executable process list is empty.
     # Counts only, no process names or PIDs, and never stop a process.

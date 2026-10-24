@@ -99,16 +99,20 @@ function Write-CandidatePortableProcessSnapshot([string]$candidateExe,[string]$l
 function Get-CandidatePortableFileShareSummary(
   [string]$source,[string[]]$filePaths
 ) {
+  # ISSUE-215: fixed, path-redacted failure stages, not arbitrary exception
+  # messages or absolute candidate file names.
+  $stage='input'
   try {
     if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
        [string]::IsNullOrWhiteSpace($source) -or
        $null -eq $filePaths -or $filePaths.Count -gt 512) {
-      return 'scan=unavailable'
+      return 'scan=unavailable stage=input'
     }
     $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
     $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
-       [StringComparison]::OrdinalIgnoreCase)) { return 'scan=unavailable' }
+       [StringComparison]::OrdinalIgnoreCase)) { return 'scan=unavailable stage=manifest-scope' }
+    $stage='manifest-scope'
     Assert-CandidatePortableNoReparsePath $runner $base
     $prefix=$base+[IO.Path]::DirectorySeparatorChar
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -119,15 +123,15 @@ function Get-CandidatePortableFileShareSummary(
     # This is only a handle-open diagnostic; it performs no rename or writes.
     $sourceParent=[IO.Path]::GetDirectoryName($base)
     if(-not $sourceParent.StartsWith($runner,[StringComparison]::OrdinalIgnoreCase)) {
-      return 'scan=unavailable'
+      return 'scan=unavailable stage=manifest-scope'
     }
     if($seen.Add($sourceParent)) { $targets.Add($sourceParent) }
     if($seen.Add($base)) { $targets.Add($base) }
     foreach($path in $filePaths) {
-      if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable' }
+      if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable stage=manifest-scope' }
       $full=[IO.Path]::GetFullPath($path)
       if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
-        return 'scan=unavailable'
+        return 'scan=unavailable stage=manifest-scope'
       }
       $null=$manifestFiles.Add($full)
       $parent=[IO.Path]::GetDirectoryName($full)
@@ -141,6 +145,7 @@ function Get-CandidatePortableFileShareSummary(
     # of any enumerated file, yet an open directory handle can deny rename.
     # Walk only direct child directories, reject reparse points before descent,
     # and bound the entire read-only diagnostic independently of file count.
+    $stage='enumeration'
     $pending=[Collections.Generic.Queue[string]]::new()
     $pending.Enqueue($base)
     $directoryCount=0
@@ -152,10 +157,10 @@ function Get-CandidatePortableFileShareSummary(
         $full=[IO.Path]::GetFullPath([string]$child.FullName)
         if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
            (([int]$child.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0)) {
-          return 'scan=unavailable'
+          return 'scan=unavailable stage=enumeration'
         }
         $directoryCount++
-        if($directoryCount -gt 512) { return 'scan=unavailable' }
+        if($directoryCount -gt 512) { return 'scan=unavailable stage=enumeration' }
         if($seen.Add($full)) { $targets.Add($full) }
         $pending.Enqueue($full)
       }
@@ -168,22 +173,24 @@ function Get-CandidatePortableFileShareSummary(
         $full=[IO.Path]::GetFullPath([string]$child.FullName)
         if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
            (([int]$child.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0)) {
-          return 'scan=unavailable'
+          return 'scan=unavailable stage=enumeration'
         }
         $discoveredFiles++
-        if($discoveredFiles -gt 512) { return 'scan=unavailable' }
+        if($discoveredFiles -gt 512) { return 'scan=unavailable stage=enumeration' }
         if(-not $manifestFiles.Contains($full)) { $extraFiles++ }
         if($seen.Add($full)) { $targets.Add($full) }
       }
     }
     # Includes the root and every parent of a candidate file. Reparse paths
     # are rejected before any native handle is requested.
+    $stage='attributes'
     foreach($path in $targets) {
       if(([int][IO.File]::GetAttributes($path) -band
          [int][IO.FileAttributes]::ReparsePoint) -ne 0) {
-        return 'scan=unavailable'
+        return 'scan=unavailable stage=attributes'
       }
     }
+    $stage='native-setup'
     if(-not ('UahCandidateDeleteAccessProbe' -as [type])) {
       Add-Type -TypeDefinition @'
 using System;
@@ -196,6 +203,7 @@ public static class UahCandidateDeleteAccessProbe {
 }
 '@ -ErrorAction Stop
     }
+    $stage='native-probe'
     $blocked=[Collections.Generic.List[string]]::new()
     $blockedCount=0
     foreach($path in $targets) {
@@ -214,7 +222,7 @@ public static class UahCandidateDeleteAccessProbe {
           [uint32]0x02000000,[IntPtr]::Zero)
         if($handle.IsInvalid) {
           $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
-          if($code -notin @(5,32,33)) { return 'scan=unavailable' }
+          if($code -notin @(5,32,33)) { return 'scan=unavailable stage=native-probe' }
           $blockedCount++
           if($blocked.Count -lt 8) {
             $name=if([string]::Equals($path,$sourceParent,
@@ -231,7 +239,7 @@ public static class UahCandidateDeleteAccessProbe {
     }
     # Candidate-relative names or fixed (parent)/(root), no absolute paths.
     return "scan=ok probed=$($filePaths.Count) blockedExamples=$blockedCount names=$($blocked -join ';') extraFiles=$extraFiles"
-  } catch { return 'scan=unavailable' }
+  } catch { return "scan=unavailable stage=$stage" }
 }
 
 # ISSUE-215 / TEST-028: supplementary Windows Restart Manager evidence
