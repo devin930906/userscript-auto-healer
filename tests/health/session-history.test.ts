@@ -172,7 +172,8 @@ test('TASK-015/TEST-024: archived history is per-scenario and capped at 32, pres
   const key=limitedScenarioHistoryKey(A,'first');
   let clock=10;
   for(let i=0;i<36;i++){
-   const run=new LimitedHealthRegistry(()=>++clock);
+   clock++;
+   const run=new LimitedHealthRegistry(()=>clock);
    run.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
    assert.equal((await feature.saveLimitedHealthArchive(userData,run.snapshot(key))).status,
     'ARCHIVE_SAVED_UNVERIFIED');
