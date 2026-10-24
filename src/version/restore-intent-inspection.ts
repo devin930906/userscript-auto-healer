@@ -214,6 +214,11 @@ export async function inspectNativeRestoreIntentReadOnly(
   // Without this, an external writer can modify one after its first check
   // and the user sees a false reconciled/verified status.
   if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  // The second backup round has asynchronous reads. A separate process may
+  // replace or rewrite the previously verified intent *during* that round.
+  // Re-read the exact bounded journal before returning any observation;
+  // matching backup bytes cannot authenticate a stale/replaced intent.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
   // The final independent backup reads suspend execution. An external
   // editor can replace the selected source AFTER our earlier fingerprint
   // and sourceStart/sourceEnd identity check, but BEFORE this observation
