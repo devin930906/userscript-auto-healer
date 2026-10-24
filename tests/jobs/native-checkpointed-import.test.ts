@@ -158,3 +158,63 @@ test('TASK-013/TEST-022: cancellation during resumed AST display analysis cannot
    'late display cancellation must not rewrite previous durable scheduling');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segments retain verified static previews',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-resumed-worker-failure-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<17;i++){
+   const path=join(home,'selected-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#isolated-'+i+'");');
+   files.push(path);
+  }
+  const scripts=(await importApprovedPaths(files)).scripts;
+  assert.equal(scripts.length,17);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const first=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(first.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(first.status!=='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')return;
+  assert.equal(first.previews.every(row=>row.status==='STATIC_ANALYSIS_ONLY'),true);
+  const directory=join(root,(await readdir(root))[0]);
+  const journal=join(directory,BATCH_JOURNAL_FILENAME);
+  const saved=await readFile(journal);
+
+  // A previously persisted SUCCEEDED hint is NOT fresh AST evidence.
+  // Inject a Worker-level exception only in the first resumed segment.
+  // The next independent segment must still yield real preview evidence.
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(calls===1)throw Error('INJECTED_RESUMED_AST_WORKER_FAILURE');
+    return actual(...args);
+   });
+  const progress:Array<[number,number]>=[];
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts,
+    undefined,(processed,total)=>progress.push([processed,total]));
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.deepEqual(resumed.previews.slice(0,16).map(row=>row.status),
+     Array(16).fill('ISOLATED_ANALYSIS_FAILED'));
+    assert.equal(resumed.previews[16].status,'STATIC_ANALYSIS_ONLY',
+     'an independent segment must not be lost to a prior Worker failure');
+    assert.equal(resumed.previews.every(row=>row.automaticPatchAllowed===false&&
+     row.tampermonkeyVerified===false&&row.businessVerified===false),true);
+   }
+   assert.equal(calls,2,'every resumed segment independently re-runs AST');
+   assert.deepEqual(progress,[[16,17],[17,17]]);
+  }finally{patch.mock.restore();}
+  assert.deepEqual(await readFile(journal),saved,
+   'resumed display-only faults must not rewrite durable scheduling history');
+  for(let i=0;i<17;i++){
+   assert.equal((await readFile(files[i],'utf8')).includes('#isolated-'+i),true,
+    'Worker failures must not alter imported userscripts');
+  }
+ }finally{await rm(home,{recursive:true,force:true});}
+});
