@@ -83,6 +83,29 @@ try {
   New-Item -ItemType Directory -Path $sandbox | Out-Null
   try {
     $env:RUNNER_TEMP=$sandbox
+    # TEST-028: a relative RUNNER_TEMP must never be silently resolved
+    # against the process working directory as an authority to rename files.
+    # Even absolute source/destination paths must fail closed in this case.
+    $relativeSource=Join-Path $sandbox 'relative-temp-source'
+    $relativeMoved=Join-Path $sandbox 'relative-temp-moved'
+    New-Item -ItemType Directory -Path $relativeSource | Out-Null
+    $relativePayload=Join-Path $relativeSource 'preserve.txt'
+    [IO.File]::WriteAllText($relativePayload,'untouched')
+    $relativeTempBlocked=$false
+    try {
+      $env:RUNNER_TEMP='relative-runner-temp'
+      try { Move-CandidatePortableDirectory $relativeSource $relativeMoved 1 0 | Out-Null }
+      catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*requires absolute runner temp paths*') { throw }
+        $relativeTempBlocked=$true
+      }
+    } finally { $env:RUNNER_TEMP=$sandbox }
+    if(-not $relativeTempBlocked -or (Test-Path -LiteralPath $relativeMoved) -or
+       -not (Test-Path -LiteralPath $relativePayload -PathType Leaf) -or
+       [IO.File]::ReadAllText($relativePayload) -cne 'untouched') {
+      throw 'Relative RUNNER_TEMP allowed unsafe candidate relocation'
+    }
+    Write-Output 'PASS: relative RUNNER_TEMP is rejected before any candidate relocation'
     foreach($base in @(
       (Join-Path $root 'external'),
       (Join-Path $root 'isolated-runner-sibling')
