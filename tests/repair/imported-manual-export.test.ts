@@ -196,6 +196,25 @@ test('TEST-019/026: native file handoff rejects accessors and extra pathname aut
  });
 });
 
+test('TEST-019/026: forged SHA coercion never executes untrusted import code',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  let conversions=0;
+  const forgedSha={
+   [Symbol.toPrimitive](){conversions++;return script.sha256;}
+  };
+  const result=await exportReviewedImportedSelectorOnly(
+   {...script,sha256:forgedSha},scenario(script.sha256),observation(),
+   {backupDirectory,exportDirectory,userApproved:true}
+  );
+  assert.equal(conversions,0,'SHA validation must reject objects before RegExp coercion');
+  assert.equal(result.status,'BLOCKED');
+  if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_IMPORT');
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readdir(exportDirectory),[]);
+  assert.equal(await readFile(scriptPath,'utf8'),source);
+ });
+});
+
 test('TEST-019/023/026: native manual export rejects accessor scenarios before touching disk',async()=>{
  await fixture(async({script,backupDirectory,exportDirectory})=>{
   let invoked=0;
