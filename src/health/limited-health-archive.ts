@@ -210,9 +210,26 @@ export async function saveLimitedHealthArchive(
        !previous.bytes.equals(current.bytes))||
      await hasUnsafePathLink(dir))
    return Object.freeze({status:'BLOCKED',...emptyAuthority});
-  if(previous==='NOT_FOUND')await link(pending,target);
-  else await rename(pending,target);
-  if(previous!=='NOT_FOUND')created=false;
+  if(previous==='NOT_FOUND'){
+   // A no-clobber hard link temporarily has nlink=2. Verify both names
+   // refer to OUR staged inode before retiring the staging name; only
+   // then can the final archive satisfy the independent nlink=1 check.
+   await link(pending,target);
+   const stagedLink=await lstat(pending,{bigint:true});
+   const targetLink=await lstat(target,{bigint:true});
+   if(!staged||!stagedLink.isFile()||stagedLink.isSymbolicLink()||
+      !targetLink.isFile()||targetLink.isSymbolicLink()||
+      stagedLink.nlink!==2n||targetLink.nlink!==2n||
+      !directorySame(staged,stagedLink)||
+      !directorySame(stagedLink,targetLink)||
+      stagedLink.size!==staged.size||targetLink.size!==staged.size)
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
+   await unlink(pending);
+   created=false;
+  }else{
+   await rename(pending,target);
+   created=false;
+  }
   const published=await inspectFile(target,key);
   if(!published||published==='NOT_FOUND'||!published.bytes.equals(bytes))
    return Object.freeze({status:'BLOCKED',...emptyAuthority});
