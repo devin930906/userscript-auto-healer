@@ -106,6 +106,43 @@ try {
       throw 'Relative RUNNER_TEMP allowed unsafe candidate relocation'
     }
     Write-Output 'PASS: relative RUNNER_TEMP is rejected before any candidate relocation'
+    # IsPathRooted accepts Windows current-drive-relative and drive-relative
+    # spellings. They must not become trusted absolute relocation authorities.
+    $driveRoot=[IO.Path]::GetPathRoot($sandbox)
+    if($driveRoot.Length -ne 3 -or [string]$driveRoot[1] -cne ':' -or
+       [string]$driveRoot[2] -cne [string][IO.Path]::DirectorySeparatorChar) {
+      throw 'TEST-028 requires a Windows drive-backed disposable runner'
+    }
+    $rootRelativeSandbox=[string][IO.Path]::DirectorySeparatorChar + $sandbox.Substring($driveRoot.Length)
+    $rootRelativeSource=[string][IO.Path]::DirectorySeparatorChar + $relativeSource.Substring($driveRoot.Length)
+    $rootRelativeMoved=[string][IO.Path]::DirectorySeparatorChar + $relativeMoved.Substring($driveRoot.Length)
+    $driveRelativeSandbox=$driveRoot.Substring(0,2) + $sandbox.Substring($driveRoot.Length)
+    $driveRelativeSource=$driveRoot.Substring(0,2) + $relativeSource.Substring($driveRoot.Length)
+    $driveRelativeMoved=$driveRoot.Substring(0,2) + $relativeMoved.Substring($driveRoot.Length)
+    foreach($case in @(
+      @{ name='runner-root-relative'; runner=$rootRelativeSandbox; from=$relativeSource; to=$relativeMoved },
+      @{ name='source-root-relative'; runner=$sandbox; from=$rootRelativeSource; to=$relativeMoved },
+      @{ name='destination-root-relative'; runner=$sandbox; from=$relativeSource; to=$rootRelativeMoved },
+      @{ name='runner-drive-relative'; runner=$driveRelativeSandbox; from=$relativeSource; to=$relativeMoved },
+      @{ name='source-drive-relative'; runner=$sandbox; from=$driveRelativeSource; to=$relativeMoved },
+      @{ name='destination-drive-relative'; runner=$sandbox; from=$relativeSource; to=$driveRelativeMoved }
+    )) {
+      $blocked=$false
+      try {
+        $env:RUNNER_TEMP=$case.runner
+        try { Move-CandidatePortableDirectory $case.from $case.to 1 0 | Out-Null }
+        catch [System.InvalidOperationException] {
+          if($_.Exception.Message -notlike '*requires absolute runner temp paths*') { throw }
+          $blocked=$true
+        }
+      } finally { $env:RUNNER_TEMP=$sandbox }
+      if(-not $blocked -or (Test-Path -LiteralPath $relativeMoved) -or
+         -not (Test-Path -LiteralPath $relativePayload -PathType Leaf) -or
+         [IO.File]::ReadAllText($relativePayload) -cne 'untouched') {
+        throw ('Ambiguous Windows rooted path changed candidate state: '+$case.name)
+      }
+    }
+    Write-Output 'PASS: six ambiguous Windows rooted relocation path inputs rejected'
     foreach($base in @(
       (Join-Path $root 'external'),
       (Join-Path $root 'isolated-runner-sibling')
