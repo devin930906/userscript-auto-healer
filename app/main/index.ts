@@ -894,7 +894,7 @@ function registerSafeIpc(): void {
       const currentLast=current.events[current.events.length-1]?.observedAtMs;
       const currentStatus=currentLast!==undefined&&currentLast>=oldLast?
         current.currentStatus:'INDETERMINATE' as const;
-      return Object.freeze({...current,currentStatus,events});
+      return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
     }catch{return current.events.length?current:
       {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};}
   });

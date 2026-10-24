@@ -376,3 +376,17 @@ test('TASK-009/012/017 TEST-019/020/023/026: manual export requires true live ow
  assert.match(html,/不提供自动安装和回滚/);
  assert.match(ui,/MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED/);
 });
+
+test('TASK-015/017 TEST-024/026: native-only archive has no arbitrary renderer path authority',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(main,/ipcMain\.handle\('scenario:history',async\(event,id:unknown\)=>/);
+ assert.match(main,/readLimitedHealthArchive\(app\.getPath\('userData'\),key\)/);
+ assert.match(main,/saveLimitedHealthArchive\(app\.getPath\('userData'\),snapshot\)/);
+ assert.match(main,/archiveRetained:true/);
+ assert.match(main,/重新启动后历史不会成为当前健康认证/);
+ assert.match(ui,/本机持久的未验证历史/);
+ assert.match(preload,/readScenarioHistory: \(id: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:history',id\)/);
+ assert.doesNotMatch(main,/ipcMain\.handle\('scenario:history',async\(event,(?:path|sourcePath|fileName|scriptHash)/);
+});
