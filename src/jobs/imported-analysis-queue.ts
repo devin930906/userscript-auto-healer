@@ -33,7 +33,7 @@ const NATIVE_TYPED_ARRAY_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
  * even after their SHA-256 was checked. A later segment must not read bytes
  * modified by the caller while earlier workers/progress handlers run.
  */
-function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundScript[]|null{
+export function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundScript[]|null{
  try{
   // Only a native data-only batch can reach the privileged AST worker.
   // A Proxy, accessor-backed array index or custom iterator can execute
