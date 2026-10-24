@@ -551,32 +551,68 @@ function Get-CandidatePortableRmFileAssociationSummary(
     $other=@($sorted | Where-Object {
       [IO.Path]::GetFileName($_) -cne 'UserscriptAutoHealer.exe'
     })
-    $sample=@(@($exe)+@($other) | Select-Object -First 40)
+    $probeOrder=@(@($exe)+@($other))
     $associated=0;$exeAssociated=0;$libraryAssociated=0
     $otherAssociated=0;$outsideAssociated=0
-    foreach($file in $sample) {
-      # Existing routine independently verifies scope, signature/creation
-      # identity and session closure for this SINGLE file.
-      $detail=Get-CandidatePortableRestartManagerSummary $base @($file)
-      $affected=[regex]::Match($detail,
-        '^rm=ok sampled=1 total=1 affected=(\d+) ')
-      $scopes=[regex]::Match($detail,
+    $sampled=0;$scannedBatches=0;$unresolvedOutsideBatches=0
+    # A per-file RM session for all 512 files could turn a diagnostic into
+    # an unbounded delay at the first rename denial. Query at most 13 groups
+    # of 40, then inspect at most ONE 40-file associated group individually.
+    # Later associated groups remain explicitly PARTIAL, never false "clear".
+    for($offset=0;$offset -lt $probeOrder.Count;$offset+=40) {
+      $batch=@($probeOrder | Select-Object -Skip $offset -First 40)
+      $scannedBatches++
+      $group=Get-CandidatePortableRestartManagerSummary $base $batch
+      $header=[regex]::Match($group,
+        '^rm=ok sampled=(\d+) total=(\d+) affected=(\d+) ')
+      $scope=[regex]::Match($group,
         ' imageScope=\[candidateTree=\d+ runnerOther=\d+ outsideRunner=(\d+) unknown=\d+\]')
-      if(-not $affected.Success -or -not $scopes.Success) {
+      if(-not $header.Success -or -not $scope.Success -or
+         [int]$header.Groups[1].Value -ne $batch.Count -or
+         [int]$header.Groups[2].Value -ne $batch.Count) {
         return 'rmFiles=unavailable'
       }
-      $count=[int]$affected.Groups[1].Value
-      $outside=[int]$scopes.Groups[1].Value
+      $count=[int]$header.Groups[3].Value
+      $outside=[int]$scope.Groups[1].Value
       if($outside -gt $count) { return 'rmFiles=unavailable' }
-      if($count -eq 0) { continue }
-      $associated++
-      if([string]::Equals([IO.Path]::GetFileName($file),'UserscriptAutoHealer.exe',
-         [StringComparison]::Ordinal)) { $exeAssociated++ }
-      elseif([IO.Path]::GetExtension($file) -ieq '.dll') { $libraryAssociated++ }
-      else { $otherAssociated++ }
-      if($outside -gt 0) { $outsideAssociated++ }
+      if($outside -eq 0) { continue }
+      if($sampled+$batch.Count -gt 40) {
+        $unresolvedOutsideBatches++
+        continue
+      }
+      foreach($file in $batch) {
+        # Existing routine independently validates each exact runner-owned
+        # file, classifies time-matched process images, and closes its session.
+        $detail=Get-CandidatePortableRestartManagerSummary $base @($file)
+        $affected=[regex]::Match($detail,
+          '^rm=ok sampled=1 total=1 affected=(\d+) ')
+        $scopes=[regex]::Match($detail,
+          ' imageScope=\[candidateTree=\d+ runnerOther=\d+ outsideRunner=(\d+) unknown=\d+\]')
+        if(-not $affected.Success -or -not $scopes.Success) {
+          return 'rmFiles=unavailable'
+        }
+        $fileCount=[int]$affected.Groups[1].Value
+        $fileOutside=[int]$scopes.Groups[1].Value
+        if($fileOutside -gt $fileCount) { return 'rmFiles=unavailable' }
+        $sampled++
+        if($fileCount -eq 0) { continue }
+        $associated++
+        if([string]::Equals([IO.Path]::GetFileName($file),'UserscriptAutoHealer.exe',
+           [StringComparison]::Ordinal)) { $exeAssociated++ }
+        elseif([IO.Path]::GetExtension($file) -ieq '.dll') { $libraryAssociated++ }
+        else { $otherAssociated++ }
+        if($fileOutside -gt 0) { $outsideAssociated++ }
+      }
     }
-    return "rmFiles=ok sampled=$($sample.Count) associated=$associated kinds=[exe=$exeAssociated library=$libraryAssociated other=$otherAssociated] outsideRunnerAssociated=$outsideAssociated"
+    $state=if($unresolvedOutsideBatches -eq 0) {'rmFiles=ok'} else {'rmFiles=partial'}
+    $summary="$state sampled=$sampled associated=$associated kinds=[exe=$exeAssociated library=$libraryAssociated other=$otherAssociated] outsideRunnerAssociated=$outsideAssociated"
+    if($probeOrder.Count -gt 40) {
+      $summary+=" scannedBatches=$scannedBatches totalFiles=$($probeOrder.Count)"
+    }
+    if($unresolvedOutsideBatches -gt 0) {
+      $summary+=" unresolvedOutsideBatches=$unresolvedOutsideBatches"
+    }
+    return $summary
   } catch { return 'rmFiles=unavailable' }
 }
 
@@ -758,7 +794,10 @@ function Get-CandidatePortableFirstDenialSummary(
   # Run individual attribution only when a batch already observed an
   # outside-runner association. Never treat this evidence as causal proof.
   $rmFiles='rmFiles=not-probed'
-  if($rm -match ' imageScope=\[[^\]]*outsideRunner=([1-9][0-9]*)') {
+  if($rm -match ' imageScope=\[[^\]]*outsideRunner=([1-9][0-9]*)' -or
+     $rm -match ' coverage=\[[^\]]*extraAffectedObservations=([1-9][0-9]*)') {
+    # A later 40-file RM batch may be the ONLY place with an association.
+    # Inspect targeted batches even when the first batch reports zero.
     $rmFiles=Get-CandidatePortableRmFileAssociationSummary $source $candidateFiles
   }
   return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm] fileAssociations=[$rmFiles]"
