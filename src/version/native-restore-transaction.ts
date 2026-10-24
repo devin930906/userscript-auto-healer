@@ -237,6 +237,11 @@ export async function restoreVerifiedOriginalNativeOnly(
  // itself has been released. A stranded mutex blocks subsequent recovery.
  let completedRestore:NativeOriginalRestoreResult|undefined;
  let lockReleased=false;
+ // Release of the cooperative mutex is asynchronous. Keep independent
+ // receipt evidence so a late external write cannot be acknowledged as good.
+ let receiptSource:BigIntStats|undefined;
+ let receiptJournal:Readonly<{path:string;bytes:Buffer}>|undefined;
+ let receiptDisplaced:Readonly<{fileName:string;byteLength:number}>|undefined;
  let pending:string|undefined;
  let journalPending:string|undefined;
  let pendingIdentity:BigIntStats|undefined;
@@ -446,6 +451,10 @@ export async function restoreVerifiedOriginalNativeOnly(
      await hasUnsafePathLink(opts.sourcePath))
    return block('RECOVERY_SAFETY_FAILED');
   // Do not return before finally; lock cleanup determines success.
+  // Recheck this same inode and both retained recovery copies AFTER rmdir.
+  receiptSource=finalRestoredStat;
+  receiptJournal={path:journalPath,bytes:journal};
+  receiptDisplaced={fileName:displaced.backupFileName,byteLength:displaced.byteLength};
   completedRestore=Object.freeze({
    status:'RESTORED_NATIVE_ONLY' as const,
    originalSha256:opts.expectedOriginalSha256,
@@ -475,9 +484,57 @@ export async function restoreVerifiedOriginalNativeOnly(
    }catch{/* Preserve unknown or busy lock evidence. */}
   }
  }
- // Never acknowledge restoration if our path lock did not release. The
- // original MAY already contain restored bytes: preserve all backups and
- // the intent journal for explicit privileged native reconciliation.
- return completedRestore&&lockReleased?
-  completedRestore:block('RECOVERY_SAFETY_FAILED');
+ // Never acknowledge restoration if the path lock failed to release. The
+ // original MAY already contain restored bytes: keep backups and journal.
+ if(!completedRestore||!lockReleased||!receiptSource||
+    !receiptJournal||!receiptDisplaced)
+  return block('RECOVERY_SAFETY_FAILED');
+ // Releasing our mutex awaits the filesystem. A third-party edit during
+ // that await can invalidate an earlier success receipt. Recheck the same
+ // restored inode, the original/displaced backups and the published intent
+ // after release. This remains a bounded snapshot, NOT an exclusive handle
+ // lock or a guarantee against changes after the final observation.
+ try{
+  if(await hasUnsafePathLink(opts.sourcePath)||
+     await hasUnsafePathLink(opts.backupDirectory))
+   return block('RECOVERY_SAFETY_FAILED');
+  const again=await verifyApprovedSourceFingerprint({
+   sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
+   userApproved:true
+  });
+  const current=await lstat(opts.sourcePath,{bigint:true});
+  if(again.status!=='MATCHED_READ_ONLY'||
+     !current.isFile()||current.isSymbolicLink()||current.nlink!==1n||
+     !sameFile(receiptSource,current)||
+     (current.mode&0o777n)!==(receiptSource.mode&0o777n))
+   return block('RECOVERY_SAFETY_FAILED');
+  if((await verifyBackupRecoverySource({
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+    backupFileName:opts.backupFileName,
+    expectedSha256:opts.expectedOriginalSha256,
+    expectedByteLength:opts.expectedOriginalByteLength,userApproved:true
+   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+   (await verifyBackupRecoverySource({
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+    backupFileName:receiptDisplaced.fileName,
+    expectedSha256:opts.expectedCurrentSha256,
+    expectedByteLength:receiptDisplaced.byteLength,userApproved:true
+   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+   await verifyExactCandidateBytesReadOnly(
+    receiptJournal.path,receiptJournal.bytes)!=='MATCH')
+   return block('RECOVERY_SAFETY_FAILED');
+  // The extra recovery checks can also await external disk operations.
+  // Finish by rechecking the original source to avoid stale success after
+  // the evidence verification. Never undo somebody else's latest edit.
+  if((await verifyApprovedSourceFingerprint({
+    sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
+    userApproved:true
+   })).status!=='MATCHED_READ_ONLY')
+   return block('RECOVERY_SAFETY_FAILED');
+  const last=await lstat(opts.sourcePath,{bigint:true});
+  if(!sameFile(receiptSource,last)||last.nlink!==1n||
+     await hasUnsafePathLink(opts.sourcePath))
+   return block('RECOVERY_SAFETY_FAILED');
+  return completedRestore;
+ }catch{return block('RECOVERY_SAFETY_FAILED');}
 }

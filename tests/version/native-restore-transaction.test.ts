@@ -578,6 +578,67 @@ test('TASK-011/TEST-020/026: Windows case aliases must share a native restore pa
  });
 });
 
+test('TASK-011/TEST-020/021: source modified while mutex is released cannot get success',async()=>{
+ await fixture(async opts=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const originalRmdir=fsPromises.rmdir;
+  const external=Buffer.from('// external editor intervened during mutex release\n');
+  let changedDuringRelease=false;
+  (fsPromises as {rmdir:typeof originalRmdir}).rmdir=async(path,...args)=>{
+   const result=await originalRmdir(path,...args);
+   if(path.includes('.uah-restore-path-')){
+    assert.deepEqual(await readFile(opts.sourcePath),original);
+    await writeFile(opts.sourcePath,external);
+    changedDuringRelease=true;
+   }
+   return result;
+  };
+  try{
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(changedDuringRelease,true);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false});
+   assert.deepEqual(await readFile(opts.sourcePath),external,
+    'must preserve external writes after restoring source');
+   const names=await readdir(opts.backupDirectory);
+   assert.ok(names.includes(opts.backupFileName));
+   assert.ok(names.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName));
+   assert.ok(names.some(n=>n.endsWith('.journal.json')));
+  }finally{(fsPromises as {rmdir:typeof originalRmdir}).rmdir=originalRmdir;}
+ });
+});
+
+test('TASK-011/TEST-020/021: journal changed while mutex is released cannot get success',async()=>{
+ await fixture(async opts=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const originalRmdir=fsPromises.rmdir;
+  let changedDuringRelease=false;
+  (fsPromises as {rmdir:typeof originalRmdir}).rmdir=async(path,...args)=>{
+   const result=await originalRmdir(path,...args);
+   if(path.includes('.uah-restore-path-')){
+    const journals=(await readdir(opts.backupDirectory))
+     .filter(n=>n.endsWith('.journal.json'));
+    assert.equal(journals.length,1);
+    await writeFile(join(opts.backupDirectory,journals[0]),
+     Buffer.from('external journal replacement after mutex release'));
+    changedDuringRelease=true;
+   }
+   return result;
+  };
+  try{
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(changedDuringRelease,true);
+   assert.deepEqual(result,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false});
+   assert.deepEqual(await readFile(opts.sourcePath),original);
+   const names=await readdir(opts.backupDirectory);
+   assert.ok(names.includes(opts.backupFileName));
+   assert.ok(names.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName));
+  }finally{(fsPromises as {rmdir:typeof originalRmdir}).rmdir=originalRmdir;}
+ });
+});
 test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
  await fixture(async opts=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
