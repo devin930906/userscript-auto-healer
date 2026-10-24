@@ -8,7 +8,7 @@
 import {createHash} from 'node:crypto';
 import {lstat,mkdir} from 'node:fs/promises';
 import {isAbsolute,join,resolve} from 'node:path';
-import type {ImportedScript} from '../import/import-service';
+import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
 import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
@@ -28,7 +28,6 @@ const fail=(count:number,reason:BatchJournalFailure|'CANCELLED'):BatchOutcome=>O
  previews:Array.from({length:count},()=>unavailableImportPreview(
   reason==='CANCELLED'?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'))
 });
-const HASH=/^[0-9a-f]{64}$/;
 const blank=(count:number,status:'SKIPPED_CANCELLED'|'ISOLATED_ANALYSIS_FAILED')=>
  Array.from({length:count},()=>unavailableImportPreview(status,'NOT_CHECKED'));
 
@@ -42,6 +41,9 @@ export async function runCheckpointedNativeImportAnalysis(
  onProgress?:(processed:number,total:number)=>void
 ):Promise<BatchOutcome>{
  const count=Array.isArray(scripts)?scripts.length:0;
+ // The native importer caps its batches. Do not allocate an unbounded
+ // failure array or snapshot for a forged direct caller.
+ if(count>MAX_SELECTED_FILES)return fail(0,'INVALID_INPUT');
  if(signal?.aborted)return fail(count,'CANCELLED');
  const bound=snapshotNativeScripts(scripts);
  if(!bound||bound.length===0)return fail(count,'INVALID_INPUT');
@@ -75,9 +77,10 @@ export async function runCheckpointedNativeImportAnalysis(
      await hasUnsafePathLink(directory))return fail(count,'UNSAFE_PATH');
  }catch{return fail(count,'UNSAFE_PATH');}
  const observations:(ImportAnalysisPreview[]|undefined)[]=Array(groups.length);
+ const lifetime=new AbortController();
  const worker=async(ordinal:number,abort:AbortSignal)=>{
   const previews=await previewImportedBatchOffMain(groups[ordinal].scripts,abort);
-  if(abort.aborted||signal?.aborted||
+  if(abort.aborted||signal?.aborted||lifetime.signal.aborted||
      previews.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
        row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET'))
    return 'PERMANENT_FAILURE' as const;
@@ -93,30 +96,38 @@ export async function runCheckpointedNativeImportAnalysis(
  const resumed=loaded.status==='CHECKPOINT_RESTORED_SCHEDULING_ONLY';
  const coordinator=resumed?loaded.coordinator:
   new ReadOnlyBatchCoordinator(options,worker);
+ // Preserve the pre-existing 120-second overall AST budget, not merely
+ // the per-segment timeout. A 1000-file import must not hold the UI for
+ // 63 independent 15-second attempts.
+ const cancel=()=>lifetime.abort();
  const onAbort=()=>coordinator.cancel();
- signal?.addEventListener('abort',onAbort,{once:true});
- let outcome:Awaited<ReturnType<typeof runCheckpointedReadOnlyBatch>>;
+ const timeout=setTimeout(cancel,120000);
+ signal?.addEventListener('abort',cancel,{once:true});
+ lifetime.signal.addEventListener('abort',onAbort,{once:true});
  try{
-  if(signal?.aborted)return fail(count,'CANCELLED');
-  outcome=await runCheckpointedReadOnlyBatch(directory,coordinator);
- }finally{signal?.removeEventListener('abort',onAbort);}
- if(outcome.status==='BLOCKED')return fail(count,outcome.reason);
- const previews:ImportAnalysisPreview[]=[];
- let processed=0;
- for(let ordinal=0;ordinal<groups.length;ordinal++){
-  const group=groups[ordinal];
-  const state=outcome.snapshot.jobs[ordinal].state;
-  // A prior success is an unauthenticated scheduling hint. Always rerun
-  // its bounded, isolated AST worker to return fresh, source-matched UI data,
-  // without scheduling a privileged/repaired job or trusting journal content.
-  let reports=observations[ordinal];
-  if(!reports&&state==='SUCCEEDED'&&!signal?.aborted)
-   reports=await previewImportedBatchOffMain(group.scripts,signal);
-  previews.push(...(reports??blank(group.scripts.length,
-   signal?.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED')));
-  processed+=group.scripts.length;
-  try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
+  if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
+  const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator);
+  if(outcome.status==='BLOCKED')return fail(count,outcome.reason);
+  const previews:ImportAnalysisPreview[]=[];
+  let processed=0;
+  for(let ordinal=0;ordinal<groups.length;ordinal++){
+   const group=groups[ordinal];
+   const state=outcome.snapshot.jobs[ordinal].state;
+   // A prior success is an unauthenticated scheduling hint. Always rerun
+   // its bounded, isolated AST worker to return fresh, source-matched UI data.
+   let reports=observations[ordinal];
+   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted)
+    reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+   previews.push(...(reports??blank(group.scripts.length,
+    lifetime.signal.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED')));
+   processed+=group.scripts.length;
+   try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
+  }
+  return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
+   resumed,previews});
+ }finally{
+  clearTimeout(timeout);
+  signal?.removeEventListener('abort',cancel);
+  lifetime.signal.removeEventListener('abort',onAbort);
  }
- return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
-  resumed,previews});
 }
