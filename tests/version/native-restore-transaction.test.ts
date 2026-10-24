@@ -395,6 +395,44 @@ test('TEST-020/026: restore intent blocks source changed during final asynchrono
  });
 });
 
+test('TEST-020/026: a journal changed during the second backup round cannot yield a stale recovery observation',async t=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const query={sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true};
+  const journalPath=join(opts.backupDirectory,restored.journalFileName);
+  const originalJournal=await readFile(journalPath);
+  const module=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const realVerify=module.verifyBackupRecoverySource;
+  let checks=0;
+  const tampered=Buffer.from('journal altered while asynchronous backups were rechecked');
+  // First two calls verify the initial backup pair; calls 3 and 4 are
+  // the final pair. Simulate an external writer after #4 has returned its
+  // valid result, where the old inspector would acknowledge stale evidence.
+  t.mock.method(module,'verifyBackupRecoverySource',
+   async (input:Parameters<typeof realVerify>[0])=>{
+    const result=await realVerify(input);
+    if(++checks===4)await writeFile(journalPath,tampered);
+    return result;
+   });
+  const observation=await inspectNativeRestoreIntentReadOnly(query);
+  assert.equal(checks,4,'must mutate after the second complete backup pass');
+  assert.deepEqual(observation,{
+   status:'BLOCKED',reason:'UNSAFE_JOURNAL',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(journalPath),tampered,
+   'read-only reconciliation must not overwrite or auto-repair external changes');
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+  assert.deepEqual(await readFile(join(opts.backupDirectory,opts.backupFileName)),original);
+  assert.notDeepEqual(await readFile(journalPath),originalJournal);
+ });
+});
+
 test('TEST-020/026: forged journal, tampered backup and diverged source never give a usable receipt',async()=>{
  await fixture(async opts=>{
   const restored=await restoreVerifiedOriginalNativeOnly(opts);
