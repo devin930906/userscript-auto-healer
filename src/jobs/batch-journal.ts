@@ -120,6 +120,7 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
  let releasedOwnedLock=false;
  let ownedLock:Identity|undefined,ownedStaging:Identity|undefined;
  let previousTarget:Identity|undefined;
+ let publishedIdentity:Identity|undefined;
  try{
   try{await mkdir(lock,{mode:0o700});acquired=true;}
   catch(error){
@@ -210,6 +211,7 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
      !stored.bytes.equals(bytes)||
      !await stillOwnWriterLock(directory,start,ownedLock))
     return deny('IO_FAILURE');
+  publishedIdentity=published;
   // The coordinator is mutable while the last filesystem awaits run.
   // Its state can change even AFTER the earlier pre-publish check (for
   // example a user cancellation as the atomic rename completes). Refuse a
@@ -247,8 +249,23 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
  // rmdir returned, refuse success when a new competing lock appeared.
  // Neither failure changes the already-published journal; recovery is manual.
  if(!releasedOwnedLock)return deny('BUSY');
- try{if(await writerLockExists(directory))return deny('BUSY');}
- catch{return deny('IO_FAILURE');}
+ try{
+  if(await writerLockExists(directory))return deny('BUSY');
+  // Releasing the writer mutex awaits filesystem I/O. An external editor
+  // can rewrite or replace the already-published checkpoint during release.
+  // Refuse an apparently durable receipt unless the SAME published inode
+  // and exact bytes remain after mutex cleanup. This is a bounded snapshot,
+  // not an atomic external-process lock or permission to overwrite evidence.
+  const finalRead=await boundedRead(target);
+  const finalPath=await lstat(target,{bigint:true});
+  const finalDirectory=await checkedDirectory(directory);
+  if(!publishedIdentity||!finalRead||!finalDirectory||
+     !sameDir(start,finalDirectory)||
+     !sameFile(publishedIdentity,finalRead.file)||
+     !sameFile(finalRead.file,finalPath)||
+     !finalRead.bytes.equals(bytes))return deny('INVALID_CHECKPOINT');
+  if(await writerLockExists(directory))return deny('BUSY');
+ }catch{return deny('IO_FAILURE');}
  // No further asynchronous suspension after this last native snapshot.
  // Cancellation during any awaited cleanup must invalidate the receipt.
  // This is a same-process check, not an atomic cross-process journal.
