@@ -400,6 +400,17 @@ export async function restoreVerifiedOriginalNativeOnly(
   // asynchronous backup/journal I/O. Never rename while its identity is lost.
   if(!owner||!await stillOwnNativeRestorePathLock(lock,owner))
    return block('SOURCE_LOCKED');
+  // The last byte digest is asynchronous: another process can replace
+  // the staged pathname before rename. Require the SAME previously-owned
+  // inode, single link and approved mode at the final replacement boundary.
+  // This is a bounded snapshot, not an OS-exclusive file lock.
+  if(!pendingIdentity||await hasUnsafePathLink(pending))
+   return block('RECOVERY_SAFETY_FAILED');
+  const finalPending=await lstat(pending,{bigint:true});
+  if(!finalPending.isFile()||finalPending.isSymbolicLink()||
+     finalPending.nlink!==1n||!sameFile(pendingIdentity,finalPending)||
+     (finalPending.mode&0o777n)!==(sourceStart.mode&0o777n))
+   return block('RECOVERY_SAFETY_FAILED');
 
   await rename(pending,opts.sourcePath);
   pending=undefined;

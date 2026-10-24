@@ -8,7 +8,7 @@ import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
 import {chmod,link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
@@ -626,6 +626,46 @@ test('TASK-011/TEST-020/021: a source changed during final journal verification 
  });
 });
 
+
+test('TASK-011/TEST-020/026: replaced pending inode after last byte check must never overwrite selected source',async t=>{
+ await fixture(async opts=>{
+  const module=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const realVerify=module.verifyExactCandidateBytesReadOnly;
+  let stagingChecks=0;
+  const sourceParent=dirname(opts.sourcePath);
+  const foreign=Buffer.alloc(original.length,0x58);
+  // First check validates the staged recovery bytes. After the FINAL check
+  // returns MATCH, simulate another process swapping the pending pathname.
+  // The earlier digest must not authorize renaming the replacement inode.
+  t.mock.method(module,'verifyExactCandidateBytesReadOnly',
+   async (path:Parameters<typeof realVerify>[0],
+          expected:Parameters<typeof realVerify>[1])=>{
+    const result=await realVerify(path,expected);
+    if(dirname(path)===sourceParent&&
+       path.slice(sourceParent.length+1).startsWith('.uah-restore-')&&path.endsWith('.pending')&&
+       result==='MATCH'&&++stagingChecks===2){
+     const displacedPending=join(sourceParent,'.externally-moved-'+randomUUID());
+     await rename(path,displacedPending);
+     await writeFile(path,foreign);
+    }
+    return result;
+   });
+  const result=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(stagingChecks,2,'must inject between final digest and atomic rename');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'never replace the selected original with a different pending inode');
+  assert.deepEqual(await readFile(join(opts.backupDirectory,opts.backupFileName)),original);
+  assert.ok((await readdir(opts.backupDirectory))
+   .some(n=>n.endsWith('.journal.json')),
+   'retain recovery intent and backups for independent reconciliation');
+ });
+});
 
 test('TASK-011/TEST-020/026: Windows case aliases must share a native restore path lock',
  {skip:process.platform!=='win32'},async()=>{
