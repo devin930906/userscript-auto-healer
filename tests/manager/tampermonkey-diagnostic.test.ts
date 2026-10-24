@@ -186,6 +186,41 @@ test('TEST-017: manual diagnostic refuses unsupported injection timing before br
    assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'});
  }
 });
+test('TASK-007/TEST-017/026: diagnostic startup refuses hostile option descriptors without invoking caller code',async()=>{
+ const browser={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ let executed=0;
+ for(const key of ['signal','ttlMs','runAt'] as const){
+   const forged=Object.defineProperty({},key,{
+     enumerable:true,get(){executed++;throw Error('UNTRUSTED_OPTION_GETTER');}
+   });
+   const result=await startApprovedTampermonkeyDiagnostic(
+     browser,true,forged as Parameters<typeof startApprovedTampermonkeyDiagnostic>[2]);
+   assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'},key);
+ }
+ const traps={
+   get(){executed++;throw Error('UNTRUSTED_PROXY_GET');},
+   ownKeys(){executed++;throw Error('UNTRUSTED_PROXY_KEYS');},
+   getPrototypeOf(){executed++;throw Error('UNTRUSTED_PROXY_PROTOTYPE');}
+ };
+ const proxy=new Proxy({signal:AbortSignal.abort()},traps);
+ const revoked=Proxy.revocable({ttlMs:60000},{});
+ revoked.revoke();
+ for(const options of [
+   proxy,revoked.proxy,Object.create({ttlMs:60000}),
+   {ttlMs:60000,extra:'untrusted'},
+   {signal:{aborted:false}},null,[]
+ ]){
+   const result=await startApprovedTampermonkeyDiagnostic(browser,true,
+     options as Parameters<typeof startApprovedTampermonkeyDiagnostic>[2]);
+   assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'});
+ }
+ assert.equal(executed,0,'no caller getter or Proxy trap may run at native diagnostic startup');
+ assert.deepEqual(await startApprovedTampermonkeyDiagnostic(browser,true,{
+   ttlMs:60000,runAt:'document-end',signal:AbortSignal.abort()
+ }),{ok:false,code:'CANCELLED'},
+ 'a real aborted AbortSignal still revokes the request before any browser action');
+});
+
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
  const fake={ok:true as const,status:'OWNED_CDP_BROWSER_VERIFIED' as const,
    pid:123456,chromeVersion:'155.0.0.0',

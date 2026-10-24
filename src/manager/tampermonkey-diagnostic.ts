@@ -361,6 +361,40 @@ export function createManualModeVisitLatch() {
  });
 }
 
+/** A native diagnostic accepts only inert, own-data option fields.
+ * Never invoke an untrusted getter, Proxy trap or fake AbortSignal method.
+ */
+function snapshotDiagnosticOptions(value:unknown):{
+ ttlMs?:number;signal?:AbortSignal;runAt?:GmProbeRunAt
+}|null{
+ try{
+  if(!value||typeof value!=='object'||Array.isArray(value)||isProxy(value))
+   return null;
+  const proto=Object.getPrototypeOf(value);
+  if(proto!==Object.prototype&&proto!==null)return null;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(fields);
+  if(names.length>3||names.some(key=>typeof key!=='string'||
+      !['ttlMs','signal','runAt'].includes(key)))return null;
+  const checked:Record<string,unknown>=Object.create(null);
+  for(const name of names){
+   const d=fields[name as string];
+   if(!d||!Object.prototype.hasOwnProperty.call(d,'value'))return null;
+   checked[name as string]=d.value;
+  }
+  const signal=checked.signal;
+  if(signal!==undefined&&(
+    !signal||typeof signal!=='object'||isProxy(signal)||
+    Object.getPrototypeOf(signal)!==AbortSignal.prototype||
+    ['aborted','addEventListener','removeEventListener'].some(
+     field=>Object.prototype.hasOwnProperty.call(signal,field))
+  ))return null;
+  return {ttlMs:checked.ttlMs as number|undefined,
+   signal:signal as AbortSignal|undefined,
+   runAt:checked.runAt as GmProbeRunAt|undefined};
+ }catch{return null;}
+}
+
 /** Requires a live owned Chrome and a real CDP runtime hint before listening.
  * This API cannot be used to attach a preexisting Chrome, spoof a manager,
  * or install a userscript without the tester's separate manual action.
@@ -371,24 +405,27 @@ export async function startApprovedTampermonkeyDiagnostic(
    readonly runAt?:GmProbeRunAt}={}
 ):Promise<StartDiagnosticResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
- if(options.signal?.aborted)return {ok:false,code:'CANCELLED'};
- const ttlMs=options.ttlMs??60000;
+ const safeOptions=snapshotDiagnosticOptions(options);
+ if(!safeOptions)return {ok:false,code:'INVALID_OPTIONS'};
+ const signal=safeOptions.signal;
+ if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+ const ttlMs=safeOptions.ttlMs??60000;
  if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>MAX_GM_PROBE_TTL_MS||
-    (options.runAt!==undefined&&!isSupportedGmProbeRunAt(options.runAt)))
+    (safeOptions.runAt!==undefined&&!isSupportedGmProbeRunAt(safeOptions.runAt)))
    return {ok:false,code:'INVALID_OPTIONS'};
  if(!browser?.ok||!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
- const hint=await inspectApprovedTampermonkeyRuntime(browser,true,options.signal);
+ const hint=await inspectApprovedTampermonkeyRuntime(browser,true,signal);
  if(!hint.ok)return {ok:false,code:hint.code};
- if(options.signal?.aborted)return {ok:false,code:'CANCELLED'};
+ if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
  const fixture=await startIsolatedTampermonkeyGmProbe(
-   true,ttlMs,options.runAt??'document-idle');
+   true,ttlMs,safeOptions.runAt??'document-idle');
  if(!fixture.ok)return {ok:false,code:fixture.code};
- if(options.signal?.aborted||!isLiveApprovedChromeSession(browser)){
+ if(signal?.aborted||!isLiveApprovedChromeSession(browser)){
    await fixture.session.stop();
-   return options.signal?.aborted?{ok:false,code:'CANCELLED'}:
+   return signal?.aborted?{ok:false,code:'CANCELLED'}:
      {ok:false,code:'UNVERIFIED_BROWSER'};
  }
  const probe=fixture.session;
@@ -400,8 +437,8 @@ export async function startApprovedTampermonkeyDiagnostic(
  // Stopping a manual diagnostic must cancel pending owned-CDP tab navigation
  // and DOM reads, not merely reject their results after they finish.
  const sessionCancelled=new AbortController();
- const sessionSignal=options.signal?
-   AbortSignal.any([sessionCancelled.signal,options.signal]):
+ const sessionSignal=signal?
+   AbortSignal.any([sessionCancelled.signal,signal]):
    sessionCancelled.signal;
  const ready=()=>!stopped&&!sessionSignal.aborted&&
    Date.now()<probe.expiresAt&&isLiveApprovedChromeSession(browser);
@@ -410,15 +447,15 @@ export async function startApprovedTampermonkeyDiagnostic(
    if(stopping)return stopping;
    stopped=true;
    sessionCancelled.abort();
-   options.signal?.removeEventListener('abort',onCallerAbort);
+   signal?.removeEventListener('abort',onCallerAbort);
    stopping=probe.stop();
    return stopping;
  };
  // Revoking session consent must also close the disposable HTTP listener,
  // not just suppress a future positive diagnostic assessment.
  const onCallerAbort=()=>{void stop().catch(()=>undefined);};
- options.signal?.addEventListener('abort',onCallerAbort,{once:true});
- if(options.signal?.aborted){
+ signal?.addEventListener('abort',onCallerAbort,{once:true});
+ if(signal?.aborted){
    await stop();
    return {ok:false,code:'CANCELLED'};
  }
