@@ -1185,7 +1185,7 @@ async function createMainWindow(): Promise<void> {
     const probe = await win.webContents.executeJavaScript(
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
-      "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const bad = await a.validateConfig({}); " +
+      "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const noInventory=await a.inspectRestoreInventory(); const bad = await a.validateConfig({}); " +
        "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
        "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
        "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
@@ -1355,7 +1355,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
       "document.getElementById('scenario-export-manual').disabled && " +
-      "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && " +
+      "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && noInventory.ok === false && noInventory.code === 'CANCELLED' && " +
       "rendered === true && badDropReported && scanCancelReady && pendingCallbackBeforeCancel && scanCancelled && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
@@ -1498,7 +1498,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
