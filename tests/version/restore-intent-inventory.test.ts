@@ -132,3 +132,57 @@ test('TASK-011/TEST-020/026: concurrent directory insertion during scan invalida
   assert.deepEqual(await readdir(backupDirectory),['external-concurrent-edit.txt']);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/026: journal edited after individual inspection cannot yield a stale inventory count',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-inventory-journal-race-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const backup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(backup.status,'BACKUP_ONLY');
+  if(backup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,updated);
+  const restored=await restoreVerifiedOriginalNativeOnly({
+   sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+   expectedCurrentSha256:sha(updated),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,userApproved:true,
+   manualRestoreApproved:true
+  });
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  const journal=(await readdir(backupDirectory)).find(n=>n.endsWith('.journal.json'));
+  assert.ok(journal,'real native restore must publish its journal');
+  const journalPath=join(backupDirectory,journal);
+  const inspection=require('../../src/version/restore-intent-inspection') as
+   typeof import('../../src/version/restore-intent-inspection');
+  const originalInspect=inspection.inspectNativeRestoreIntentReadOnly;
+  let edited=0;
+  const patched=mock.method(inspection,'inspectNativeRestoreIntentReadOnly',
+   async(...args:Parameters<typeof originalInspect>)=>{
+    const observed=await originalInspect(...args);
+    if(observed.status==='RESTORE_INTENT_OBSERVED_READ_ONLY'&&edited++===0){
+     // Simulate an uncooperative writer mutating journal BYTES after its
+     // own verification, without changing the parent directory namespace.
+     await writeFile(journalPath,'{"tampermonkeyVerified":true}\n');
+    }
+    return observed;
+   });
+  try{
+   const result=await inspectNativeRestoreIntentInventoryReadOnly({
+    sourcePath,backupDirectory,userApproved:true
+   });
+   assert.equal(edited,1,'the race must occur after the first valid observation');
+   assert.deepEqual([result.status,'reason' in result?result.reason:null],
+    ['BLOCKED','UNSAFE_PATH'],
+    'a changed earlier journal cannot remain an accepted count');
+   assert.equal('inspected' in result,false);
+  }finally{patched.mock.restore();}
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.equal((await readFile(journalPath)).toString(),
+   '{"tampermonkeyVerified":true}\n');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
