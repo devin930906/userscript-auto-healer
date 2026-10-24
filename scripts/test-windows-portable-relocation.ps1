@@ -498,6 +498,20 @@ try {
     } else {
       throw "Restart Manager missed classified disposable lock evidence: $rmLocked"
     }
+    # ISSUE-215: batch-level RM process counts cannot identify which candidate
+    # member has the association. A single true external-process file lock
+    # must be attributable to its file KIND without exposing names or PIDs.
+    $perFile=Get-CandidatePortableRmFileAssociationSummary $permanent @($permanentFile)
+    if($perFile -cne 'rmFiles=ok sampled=1 associated=1 kinds=[exe=0 library=0 other=1] outsideRunnerAssociated=1' -or
+       $perFile.Contains($permanentFile) -or $perFile.Contains($root)) {
+      throw "TEST-028: RM single-file association must preserve anonymous lock evidence: $perFile"
+    }
+    $perFileOutOfScope=Get-CandidatePortableRmFileAssociationSummary $permanent @(
+      (Join-Path $root 'out-of-scope-file.txt'))
+    if($perFileOutOfScope -cne 'rmFiles=unavailable') {
+      throw 'TEST-028: per-file RM probe crossed the candidate-only boundary'
+    }
+    Write-Output 'PASS: Restart Manager isolates an associated candidate file kind without names or PIDs'
     $rmOutside=Get-CandidatePortableRestartManagerSummary $permanent @(
       (Join-Path $root 'outside-scope.txt'))
     if($rmOutside -cne 'rm=unavailable') {
