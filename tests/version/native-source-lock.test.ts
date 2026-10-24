@@ -39,6 +39,35 @@ test('TEST-020/026: NTFS stream aliases are refused before native source locking
   });
 });
 
+test('TEST-020/026: unsafe path identity fails before mutex competition or action',async t=>{
+  await fixture(async(source,backups,root)=>{
+    const identity=await lstat(source,{bigint:true});
+    const key=sha(Buffer.from(identity.dev.toString()+':'+identity.ino.toString()));
+    const preexistingLock=join(root,'.uah-source-lock-'+key);
+    await mkdir(preexistingLock);
+    const boundary=require('../../src/version/path-boundary') as
+      typeof import('../../src/version/path-boundary');
+    const originalCheck=boundary.hasUnsafePathLink;
+    let checked=0;
+    let executed=false;
+    // A deterministic stand-in for a Windows source alias rejected by the
+    // shared validator. The old order hits SOURCE_LOCKED BEFORE this check.
+    t.mock.method(boundary,'hasUnsafePathLink',async (path:string)=>{
+      if(path===source){checked++;return true;}
+      return originalCheck(path);
+    });
+    await assert.rejects(withNativeSourceLock(source,async()=>{
+      executed=true;
+      return true;
+    }),lockError('INVALID_SOURCE'));
+    assert.equal(checked,1,'invalid alias must be checked before mkdir');
+    assert.equal(executed,false,'no selected source operation may run');
+    assert.ok((await lstat(preexistingLock)).isDirectory(),
+      'never disturb another process mutex');
+    assert.deepEqual(await readFile(source),bytes);
+    assert.deepEqual(await readdir(backups),[]);
+  });
+});
 test('TEST-020: same-source concurrent backups fail closed and release after owner returns',async()=>{
   await fixture(async(source,backups,root)=>{
     let signal!:()=>void;
