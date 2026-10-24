@@ -7,6 +7,29 @@ import {importApprovedPaths} from '../../src/import/import-service';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import {BATCH_JOURNAL_FILENAME} from '../../src/jobs/batch-journal';
 
+test('TASK-013/TEST-022/026: checkpointed native import must reject an array Proxy without reading properties',async()=>{
+ let traps=0;
+ const hostile=new Proxy([] as unknown as Parameters<
+  typeof runCheckpointedNativeImportAnalysis>[1],{
+  get(){traps++;throw Error('UNTRUSTED_BATCH_LENGTH');},
+  getPrototypeOf(){traps++;throw Error('UNTRUSTED_BATCH_PROTOTYPE');},
+  ownKeys(){traps++;throw Error('UNTRUSTED_BATCH_KEYS');}
+ });
+ const revoked=Proxy.revocable([] as unknown as Parameters<
+  typeof runCheckpointedNativeImportAnalysis>[1],{});
+ for(const supplied of [hostile,revoked.proxy]){
+  const result=await runCheckpointedNativeImportAnalysis(
+   join(tmpdir(),'uncreated-checkpointed-batch-proxy-root'),supplied);
+  assert.deepEqual(result,{status:'BLOCKED',reason:'INVALID_INPUT',previews:[]},
+   'a forged native batch must fail closed before reading its length or writing a journal');
+ }
+ revoked.revoke();
+ const afterRevocation=await runCheckpointedNativeImportAnalysis(
+  join(tmpdir(),'uncreated-checkpointed-batch-proxy-root'),revoked.proxy);
+ assert.deepEqual(afterRevocation,{status:'BLOCKED',reason:'INVALID_INPUT',previews:[]});
+ assert.equal(traps,0,'even an active Proxy must not trigger caller traps');
+});
+
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
 test('TASK-013/TEST-022: real native imported scripts checkpoint and safely reanalyse after restart',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-batch-test-'));
