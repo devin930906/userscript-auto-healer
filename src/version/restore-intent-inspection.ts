@@ -238,6 +238,12 @@ export async function inspectNativeRestoreIntentReadOnly(
   if(!sameFile(sourceStart,lastSource)||lastSource.nlink!==1n||
      !sameDir(dirStart,lastDir)||await hasUnsafePathLink(x.sourcePath)||
      await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
+  // The final source fingerprint itself awaits filesystem I/O. An external
+  // editor can modify the already-verified intent DURING that last read.
+  // Refuse stale recovery observations by checking the exact bounded
+  // journal once more after the final source verification. This remains a
+  // read-only, bounded observation, not an atomic cross-process lock.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
    sourceState,originalSha256:j.originalSha256,
    displacedSha256:j.displacedSha256,...noAuthority});
