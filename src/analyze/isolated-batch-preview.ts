@@ -241,11 +241,9 @@ export async function previewImportedBatchOffMain(
  // Only the native importer may create a 1000-file batch. Direct callers
  // exceeding that contract fail closed; no unbounded worker chain starts.
  if(scripts.length>MAX_SELECTED_FILES){
-  const status=signal?.aborted?'SKIPPED_CANCELLED':'SKIPPED_BATCH_BUDGET';
-  const skipped=scripts.map(()=>unavailableImportPreview(status,'NOT_CHECKED'));
-  try{onProgress?.(skipped.length,scripts.length);}
-  catch{/* advisory progress only */}
-  return skipped;
+  // A direct over-limit call cannot come from the validated native importer.
+  // Refuse without allocating unbounded reports or invoking caller methods.
+  return [];
  }
  const stopAt=Date.now()+MAX_TOTAL_PREVIEW_MS;
  for(let offset=0;offset<scripts.length;offset+=MAX_BATCH_PREVIEW_FILES){

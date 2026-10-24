@@ -279,3 +279,20 @@ test('TEST-026: hostile worker-reply getters, proxies and array slots fail close
  }),1),null);
  assert.equal(validateIsolatedPreviewReply([Object.create({source:'leak'})],1),null);
 });
+
+test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoking caller methods',async()=>{
+ // The native importer caps batches at 1000. A forged direct call must not
+ // allocate one fallback per untrusted slot or invoke overridden Array.map.
+ const tooMany=new Array(1001) as ReturnType<typeof imported>[];
+ let mapCalls=0;
+ Object.defineProperty(tooMany,'map',{value(){
+  mapCalls++;
+  throw Error('UNTRUSTED_OVER_CAPACITY_ARRAY_MAP');
+ }});
+ let progressCalls=0;
+ const reports=await previewImportedBatchOffMain(tooMany,undefined,
+  ()=>{progressCalls++;});
+ assert.deepEqual(reports,[],'invalid direct batches must fail without output allocation');
+ assert.equal(mapCalls,0,'over-capacity refusal must not execute a caller method');
+ assert.equal(progressCalls,0,'invalid batches have no valid per-file progress');
+});
