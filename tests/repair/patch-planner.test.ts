@@ -176,6 +176,34 @@ test('TEST-019/026: modified DOM selector methods cannot yield an offline repair
   })).status,'CANDIDATE_ONLY');
 });
 
+test('TASK-009/TEST-019/026: reflective document selector mutation blocks offline candidate',()=>{
+  for(const snippet of [
+    "Object.defineProperty(document,'querySelector',{value:()=>null});",
+    "Object.defineProperties(document,{querySelector:{value:()=>null}});",
+    "Object.assign(document,{querySelector:()=>null});",
+    "Reflect.set(document,'querySelector',()=>null);",
+    "Reflect.defineProperty(document,'querySelector',{value:()=>null});",
+    "Object.setPrototypeOf(document,{querySelector:()=>null});",
+    "Reflect['set'](document,'querySelector',()=>null);",
+    "Object[operation](document,'querySelector',()=>null);"
+  ]){
+    const script=meta+snippet+" document.querySelector('#old');";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    }));
+    assert.equal(result.status,'BLOCKED',snippet);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  // Calls on unrelated targets do not mutate document's selector method.
+  const control=meta+
+    "Object.defineProperty(other,'querySelector',{value:()=>null});"+
+    " Object.keys(document); document.querySelector('#old');";
+  assert.equal(proposeLiteralSelectorPatch(request(control,{
+    callOffset:control.lastIndexOf('document.querySelector(')
+  })).status,'CANDIDATE_ONLY');
+});
+
 test('TEST-014: exact call location prevents replacing repeated selectors globally',()=>{
   const repeated=meta+
     "document.querySelector('#old');\n"+
