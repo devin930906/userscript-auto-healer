@@ -507,6 +507,79 @@ public static class UahCandidateRestartManagerProbe {
   }
 }
 
+# ISSUE-215 / TEST-028: a batch-level Restart Manager association is
+# not evidence of which file is used. Inspect no more than the SAME first 40
+# bounded candidate files individually; emit anonymous file-kind counts only.
+# A per-file association is STILL not proof of a rename-denying handle.
+# Never log filenames/PIDs, terminate processes or mutate payload bytes.
+function Get-CandidatePortableRmFileAssociationSummary(
+  [string]$source,[string[]]$candidateFiles
+) {
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       $null -eq $candidateFiles -or $candidateFiles.Count -lt 1 -or
+       $candidateFiles.Count -gt 512 -or
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return 'rmFiles=unavailable'
+    }
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    $prefix=$base+[IO.Path]::DirectorySeparatorChar
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return 'rmFiles=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $paths=[Collections.Generic.List[string]]::new()
+    foreach($file in $candidateFiles) {
+      if([string]::IsNullOrWhiteSpace($file) -or
+         -not [IO.Path]::IsPathFullyQualified($file)) { return 'rmFiles=unavailable' }
+      $full=[IO.Path]::GetFullPath($file)
+      if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+         -not [IO.File]::Exists($full) -or -not $seen.Add($full)) {
+        return 'rmFiles=unavailable'
+      }
+      Assert-CandidatePortableNoReparsePath $runner $full
+      $paths.Add($full)
+    }
+    $sorted=@($paths | Sort-Object)
+    $exe=@($sorted | Where-Object {
+      [IO.Path]::GetFileName($_) -ceq 'UserscriptAutoHealer.exe'
+    })
+    $other=@($sorted | Where-Object {
+      [IO.Path]::GetFileName($_) -cne 'UserscriptAutoHealer.exe'
+    })
+    $sample=@(@($exe)+@($other) | Select-Object -First 40)
+    $associated=0;$exeAssociated=0;$libraryAssociated=0
+    $otherAssociated=0;$outsideAssociated=0
+    foreach($file in $sample) {
+      # Existing routine independently verifies scope, signature/creation
+      # identity and session closure for this SINGLE file.
+      $detail=Get-CandidatePortableRestartManagerSummary $base @($file)
+      $affected=[regex]::Match($detail,
+        '^rm=ok sampled=1 total=1 affected=(\d+) ')
+      $scopes=[regex]::Match($detail,
+        ' imageScope=\[candidateTree=\d+ runnerOther=\d+ outsideRunner=(\d+) unknown=\d+\]')
+      if(-not $affected.Success -or -not $scopes.Success) {
+        return 'rmFiles=unavailable'
+      }
+      $count=[int]$affected.Groups[1].Value
+      $outside=[int]$scopes.Groups[1].Value
+      if($outside -gt $count) { return 'rmFiles=unavailable' }
+      if($count -eq 0) { continue }
+      $associated++
+      if([string]::Equals([IO.Path]::GetFileName($file),'UserscriptAutoHealer.exe',
+         [StringComparison]::Ordinal)) { $exeAssociated++ }
+      elseif([IO.Path]::GetExtension($file) -ieq '.dll') { $libraryAssociated++ }
+      else { $otherAssociated++ }
+      if($outside -gt 0) { $outsideAssociated++ }
+    }
+    return "rmFiles=ok sampled=$($sample.Count) associated=$associated kinds=[exe=$exeAssociated library=$libraryAssociated other=$otherAssociated] outsideRunnerAssociated=$outsideAssociated"
+  } catch { return 'rmFiles=unavailable' }
+}
+
 # ISSUE-215 / TEST-028: collect candidate-only ACL metadata at the actual
 # rename failure. Successful DELETE-access handle opens and a successful
 # sibling-control rename cannot rule out differing directory ACL inheritance.
@@ -682,7 +755,13 @@ function Get-CandidatePortableFirstDenialSummary(
   $sibling=Get-CandidatePortableSiblingRenameControl $source
   $acl=Get-CandidatePortableRenameAclSummary $source
   $rm=Get-CandidatePortableRestartManagerSummary $source $candidateFiles
-  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm]"
+  # Run individual attribution only when a batch already observed an
+  # outside-runner association. Never treat this evidence as causal proof.
+  $rmFiles='rmFiles=not-probed'
+  if($rm -match ' imageScope=\[[^\]]*outsideRunner=([1-9][0-9]*)') {
+    $rmFiles=Get-CandidatePortableRmFileAssociationSummary $source $candidateFiles
+  }
+  return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm] fileAssociations=[$rmFiles]"
 }
 
 function Move-CandidatePortableDirectory(
