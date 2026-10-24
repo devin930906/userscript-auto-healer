@@ -32,6 +32,22 @@ const fail=(count:number,reason:BatchJournalFailure|'CANCELLED'):BatchOutcome=>O
 const blank=(count:number,status:'SKIPPED_CANCELLED'|'ISOLATED_ANALYSIS_FAILED')=>
  Array.from({length:count},()=>unavailableImportPreview(status,'NOT_CHECKED'));
 
+/** A cancellation claim may come from an untrusted JS boundary even for
+ * native-only callers. Require native AbortSignal internal slots BEFORE any
+ * aborted getter or event method is read. Shadowed instance methods can
+ * execute caller code later during scheduler cleanup, so reject them too.
+ */
+function isNativeCancellationSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 /** journalRoot must come exclusively from Electron's own native userData.
  * A root for this feature does not confer any authority over selected files.
  * Reimporting the same ordered script bytes resumes a read-only scheduling
@@ -50,6 +66,8 @@ export async function runCheckpointedNativeImportAnalysis(
  // The native importer caps its batches. Do not allocate an unbounded
  // failure array or snapshot for a forged direct caller.
  if(count>MAX_SELECTED_FILES)return fail(0,'INVALID_INPUT');
+ if(signal!==undefined&&!isNativeCancellationSignal(signal))
+  return fail(count,'INVALID_INPUT');
  if(signal?.aborted)return fail(count,'CANCELLED');
  const bound=snapshotNativeScripts(scripts);
  if(!bound||bound.length===0)return fail(count,'INVALID_INPUT');
