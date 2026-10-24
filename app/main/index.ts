@@ -794,7 +794,11 @@ function registerSafeIpc(): void {
       if(win===mainWindow&&!win.isDestroyed())
         for(const script of result.scripts){
           scenarioSession.recordImported(script.sha256);
-          if(script.sourcePath&&!nativeImportedPaths.has(script.sha256))
+          // A new native picker is a new explicit source selection. The
+          // digest identifies bytes, NOT a forever-authorized old file path.
+          // On same-byte reimport, bind later manual export to the most
+          // recently selected file, never an older duplicate pathname.
+          if(script.sourcePath)
             nativeImportedPaths.set(script.sha256,script.sourcePath);
         }
       // Cancellation during processing retains successful earlier imports.
@@ -1093,7 +1097,8 @@ function registerSafeIpc(): void {
         type:'question',buttons:['创建备份、候选及原始恢复版本','取消'],
         defaultId:1,cancelId:1,noLink:true,
         message:'确认写入备份、人工候选及独立的原始恢复文件？',
-        detail:'脚本：'+current.scripts[0].filename+
+        detail:'实际源文件（最近一次原生选择）：'+sourcePath+
+          '\n脚本：'+current.scripts[0].filename+
           '\n备份文件夹：'+backup.filePaths[0]+
           '\n候选文件夹：'+destination.filePaths[0]+
           '\n导出目录将生成修复候选和保留原字节的人工恢复脚本，均不会自动安装。' +
