@@ -540,6 +540,21 @@ try {
          $batchRm.Contains($batchRoot)) {
         throw 'Restart Manager did not observe exclusively locked last candidate file in later batch'
       }
+      # RED TASK-020/TEST-028: an association exclusively in the next
+      # 40-file RM batch must reach the privacy-safe per-file diagnostic.
+      # The first 40 have NO associated process; this is real Win32 sharing.
+      $tailAssociation=Get-CandidatePortableRmFileAssociationSummary $batchRoot $batchFiles
+      $expectedTail='rmFiles=ok sampled=1 associated=1 kinds=[exe=0 library=0 other=1] outsideRunnerAssociated=1 scannedBatches=2 totalFiles=41'
+      if($tailAssociation -cne $expectedTail -or
+         $tailAssociation.Contains($batchRoot) -or
+         $tailAssociation.Contains($batchFiles[40])) {
+        throw "TEST-028 later-batch RM association was not independently narrowed: $tailAssociation"
+      }
+      $tailDenial=Get-CandidatePortableFirstDenialSummary $batchRoot $batchFiles
+      if(-not $tailDenial.Contains("fileAssociations=[$expectedTail]") -or
+         $tailDenial.Contains($batchRoot) -or $tailDenial.Contains($batchFiles[40])) {
+        throw 'TEST-028 first-denial diagnostics silently skipped later-batch RM association'
+      }
     } finally { $tailHandle.Dispose() }
     Write-Output 'PASS: bounded Restart Manager batches inspect later candidate file locks without leaking paths'
     # Even a transient first denial must carry evidence before a later move
