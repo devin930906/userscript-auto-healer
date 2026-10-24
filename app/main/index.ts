@@ -29,6 +29,7 @@ import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-o
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
+import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 let mainWindow: BrowserWindow | null = null;
@@ -564,6 +565,57 @@ function registerSafeIpc(): void {
     stopOnlyGmProbe();
     return {ok:existed,status:existed?'FIXTURE_STOP_REQUESTED':'NO_ACTIVE_FIXTURE',
       ...unverified};
+  });
+
+  // TASK-011: read-only scan of native-selected recovery intent directory.
+  // No user path, hash, script bytes, journal filename or write authority IPC.
+  ipcMain.handle('restore:inspect-inventory',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||scenarioObserveInProgress||launchInProgress||
+       profilePreparationInProgress||gmActionInProgress||gmStartInProgress||
+       readOwnedBrowser())
+      return {ok:false,code:'RESTORE_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    nativeSelectionInProgress=true;
+    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'info',buttons:['只读扫描恢复目录','取消'],defaultId:1,cancelId:1,
+        noLink:true,message:'只读核对该脚本对应的恢复意图目录？',
+        detail:'请独立选择本地 .user.js 原文件及此前保存恢复意图的文件夹。'
+          +'\n最多检查 32 份意图、1024 个目录条目；无法验证的记录只统计为拒绝。'
+          +'\n不移动、删除、修改文件，不执行脚本，也不自动回滚。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const source=await dialog.showOpenDialog(win,{
+        title:'只读批量核对：选择本地 .user.js 原文件',
+        properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
+      });
+      if(source.canceled||source.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const backupDirectory=await dialog.showOpenDialog(win,{
+        title:'只读批量核对：选择已有的恢复意图和独立备份文件夹',
+        properties:['openDirectory']
+      });
+      if(backupDirectory.canceled||backupDirectory.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const report=await inspectNativeRestoreIntentInventoryReadOnly({
+        sourcePath:source.filePaths[0],
+        backupDirectory:backupDirectory.filePaths[0],userApproved:true
+      });
+      if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(report.status!=='RESTORE_INTENT_INVENTORY_READ_ONLY')
+        return {ok:false,code:report.reason,...unverified};
+      return {ok:true,status:report.status,
+        inspected:report.inspected,originalPresent:report.originalPresent,
+        displacedPresent:report.displacedPresent,rejected:report.rejected,
+        ...unverified};
+    }catch{return {ok:false,code:'INSPECTION_FAILED',...unverified};}
+    finally{nativeSelectionInProgress=false;}
   });
 
   // TASK-011/TEST-020/026: explicit read-only recovery reconciliation.
@@ -1133,7 +1185,7 @@ async function createMainWindow(): Promise<void> {
     const probe = await win.webContents.executeJavaScript(
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
-      "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const bad = await a.validateConfig({}); " +
+      "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const noInventory=await a.inspectRestoreInventory(); const bad = await a.validateConfig({}); " +
        "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
        "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
        "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
@@ -1303,7 +1355,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
       "document.getElementById('scenario-export-manual').disabled && " +
-      "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && " +
+      "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && noInventory.ok === false && noInventory.code === 'CANCELLED' && " +
       "rendered === true && badDropReported && scanCancelReady && pendingCallbackBeforeCancel && scanCancelled && isolated && canCancel && cancelled && " +
       "document.getElementById('import-summary').textContent.includes('成功 5') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
@@ -1446,7 +1498,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.

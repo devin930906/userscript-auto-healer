@@ -22,7 +22,7 @@ const approvedIpcChannels=[
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
  'import:dropped','import:files','import:folder','import:get-progress',
- 'restore:inspect-intent','restore:manual-original','scenario:cancel',
+ 'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
  'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
@@ -267,6 +267,17 @@ test('TASK-011/TEST-020/026: desktop reconciles restore intent only after native
   // The UI cannot send arbitrary source/journal names or request retry.
   assert.doesNotMatch(main,/ipcMain\.handle\('restore:inspect-intent',async\(event,(?:source|journal|path)/);
   assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:inspect-intent',\s*[^)]/);
+});
+
+test('TASK-011/TEST-020/026: restore inventory IPC allows no untrusted renderer paths or approval flags',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.match(main,/ipcMain\.handle\('restore:inspect-inventory',async\(event,\.\.\.args:unknown\[\]\)=>/);
+ assert.match(preload,/inspectRestoreInventory: \(\): Promise<unknown> => ipcRenderer\.invoke\('restore:inspect-inventory'\)/);
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:inspect-inventory',\s*[^)]/);
+ assert.doesNotMatch(main,/ipcMain\.handle\('restore:inspect-inventory',async\(event,(?:path|source|backup|options)/);
+ assert.match(main,/inspectNativeRestoreIntentInventoryReadOnly\(\{/);
+ assert.match(main,/backupDirectory:backupDirectory\.filePaths\[0\],userApproved:true/);
 });
 
 test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer', () => {
