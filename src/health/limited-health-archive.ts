@@ -136,9 +136,15 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
    if(!Number.isSafeInteger(event.observedAtMs)||event.observedAtMs<0||
       event.observedAtMs>maxObservedAtMs||
       (event.status!=='ELEMENT_FOUND_ONLY'&&event.status!=='INDETERMINATE')||
-      result.length>0&&event.observedAtMs<=result[result.length-1].observedAtMs)
+      result.length>0&&event.observedAtMs<result[result.length-1].observedAtMs)
     return null;
-   result.push(Object.freeze({observedAtMs:event.observedAtMs,status:event.status}));
+   // The native registry permits several observations in one millisecond.
+   // Preserve the final observed status in this timestamp bucket, without
+   // inventing a timestamp or weakening checks for already-saved archives.
+   const row=Object.freeze({observedAtMs:event.observedAtMs,status:event.status});
+   if(result.length>0&&row.observedAtMs===result[result.length-1].observedAtMs)
+    result[result.length-1]=row;
+   else result.push(row);
   }
   return result;
  }catch{return null;}

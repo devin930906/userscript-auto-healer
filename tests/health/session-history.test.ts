@@ -258,3 +258,74 @@ test('TASK-015/TEST-024: native future-time observations are rejected before per
   assert.equal((await saveLimitedHealthArchive(userData,future.snapshot(key))).status,'BLOCKED');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: same-millisecond native observations persist last limited status without promotion',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-same-tick-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  let clock=Date.now()-1000;
+  const registry=new LimitedHealthRegistry(()=>clock);
+  // A legitimate native DOM scan can emit multiple events in one clock tick.
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  const snapshot=registry.snapshot(key);
+  assert.equal(snapshot.history.length,2);
+  assert.equal(snapshot.history[0].observedAtMs,snapshot.history[1].observedAtMs);
+  assert.equal((await saveLimitedHealthArchive(userData,snapshot)).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const first=await readLimitedHealthArchive(userData,key);
+  assert.equal(first.status,'ARCHIVE_READ_UNVERIFIED');
+  if(first.status!=='ARCHIVE_READ_UNVERIFIED')return;
+  assert.equal(first.currentStatus,'INDETERMINATE');
+  assert.deepEqual(first.events,[{observedAtMs:clock,status:'INDETERMINATE'}],
+   'within one timestamp only the last actual observation may be retained');
+  assert.equal(first.businessVerified,false);
+  assert.equal(first.tampermonkeyVerified,false);
+  assert.equal(first.automaticPatchAllowed,false);
+  assert.equal(first.automaticRollbackAllowed,false);
+
+  // Replaying the same bounded snapshot is idempotent. A later actual
+  // observation is preserved while the two original same-tick events
+  // remain collapsed into one historical entry.
+  assert.equal((await saveLimitedHealthArchive(userData,snapshot)).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  clock+=1;
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const later=await readLimitedHealthArchive(userData,key);
+  assert.equal(later.status,'ARCHIVE_READ_UNVERIFIED');
+  if(later.status==='ARCHIVE_READ_UNVERIFIED'){
+   assert.deepEqual(later.events,[
+    {observedAtMs:clock-1,status:'INDETERMINATE'},
+    {observedAtMs:clock,status:'ELEMENT_FOUND_ONLY'}]);
+   assert.equal(later.currentStatus,'INDETERMINATE',
+    'an archived DOM hit never becomes fresh or verified health after restart');
+  }
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-015/TEST-026: independent same-tick contradictory archive updates remain blocked',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-same-tick-conflict-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(B,'first');
+  const clock=Date.now()-1000;
+  const found=new LimitedHealthRegistry(()=>clock);
+  found.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,found.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const before=await readLimitedHealthArchive(userData,key);
+  const disputed=new LimitedHealthRegistry(()=>clock);
+  disputed.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,disputed.snapshot(key))).status,
+   'BLOCKED','separate history at the same timestamp cannot rewrite existing status');
+  assert.deepEqual(await readLimitedHealthArchive(userData,key),before);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
