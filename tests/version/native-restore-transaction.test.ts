@@ -643,7 +643,7 @@ test('TASK-011/TEST-020/026: replaced pending inode after last byte check must n
           expected:Parameters<typeof realVerify>[1])=>{
     const result=await realVerify(path,expected);
     if(dirname(path)===sourceParent&&
-       /^\\.uah-restore-[0-9a-f-]+\\.pending$/.test(path.slice(sourceParent.length+1))&&
+       path.slice(sourceParent.length+1).startsWith('.uah-restore-')&&path.endsWith('.pending')&&
        result==='MATCH'&&++stagingChecks===2){
      const displacedPending=join(sourceParent,'.externally-moved-'+randomUUID());
      await rename(path,displacedPending);
