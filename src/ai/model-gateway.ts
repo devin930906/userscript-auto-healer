@@ -111,7 +111,9 @@ async function limitedJson(response:Response,signal:AbortSignal):Promise<unknown
         if(done)break;
         count+=value.byteLength;
         if(count>MAX_REPLY)return null;
-        bytes.push(value);
+        // The transport may reuse its Uint8Array on the next read. Retain
+        // an owned snapshot, not a view into mutable provider memory.
+        bytes.push(value.slice());
       }
       if(signal.aborted||count===0)return null;
       const data=new Uint8Array(count);let off=0;
