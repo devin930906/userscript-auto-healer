@@ -468,6 +468,52 @@ test('TASK-013/TEST-022/026: cancellation during writer lock cleanup never ackno
  });
 });
 
+test('TASK-013/TEST-022/026: checkpoint tampering after writer mutex release invalidates the save receipt',async()=>{
+ for(const mutation of ['different-bytes','same-bytes-new-inode'] as const){
+  await withJournal(async directory=>{
+   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+   const nativeRmdir=fsPromises.rmdir;
+   const lock=join(directory,'.uah-readonly-batch-v2.lock');
+   const target=join(directory,BATCH_JOURNAL_FILENAME);
+   const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+   let injected=false;
+   (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...rest)=>{
+    await nativeRmdir(path,...rest);
+    if(path===lock){
+     injected=true;
+     if(mutation==='different-bytes'){
+      await writeFile(target,Buffer.from('externally modified checkpoint'));
+     }else{
+      const exact=await readFile(target);
+      const previous=join(directory,'prior-owned-journal-preserved');
+      renameSync(target,previous);
+      writeFileSync(target,exact);
+     }
+    }
+   };
+   try{
+    const result=await saveReadOnlyBatchJournal(directory,coordinator);
+    assert.equal(injected,true,'test must mutate after the real lock release');
+    assert.deepEqual(result,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+    if(mutation==='different-bytes'){
+     assert.equal((await readFile(target)).toString(),
+      'externally modified checkpoint');
+     assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+      {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+    }else{
+     const data=await readFile(target);
+     assert.equal(JSON.parse(data.toString('utf8')).schema,'uah-readonly-batch-v2');
+     assert.deepEqual(await readFile(join(directory,'prior-owned-journal-preserved')),data);
+    }
+    assert.deepEqual(coordinator.snapshot().jobs.map(j=>j.state),
+     ['QUEUED','QUEUED'],'no batch worker or script update was authorized');
+   }finally{
+    (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;
+   }
+  });
+ }
+});
+
 test('TASK-013/TEST-022/026: lock cleanup denial cannot acknowledge an unusable checkpoint',async()=>{
  await withJournal(async directory=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
