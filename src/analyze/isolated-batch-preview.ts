@@ -8,6 +8,7 @@
  * the active worker and stops all subsequent segments. No userscript is executed.
  */
 import {Worker} from 'node:worker_threads';
+import {types as nodeTypes} from 'node:util';
 import {join} from 'node:path';
 import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {
@@ -45,7 +46,7 @@ const SELECTOR_METHODS=new Set([
  '<dynamic-member>'
 ]);
 function replyRecord(value:unknown,keys:readonly string[]):Record<string,unknown>|null{
- if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||Array.isArray(value))return null;
  const proto=Object.getPrototypeOf(value);
  if(proto!==Object.prototype&&proto!==null)return null;
  const descriptors=Object.getOwnPropertyDescriptors(value);
@@ -59,7 +60,7 @@ function replyRecord(value:unknown,keys:readonly string[]):Record<string,unknown
  return fields;
 }
 function replyArray(value:unknown,count:number):unknown[]|null{
- if(!Array.isArray(value)||value.length!==count||
+ if(nodeTypes.isProxy(value)||!Array.isArray(value)||value.length!==count||
     Object.getPrototypeOf(value)!==Array.prototype)return null;
  const descriptors=Object.getOwnPropertyDescriptors(value);
  if(Reflect.ownKeys(descriptors).length!==count+1)return null;
