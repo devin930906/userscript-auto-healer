@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
+import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -134,9 +135,21 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     analysis};
 }
 async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
-  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
-  const previews=await runImportedReadOnlyAnalysisQueue(result.scripts,signal,onProgress);
-  return {canceled:result.canceled===true||signal?.aborted===true,
+  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void,
+  nativeJournalRoot?:string) {
+  // Only the native OS picker may opt into persistence. Dropped bytes still
+  // use the existing ephemeral, read-only worker; no renderer path is trusted.
+  const checkpoint=nativeJournalRoot&&result.scripts.length>0
+    ?await runCheckpointedNativeImportAnalysis(nativeJournalRoot,
+      result.scripts,signal,onProgress)
+    :undefined;
+  const previews=checkpoint?.previews??
+    await runImportedReadOnlyAnalysisQueue(result.scripts,signal,onProgress);
+  return {batchCheckpoint:checkpoint?.status,
+    batchCheckpointReason:checkpoint?.status==='BLOCKED'?checkpoint.reason:undefined,
+    batchResumed:checkpoint?.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'
+      ?checkpoint.resumed:false,
+    canceled:result.canceled===true||signal?.aborted===true,
     unprocessed:result.unprocessed??0,
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
     errors:result.errors, duplicates:result.duplicates};
@@ -741,7 +754,7 @@ function registerSafeIpc(): void {
         nativeImportCounters={phase:'ANALYZING',processed,total,
           accepted:result.scripts.length,duplicates:result.duplicates,
           failed:result.errors.length};
-      });
+      },join(app.getPath('userData'),'readonly-import-journals'));
     } finally {
       if(nativeImportController===controller){
         nativeImportController=null;

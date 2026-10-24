@@ -19,6 +19,9 @@ interface ImportResponse {
   scripts: Imported[];
   errors: { filename: string; code: string }[];
   duplicates: number;
+  batchCheckpoint?:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'|'BLOCKED';
+  batchCheckpointReason?:string;
+  batchResumed?:boolean;
 }
 interface NativeImportProgress {
   active:boolean;
@@ -254,6 +257,12 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       ? await window.healer.chooseFiles()
       : await window.healer.chooseFolder();
     show(result);
+    if (result.batchCheckpoint==='BLOCKED')
+      logLine('批处理检查点未保存：'+(result.batchCheckpointReason??'UNKNOWN')+
+        '；已导入的原始文件未被修改，静态分析不能据此视为已完成。');
+    else if(result.batchCheckpoint==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+      logLine(result.batchResumed?'已重新核对同批脚本的只读持久调度记录；仍重新分析源码，不代表修复完成。':
+        '只读 AST 批处理检查点已保存；仅记录有限调度状态，不授权修复脚本。');
     if (result.canceled) {
       unprocessedCount += result.unprocessed ?? 0;
       logLine('原生选择导入已取消；已经完成的只读结果仍保留。');
