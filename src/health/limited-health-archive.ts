@@ -32,6 +32,10 @@ export type ArchiveRead=
 export type ArchiveSave=Readonly<{status:'ARCHIVE_SAVED_UNVERIFIED'|'BLOCKED'}&typeof emptyAuthority>;
 const blocked=():ArchiveRead=>Object.freeze({status:'BLOCKED' as const,...emptyAuthority});
 const MAX_BYTES=8192;
+// A far-future local clock or modified archive must not silently prevent
+// new consented observations from entering the bounded timeline.
+// This remains clock-sanity checking, NOT authentication of old evidence.
+const MAX_FUTURE_SKEW_MS=5*60*1000;
 const SHA=/^[0-9a-f]{64}$/;
 const dirName='limited-health-history-v1';
 const same=(a:BigIntStats,b:BigIntStats)=>a.dev===b.dev&&a.ino===b.ino&&
@@ -99,11 +103,13 @@ async function inspectFile(path:string,key:string):Promise<Entry|'NOT_FOUND'|nul
       !Array.isArray(data.events)||data.events.length===0||data.events.length>32||
       text!==JSON.stringify(parsed)+'\n')return null;
    const events:ArchiveEvent[]=[];
+   const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
    for(const entry of data.events){
     if(!entry||typeof entry!=='object'||Array.isArray(entry))return null;
     const e=entry as Record<string,unknown>;
     if(Object.keys(e).join(',')!=='observedAtMs,status'||
        !Number.isSafeInteger(e.observedAtMs)||(e.observedAtMs as number)<0||
+       (e.observedAtMs as number)>maxObservedAtMs||
        (e.status!=='ELEMENT_FOUND_ONLY'&&e.status!=='INDETERMINATE')||
        (events.length>0&&(e.observedAtMs as number)<=events[events.length-1].observedAtMs))
      return null;
@@ -125,8 +131,10 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
      !Array.isArray(snapshot.history)||snapshot.history.length===0||
      snapshot.history.length>32)return null;
   const result:ArchiveEvent[]=[];
+  const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
   for(const event of snapshot.history){
    if(!Number.isSafeInteger(event.observedAtMs)||event.observedAtMs<0||
+      event.observedAtMs>maxObservedAtMs||
       (event.status!=='ELEMENT_FOUND_ONLY'&&event.status!=='INDETERMINATE')||
       result.length>0&&event.observedAtMs<=result[result.length-1].observedAtMs)
     return null;
