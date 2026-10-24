@@ -122,6 +122,7 @@ export async function runCheckpointedNativeImportAnalysis(
  try{
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator);
+  if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   if(outcome.status==='BLOCKED')return fail(count,outcome.reason);
   const previews:ImportAnalysisPreview[]=[];
   let processed=0;
@@ -133,11 +134,16 @@ export async function runCheckpointedNativeImportAnalysis(
    let reports=observations[ordinal];
    if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted)
     reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+   // Resume reanalysis awaits a worker AFTER checkpoint settlement. Any
+   // cancellation during that await revokes the display receipt, even when
+   // the previously persisted scheduling hint was SUCCEEDED.
+   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
    previews.push(...(reports??blank(group.scripts.length,
     lifetime.signal.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED')));
    processed+=group.scripts.length;
    try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
   }
+  if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
    resumed,previews});
  }finally{
