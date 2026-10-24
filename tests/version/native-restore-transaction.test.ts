@@ -433,6 +433,46 @@ test('TEST-020/026: a journal changed during the second backup round cannot yiel
  });
 });
 
+test('TASK-011/TEST-020/026: intent edited during the last source fingerprint cannot yield a stale observation',async t=>{
+ await fixture(async opts=>{
+  const restored=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const journalPath=join(opts.backupDirectory,restored.journalFileName);
+  const sourceModule=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const real=sourceModule.verifyApprovedSourceFingerprint;
+  let originalReads=0;
+  const external=Buffer.from('intent changed during final source fingerprint');
+  // The inspector checks the original source twice: first before its late
+  // backup/journal checks, then once more for final source stability.
+  // Change the intent AFTER the second verified source read returns, where
+  // an earlier journal recheck can no longer establish current evidence.
+  t.mock.method(sourceModule,'verifyApprovedSourceFingerprint',
+   async (input:Parameters<typeof real>[0])=>{
+    const result=await real(input);
+    if(input!==null&&typeof input==='object'&&
+       'expectedSha256' in input&&input.expectedSha256===sha(original)&&
+       result.status==='MATCHED_READ_ONLY'&&++originalReads===2)
+      await writeFile(journalPath,external);
+    return result;
+   });
+  const result=await inspectNativeRestoreIntentReadOnly({
+   sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+   journalFileName:restored.journalFileName,userApproved:true
+  });
+  assert.equal(originalReads,2,'must inject only at the last source check');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'UNSAFE_JOURNAL',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(journalPath),external,
+   'read-only inspection must not erase independent edits or rewrite evidence');
+  assert.deepEqual(await readFile(opts.sourcePath),original);
+ });
+});
+
 test('TEST-020/026: forged journal, tampered backup and diverged source never give a usable receipt',async()=>{
  await fixture(async opts=>{
   const restored=await restoreVerifiedOriginalNativeOnly(opts);
