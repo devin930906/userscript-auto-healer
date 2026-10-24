@@ -683,6 +683,7 @@ function Move-CandidatePortableDirectory(
   # GetFullPath normalizes dot segments; the trailing separator prevents an
   # attacker-controlled sibling of RUNNER_TEMP from passing a prefix check.
   if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+     -not [IO.Path]::IsPathRooted($env:RUNNER_TEMP) -or
      -not [IO.Path]::IsPathRooted($source) -or
      -not [IO.Path]::IsPathRooted($destination)) {
     throw [InvalidOperationException]::new('Candidate relocation requires absolute runner temp paths')
