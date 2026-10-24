@@ -586,7 +586,7 @@ test('TASK-011/TEST-020/021: source modified while mutex is released cannot get 
   let changedDuringRelease=false;
   (fsPromises as {rmdir:typeof originalRmdir}).rmdir=async(path,...args)=>{
    const result=await originalRmdir(path,...args);
-   if(path.includes('.uah-restore-path-')){
+   if(typeof path==='string'&&path.includes('.uah-restore-path-')){
     assert.deepEqual(await readFile(opts.sourcePath),original);
     await writeFile(opts.sourcePath,external);
     changedDuringRelease=true;
@@ -616,7 +616,7 @@ test('TASK-011/TEST-020/021: journal changed while mutex is released cannot get 
   let changedDuringRelease=false;
   (fsPromises as {rmdir:typeof originalRmdir}).rmdir=async(path,...args)=>{
    const result=await originalRmdir(path,...args);
-   if(path.includes('.uah-restore-path-')){
+   if(typeof path==='string'&&path.includes('.uah-restore-path-')){
     const journals=(await readdir(opts.backupDirectory))
      .filter(n=>n.endsWith('.journal.json'));
     assert.equal(journals.length,1);
