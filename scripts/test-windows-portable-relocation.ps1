@@ -91,6 +91,30 @@ try {
     New-Item -ItemType Directory -Path $relativeSource | Out-Null
     $relativePayload=Join-Path $relativeSource 'preserve.txt'
     [IO.File]::WriteAllText($relativePayload,'untouched')
+    # An untrusted relative runner path can resolve to this very sandbox
+    # under a chosen working directory. Even then, diagnostics must refuse.
+    $candidateForWait=Join-Path $relativeSource 'UserscriptAutoHealer.exe'
+    Push-Location -LiteralPath $root
+    try {
+      $env:RUNNER_TEMP='isolated-runner'
+      $waitDenied=$false
+      try { Wait-CandidatePortableProcessExit $candidateForWait 1 0 | Out-Null }
+      catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*fully qualified runner paths*') { throw }
+        $waitDenied=$true
+      }
+      if(-not $waitDenied) {
+        throw 'Relative RUNNER_TEMP incorrectly authorized candidate process wait'
+      }
+      $control=Get-CandidatePortableSiblingRenameControl $relativeSource
+      if($control -cne 'control=unavailable') {
+        throw ('Relative RUNNER_TEMP incorrectly permitted sibling rename probe: '+$control)
+      }
+      if(@(Get-ChildItem -LiteralPath $sandbox -Directory -Filter 'uah-empty-rename-control-*').Count -gt 0) {
+        throw 'Invalid runner path left a diagnostic rename control directory'
+      }
+    } finally { $env:RUNNER_TEMP=$sandbox; Pop-Location }
+    Write-Output 'PASS: candidate process and rename diagnostics reject cwd-resolved runner temp'
     $relativeTempBlocked=$false
     try {
       $env:RUNNER_TEMP='relative-runner-temp'

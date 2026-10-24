@@ -11,6 +11,12 @@ function Wait-CandidatePortableProcessExit(
      $delayMilliseconds -lt 0 -or $delayMilliseconds -gt 1000) {
     throw [ArgumentException]::new('Invalid candidate process wait options')
   }
+  # Never resolve a relative runner authority against the current directory.
+  # Use the same fully qualified path gate as the actual candidate move.
+  if(-not [IO.Path]::IsPathFullyQualified($candidateExe) -or
+     -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+    throw [InvalidOperationException]::new('Candidate process wait requires fully qualified runner paths')
+  }
   $exact=[IO.Path]::GetFullPath($candidateExe)
   $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
   if(-not $exact.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
@@ -601,7 +607,10 @@ function Get-CandidatePortableSiblingRenameControl([string]$source) {
   try {
     if([string]::IsNullOrWhiteSpace($source) -or
        [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
-       -not [IO.Path]::IsPathRooted($source)) { return 'control=unavailable' }
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return 'control=unavailable'
+    }
     $base=[IO.Path]::GetFullPath($source)
     $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
