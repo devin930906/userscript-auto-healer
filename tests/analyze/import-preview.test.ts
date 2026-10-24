@@ -296,3 +296,27 @@ test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoki
  assert.equal(mapCalls,0,'over-capacity refusal must not execute a caller method');
  assert.equal(progressCalls,0,'invalid batches have no valid per-file progress');
 });
+
+test('TASK-013/TEST-022/026: isolated reply rejects Proxy arrays, rows and sites before reflection',()=>{
+ const preview=JSON.parse(JSON.stringify(previewImportedScriptAnalysis(
+  imported(header+'document.querySelector("#sensitive");'))));
+ let traps=0;
+ const reject=()=>{traps++;throw Error('PRIVATE_WORKER_PROXY_TRAP');};
+ const proxyArray=new Proxy([preview],{get:reject,getPrototypeOf:reject});
+ const proxyRow=new Proxy(preview,{getPrototypeOf:reject,ownKeys:reject});
+ const proxySite=new Proxy(preview.sites[0],{getPrototypeOf:reject,ownKeys:reject});
+ for(const input of [
+  proxyArray,[proxyRow],[{...preview,sites:[proxySite]}]
+ ]) {
+  assert.equal(validateIsolatedPreviewReply(input,1),null);
+  assert.equal(traps,0,'hostile Proxy traps must never run in a read-only reply boundary');
+ }
+ const revokedArray=Proxy.revocable([preview],{});revokedArray.revoke();
+ const revokedRow=Proxy.revocable(preview,{});revokedRow.revoke();
+ const revokedSite=Proxy.revocable(preview.sites[0],{});revokedSite.revoke();
+ for(const input of [revokedArray.proxy,[revokedRow.proxy],
+  [{...preview,sites:[revokedSite.proxy]}]]) {
+  assert.equal(validateIsolatedPreviewReply(input,1),null);
+ }
+ assert.equal(traps,0);
+});
