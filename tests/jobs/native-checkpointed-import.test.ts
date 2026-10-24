@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -109,5 +109,52 @@ test('TASK-013/TEST-022/026: junctioned or missing userData parent cannot cause 
   if(missing.status==='BLOCKED')assert.equal(missing.reason,'UNSAFE_PATH');
   assert.equal((await readdir(home)).includes('missing-app-userdata'),false,
    'the import scheduler is not permitted to recursively construct userData');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022: cancellation during resumed AST display analysis cannot return a checkpointed success',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-resumed-cancel-'));
+ try{
+  const file=join(home,'selected.user.js');
+  const script=header+'document.querySelector("#source-retained");';
+  await writeFile(file,script);
+  const selected=(await importApprovedPaths([file])).scripts;
+  assert.equal(selected.length,1);
+  const root=join(home,'userdata','read-only');
+  await mkdir(join(home,'userdata'));
+  const first=await runCheckpointedNativeImportAnalysis(root,selected);
+  assert.equal(first.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const checkpointBefore=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const native=isolated.previewImportedBatchOffMain;
+  const controller=new AbortController();
+  const progress:Array<[number,number]>=[];
+  let injected=0;
+  const patched=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof native>)=>{
+    const reports=await native(...args);
+    injected++;
+    controller.abort();
+    return reports;
+   });
+  try{
+   const result=await runCheckpointedNativeImportAnalysis(root,selected,
+    controller.signal,(processed,total)=>progress.push([processed,total]));
+   assert.equal(injected,1,'abort must happen during resumed display-only AST');
+   assert.equal(controller.signal.aborted,true);
+   assert.equal(result.status,'BLOCKED',
+    'a stale completed scheduling hint must never override active cancellation');
+   if(result.status==='BLOCKED'){
+    assert.equal(result.reason,'CANCELLED');
+    assert.deepEqual(result.previews.map(p=>p.status),['SKIPPED_CANCELLED']);
+   }
+   assert.deepEqual(progress,[],'cancelled display must not signal finished progress');
+  }finally{patched.mock.restore();}
+  assert.deepEqual(await readFile(file),Buffer.from(script),
+   'never modify selected userscript bytes');
+  assert.deepEqual(await readFile(journal),checkpointBefore,
+   'late display cancellation must not rewrite previous durable scheduling');
  }finally{await rm(home,{recursive:true,force:true});}
 });
