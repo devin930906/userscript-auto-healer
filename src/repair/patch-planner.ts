@@ -99,6 +99,41 @@ function mayReplaceDomSelectorMethod(target:unknown):boolean{
     (property.name==='querySelector'||property.name==='querySelectorAll');
 }
 
+/** Standard reflection can replace the selector method without an
+ * AssignmentExpression on document. We cannot prove that a reflective
+ * mutator leaves the native DOM API intact. Reject only when its first
+ * argument is the global document (including window/globalThis.document).
+ * A dynamic Object/Reflect member call is also ambiguous for that target.
+ * This is an offline conservative heuristic, not a runtime attestation. */
+function mayReflectivelyMutateDocument(node:AstNode):boolean{
+ if(node.type!=='CallExpression'||!Array.isArray(node.arguments)||
+    node.arguments.length===0)return false;
+ const argument=asNode(node.arguments[0]);
+ const firstIsDocument=argument?.type==='Identifier'&&argument.name==='document';
+ const nested=asNode(argument?.object);
+ const nestedProperty=asNode(argument?.property);
+ const aliasedDocument=argument?.type==='MemberExpression'&&
+   argument.computed===false&&
+   nested?.type==='Identifier'&&
+   (nested.name==='window'||nested.name==='globalThis')&&
+   nestedProperty?.type==='Identifier'&&nestedProperty.name==='document';
+ if(!firstIsDocument&&!aliasedDocument)return false;
+ const callee=asNode(node.callee);
+ if(callee?.type!=='MemberExpression')return false;
+ const receiver=asNode(callee.object);
+ if(receiver?.type!=='Identifier'||
+    (receiver.name!=='Object'&&receiver.name!=='Reflect'))return false;
+ const property=asNode(callee.property);
+ const method=callee.computed===true?
+   (property?.type==='Literal'&&typeof property.value==='string'?
+      property.value:null):
+   (property?.type==='Identifier'?property.name:null);
+ if(typeof method!=='string')return true;
+ return receiver.name==='Object'?
+   ['defineProperty','defineProperties','assign','setPrototypeOf'].includes(method):
+   ['defineProperty','set','deleteProperty','setPrototypeOf'].includes(method);
+}
+
 /** Reject source whose `document` reference or selector methods cannot be
  * conservatively trusted. Direct eval and with-statements also make name
  * resolution ambiguous.
@@ -129,7 +164,8 @@ function ambiguousDocumentBinding(source:string):boolean{
        (node.type==='UnaryExpression'&&node.operator==='delete'&&
         mayReplaceDomSelectorMethod(node.argument))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
-        asNode(node.callee)?.name==='eval')){
+        asNode(node.callee)?.name==='eval')||
+       mayReflectivelyMutateDocument(node)){
       ambiguous=true;return;
     }
     for(const [key,value] of Object.entries(node)){
