@@ -347,3 +347,29 @@ test('TEST-016/026: disabling AI revokes a pending transport that ignores cancel
   assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
   assert.equal(gateway.status().remainingRequests,0);
 });
+
+test('TEST-016/026: streamed model discovery preserves chunks from a reused transport buffer',async()=>{
+  // A valid streaming transport may return successive views of the same
+  // byte array. Earlier chunks must be copied before the next read mutates it.
+  const json=new TextEncoder().encode('{"data":[{"id":"buffer-reused-model"}]}');
+  const shared=new Uint8Array(7);
+  let offset=0;
+  const body=new ReadableStream<Uint8Array>({
+    pull(controller){
+      if(offset===json.length){controller.close();return;}
+      const size=Math.min(shared.length,json.length-offset);
+      shared.fill(0);
+      shared.set(json.subarray(offset,offset+size));
+      controller.enqueue(shared.subarray(0,size));
+      offset+=size;
+    }
+  },{highWaterMark:0});
+  const gateway=new OptionalAiGateway({...options(),maxRequests:1},
+    async()=>new Response(body,{headers:{'Content-Type':'application/json'}}));
+  assert.equal(gateway.enable(approval()),true);
+  const result=await gateway.discoverModels(approval());
+  assert.deepEqual(result,{
+    ok:true,status:'MODELS_DISCOVERED',
+    models:['buffer-reused-model'],manualModelAvailable:true,automaticPatchAllowed:false
+  });
+});
