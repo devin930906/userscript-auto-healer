@@ -73,6 +73,10 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      !dir.isDirectory()||dir.isSymbolicLink())
    return block('UNSAFE_PATH');
   let visited=0,inspected=0,originalPresent=0,displacedPresent=0,rejected=0;
+  const observations:Array<{
+   journalFileName:string;
+   result:Awaited<ReturnType<typeof inspectNativeRestoreIntentReadOnly>>
+  }>=[];
   const handle=await opendir(x.backupDirectory);
   for await(const entry of handle){
    if(++visited>MAX_DIRECTORY_ENTRIES)return block('SCAN_LIMIT');
@@ -84,9 +88,32 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
     sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
     journalFileName:entry.name,userApproved:true
    });
+   observations.push({journalFileName:entry.name,result:observation});
    if(observation.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY')rejected++;
    else if(observation.sourceState==='ORIGINAL_PRESENT')originalPresent++;
    else displacedPresent++;
+  }
+  // A journal can be edited IN PLACE after its own inspection without
+  // changing the directory's mtime/ctime. Revalidate each bounded result
+  // before returning aggregate counts. This is still only an observational
+  // snapshot, never a cross-process atomic transaction or recovery authority.
+  for(const prior of observations){
+   const current=await inspectNativeRestoreIntentReadOnly({
+    sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
+    journalFileName:prior.journalFileName,userApproved:true
+   });
+   const earlier=prior.result;
+   if(earlier.status!==current.status)return block('UNSAFE_PATH');
+   if(earlier.status==='BLOCKED'){
+    if(current.status!=='BLOCKED'||earlier.reason!==current.reason)
+     return block('UNSAFE_PATH');
+   }else{
+    if(current.status!=='RESTORE_INTENT_OBSERVED_READ_ONLY'||
+       earlier.sourceState!==current.sourceState||
+       earlier.originalSha256!==current.originalSha256||
+       earlier.displacedSha256!==current.displacedSha256)
+     return block('UNSAFE_PATH');
+   }
   }
   const srcAfter=await lstat(x.sourcePath,{bigint:true});
   const dirAfter=await lstat(x.backupDirectory,{bigint:true});
