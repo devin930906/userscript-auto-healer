@@ -1,8 +1,9 @@
 /** TASK-011 / TEST-020/021/026: bounded native-only recovery inventory. */
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,readdir,rm,symlink,utimes,writeFile} from 'node:fs/promises';
+import {promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
@@ -92,4 +93,42 @@ test('TASK-011/TEST-026: adversarial inventory inputs cannot invoke getters or P
   assert.equal(result.automaticRollbackAllowed,false);
  }
  assert.equal(getters,0);assert.equal(traps,0);
+});
+
+test('TASK-011/TEST-020/026: concurrent directory insertion during scan invalidates entire recovery summary',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-intent-inventory-race-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await writeFile(sourcePath,original);
+  await mkdir(backupDirectory);
+  // Pin mtime to the past so a concurrent namespace edit produces a
+  // distinguishable directory identity even on coarse-timestamp volumes.
+  await utimes(backupDirectory,new Date('2000-01-01T00:00:00Z'),
+   new Date('2000-01-01T00:00:00Z'));
+  const before=await readFile(sourcePath);
+  const originalOpen=fsPromises.opendir.bind(fsPromises);
+  let inserted=0;
+  const patched=mock.method(fsPromises,'opendir',
+   (async(...args:Parameters<typeof fsPromises.opendir>)=>{
+    const handle=await originalOpen(...args);
+    // Inject external directory mutation AFTER the production pre-scan
+    // identity snapshot and BEFORE its actual enumeration.
+    inserted++;
+    await writeFile(join(backupDirectory,'external-concurrent-edit.txt'),'x');
+    return handle;
+   }) as typeof fsPromises.opendir);
+  try{
+   const result=await inspectNativeRestoreIntentInventoryReadOnly({
+    sourcePath,backupDirectory,userApproved:true
+   });
+   assert.deepEqual([result.status,'reason' in result?result.reason:null],
+    ['BLOCKED','UNSAFE_PATH']);
+   assert.equal('inspected' in result,false,
+    'a changed directory must never produce a partial trusted count');
+  }finally{patched.mock.restore();}
+  assert.equal(inserted,1);
+  assert.deepEqual(await readFile(sourcePath),before);
+  assert.deepEqual(await readdir(backupDirectory),['external-concurrent-edit.txt']);
+ }finally{await rm(home,{recursive:true,force:true});}
 });
