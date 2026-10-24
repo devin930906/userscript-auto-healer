@@ -117,3 +117,47 @@ test('TEST-025: staged review cannot be mistaken for a Tampermonkey test or writ
   assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   assert.throws(() => new LimitedCompatibilityLayer({...initial,consumers:[A,'secret']}));
 });
+
+
+// TASK-016 / TEST-025/026: Object.getPrototypeOf/Reflect.ownKeys and array
+// shape reads on a Proxy are executable attacker code, even without getters.
+// Reject the proxy itself at every trust boundary before touching any trap.
+test('TASK-016/TEST-025/026: compatibility definition and preview reject Proxy traps without execution', () => {
+  let trapped=0;
+  const hostile=<T extends object>(value:T):T=>new Proxy(value,{
+    getPrototypeOf(){trapped++;return Object.getPrototypeOf(value);},
+    ownKeys(){trapped++;return Reflect.ownKeys(value);},
+    get(_target,key,receiver){trapped++;return Reflect.get(value,key,receiver);}
+  });
+  for(const invalid of [
+    hostile(initial),
+    {...initial,consumers:hostile([...initial.consumers])},
+    {...initial,bindings:hostile([...initial.bindings])},
+    {...initial,bindings:[hostile({...initial.bindings[0]}),initial.bindings[1]]}
+  ]){
+    assert.throws(()=>new LimitedCompatibilityLayer(invalid),/INVALID_COMPAT/);
+    assert.equal(trapped,0,'constructor must not execute untrusted Proxy traps');
+  }
+  for(const [candidate,reports] of [
+    [hostile(newer),checks],
+    [{...newer,consumers:hostile([...newer.consumers])},checks],
+    [{...newer,bindings:hostile([...newer.bindings])},checks],
+    [{...newer,bindings:[hostile({...newer.bindings[0]}),newer.bindings[1]]},checks],
+    [newer,hostile([...checks])],
+    [newer,[hostile({...checks[0]}),checks[1]]]
+  ] as const){
+    const layer=new LimitedCompatibilityLayer(initial);
+    const decision=layer.previewUpgrade(candidate,reports);
+    assert.equal(decision.status,'BLOCKED');
+    assert.equal(decision.automaticActivationAllowed,false);
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+    assert.equal(trapped,0,'preview must not execute untrusted Proxy traps');
+  }
+  const revoked=Proxy.revocable([...checks],{});
+  revoked.revoke();
+  const layer=new LimitedCompatibilityLayer(initial);
+  assert.equal(layer.previewUpgrade(newer,revoked.proxy).status,'BLOCKED');
+  assert.equal(layer.snapshot().preview,null);
+  assert.equal(trapped,0);
+});
