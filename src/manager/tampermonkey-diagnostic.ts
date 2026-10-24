@@ -389,6 +389,16 @@ function snapshotDiagnosticOptions(value:unknown):{
     ['aborted','addEventListener','removeEventListener'].some(
      field=>Object.prototype.hasOwnProperty.call(signal,field))
   ))return null;
+  if(signal!==undefined){
+   // Object.create(AbortSignal.prototype) passes a prototype equality
+   // check but has no native AbortSignal internal slots. Calling the
+   // built-in getter first performs a brand check without executing a
+   // forged instance accessor or event-handler method.
+   const nativeAbortedGetter=Object.getOwnPropertyDescriptor(
+     AbortSignal.prototype,'aborted')?.get;
+   if(typeof nativeAbortedGetter!=='function'||
+      typeof nativeAbortedGetter.call(signal)!=='boolean')return null;
+  }
   return {ttlMs:checked.ttlMs as number|undefined,
    signal:signal as AbortSignal|undefined,
    runAt:checked.runAt as GmProbeRunAt|undefined};

@@ -221,6 +221,25 @@ test('TASK-007/TEST-017/026: diagnostic startup refuses hostile option descripto
  'a real aborted AbortSignal still revokes the request before any browser action');
 });
 
+test('TASK-007/TEST-017/026: prototype-spoofed AbortSignal is rejected without native brand exceptions',async()=>{
+ const unverifiedBrowser={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ // Prototype equality is not enough: a plain object can inherit
+ // AbortSignal.prototype without the native AbortSignal internal slots.
+ // Reading .aborted on such an object throws ERR_INVALID_THIS.
+ const counterfeit=Object.create(AbortSignal.prototype) as AbortSignal;
+ assert.equal(Object.getPrototypeOf(counterfeit),AbortSignal.prototype);
+ assert.deepEqual(await startApprovedTampermonkeyDiagnostic(
+   unverifiedBrowser,true,{signal:counterfeit}),
+   {ok:false,code:'INVALID_OPTIONS'});
+ // A forged signal must not even reach the normal browser preflight.
+ assert.deepEqual(await startApprovedTampermonkeyDiagnostic(
+   unverifiedBrowser,true,{signal:AbortSignal.abort()}),
+   {ok:false,code:'CANCELLED'});
+ assert.deepEqual(await startApprovedTampermonkeyDiagnostic(
+   unverifiedBrowser,true,{signal:new AbortController().signal}),
+   {ok:false,code:'UNVERIFIED_BROWSER'});
+});
+
 test('TEST-017: orchestration rejects missing authorization and forged browser identity',async()=>{
  const fake={ok:true as const,status:'OWNED_CDP_BROWSER_VERIFIED' as const,
    pid:123456,chromeVersion:'155.0.0.0',
