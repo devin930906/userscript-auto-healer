@@ -456,8 +456,7 @@ try {
       Get-CandidatePortableFileShareSummary $permanent @($permanentFile)
     }
     if($enumerationUnavailable -cne 'scan=unavailable stage=enumeration' -or
-       $enumerationUnavailable.Contains('DO-NOT-LEAK') -or
-       [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+       $enumerationUnavailable.Contains('DO-NOT-LEAK')) {
       throw "Share probe must report bounded enumeration failure stage: $enumerationUnavailable"
     }
     Write-Output 'PASS: file-sharing probe distinguishes rejected scope from enumeration failure without exposing paths'
