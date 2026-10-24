@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {mkdtemp,mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {importApprovedPaths} from '../../src/import/import-service';
@@ -15,6 +15,7 @@ test('TASK-013/TEST-022: real native imported scripts checkpoint and safely rean
   await writeFile(a,header+'document.querySelector("#private-one");');
   await writeFile(b,header+'document.querySelector("#private-two");');
   const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
   const picked=await importApprovedPaths([a,b]);
   assert.equal(picked.errors.length,0);
   assert.equal(picked.scripts.length,2);
@@ -62,6 +63,7 @@ test('TASK-013/TEST-022/026: tampered persistent batch blocks without replacing 
   await writeFile(a,header+'document.querySelector("#private-node");');
   const data=(await importApprovedPaths([a])).scripts;
   const root=join(home,'user-data','jobs');
+  await mkdir(join(home,'user-data'));
   const first=await runCheckpointedNativeImportAnalysis(root,data);
   assert.equal(first.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
   const batch=(await readdir(root))[0];
@@ -79,5 +81,33 @@ test('TASK-013/TEST-022/026: tampered persistent batch blocks without replacing 
   const abort=await runCheckpointedNativeImportAnalysis(root,data,cancelled.signal);
   assert.deepEqual(abort.status,'BLOCKED');
   assert.equal(await readFile(journal,'utf8'),tampered);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: junctioned or missing userData parent cannot cause any checkpoint directory creation',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-journal-boundary-'));
+ try{
+  const selected=join(home,'selected.user.js');
+  await writeFile(selected,header+'document.querySelector("#safe");');
+  const data=(await importApprovedPaths([selected])).scripts;
+  assert.equal(data.length,1);
+  const foreign=join(home,'unrelated-foreign-directory');
+  await mkdir(foreign);
+  const alias=join(home,'redirected-userdata');
+  // A Windows junction does not require changing the app's file ownership.
+  await symlink(foreign,alias,process.platform==='win32'?'junction':'dir');
+  const diverted=await runCheckpointedNativeImportAnalysis(join(alias,'readonly-import-journals'),data);
+  assert.equal(diverted.status,'BLOCKED');
+  if(diverted.status==='BLOCKED')assert.equal(diverted.reason,'UNSAFE_PATH');
+  assert.deepEqual(await readdir(foreign),[],
+   'a malicious parent must be rejected BEFORE mkdir can touch its target');
+  assert.deepEqual(await readFile(selected),Buffer.from(header+'document.querySelector("#safe");'));
+
+  const absent=join(home,'missing-app-userdata');
+  const missing=await runCheckpointedNativeImportAnalysis(join(absent,'readonly-import-journals'),data);
+  assert.equal(missing.status,'BLOCKED');
+  if(missing.status==='BLOCKED')assert.equal(missing.reason,'UNSAFE_PATH');
+  assert.equal((await readdir(home)).includes('missing-app-userdata'),false,
+   'the import scheduler is not permitted to recursively construct userData');
  }finally{await rm(home,{recursive:true,force:true});}
 });

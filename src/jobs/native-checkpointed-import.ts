@@ -7,7 +7,7 @@
  */
 import {createHash} from 'node:crypto';
 import {lstat,mkdir} from 'node:fs/promises';
-import {isAbsolute,join,resolve} from 'node:path';
+import {dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
@@ -65,10 +65,25 @@ export async function runCheckpointedNativeImportAnalysis(
  }
  const directory=join(journalRoot,'batch-'+nameHash.digest('hex'));
  try{
-  // Do not use a source-file parent directory for app state. Existing
-  // symlinked paths are denied by the same native path boundary as recovery.
-  await mkdir(journalRoot,{recursive:true,mode:0o700});
+  // Electron must have already created its own userData parent. A recursive
+  // mkdir on journalRoot used to follow a pre-existing userData junction
+  // BEFORE detecting it, potentially creating folders outside app-owned
+  // storage. Refuse the redirected/missing parent before any mkdir at all.
+  const parent=dirname(journalRoot);
+  if(await hasUnsafePathLink(parent))return fail(count,'UNSAFE_PATH');
+  const parentStart=await lstat(parent,{bigint:true});
+  if(!parentStart.isDirectory()||parentStart.isSymbolicLink())
+   return fail(count,'UNSAFE_PATH');
+  await mkdir(journalRoot,{recursive:false,mode:0o700}).catch(error=>{
+   if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;
+  });
   if(await hasUnsafePathLink(journalRoot))return fail(count,'UNSAFE_PATH');
+  const root=await lstat(journalRoot,{bigint:true});
+  const parentAgain=await lstat(parent,{bigint:true});
+  if(!root.isDirectory()||root.isSymbolicLink()||
+     !parentAgain.isDirectory()||parentAgain.isSymbolicLink()||
+     parentAgain.dev!==parentStart.dev||parentAgain.ino!==parentStart.ino)
+   return fail(count,'UNSAFE_PATH');
   await mkdir(directory,{recursive:false,mode:0o700}).catch(error=>{
    if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;
   });
