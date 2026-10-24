@@ -451,7 +451,8 @@ test('TASK-011/TEST-020/026: intent edited during the last source fingerprint ca
   t.mock.method(sourceModule,'verifyApprovedSourceFingerprint',
    async (input:Parameters<typeof real>[0])=>{
     const result=await real(input);
-    if(input.expectedSha256===sha(original)&&
+    if(input!==null&&typeof input==='object'&&
+       'expectedSha256' in input&&input.expectedSha256===sha(original)&&
        result.status==='MATCHED_READ_ONLY'&&++originalReads===2)
       await writeFile(journalPath,external);
     return result;
