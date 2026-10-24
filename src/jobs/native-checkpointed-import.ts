@@ -132,8 +132,16 @@ export async function runCheckpointedNativeImportAnalysis(
    // A prior success is an unauthenticated scheduling hint. Always rerun
    // its bounded, isolated AST worker to return fresh, source-matched UI data.
    let reports=observations[ordinal];
-   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted)
-    reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted){
+    try{
+     reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+    }catch{
+     // A persisted SUCCEEDED scheduling hint is not current AST evidence.
+     // Isolate a rejected display-only Worker to its own script segment;
+     // later segments still run, and no prior journal is promoted to proof.
+     reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');
+    }
+   }
    // Resume reanalysis awaits a worker AFTER checkpoint settlement. Any
    // cancellation during that await revokes the display receipt, even when
    // the previously persisted scheduling hint was SUCCEEDED.
