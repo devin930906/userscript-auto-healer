@@ -524,8 +524,8 @@ function Get-CandidatePortableRmFileAssociationSummary(
        -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
       return 'rmFiles=unavailable'
     }
-    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\\','/'))
-    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     $prefix=$base+[IO.Path]::DirectorySeparatorChar
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
        [StringComparison]::OrdinalIgnoreCase) -or
@@ -559,9 +559,9 @@ function Get-CandidatePortableRmFileAssociationSummary(
       # identity and session closure for this SINGLE file.
       $detail=Get-CandidatePortableRestartManagerSummary $base @($file)
       $affected=[regex]::Match($detail,
-        '^rm=ok sampled=1 total=1 affected=(\\d+) ')
+        '^rm=ok sampled=1 total=1 affected=(\d+) ')
       $scopes=[regex]::Match($detail,
-        ' imageScope=\\[candidateTree=\\d+ runnerOther=\\d+ outsideRunner=(\\d+) unknown=\\d+\\]')
+        ' imageScope=\[candidateTree=\d+ runnerOther=\d+ outsideRunner=(\d+) unknown=\d+\]')
       if(-not $affected.Success -or -not $scopes.Success) {
         return 'rmFiles=unavailable'
       }
