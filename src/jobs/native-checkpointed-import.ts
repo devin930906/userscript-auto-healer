@@ -6,6 +6,7 @@
  * No auto repair, browser control, user file writes or Tampermonkey claims.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {lstat,mkdir} from 'node:fs/promises';
 import {dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
@@ -40,7 +41,12 @@ export async function runCheckpointedNativeImportAnalysis(
  journalRoot:string,scripts:readonly ImportedScript[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void
 ):Promise<BatchOutcome>{
- const count=Array.isArray(scripts)?scripts.length:0;
+ // Refuse caller-controlled batch Proxies BEFORE accessing their length.
+ // Array.isArray(revokedProxy) throws and active Proxy length may run traps.
+ // Match the in-memory native AST queue's fail-closed input boundary.
+ if(nodeTypes.isProxy(scripts)||!Array.isArray(scripts))
+  return fail(0,'INVALID_INPUT');
+ const count=scripts.length;
  // The native importer caps its batches. Do not allocate an unbounded
  // failure array or snapshot for a forged direct caller.
  if(count>MAX_SELECTED_FILES)return fail(0,'INVALID_INPUT');
