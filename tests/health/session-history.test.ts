@@ -213,3 +213,48 @@ test('TASK-015/TEST-024/026: tampered or linked archive never becomes trusted or
   assert.equal((await feature.saveLimitedHealthArchive(redirected,original.snapshot(key))).status,'BLOCKED');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: a structurally valid future-dated archive cannot poison real observations',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-future-health-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const valid=new LimitedHealthRegistry(()=>Date.now()-1000);
+  valid.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,valid.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const file=join(userData,'limited-health-history-v1',
+   (await readdir(join(userData,'limited-health-history-v1')))[0]);
+  const parsed=JSON.parse(await readFile(file,'utf8')) as {
+   events:{observedAtMs:number;status:string}[];
+  };
+  // This remains an otherwise canonical JSON archive, not a broken schema.
+  // Without a time boundary it would suppress every legitimate observation
+  // made before the forged future timestamp, while claiming a successful save.
+  parsed.events[0].observedAtMs=Date.now()+24*60*60*1000;
+  const poisoned=JSON.stringify(parsed)+'\n';
+  await writeFile(file,poisoned);
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,'BLOCKED');
+  const current=new LimitedHealthRegistry(()=>Date.now());
+  current.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,current.snapshot(key))).status,
+   'BLOCKED');
+  assert.equal(await readFile(file,'utf8'),poisoned,
+   'never overwrite structurally valid yet future-poisoned evidence');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-015/TEST-024: native future-time observations are rejected before persistence',async()=>{
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-future-clock-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const future=new LimitedHealthRegistry(()=>Date.now()+24*60*60*1000);
+  future.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,future.snapshot(key))).status,'BLOCKED');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
