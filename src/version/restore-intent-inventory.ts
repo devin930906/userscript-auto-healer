@@ -96,6 +96,11 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      src.ctimeNs!==srcAfter.ctimeNs||
      !dirAfter.isDirectory()||dirAfter.isSymbolicLink()||
      dir.dev!==dirAfter.dev||dir.ino!==dirAfter.ino||
+     // A directory may keep its inode while a concurrent editor adds, removes
+     // or renames restore intents during enumeration. Do not show counts from
+     // an unstable namespace as a reconciled recovery inventory. This is a
+     // fail-closed snapshot guard, NOT an atomic cross-process lock.
+     dir.mtimeNs!==dirAfter.mtimeNs||dir.ctimeNs!==dirAfter.ctimeNs||
      await hasUnsafePathLink(x.sourcePath)||
      await hasUnsafePathLink(x.backupDirectory))return block('UNSAFE_PATH');
   return Object.freeze({status:'RESTORE_INTENT_INVENTORY_READ_ONLY' as const,
