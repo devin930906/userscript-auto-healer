@@ -31,6 +31,35 @@ test('TASK-013/TEST-022/026: checkpointed native import must reject an array Pro
 });
 
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
+test('TASK-013/TEST-022/026: forged native cancellation never executes getters or creates a journal',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-signal-boundary-'));
+ try{
+  const file=join(home,'approved.user.js');
+  const source=header+'document.querySelector("#approved");';
+  await writeFile(file,source);
+  const scripts=(await importApprovedPaths([file])).scripts;
+  assert.equal(scripts.length,1);
+  const root=join(home,'nonexistent-userdata','readonly-journals');
+  let calls=0;
+  const forged={get aborted(){calls++;return true;}} as unknown as AbortSignal;
+  const proxied=new Proxy(new AbortController().signal,{
+   get(){calls++;throw Error('UNTRUSTED_ABORT_GETTER');},
+   getPrototypeOf(){calls++;throw Error('UNTRUSTED_ABORT_PROTOTYPE');}
+  });
+  const revoked=Proxy.revocable(new AbortController().signal,{});
+  revoked.revoke();
+  const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+  for(const signal of [forged,proxied,revoked.proxy,spoof]){
+   const result=await runCheckpointedNativeImportAnalysis(root,scripts,signal);
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_INPUT');
+  }
+  assert.equal(calls,0,'native cancellation must be validated before caller hooks');
+  assert.equal((await readdir(home)).includes('nonexistent-userdata'),false);
+  assert.equal((await readFile(file)).toString(),source);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022: real native imported scripts checkpoint and safely reanalyse after restart',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-batch-test-'));
  try{
