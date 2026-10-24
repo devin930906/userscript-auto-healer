@@ -1189,7 +1189,7 @@ async function createMainWindow(): Promise<void> {
     const reselectedSourceDir=mkdtempSync(join(tmpdir(),'uah-task009-source-reselect-'));
     const reselectedSource=join(reselectedSourceDir,'approved.user.js');
     writeFileSync(reselectedSource,nativeImportFixtureBytes);
-    let nativeFilePickerCount=0;
+    let nativeFilePickerPath=join(fixtureDir,'approved.user.js');
     const nativeDialog = dialog.showOpenDialog;
     const nativeConsent = dialog.showMessageBox;
     Object.defineProperty(dialog, 'showOpenDialog', {
@@ -1209,7 +1209,7 @@ async function createMainWindow(): Promise<void> {
           : options.title?.startsWith('选择已有的独立调试')
             ? [disposableProfile]
             : options.title?.startsWith('选择 .user.js 文件')
-              ? [++nativeFilePickerCount>=3 ? reselectedSource : join(fixtureDir,'approved.user.js')]
+              ? [nativeFilePickerPath]
               : options.properties?.includes('openDirectory')
                 ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
         });
@@ -1420,19 +1420,19 @@ async function createMainWindow(): Promise<void> {
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
       "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
-      "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
+      "a.security.isolated === true, keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
       true
-    ) as { ok?: boolean; keys?: string[] };
+    ) as { ok?: boolean; keys?: string[]; nativeHash?:string };
     // TASK-009/012/017: a later, independently native-picked byte-identical
     // .user.js must become the exact local source for subsequent manual export.
     // Earlier hash-only path affinity silently retained the OLD pathname.
-    const digest=createHash('sha256').update(nativeImportFixtureBytes).digest('hex');
-    if(nativeImportedPaths.get(digest)!==join(fixtureDir,'approved.user.js'))
-      throw new Error('NATIVE_SOURCE_FIRST_PICKER_NOT_BOUND');
+    if(!probe?.nativeHash||!nativeImportedPaths.has(probe.nativeHash))
+      throw new Error('NATIVE_SOURCE_INITIAL_BINDING_UNAVAILABLE');
+    nativeFilePickerPath=reselectedSource;
     const reselected=await win.webContents.executeJavaScript(
       'window.healer.chooseFiles()') as {scripts:{sha256:string}[]};
-    if(reselected.scripts.length!==1||reselected.scripts[0].sha256!==digest||
-       nativeImportedPaths.get(digest)!==reselectedSource)
+    if(reselected.scripts.length!==1||reselected.scripts[0].sha256!==probe.nativeHash||
+       nativeImportedPaths.get(probe.nativeHash)!==reselectedSource)
       throw new Error('NATIVE_RESELECTED_SOURCE_NOT_ACTIVE');
     // TASK-011 / TEST-020/021/026: true desktop renderer -> preload ->
     // native OS pickers -> TWO simulated explicit consents -> safe native
