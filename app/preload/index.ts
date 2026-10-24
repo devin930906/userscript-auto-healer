@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   exportManualScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-manual',id),
   // No renderer-supplied path, file bytes, hashes, consent or restore options.
   inspectRestoreIntent: (): Promise<unknown> => ipcRenderer.invoke('restore:inspect-intent'),
+  inspectRestoreInventory: (): Promise<unknown> => ipcRenderer.invoke('restore:inspect-inventory'),
   restoreManualOriginal: (): Promise<unknown> => ipcRenderer.invoke('restore:manual-original'),
   cancelScenarioInspection: (): Promise<unknown> => ipcRenderer.invoke('scenario:cancel'),
   chooseChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:choose-chrome'),

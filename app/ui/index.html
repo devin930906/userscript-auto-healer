@@ -60,6 +60,9 @@
       <p>如果手动恢复曾中断或返回错误，可先使用下方只读核对：独立选择当前脚本和先前生成的恢复意图 .journal.json 文件；程序只会核对当前原版/被替换版本及两份备份的字节关系，不重试写入、不安装 Tampermonkey 脚本。结果只是本机文件状态，不证明脚本业务功能恢复。</p>
       <button id="restore-inspect-intent" type="button">只读核对恢复意图（不会覆盖文件）</button>
       <p id="restore-inspect-result" role="status" aria-live="polite">尚未执行只读核对。</p>
+      <p>若恢复意图不止一份，可只读扫描整个恢复文件夹。先通过系统对话框选择当前脚本及恢复目录，最多检查 32 份意图与 1024 个目录条目；输出只有经过核验的数量，不列出路径或摘要，不执行回滚。</p>
+      <button id="restore-inspect-inventory" type="button">批量只读核对恢复目录（不改动文件）</button>
+      <p id="restore-inventory-result" role="status" aria-live="polite">尚未扫描恢复目录。</p>
     </section>
     <section aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>

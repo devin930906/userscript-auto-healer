@@ -29,6 +29,7 @@ import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-o
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
+import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 
 let mainWindow: BrowserWindow | null = null;
@@ -564,6 +565,57 @@ function registerSafeIpc(): void {
     stopOnlyGmProbe();
     return {ok:existed,status:existed?'FIXTURE_STOP_REQUESTED':'NO_ACTIVE_FIXTURE',
       ...unverified};
+  });
+
+  // TASK-011: read-only scan of native-selected recovery intent directory.
+  // No user path, hash, script bytes, journal filename or write authority IPC.
+  ipcMain.handle('restore:inspect-inventory',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||scenarioObserveInProgress||launchInProgress||
+       profilePreparationInProgress||gmActionInProgress||gmStartInProgress||
+       readOwnedBrowser())
+      return {ok:false,code:'RESTORE_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    nativeSelectionInProgress=true;
+    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    try{
+      const consent=await dialog.showMessageBox(win,{
+        type:'info',buttons:['只读扫描恢复目录','取消'],defaultId:1,cancelId:1,
+        noLink:true,message:'只读核对该脚本对应的恢复意图目录？',
+        detail:'请独立选择本地 .user.js 原文件及此前保存恢复意图的文件夹。'
+          +'\n最多检查 32 份意图、1024 个目录条目；无法验证的记录只统计为拒绝。'
+          +'\n不移动、删除、修改文件，不执行脚本，也不自动回滚。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const source=await dialog.showOpenDialog(win,{
+        title:'只读批量核对：选择本地 .user.js 原文件',
+        properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
+      });
+      if(source.canceled||source.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const backupDirectory=await dialog.showOpenDialog(win,{
+        title:'只读批量核对：选择已有的恢复意图和独立备份文件夹',
+        properties:['openDirectory']
+      });
+      if(backupDirectory.canceled||backupDirectory.filePaths.length!==1||revoked())
+        return {ok:false,code:'CANCELLED',...unverified};
+      const report=await inspectNativeRestoreIntentInventoryReadOnly({
+        sourcePath:source.filePaths[0],
+        backupDirectory:backupDirectory.filePaths[0],userApproved:true
+      });
+      if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(report.status!=='RESTORE_INTENT_INVENTORY_READ_ONLY')
+        return {ok:false,code:report.reason,...unverified};
+      return {ok:true,status:report.status,
+        inspected:report.inspected,originalPresent:report.originalPresent,
+        displacedPresent:report.displacedPresent,rejected:report.rejected,
+        ...unverified};
+    }catch{return {ok:false,code:'INSPECTION_FAILED',...unverified};}
+    finally{nativeSelectionInProgress=false;}
   });
 
   // TASK-011/TEST-020/026: explicit read-only recovery reconciliation.

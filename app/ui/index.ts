@@ -73,6 +73,9 @@ interface Window {
     inspectRestoreIntent():Promise<{ok:boolean;code?:string;status?:string;
       sourceState?:'ORIGINAL_PRESENT'|'DISPLACED_PRESENT';
       automaticPatchAllowed:false;businessVerified:false;tampermonkeyVerified:false}>;
+    inspectRestoreInventory():Promise<{ok:boolean;code?:string;status?:string;
+      inspected?:number;originalPresent?:number;displacedPresent?:number;rejected?:number;
+      automaticPatchAllowed:false;businessVerified:false;tampermonkeyVerified:false}>;
     restoreManualOriginal():Promise<{ok:boolean;code?:string;status?:string;
       journalFileName?:string;displacedBackupFileName?:string;
       automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
@@ -107,6 +110,8 @@ const MAX_DIRECTORY_ENTRIES = 10000;
 const statusElement = document.getElementById('status');
 const intentInspectButton=document.getElementById('restore-inspect-intent') as HTMLButtonElement|null;
 const intentInspectResult=document.getElementById('restore-inspect-result');
+const intentInventoryButton=document.getElementById('restore-inspect-inventory') as HTMLButtonElement|null;
+const intentInventoryResult=document.getElementById('restore-inventory-result');
 const manualRestoreButton=document.getElementById('restore-manual-original') as HTMLButtonElement|null;
 const manualRestoreResult=document.getElementById('restore-manual-result');
 let manualRestoreBusy=false;
@@ -700,6 +705,7 @@ manualRestoreButton?.addEventListener('click',()=>{
  manualRestoreBusy=true;
  manualRestoreButton.disabled=true;
  if(intentInspectButton)intentInspectButton.disabled=true;
+  if(intentInventoryButton)intentInventoryButton.disabled=true;
  if(manualRestoreResult)manualRestoreResult.textContent=
    '仅通过系统对话框选择原始文件与可信备份；最终写入前必须再次确认。';
  void window.healer.restoreManualOriginal().then(result=>{
@@ -717,6 +723,7 @@ manualRestoreButton?.addEventListener('click',()=>{
  }).finally(()=>{
   manualRestoreBusy=false;manualRestoreButton.disabled=false;
   if(intentInspectButton)intentInspectButton.disabled=false;
+   if(intentInventoryButton)intentInventoryButton.disabled=false;
  });
 });
 intentInspectButton?.addEventListener('click',()=>{
@@ -724,6 +731,7 @@ intentInspectButton?.addEventListener('click',()=>{
  manualRestoreBusy=true;
  intentInspectButton.disabled=true;
  if(manualRestoreButton)manualRestoreButton.disabled=true;
+  if(intentInventoryButton)intentInventoryButton.disabled=true;
  if(intentInspectResult)intentInspectResult.textContent=
    '请通过系统对话框独立选择当前脚本与已有恢复意图文件；仅执行只读字节核对。';
  void window.healer.inspectRestoreIntent().then(result=>{
@@ -743,6 +751,35 @@ intentInspectButton?.addEventListener('click',()=>{
    '只读核对请求失败；没有获得可信文件状态，不应据此执行自动恢复。';
  }).finally(()=>{
   manualRestoreBusy=false;intentInspectButton.disabled=false;
+  if(manualRestoreButton)manualRestoreButton.disabled=false;
+   if(intentInventoryButton)intentInventoryButton.disabled=false;
+ });
+});
+
+intentInventoryButton?.addEventListener('click',()=>{
+ if(manualRestoreBusy)return;
+ manualRestoreBusy=true;
+ intentInventoryButton.disabled=true;
+ if(intentInspectButton)intentInspectButton.disabled=true;
+ if(manualRestoreButton)manualRestoreButton.disabled=true;
+ if(intentInventoryResult)intentInventoryResult.textContent=
+  '正在请求系统授权，选择当前脚本及现有恢复意图目录；没有文件会被修改。';
+ void window.healer.inspectRestoreInventory().then(result=>{
+  if(!intentInventoryResult)return;
+  intentInventoryResult.textContent=
+   result.ok&&result.status==='RESTORE_INTENT_INVENTORY_READ_ONLY'
+    ?'只读目录核对：检查 '+result.inspected+' 份恢复意图；原版字节匹配 '+
+      result.originalPresent+' 份，被替换版本匹配 '+result.displacedPresent+
+      ' 份，拒绝或不相符 '+result.rejected+
+      ' 份。该摘要不授权恢复、更新 Tampermonkey 或确认业务成功。'
+    :'只读目录核对未完成：'+(result.code??'UNKNOWN')+
+      '。扫描受阻时不提供任何部分有效计数，请人工检查文件。';
+ }).catch(()=>{
+  if(intentInventoryResult)intentInventoryResult.textContent=
+   '只读目录核对请求失败；文件状态不可确认，不应自动恢复。';
+ }).finally(()=>{
+  manualRestoreBusy=false;intentInventoryButton.disabled=false;
+  if(intentInspectButton)intentInspectButton.disabled=false;
   if(manualRestoreButton)manualRestoreButton.disabled=false;
  });
 });
