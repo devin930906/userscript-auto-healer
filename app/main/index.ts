@@ -1179,7 +1179,12 @@ async function createMainWindow(): Promise<void> {
     const disposableProfile=join(fixtureDir,'isolated-profile');
     mkdirSync(disposableProfile);
     writeFileSync(join(fixtureDir,'chrome.exe'),'NOT_A_CHROME_BINARY');
-    writeFileSync(join(fixtureDir, 'approved.user.js'), '// ==UserScript==\\n// smoke\\n');
+    const nativeImportFixtureBytes='// ==UserScript==\\n// smoke\\n';
+    writeFileSync(join(fixtureDir, 'approved.user.js'),nativeImportFixtureBytes);
+    const reselectedSourceDir=mkdtempSync(join(tmpdir(),'uah-task009-source-reselect-'));
+    const reselectedSource=join(reselectedSourceDir,'approved.user.js');
+    writeFileSync(reselectedSource,nativeImportFixtureBytes);
+    let nativeFilePickerCount=0;
     const nativeDialog = dialog.showOpenDialog;
     const nativeConsent = dialog.showMessageBox;
     Object.defineProperty(dialog, 'showOpenDialog', {
@@ -1198,8 +1203,10 @@ async function createMainWindow(): Promise<void> {
           ? [join(fixtureDir,'chrome.exe')]
           : options.title?.startsWith('选择已有的独立调试')
             ? [disposableProfile]
-            : options.properties?.includes('openDirectory')
-              ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
+            : options.title?.startsWith('选择 .user.js 文件')
+              ? [++nativeFilePickerCount>=3 ? reselectedSource : join(fixtureDir,'approved.user.js')]
+              : options.properties?.includes('openDirectory')
+                ? [fixtureDir] : [join(fixtureDir, 'approved.user.js')]
         });
       }
     });
@@ -1411,6 +1418,17 @@ async function createMainWindow(): Promise<void> {
       "a.security.isolated === true, keys:Object.keys(a).sort()}; })()",
       true
     ) as { ok?: boolean; keys?: string[] };
+    // TASK-009/012/017: a later, independently native-picked byte-identical
+    // .user.js must become the exact local source for subsequent manual export.
+    // Earlier hash-only path affinity silently retained the OLD pathname.
+    const digest=createHash('sha256').update(nativeImportFixtureBytes).digest('hex');
+    if(nativeImportedPaths.get(digest)!==join(fixtureDir,'approved.user.js'))
+      throw new Error('NATIVE_SOURCE_FIRST_PICKER_NOT_BOUND');
+    const reselected=await win.webContents.executeJavaScript(
+      'window.healer.chooseFiles()') as {scripts:{sha256:string}[]};
+    if(reselected.scripts.length!==1||reselected.scripts[0].sha256!==digest||
+       nativeImportedPaths.get(digest)!==reselectedSource)
+      throw new Error('NATIVE_RESELECTED_SOURCE_NOT_ACTIVE');
     // TASK-011 / TEST-020/021/026: true desktop renderer -> preload ->
     // native OS pickers -> TWO simulated explicit consents -> safe native
     // restore on disposable Windows fixture paths. This test must never use
@@ -1526,6 +1544,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
+    rmSync(reselectedSourceDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
         'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
