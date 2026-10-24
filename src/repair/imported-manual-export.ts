@@ -107,7 +107,8 @@ export async function exportReviewedImportedSelectorOnly(
    'filename','bytes','byteLength','sha256','textEncoding','sourcePath'
   ]);
   if(!script||typeof script.filename!=='string'||
-     !FILE.test(script.filename)||!SHA.test(script.sha256 as string)||
+     !FILE.test(script.filename)||typeof script.sha256!=='string'||
+     !SHA.test(script.sha256)||
      typeof script.sourcePath!=='string'||script.sourcePath.length===0||
      script.sourcePath.length>4096||script.sourcePath.includes('\0')||
      !isAbsolute(script.sourcePath)||
