@@ -7,7 +7,7 @@ import {importApprovedPaths} from '../../src/import/import-service';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import {BATCH_JOURNAL_FILENAME} from '../../src/jobs/batch-journal';
 
-const header='// ==UserScript==\\n// @name native-batch\\n// @match https://example.org/*\\n// ==/UserScript==\\n';
+const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
 test('TASK-013/TEST-022: real native imported scripts checkpoint and safely reanalyse after restart',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-batch-test-'));
  try{
