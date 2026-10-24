@@ -61,10 +61,12 @@ interface Window {
       pageExceptionCount?:number;
       sessionHealthStatus?:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'|'UNAVAILABLE';
       sessionHealthEventCount?:number;
+      localArchiveStatus?:'SAVED_UNVERIFIED'|'UNAVAILABLE';
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
     readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
       currentStatus?:'UNTESTED'|'ELEMENT_FOUND_ONLY'|'INDETERMINATE';
+      archiveRetained?:boolean;
       events?:readonly {observedAtMs:number;
         status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[];
       tampermonkeyVerified:false;businessVerified:false;
@@ -637,7 +639,7 @@ scenarioHistoryButton?.addEventListener('click',()=>{
  if(!id){if(scenarioHistorySummary)scenarioHistorySummary.textContent='请先登记并选择一个只读场景。';return;}
  scenarioHistoryBusy=true;browserControls();
  scenarioHistoryEntries?.replaceChildren();
- if(scenarioHistorySummary)scenarioHistorySummary.textContent='正在读取本窗口的有限观察记录；不会访问浏览器或磁盘。';
+ if(scenarioHistorySummary)scenarioHistorySummary.textContent='正在读取本窗口及可能存在的本机脱敏历史；不会访问浏览器。';
  void window.healer.readScenarioHistory(id).then(view=>{
   if(!view.ok||view.status!=='UNVERIFIED_SESSION_HISTORY_ONLY'||!Array.isArray(view.events)){
    if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史不可用：'+(view.code??'UNKNOWN');
@@ -646,7 +648,8 @@ scenarioHistoryButton?.addEventListener('click',()=>{
   if(scenarioHistorySummary)scenarioHistorySummary.textContent='当前状态：'+(
    view.currentStatus==='ELEMENT_FOUND_ONLY'?'仅观察到元素存在':
    view.currentStatus==='INDETERMINATE'?'证据不足／已过期':'尚未观察')+
-   '；本窗口保留 '+view.events.length+' 条（最多 32 条）。这不证明脚本或业务正常。';
+   '；'+(view.archiveRetained?'本机持久的未验证历史':'当前窗口的有限历史')+
+   '共 '+view.events.length+' 条（最多 32 条）。旧历史不作为当前健康认证，也不证明脚本或业务正常。';
   for(const event of view.events){
    const row=document.createElement('li');
    row.textContent=new Date(event.observedAtMs).toLocaleString()+' — '+(
@@ -693,7 +696,8 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
           '证据不足，不能判断脚本状态':
           '记录不可用')+
       '；记录 '+(result.sessionHealthEventCount??0)+
-      ' 条（最多 32 条，关闭窗口即清除）。'+
+      ' 条（本次窗口最多 32 条）。本地脱敏历史归档：'+
+       (result.localArchiveStatus==='SAVED_UNVERIFIED'?'已保存（仍未经业务验证）':'未确认保存')+'。'+
       '仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
    :'场景检查未通过：'+(result.code??'UNKNOWN')+
       '。没有获得 Tampermonkey 或业务验证结果。';

@@ -24,6 +24,7 @@ import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manu
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
+import {readLimitedHealthArchive,saveLimitedHealthArchive} from '../../src/health/limited-health-archive';
 import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
@@ -873,9 +874,29 @@ function registerSafeIpc(): void {
 
   // Read-only history of a staged/imported scenario. This never visits a site,
   // accepts a file path/hash from renderer, or returns raw evidence/hash data.
-  ipcMain.handle('scenario:history',(event,id:unknown)=>{
+  ipcMain.handle('scenario:history',async(event,id:unknown)=>{
     authorizeSender(event);
-    return readLimitedSessionHistory(scenarioSession,limitedScenarioHistory,id);
+    const current=readLimitedSessionHistory(scenarioSession,limitedScenarioHistory,id);
+    if(!current.ok)return current;
+    const selected=scenarioSession.resolveReadOnlyDom(id);
+    if(!selected.ok)return current;
+    try{
+      const key=limitedScenarioHistoryKey(
+        selected.scenario.scriptSha256,selected.scenario.id);
+      const stored=await readLimitedHealthArchive(app.getPath('userData'),key);
+      if(stored.status==='BLOCKED')return current.events.length?current:
+        {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};
+      if(stored.status!=='ARCHIVE_READ_UNVERIFIED')return current;
+      const oldLast=stored.events[stored.events.length-1].observedAtMs;
+      const recent=current.events.filter(event=>event.observedAtMs>oldLast);
+      const events=Object.freeze([...stored.events,...recent].slice(-32).map(
+        event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
+      const currentLast=current.events[current.events.length-1]?.observedAtMs;
+      const currentStatus=currentLast!==undefined&&currentLast>=oldLast?
+        current.currentStatus:'INDETERMINATE' as const;
+      return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
+    }catch{return current.events.length?current:
+      {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};}
   });
 
   // Fresh native consent, verified owned Chrome process and a scenario ID from
@@ -905,6 +926,7 @@ function registerSafeIpc(): void {
         detail:'只在本程序启动的独立 Chrome 打开一个标签页：\\n'+
           selected.targetUrl+
           '\\n最多采集 3 次只读选择器计数（可选旧选择器与替代选择器同时观察），并在同一已核验标签页观察 1.2 秒页面 JavaScript 异常次数；不读取异常文本、堆栈、源码或页面内容，不执行用户脚本或修改文件。'+
+          '\\n经授权完成的有限结果将仅在本机程序数据目录保存最多 32 条脱敏时间线（时间和有限状态）；不保存页面、脚本、路径或异常正文。重新启动后历史不会成为当前健康认证。'+
           '\\nCDP 结果不验证 Tampermonkey、GM API 或真实业务。'
       });
       if(consent.response!==0||controller.signal.aborted||
@@ -940,6 +962,7 @@ function registerSafeIpc(): void {
       // claim that the inspected web page or script failed.
       let sessionHealthStatus:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'|'UNAVAILABLE'='UNAVAILABLE';
       let sessionHealthEventCount=0;
+      let localArchiveStatus:'SAVED_UNVERIFIED'|'UNAVAILABLE'='UNAVAILABLE';
       try {
         const snapshot=recordLimitedScenarioInspection(limitedScenarioHistory,{
           scriptHash:limitedScenarioHistoryKey(
@@ -952,9 +975,15 @@ function registerSafeIpc(): void {
         sessionHealthStatus=snapshot.status==='ELEMENT_FOUND_ONLY'?
           'ELEMENT_FOUND_ONLY':'INDETERMINATE';
         sessionHealthEventCount=snapshot.history.length;
-      } catch { /* capacity/clock failure: history unavailable, no fake success */ }
+        const saved=await saveLimitedHealthArchive(app.getPath('userData'),snapshot);
+        if(saved.status==='ARCHIVE_SAVED_UNVERIFIED')
+          localArchiveStatus='SAVED_UNVERIFIED';
+      } catch { /* capacity/disk failure: history not certified as saved */ }
+      if(controller.signal.aborted||epoch!==scenarioObserveEpoch||
+         win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
       return {ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',
-        sessionHealthStatus,sessionHealthEventCount,
+        sessionHealthStatus,sessionHealthEventCount,localArchiveStatus,
         checkedAssertions:result.checkedAssertions,
         triageStatus:result.triage.status,
         faultCategory:result.triage.category,
