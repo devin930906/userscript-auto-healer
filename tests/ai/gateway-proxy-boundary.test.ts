@@ -55,3 +55,44 @@ test('TEST-015/026: proxy consent and evidence fail closed before any network re
   assert.equal(requests,0,'rejected input must not initiate provider traffic');
   assert.equal(gateway.status().remainingRequests,1);
 });
+
+test('TASK-014/TEST-015/026: invalid cancellation signals never trigger traps, traffic or quota consumption',async()=>{
+ let requests=0;
+ const gateway=new OptionalAiGateway(config,async()=>{
+  requests++;
+  return Response.json({data:[{id:'fixture-model'}]});
+ });
+ assert.equal(gateway.enable(approval),true);
+ let traps=0;
+ const poisoned=new Proxy(new AbortController().signal,{
+  get(){traps++;throw Error('PRIVATE_CANCEL_SIGNAL_GET');},
+  getPrototypeOf(){traps++;throw Error('PRIVATE_CANCEL_SIGNAL_PROTOTYPE');}
+ });
+ const shadow=new AbortController().signal;
+ Object.defineProperty(shadow,'aborted',{
+  get(){traps++;throw Error('PRIVATE_CANCEL_SIGNAL_SHADOW');}
+ });
+ const forged=Object.create(AbortSignal.prototype) as AbortSignal;
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ for(const signal of [
+  poisoned,shadow,forged,revoked.proxy,
+  {aborted:false} as AbortSignal
+ ]){
+  assert.deepEqual(await gateway.discoverModels(approval,signal),
+   {ok:false,code:'INVALID_CANCEL_SIGNAL',automaticPatchAllowed:false});
+  assert.deepEqual(await gateway.suggest(approval,evidence,signal),
+   {ok:false,code:'INVALID_CANCEL_SIGNAL',automaticPatchAllowed:false});
+  assert.equal(gateway.status().remainingRequests,1,
+   'invalid signal must not consume the single authorized request');
+ }
+ assert.equal(traps,0,'malicious signal getters and proxy traps must not execute');
+ assert.equal(requests,0,'invalid signal must not touch credential-bearing transport');
+ const valid=new AbortController();
+ assert.deepEqual(await gateway.discoverModels(approval,valid.signal),{
+  ok:true,status:'MODELS_DISCOVERED',models:['fixture-model'],
+  manualModelAvailable:true,automaticPatchAllowed:false
+ });
+ assert.equal(requests,1,'valid native signal should still work');
+ assert.equal(gateway.status().remainingRequests,0);
+});
