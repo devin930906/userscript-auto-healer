@@ -135,6 +135,9 @@ export async function runImportedReadOnlyAnalysisQueue(
   return {offset,list,hash:hash.digest('hex')};
  });
  const results:(ImportAnalysisPreview|null)[]=Array(count).fill(null);
+ // A transient isolated Worker failure is retryable once, but neither
+ // retries nor a malformed reply may double-count completed script slots.
+ const attempts:number[]=Array(segmentCount).fill(0);
  const parent=new AbortController();
  const cancel=()=>parent.abort();
  signal?.addEventListener('abort',cancel,{once:true});
@@ -149,18 +152,33 @@ export async function runImportedReadOnlyAnalysisQueue(
  let processed=0;
  try{
   const coordinator=new ReadOnlyBatchCoordinator({
-   count:segmentCount,concurrency:1,maxAttempts:1,
+   count:segmentCount,concurrency:1,maxAttempts:2,
    timeoutMs:SEGMENT_TIMEOUT_MS,jobHashes:groups.map(group=>group.hash)
   },async (ordinal,workerSignal)=>{
    const group=groups[ordinal];
-   const previews=await previewImportedBatchOffMain(group.list,workerSignal);
-   // Never promote a timed-out/cancelled result to completed work.
+   const attempt=++attempts[ordinal];
+   let previews:ImportAnalysisPreview[]=[];
+   try{
+    previews=await previewImportedBatchOffMain(group.list,workerSignal);
+   }catch{
+    // An isolated, trusted read-only Worker can crash before producing a
+    // result. Only one independent replacement attempt is permitted.
+   }
+   // Cancellation and timeouts never start a replacement Worker.
    if(workerSignal.aborted)return 'PERMANENT_FAILURE';
-   for(let i=0;i<previews.length;i++)results[group.offset+i]=previews[i];
+   const failed=previews.length!==group.list.length||
+    previews.some(x=>x.status==='ISOLATED_ANALYSIS_FAILED');
+   const exhausted=previews.some(x=>
+    x.status==='SKIPPED_CANCELLED'||x.status==='SKIPPED_BATCH_BUDGET');
+   if(failed&&!exhausted&&attempt<2)return 'RETRYABLE_FAILURE';
+   // Reject the entire malformed/failed segment, not just its supplied
+   // prefix. A later segment can still produce independent AST evidence.
+   if(!failed){
+    for(let i=0;i<previews.length;i++)results[group.offset+i]=previews[i];
+   }
    processed+=group.list.length;
    try{onProgress?.(processed,count);}catch{/* no callback authority */}
-   return previews.some(x=>x.status==='ISOLATED_ANALYSIS_FAILED')
-    ?'PERMANENT_FAILURE':'DONE';
+   return failed?'PERMANENT_FAILURE':'DONE';
   });
   if(parent.signal.aborted)coordinator.cancel();
   const onAbort=()=>coordinator.cancel();
