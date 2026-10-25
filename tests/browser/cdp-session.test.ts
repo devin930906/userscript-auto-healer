@@ -40,6 +40,31 @@ test('TEST-009: requested tab shape is not a verified owned session',()=>{
     assert.equal(result.targetId,pageId);
   }
 });
+test('TEST-009: a newly created target ID is selectable despite a pre-existing identical URL tab',()=>{
+  // An ordinary owned Chrome can already contain another tab at the same URL.
+  // The target ID is returned by this specific Target.createTarget command,
+  // not supplied by arbitrary page JavaScript.
+  const newId='b'.repeat(32);
+  const newer={...testPage,id:newId,
+    webSocketDebuggerUrl:'ws://127.0.0.1:9223/devtools/page/'+newId};
+  // Keep RED as a behavior failure, not a compile-time arity failure.
+  const lookup=inspectCdpTargetList as unknown as (
+    payload:unknown,port:number,url:string,createdTargetId?:string
+  )=>ReturnType<typeof inspectCdpTargetList>;
+  const found=lookup([testPage,newer],9223,testPage.url,newId);
+  assert.deepEqual(found,{ok:true,status:'TARGET_STRUCTURE_ONLY',
+    targetId:newId,websocketUrl:newer.webSocketDebuggerUrl,owned:false},
+    'the exact new page remains identifiable without trusting the older page');
+  assert.deepEqual(lookup([testPage,newer],9223,testPage.url,'c'.repeat(32)),
+    {ok:false,code:'TARGET_NOT_FOUND'},
+    'never substitute another matching-URL page for the created tab');
+  assert.deepEqual(lookup([testPage,newer],9223,testPage.url,'../forged'),
+    {ok:false,code:'INVALID_TARGET_INPUT'});
+  assert.deepEqual(lookup([newer,newer],9223,testPage.url,newId),
+    {ok:false,code:'TARGET_AMBIGUOUS'},
+    'duplicate records of the exact created ID must fail closed');
+});
+
 test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoints',()=>{
   for(const bad of [
     {...testPage,webSocketDebuggerUrl:'ws://127.0.0.1:9333/devtools/page/'+pageId},
