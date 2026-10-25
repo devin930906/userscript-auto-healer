@@ -176,6 +176,13 @@ export async function runCheckpointedNativeImportAnalysis(
    if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted){
     try{
      reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+     // A persisted success only resumes scheduling, never certifies a fresh
+     // Worker response. Missing or failed replies must preserve one receipt
+     // per imported script without suppressing later independent segments.
+     if(reports.length!==group.scripts.length||
+        reports.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
+          row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET'))
+      reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');
     }catch{
      // A persisted SUCCEEDED scheduling hint is not current AST evidence.
      // Isolate a rejected display-only Worker to its own script segment;
