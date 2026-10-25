@@ -2,6 +2,7 @@
  * This cannot prove login, userscript injection, GM APIs or business behavior.
  */
 import { setTimeout as delay } from 'node:timers/promises';
+import {types as nodeTypes} from 'node:util';
 import type { ManagedLaunchResult } from './owned-chrome';
 import { readBoundedCdpJson, isLiveApprovedChromeSession } from './owned-chrome';
 import { inspectCdpTargetList, verifyWindowsLoopbackListenerPid } from './cdp-session';
@@ -10,7 +11,7 @@ export type OpenTargetResult =
   | {readonly ok:true;readonly status:'TARGET_ID_AND_URL_MATCH_ONLY';
      readonly targetId:string;readonly businessVerified:false}
   | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'UNVERIFIED_BROWSER'|
-      'INVALID_TARGET_URL'|'UNOWNED_LISTENER'|'CDP_COMMAND_FAILED'|'TARGET_NOT_CONFIRMED'|'CANCELLED'};
+      'INVALID_TARGET_URL'|'UNOWNED_LISTENER'|'CDP_COMMAND_FAILED'|'TARGET_NOT_CONFIRMED'|'CANCELLED'|'INVALID_OPTIONS'};
 /** Fixed, content-blind diagnostics for a verified, explicitly approved tab only. */
 export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'LIST_TRANSPORT_FAILED'|'LIST_INVALID'|'LIST_NOT_MATCHED'|
@@ -182,6 +183,22 @@ async function confirmsMainFrameNavigation(
   });
 }
 
+/** Direct exported native API boundary: a forged AbortSignal getter can
+ * execute caller code before ownership verification or turn a cancellation
+ * check into an uncaught exception. Use native internal slots, never call
+ * arbitrary accessors, shadow event methods or proxy traps.
+ */
+function validNativeCancelSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 /** Never accept a raw third-party CDP socket or an unapproved website. */
 export async function openApprovedTarget(
   session:ManagedLaunchResult,targetUrl:string,userApproved:boolean,
@@ -194,9 +211,13 @@ export async function openApprovedTarget(
     try{onTargetStage?.(value);}catch{/* non-authoritative */}
   };
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+  if(signal!==undefined&&!validNativeCancelSignal(signal))
+    return {ok:false,code:'INVALID_OPTIONS'};
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-  if(!session || !session.ok||session.status!=='OWNED_CDP_BROWSER_VERIFIED'||
-     session.websocketHandshakeVerified!==true || !isLiveApprovedChromeSession(session))
+  // WeakMap-backed ownership MUST precede reads of session.ok/status etc.
+  // Forged objects, including revoked Proxies, cannot invoke user accessors.
+  if(!isLiveApprovedChromeSession(session)||
+     session.websocketHandshakeVerified!==true)
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   if(typeof targetUrl!=='string'||!validTarget(targetUrl))
     return {ok:false,code:'INVALID_TARGET_URL'};

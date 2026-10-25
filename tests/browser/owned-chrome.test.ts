@@ -406,6 +406,58 @@ test('TEST-009: a forged shape cannot authorize Chrome target creation',async()=
     {ok:false,code:'UNVERIFIED_BROWSER'});
 });
 
+test('TASK-005/TEST-009/026: CDP navigation rejects unregistered browser accessors and Proxies before touching them',async()=>{
+ let getterCalls=0,trapCalls=0;
+ const malicious={
+  get ok(){getterCalls++;throw Error('PRIVATE_BROWSER_GETTER');}
+ } as unknown as Parameters<typeof openApprovedTarget>[0];
+ const proxied=new Proxy({},{
+  get(){trapCalls++;throw Error('PRIVATE_BROWSER_PROXY_GET');},
+  getPrototypeOf(){trapCalls++;throw Error('PRIVATE_BROWSER_PROXY_PROTO');}
+ }) as Parameters<typeof openApprovedTarget>[0];
+ const revoked=Proxy.revocable({},{});
+ revoked.revoke();
+ for(const browser of [malicious,proxied,
+   revoked.proxy as Parameters<typeof openApprovedTarget>[0]]){
+  assert.deepEqual(await openApprovedTarget(browser,'https://example.com/',true),
+    {ok:false,code:'UNVERIFIED_BROWSER'});
+ }
+ assert.equal(getterCalls,0);
+ assert.equal(trapCalls,0);
+});
+
+test('TASK-005/TEST-009/026: invalid CDP navigation AbortSignal cannot run getters or initiate work',async()=>{
+ let traps=0;
+ const poisoned=new Proxy(new AbortController().signal,{
+  get(){traps++;throw Error('PRIVATE_ABORT_GET');},
+  getPrototypeOf(){traps++;throw Error('PRIVATE_ABORT_PROTO');}
+ });
+ const shadow=new AbortController().signal;
+ Object.defineProperty(shadow,'aborted',{
+  get(){traps++;throw Error('PRIVATE_ABORT_SHADOW');}
+ });
+ const forged=Object.create(AbortSignal.prototype) as AbortSignal;
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ const missing={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ for(const signal of [
+  poisoned,shadow,forged,revoked.proxy,{aborted:false} as AbortSignal
+ ]){
+  assert.deepEqual(await openApprovedTarget(
+   missing,'https://example.com/',true,signal),
+   {ok:false,code:'INVALID_OPTIONS'});
+ }
+ assert.equal(traps,0,'no user getter or Proxy trap may run before CDP ownership');
+ const cancelled=new AbortController();
+ cancelled.abort();
+ assert.deepEqual(await openApprovedTarget(
+  missing,'https://example.com/',true,cancelled.signal),
+  {ok:false,code:'CANCELLED'});
+ assert.deepEqual(await openApprovedTarget(
+  missing,'https://example.com/',true,new AbortController().signal),
+  {ok:false,code:'UNVERIFIED_BROWSER'});
+});
+
 /** Dedicated cloud job supplies a signed, independently located official
  * Chrome for Testing. Standard app-check skips this optional matrix cell.
  */
