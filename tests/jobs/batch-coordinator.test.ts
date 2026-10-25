@@ -996,3 +996,38 @@ test('TASK-013/TEST-022/026: exhausted malformed AST segment stays failed withou
   assert.ok(previews.every(p=>!p.automaticPatchAllowed&&!p.tampermonkeyVerified&&!p.businessVerified));
  }finally{injected.mock.restore();}
 });
+
+test('TASK-013/TEST-022/026: cancelled pre-worker checkpoint failure is normalized and never dispatches',async()=>{
+ let entered!:()=>void;
+ const saving=new Promise<void>(resolve=>{entered=resolve;});
+ let release!:()=>void;
+ const permit=new Promise<void>(resolve=>{release=resolve;});
+ let saves=0,dispatched=0;
+ const coordinator=new ReadOnlyBatchCoordinator({
+  count:2,concurrency:1,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B]
+ },async()=>{
+  dispatched++;
+  return 'DONE';
+ });
+ const run=coordinator.run(async()=>{
+  saves++;
+  if(saves===1){
+   entered();
+   await permit;
+  }else{
+   throw Error('PRIVATE_CHECKPOINT_IO_DETAILS');
+  }
+ });
+ await saving;
+ coordinator.cancel();
+ release();
+ await assert.rejects(run,error=>
+  error instanceof Error&&error.message==='CHECKPOINT_FAILED',
+  'a failed cancellation checkpoint must not expose raw file-system error text');
+ assert.equal(saves,2,'the canceled RUNNING attempt must try to persist its terminal state');
+ assert.equal(dispatched,0,'never run a worker after cancellation or failed checkpoint');
+ assert.deepEqual(coordinator.snapshot().jobs.map(j=>j.state),['CANCELLED','CANCELLED']);
+ assert.deepEqual(coordinator.snapshot().jobs.map(j=>j.attempts),[1,0]);
+ assert.equal(coordinator.snapshot().automaticPatchAllowed,false);
+});
