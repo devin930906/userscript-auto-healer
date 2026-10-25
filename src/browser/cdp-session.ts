@@ -38,10 +38,14 @@ export type CdpTargetEnvelope =
   | {readonly ok:false; readonly code:'INVALID_TARGET_INPUT'|'INVALID_TARGET_LIST'|
       'TARGET_NOT_FOUND'|'TARGET_AMBIGUOUS'|'UNSAFE_TARGET_WEBSOCKET'};
 export function inspectCdpTargetList(
-  payload:unknown, expectedPort:number, expectedUrl:string
+  payload:unknown, expectedPort:number, expectedUrl:string,
+  createdTargetId?:string
 ):CdpTargetEnvelope {
   if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535 ||
-     typeof expectedUrl!=='string' || expectedUrl.length>4096)
+     typeof expectedUrl!=='string' || expectedUrl.length>4096 ||
+     (createdTargetId!==undefined &&
+      (typeof createdTargetId!=='string' ||
+       !/^[a-zA-Z0-9_-]{8,128}$/.test(createdTargetId))))
     return {ok:false,code:'INVALID_TARGET_INPUT'};
   let wanted:URL;
   try {wanted=new URL(expectedUrl);}
@@ -71,6 +75,10 @@ export function inspectCdpTargetList(
        Number(ws.port)!==expectedPort || ws.username||ws.password ||
        ws.search||ws.hash || ws.pathname!=="/devtools/page/"+target.id)
       return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};
+    // A self-created page can share its URL with older pages. Only the
+    // exact returned ID may become this navigation's structural receipt.
+    // Unrelated matching-URL endpoints still receive safety validation.
+    if(createdTargetId!==undefined&&target.id!==createdTargetId)continue;
     matches.push({id:target.id,websocketUrl:target.webSocketDebuggerUrl});
     if(matches.length>1)return {ok:false,code:'TARGET_AMBIGUOUS'};
   }
