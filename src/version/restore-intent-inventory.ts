@@ -5,8 +5,9 @@
  * Never return user file paths, script bytes, digests or journal names.
  */
 import {types as nodeTypes} from 'node:util';
+import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
-import {basename,isAbsolute,resolve} from 'node:path';
+import {basename,isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 import {inspectNativeRestoreIntentReadOnly} from './restore-intent-inspection';
 
@@ -97,7 +98,13 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   // changing the directory's mtime/ctime. Revalidate each bounded result
   // before returning aggregate counts. This is still only an observational
   // snapshot, never a cross-process atomic transaction or recovery authority.
+  // Bind the final per-item audit to the same file identities until the
+  // entire aggregate is ready. In-place journal edits need not change the
+  // recovery directory metadata, and would otherwise escape a two-pass scan.
+  const auditedJournals:Array<{name:string;file:BigIntStats}>=[];
   for(const prior of observations){
+   const before=await lstat(join(x.backupDirectory,prior.journalFileName),
+    {bigint:true});
    const current=await inspectNativeRestoreIntentReadOnly({
     sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
     journalFileName:prior.journalFileName,userApproved:true
@@ -114,6 +121,7 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
        earlier.displacedSha256!==current.displacedSha256)
      return block('UNSAFE_PATH');
    }
+   auditedJournals.push({name:prior.journalFileName,file:before});
   }
   const srcAfter=await lstat(x.sourcePath,{bigint:true});
   const dirAfter=await lstat(x.backupDirectory,{bigint:true});
@@ -130,6 +138,17 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      dir.mtimeNs!==dirAfter.mtimeNs||dir.ctimeNs!==dirAfter.ctimeNs||
      await hasUnsafePathLink(x.sourcePath)||
      await hasUnsafePathLink(x.backupDirectory))return block('UNSAFE_PATH');
+  // A prior journal may have been replaced or edited while a DIFFERENT
+  // journal was revalidated, or immediately after its own revalidation.
+  // Check every captured inode and metadata at the aggregate boundary.
+  // This is a bounded snapshot, never a cross-process atomic lock.
+  for(const audit of auditedJournals){
+   const file=await lstat(join(x.backupDirectory,audit.name),{bigint:true});
+   if(file.dev!==audit.file.dev||file.ino!==audit.file.ino||
+      file.size!==audit.file.size||file.mtimeNs!==audit.file.mtimeNs||
+      file.ctimeNs!==audit.file.ctimeNs||file.nlink!==audit.file.nlink||
+      file.mode!==audit.file.mode)return block('UNSAFE_PATH');
+  }
   return Object.freeze({status:'RESTORE_INTENT_INVENTORY_READ_ONLY' as const,
    inspected,originalPresent,displacedPresent,rejected,...noAuthority});
  }catch{return block('IO_FAILURE');}
