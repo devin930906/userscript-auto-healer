@@ -156,10 +156,17 @@ export async function exportReviewedImportedSelectorOnly(
 
   const analysis=analyzeSelectors(source);
   if(analysis.status!=='OK')return block('UNSUPPORTED_SELECTOR_SITE');
+  const oldSelector=scenario.assertions[0].selector;
+  const nextSelector=scenario.assertions[1].selector;
+  const exactId=/^#[A-Za-z_][A-Za-z0-9_-]{0,127}$/;
   const matches=analysis.sites.filter(site=>
-   site.kind==='literal'&&site.selector===scenario.assertions[0].selector&&
-   site.fallbackGroup===null&&
-   (site.method==='querySelector'||site.method==='querySelectorAll'));
+   site.kind==='literal'&&site.fallbackGroup===null&&(
+    ((site.method==='querySelector'||site.method==='querySelectorAll')&&
+     site.selector===oldSelector)||
+    // DOM assertions remain CSS selectors (#id); getElementById takes "id".
+    (site.method==='getElementById'&&exactId.test(oldSelector)&&
+     exactId.test(nextSelector)&&site.selector===oldSelector.slice(1))
+   ));
   if(matches.length!==1)return block(
    matches.length>1?'AMBIGUOUS_SELECTOR_SITE':'UNSUPPORTED_SELECTOR_SITE'
   );
