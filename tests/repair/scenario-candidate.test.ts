@@ -256,6 +256,26 @@ test('TEST-019: unresolved metadata execution and update dependencies block DOM-
   }
 });
 
+test('TASK-009/TEST-019/026: unverified manager execution wrappers and external icons block DOM-only review',()=>{
+  // A static selector hit cannot verify manager injection context or
+  // network-loaded metadata resources. No candidate is eligible here.
+  for(const tag of [
+    '// @unwrap',
+    '// @icon https://assets.example.invalid/logo.png',
+    '// @icon64 https://assets.example.invalid/logo-large.png'
+  ]){
+    const changed=source.replace('// @grant none',tag+'\\n// @grant none'.replace('\\n','\n'));
+    const request={...patch,source:changed,
+      expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
+      callOffset:changed.indexOf('document.querySelector')};
+    const linked={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(request,linked,series(),true);
+    assert.equal(result.status,'BLOCKED',tag);
+    assert.equal(result.automaticPatchAllowed,false,tag);
+    assert.equal('candidateSource' in result,false,tag);
+  }
+});
+
 test('TEST-019: @include and @exclude precedence cannot silently authorize a candidate',()=>{
   for(const extra of [
     '// @exclude https://example.com/*\n',
