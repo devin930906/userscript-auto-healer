@@ -113,7 +113,7 @@ test('TASK-011/TEST-020/026: newly inserted checkpoint invalidates enumerated in
    assert.equal(made.status,'CHECKPOINT_STAGED_UNVERIFIED');
    if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
    const newName=made.checkpointFileName.replace(
-     /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.checkpoint\\.json$/,
+     /[0-9a-f-]{36}[.]checkpoint[.]json$/,
      '00000000-0000-4000-8000-000000000001.checkpoint.json');
    assert.notEqual(newName,made.checkpointFileName);
    const latePath=join(options.backupDirectory,newName);
