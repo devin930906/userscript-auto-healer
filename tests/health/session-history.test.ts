@@ -379,3 +379,29 @@ test('TASK-015/TEST-024: same-tick DOM after insufficient evidence cannot promot
    assert.deepEqual(restored.events,[{observedAtMs:timestamp,status:'INDETERMINATE'}]);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: native archive rejects forged event kind and evidence consistency',async()=>{
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-event-shape-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const authentic=registry.snapshot(key);
+  const event=authentic.history[0];
+  for(const forged of [
+   {...event,kind:'INSUFFICIENT_EVIDENCE'},
+   {...event,evidenceHash:null},
+   {...event,kind:'UNKNOWN_EVENT'},
+   {...event,evidenceHash:'not-a-hash'}
+  ]){
+   const fake={...authentic,history:[forged]};
+   assert.equal((await saveLimitedHealthArchive(userData,fake as typeof authentic)).status,
+    'BLOCKED','inconsistent native observation must never be archived');
+  }
+  assert.deepEqual(await readdir(userData),[],
+   'invalid snapshots must not even create an archive directory');
+ }finally{await rm(home,{recursive:true,force:true});}
+});

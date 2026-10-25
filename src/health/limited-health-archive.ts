@@ -133,7 +133,11 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
   const result:ArchiveEvent[]=[];
   const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
   for(const event of snapshot.history){
-   if(!Number.isSafeInteger(event.observedAtMs)||event.observedAtMs<0||
+   if((event.kind!=='LIMITED_DOM_OBSERVATION'&&event.kind!=='INSUFFICIENT_EVIDENCE')||
+      (event.kind==='LIMITED_DOM_OBSERVATION'?
+       typeof event.evidenceHash!=='string'||!SHA.test(event.evidenceHash):
+       event.evidenceHash!==null)||
+      !Number.isSafeInteger(event.observedAtMs)||event.observedAtMs<0||
       event.observedAtMs>maxObservedAtMs||
       (event.status!=='ELEMENT_FOUND_ONLY'&&event.status!=='INDETERMINATE')||
       result.length>0&&event.observedAtMs<result[result.length-1].observedAtMs)
