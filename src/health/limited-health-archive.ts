@@ -203,8 +203,16 @@ export async function saveLimitedHealthArchive(
   for(const event of fresh){
    const latest=all[all.length-1];
    if(latest&&event.observedAtMs<=latest.observedAtMs){
-    if(event.observedAtMs===latest.observedAtMs&&event.status!==latest.status)
-     return Object.freeze({status:'BLOCKED',...emptyAuthority});
+    if(event.observedAtMs===latest.observedAtMs){
+     // Separate consented scans may reach disk in the same millisecond.
+     // Preserve the conservative status across saves: a later unknown
+     // can downgrade a DOM-only hit, but an ambiguous same-tick DOM hit
+     // must never promote an already-indeterminate archived observation.
+     if(latest.status==='ELEMENT_FOUND_ONLY'&&event.status==='INDETERMINATE')
+      all[all.length-1]=Object.freeze({
+       observedAtMs:latest.observedAtMs,status:'INDETERMINATE' as const
+      });
+    }
     continue;
    }
    all.push(event);
