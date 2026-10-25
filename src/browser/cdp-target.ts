@@ -234,7 +234,7 @@ export async function openApprovedTarget(
           AbortSignal.timeout(1500)});
       const json=await readBoundedCdpJson(response);
       if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-      const inspected=inspectCdpTargetList(json,port,targetUrl);
+      const inspected=inspectCdpTargetList(json,port,targetUrl,created);
       if(!Array.isArray(json))stage('LIST_INVALID');
       else if(!inspected.ok)stage('LIST_NOT_MATCHED');
       else if(inspected.targetId!==created)stage('TARGET_ID_MISMATCH');
