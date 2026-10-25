@@ -439,3 +439,55 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
   }
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit imported scripts',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-resumed-truncated-preview-'));
+ try{
+  const paths:string[]=[];
+  for(let i=0;i<17;i++){
+   const path=join(home,'segment-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#segment-'+i+'");');
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  assert.equal(scripts.length,17);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const real=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof real>)=>{
+    if(++calls===1)return [] as Awaited<ReturnType<typeof real>>;
+    return real(...args);
+   });
+  try{
+   const progress:Array<[number,number]>=[];
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts,
+    undefined,(done,total)=>progress.push([done,total]));
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.equal(resumed.previews.length,17,'every selected file needs a display receipt');
+    assert.deepEqual(resumed.previews.slice(0,16).map(row=>row.status),
+     Array(16).fill('ISOLATED_ANALYSIS_FAILED'),
+     'truncated fresh Worker output must fail closed for its whole segment');
+    assert.equal(resumed.previews[16].status,'STATIC_ANALYSIS_ONLY',
+     'a failed segment must not discard another independently valid one');
+    assert.equal(resumed.previews.every(row=>
+     !row.automaticPatchAllowed&&!row.tampermonkeyVerified&&!row.businessVerified),true);
+   }
+   assert.equal(calls,2,'each resumed segment re-runs its isolated worker');
+   assert.deepEqual(progress,[[16,17],[17,17]]);
+  }finally{patch.mock.restore();}
+  assert.deepEqual(await readFile(journal),before,
+   'display-only recovery must leave persisted scheduling evidence untouched');
+  for(let i=0;i<paths.length;i++)
+   assert.equal((await readFile(paths[i],'utf8')).includes('#segment-'+i),true);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
