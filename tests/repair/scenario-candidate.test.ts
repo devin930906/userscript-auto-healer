@@ -264,7 +264,7 @@ test('TASK-009/TEST-019/026: unverified manager execution wrappers and external 
     '// @icon https://assets.example.invalid/logo.png',
     '// @icon64 https://assets.example.invalid/logo-large.png'
   ]){
-    const changed=source.replace('// @grant none',tag+'\\n// @grant none'.replace('\\n','\n'));
+    const changed=source.replace('// @grant none',tag+'\n// @grant none');
     const request={...patch,source:changed,
       expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
       callOffset:changed.indexOf('document.querySelector')};

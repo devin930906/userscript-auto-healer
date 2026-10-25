@@ -178,6 +178,11 @@ function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
      metadata.tags.require!==undefined||
      metadata.tags.resource!==undefined||
      metadata.tags.connect!==undefined||
+     // A DOM-only receipt cannot attest manager execution wrappers or
+     // remote icons loaded during manager installation/display.
+     metadata.tags.unwrap!==undefined||
+     metadata.tags.icon!==undefined||
+     metadata.tags.icon64!==undefined||
      metadata.tags.updateurl!==undefined||
      metadata.tags.downloadurl!==undefined||
      !Array.isArray(metadata.tags.match)||
