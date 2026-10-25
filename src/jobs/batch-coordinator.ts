@@ -299,7 +299,13 @@ export class ReadOnlyBatchCoordinator{
      }
      if(controller.signal.aborted){
       job.state='CANCELLED';
-      await onTransition();
+      try{await onTransition();}
+      catch{
+       // The cancellation checkpoint is not durable. Never leak the
+       // underlying storage error or begin another read-only worker.
+       this.cancel();
+       throw Error('CHECKPOINT_FAILED');
+      }
       return;
      }
     }
