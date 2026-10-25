@@ -95,7 +95,7 @@ export function suggestSites(metadata?:MetadataResult):SiteHint[] {
         const value=pattern.trim();
         if(!value||seen.has(source+':'+value))continue;
         seen.add(source+':'+value);
-        const match=/^(\\*|https?):\\/\\/([^/\\s]+)(?:\\/|$)/i.exec(value);
+        const match=/^(\*|https?):\/\/([^/\s]+)(?:\/|$)/i.exec(value);
         const host=match?.[2] ?? null;
         hints.push({
           source,pattern:value,
