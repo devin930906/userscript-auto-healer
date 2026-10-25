@@ -797,3 +797,59 @@ test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native res
   }
  });
 });
+
+test('TASK-011/TEST-020/021/026: revoked native restore before start never touches selected source',async()=>{
+ await fixture(async opts=>{
+  const abort=new AbortController();
+  abort.abort();
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly(opts,abort.signal);
+  assert.deepEqual([result.status,'reason' in result?result.reason:null],
+   ['BLOCKED','CANCELLED']);
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'no displaced backup, journal, pending or lock may be created');
+  let traps=0;
+  const hostile=new Proxy(abort.signal,{get(){traps++;throw Error('signal trap');}});
+  const invalid=await restoreVerifiedOriginalNativeOnly(opts,hostile);
+  assert.deepEqual([invalid.status,'reason' in invalid?invalid.reason:null],
+   ['BLOCKED','INVALID_REQUEST']);
+  assert.equal(traps,0,'never evaluate a foreign signal proxy');
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+ });
+});
+test('TASK-011/TEST-020/021/026: revoked native window before final rename retains both backups and source',async()=>{
+ await fixture(async opts=>{
+  const abort=new AbortController();
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const originalLink=fsPromises.link;
+  let revokedAfterJournal=false;
+  (fsPromises as {link:typeof originalLink}).link=async(from,to)=>{
+   const completed=await originalLink(from,to);
+   if(typeof to==='string'&&to.endsWith('.journal.json')){
+    revokedAfterJournal=true;
+    abort.abort();
+   }
+   return completed;
+  };
+  try{
+   const result=await restoreVerifiedOriginalNativeOnly(opts,abort.signal);
+   assert.equal(revokedAfterJournal,true,'must reach actual published journal');
+   assert.deepEqual([result.status,'reason' in result?result.reason:null],
+    ['BLOCKED','CANCELLED']);
+   assert.deepEqual(await readFile(opts.sourcePath),changed,
+    'native restore cannot overwrite source after revocation');
+   const entries=await readdir(opts.backupDirectory);
+   assert.ok(entries.includes(opts.backupFileName));
+   assert.ok(entries.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName),
+    'displaced version must remain independently recoverable');
+   assert.ok(entries.some(n=>n.endsWith('.journal.json')),
+    'published crash-recovery intent must survive cancellation');
+   const root=await readdir(dirname(opts.sourcePath));
+   assert.ok(!root.some(n=>n.startsWith('.uah-restore-path-')),
+    'owned cooperative mutex must be released after cancellation');
+  }finally{
+   (fsPromises as {link:typeof originalLink}).link=originalLink;
+  }
+ });
+});
