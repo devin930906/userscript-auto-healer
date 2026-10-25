@@ -135,7 +135,8 @@ export async function inspectApprovedTampermonkeyRuntime(
  if(signal!==undefined&&!isNativeRuntimeSignal(signal))
    return {ok:false,code:'INVALID_OPTIONS'};
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
- if(!session?.ok||!isLiveApprovedChromeSession(session))
+ // The native WeakMap ownership check must precede all session property reads.
+ if(!isLiveApprovedChromeSession(session))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
  let ws:URL;
  try{ws=new URL(session.browserWebsocket);}catch{return {ok:false,code:'UNVERIFIED_BROWSER'};}

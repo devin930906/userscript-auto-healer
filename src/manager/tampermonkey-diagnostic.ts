@@ -423,7 +423,8 @@ export async function startApprovedTampermonkeyDiagnostic(
  if(!Number.isInteger(ttlMs)||ttlMs<1000||ttlMs>MAX_GM_PROBE_TTL_MS||
     (safeOptions.runAt!==undefined&&!isSupportedGmProbeRunAt(safeOptions.runAt)))
    return {ok:false,code:'INVALID_OPTIONS'};
- if(!browser?.ok||!isLiveApprovedChromeSession(browser))
+ // Refuse unregistered browser objects before reading untrusted properties.
+ if(!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
  const hint=await inspectApprovedTampermonkeyRuntime(browser,true,signal);
  if(!hint.ok)return {ok:false,code:hint.code};
