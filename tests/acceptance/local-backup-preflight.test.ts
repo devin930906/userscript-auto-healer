@@ -174,3 +174,41 @@ test('TEST-020: symlinked backup directory is rejected, source remains untouched
   assert.deepEqual(await readdir(paths.backupDirectory),[]);
  });
 });
+
+test('TASK-010/011 TEST-020/021/026: source changed during final backup check rejects stale prepared receipt',async t=>{
+ await fixture(async paths=>{
+  const recoveryModule=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const real=recoveryModule.verifyBackupRecoverySource;
+  const externalEdit=source+'// external editor changed the selected source during final backup I/O\\n';
+  let backupChecks=0;
+  let originalBackupPath='';
+  t.mock.method(recoveryModule,'verifyBackupRecoverySource',
+   async(input:Parameters<typeof real>[0])=>{
+    const result=await real(input);
+    if(result.status==='RECOVERY_SOURCE_VERIFIED_READ_ONLY'){
+     backupChecks++;
+     if(backupChecks===2){
+      const names=await readdir(paths.backupDirectory);
+      assert.equal(names.length,1,'the independently verified backup must exist');
+      originalBackupPath=join(paths.backupDirectory,names[0]);
+      await writeFile(paths.sourcePath,externalEdit,'utf8');
+     }
+    }
+    return result;
+   });
+  const result=await prepareReviewedLocalBackupOnly(request,candidate,{
+   ...paths,userApproved:true
+  });
+  assert.equal(backupChecks,2,'test must reach the second real backup verification');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'SOURCE_CHANGED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessRecoveredVerified:false
+  },'the selected source no longer matches the independently stored backup');
+  assert.equal(await readFile(paths.sourcePath,'utf8'),externalEdit,
+   'native backup preparation must never overwrite a third-party edit');
+  assert.equal(await readFile(originalBackupPath,'utf8'),source,
+   'independent original recovery bytes must remain preserved');
+ });
+});
