@@ -107,10 +107,16 @@ export interface ChromeLaunchOptions {
  */
 const liveSessions=new WeakMap<object,ChildProcess>();
 export function isLiveApprovedChromeSession(session:ManagedLaunchResult):boolean {
-  if(!session || session.ok!==true || session.status!=='OWNED_CDP_BROWSER_VERIFIED')return false;
+  // An exported inspector can receive an arbitrary object at runtime. Only
+  // objects already held by this private WeakMap may have their properties read.
+  // WeakMap.get never invokes Proxy property/accessor traps, even for a
+  // revoked proxy. A live registered session is frozen by the native launcher.
+  if(!session||typeof session!=='object')return false;
   const child=liveSessions.get(session);
-  return Boolean(child && child.pid===session.pid && child.exitCode===null &&
-    !child.killed && child.signalCode===null);
+  if(!child)return false;
+  return session.ok===true&&session.status==='OWNED_CDP_BROWSER_VERIFIED'&&
+    child.pid===session.pid&&child.exitCode===null&&
+    !child.killed&&child.signalCode===null;
 }
 function stopOwnChild(child:ChildProcess):void {
   if(child.pid && child.exitCode===null && !child.killed)child.kill();
