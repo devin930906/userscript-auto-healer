@@ -54,6 +54,15 @@ jobs:
             variant: product-original
           - run_at: document-start
             variant: product-candidate
+          # TASK-007/009/012 / TEST-017/018/019/023: validate the newly
+          # integrated getElementById ID-to-ID review-only candidate inside
+          # actual vendor-hosted Tampermonkey. Independent Profiles install
+          # native exported original vs verified candidate; candidate Profile
+          # also explicitly reinstalls the independent recovery export.
+          - run_at: document-idle
+            variant: product-id-original
+          - run_at: document-idle
+            variant: product-id-candidate
           # End-to-end manager installation of the actual native product fixture.
           # Unlike the AST-only PoC, this is the source served by production code.
           # Native product-generated GM diagnostic in every supported timing
