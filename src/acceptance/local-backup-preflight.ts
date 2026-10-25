@@ -80,9 +80,14 @@ export async function prepareReviewedLocalBackupOnly(
   const options=parseOptions(untrustedOptions);
   if(!options)return blocked('INVALID_REQUEST');
   if(!options.userApproved)return blocked('NOT_AUTHORIZED');
-  if(utilTypes.isProxy(request))return blocked('INVALID_REQUEST');
-  // Validate AST patch and its exact proposed bytes before touching disk.
-  const sourceHash:unknown=request?.expectedSourceSha256;
+  if(!request||typeof request!=='object'||Array.isArray(request)||
+     utilTypes.isProxy(request))return blocked('INVALID_REQUEST');
+  // Never invoke a caller's accessor to obtain its claimed source identity.
+  // The separate acceptance gate validates every own data descriptor.
+  const sourceDescriptor=Object.getOwnPropertyDescriptor(request,'expectedSourceSha256');
+  const sourceHash:unknown=sourceDescriptor&&
+    Object.prototype.hasOwnProperty.call(sourceDescriptor,'value')?
+    sourceDescriptor.value:undefined;
   const review=assessLocalAcceptancePreflight(request,candidate,{
    userApproved:true,diskSourceSha256:sourceHash
   });
