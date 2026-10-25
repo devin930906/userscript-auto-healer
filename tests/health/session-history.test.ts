@@ -401,7 +401,7 @@ test('TASK-015/TEST-024/026: native archive rejects forged event kind and eviden
    assert.equal((await saveLimitedHealthArchive(userData,fake as typeof authentic)).status,
     'BLOCKED','inconsistent native observation must never be archived');
   }
-  const dir=join(userData,'limited-health-history-v1');
-  assert.deepEqual(await readdir(dir),[],'invalid snapshots must not publish archives');
+  assert.deepEqual(await readdir(userData),[],
+   'invalid snapshots must not even create an archive directory');
  }finally{await rm(home,{recursive:true,force:true});}
 });
