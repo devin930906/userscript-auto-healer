@@ -909,3 +909,36 @@ test('TASK-013/TEST-022/026: cancelled native batch never invokes a replaced Arr
  }
  assert.equal(invoked,0,'cancelled queue must use its own bounded result allocation');
 });
+
+test('TASK-013/TEST-022/026: native read-only queue rejects forged cancellation before executing caller code',async()=>{
+ const script=realNativeScript(992);
+ let traps=0;
+ const hostile={
+  get aborted(){traps++;throw Error('UNTRUSTED_CANCEL_GETTER');},
+  addEventListener(){traps++;throw Error('UNTRUSTED_CANCEL_EVENT');},
+  removeEventListener(){traps++;throw Error('UNTRUSTED_CANCEL_CLEANUP');}
+ } as unknown as AbortSignal;
+ const proxied=new Proxy(new AbortController().signal,{
+  get(){traps++;throw Error('UNTRUSTED_CANCEL_PROXY_GET');},
+  getPrototypeOf(){traps++;throw Error('UNTRUSTED_CANCEL_PROXY_PROTO');}
+ });
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+ const withShadowedEvent=new AbortController().signal;
+ Object.defineProperty(withShadowedEvent,'addEventListener',{
+  configurable:true,value:()=>{traps++;throw Error('SHADOWED_CANCEL_EVENT');}
+ });
+ const results:ReturnType<typeof realNativeScript>[]=[script];
+ for(const supplied of [hostile,proxied,revoked.proxy,spoof,withShadowedEvent]){
+  let progress=0;
+  const previews=await runImportedReadOnlyAnalysisQueue(results,supplied,
+   ()=>{progress++;});
+  assert.deepEqual(previews.map(p=>p.status),['ISOLATED_ANALYSIS_FAILED'],
+   'untrusted native cancellation signals must return a bounded failure, not throw or run AST');
+  assert.ok(previews.every(p=>p.automaticPatchAllowed===false&&
+   p.tampermonkeyVerified===false&&p.businessVerified===false));
+  assert.equal(progress,0,'forged cancellation must not dispatch the worker');
+ }
+ assert.equal(traps,0,'no getter, Proxy trap or shadowed event method may execute');
+});
