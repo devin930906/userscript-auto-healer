@@ -70,6 +70,71 @@ test('TEST-020: discover persisted checkpoint after loss of staged receipt, with
   });
 });
 
+test('TASK-011/TEST-020/026: checkpoint changed while subsequent entries are checked invalidates inventory',async t=>{
+ await fixture(async options=>{
+   const stage=await stageReviewedCandidateOnly(request,
+     proposeLiteralSelectorPatch(request),options);
+   assert.equal(stage.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+   if(stage.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const first=await stageRecoveryCheckpointOnly(request,stage,options);
+   const second=await stageRecoveryCheckpointOnly(request,stage,options);
+   assert.equal(first.status,'CHECKPOINT_STAGED_UNVERIFIED');
+   assert.equal(second.status,'CHECKPOINT_STAGED_UNVERIFIED');
+   if(first.status!=='CHECKPOINT_STAGED_UNVERIFIED'||
+      second.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+   const names=[first.checkpointFileName,second.checkpointFileName].sort();
+   const earliest=join(options.backupDirectory,names[0]);
+   const changed=Buffer.from('{\"forged\":true}\\n');
+   const module=require('../../src/version/recovery-checkpoint') as
+     typeof import('../../src/version/recovery-checkpoint');
+   const real=module.inspectRecoveryCheckpointReadOnly;
+   let checks=0;
+   t.mock.method(module,'inspectRecoveryCheckpointReadOnly',async(
+     ...args:Parameters<typeof real>)=>{
+       const result=await real(...args);
+       if(++checks===2)await writeFile(earliest,changed);
+       return result;
+     });
+   const result=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+   assert.ok(checks>=2,'must exercise after a later checkpoint verification');
+   assert.equal(result.status,'BLOCKED','previously inspected checkpoint must not remain trusted');
+   assert.equal(await readFile(earliest,'utf8'),changed.toString('utf8'));
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
+});
+
+test('TASK-011/TEST-020/026: newly inserted checkpoint invalidates enumerated inventory',async t=>{
+ await fixture(async options=>{
+   const stage=await stageReviewedCandidateOnly(request,
+     proposeLiteralSelectorPatch(request),options);
+   assert.equal(stage.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+   if(stage.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const made=await stageRecoveryCheckpointOnly(request,stage,options);
+   assert.equal(made.status,'CHECKPOINT_STAGED_UNVERIFIED');
+   if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+   const newName=made.checkpointFileName.replace(
+     /[0-9a-f-]{36}[.]checkpoint[.]json$/,
+     '00000000-0000-4000-8000-000000000001.checkpoint.json');
+   assert.notEqual(newName,made.checkpointFileName);
+   const latePath=join(options.backupDirectory,newName);
+   const module=require('../../src/version/recovery-checkpoint') as
+     typeof import('../../src/version/recovery-checkpoint');
+   const real=module.inspectRecoveryCheckpointReadOnly;
+   let checks=0;
+   t.mock.method(module,'inspectRecoveryCheckpointReadOnly',async(
+     ...args:Parameters<typeof real>)=>{
+       const result=await real(...args);
+       if(++checks===1)await writeFile(latePath,'unverified late checkpoint');
+       return result;
+     });
+   const inventory=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+   assert.ok(checks>=1,'must exercise insertion after initial enumeration');
+   assert.equal(inventory.status,'BLOCKED','incomplete checkpoint inventory must not be returned');
+   assert.equal(await readFile(latePath,'utf8'),'unverified late checkpoint');
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
+});
+
 test('TEST-020: stale original and corrupted checkpoint fail closed',async()=>{
   await fixture(async options=>{
     const staged=await stageReviewedCandidateOnly(
