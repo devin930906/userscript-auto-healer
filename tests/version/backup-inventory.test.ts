@@ -57,6 +57,67 @@ test('TEST-020 stage: list multiple observed backups without editing any source 
    assert.deepEqual(await readFile(other),fixtureBytes);
  });
 });
+test('TASK-011/TEST-020/026: recheck earlier backup when another editor changes it after later verification',async t=>{
+ await withFixture(async(source,backupDirectory)=>{
+   const made=[];
+   for(let i=0;i<2;i++){
+     const backup=await createVerifiedBackupOnly({sourcePath:source,backupDirectory,
+       expectedSha256:sha(fixtureBytes),userApproved:true});
+     assert.equal(backup.status,'BACKUP_ONLY');
+     if(backup.status!=='BACKUP_ONLY')return;
+     made.push(backup.backupFileName);
+   }
+   made.sort();
+   const first=join(backupDirectory,made[0]);
+   const changed=Buffer.from('// independently changed after the first inspection\\n');
+   const recovery=require('../../src/version/recovery-source') as
+     typeof import('../../src/version/recovery-source');
+   const real=recovery.verifyBackupRecoverySource;
+   let calls=0;
+   t.mock.method(recovery,'verifyBackupRecoverySource',async(
+     options:Parameters<typeof real>[0])=>{
+       const result=await real(options);
+       if(++calls===2)await writeFile(first,changed);
+       return result;
+     });
+   const inventory=await inspectBackupInventoryReadOnly({
+     sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.ok(calls>=2,'exercise cross-candidate change after both initial checks');
+   assert.equal(inventory.status,'BLOCKED','stale first-backup hash must not be returned');
+   assert.deepEqual(await readFile(first),changed,'inventory never fixes or deletes edited bytes');
+   assert.deepEqual(await readFile(source),fixtureBytes);
+ });
+});
+
+test('TASK-011/TEST-020/026: newly added backup during scan invalidates stale inventory counts',async t=>{
+ await withFixture(async(source,backupDirectory)=>{
+   const made=await createVerifiedBackupOnly({sourcePath:source,backupDirectory,
+     expectedSha256:sha(fixtureBytes),userApproved:true});
+   assert.equal(made.status,'BACKUP_ONLY');
+   if(made.status!=='BACKUP_ONLY')return;
+   const inserted=join(backupDirectory,backupPrefix(source)+
+     '.00000000-0000-4000-8000-000000000001.backup.user.js');
+   const recovery=require('../../src/version/recovery-source') as
+     typeof import('../../src/version/recovery-source');
+   const real=recovery.verifyBackupRecoverySource;
+   let calls=0;
+   t.mock.method(recovery,'verifyBackupRecoverySource',async(
+     options:Parameters<typeof real>[0])=>{
+       const result=await real(options);
+       if(++calls===1)await writeFile(inserted,fixtureBytes);
+       return result;
+     });
+   const inventory=await inspectBackupInventoryReadOnly({
+     sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.ok(calls>=1,'exercise directory insertion after enumeration');
+   assert.equal(inventory.status,'BLOCKED','stale namespace may not be returned as complete');
+   assert.deepEqual(await readFile(inserted),fixtureBytes);
+   assert.deepEqual(await readFile(source),fixtureBytes);
+ });
+});
+
 test('TEST-020 stage: explicit consent and native-only exact input required',async()=>{
  await withFixture(async(source,backupDirectory)=>{
    const valid={sourcePath:source,backupDirectory,userApproved:true};
