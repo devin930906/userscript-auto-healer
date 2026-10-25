@@ -52,6 +52,14 @@ export async function prepareManualOriginalRestoreSelection(
    userApproved:true
   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
    return deny('BACKUP_UNVERIFIED');
+  // A different native process can replace or edit the selected script
+  // while independent backup verification awaits filesystem I/O. The hash
+  // obtained before that await is not a current manual-restore selection.
+  // Still read-only: a later restore must independently revalidate under
+  // its own native transaction lock before touching the selected file.
+  if((await verifyApprovedSourceFingerprint({
+   sourcePath:selectedSource,expectedSha256:sourceSha,userApproved:true
+  })).status!=='MATCHED_READ_ONLY')return deny('SOURCE_UNVERIFIED');
   return Object.freeze({
    status:'AWAITING_NATIVE_RESTORE_CONSENT' as const,
    sourcePath:selectedSource,backupDirectory,backupFileName:name,
