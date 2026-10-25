@@ -125,6 +125,16 @@ export async function prepareReviewedLocalBackupOnly(
      finalBackup.sha256!==review.originalSha256||
      finalBackup.byteLength!==before.byteLength)
     return blocked('BACKUP_UNVERIFIED');
+  // Final backup verification awaits independent filesystem I/O. An
+  // external editor may change the selected original during that await,
+  // invalidating the earlier source receipt. Do not advertise a prepared
+  // backup for stale source bytes; preserve the recovery copy untouched.
+  // This is a last bounded observation, never an inter-process write lock.
+  const finalSource=await verifyApprovedSourceFingerprint(readInput);
+  if(finalSource.status!=='MATCHED_READ_ONLY'||
+     finalSource.sha256!==before.sha256||
+     finalSource.byteLength!==before.byteLength)
+    return blocked('SOURCE_CHANGED');
   return Object.freeze({
    status:'BACKUP_PREPARED_RUNTIME_UNVERIFIED' as const,
    backupFileName:copy.backupFileName,sourceSha256:review.originalSha256,
