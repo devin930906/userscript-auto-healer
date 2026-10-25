@@ -13,7 +13,7 @@ import {types as nodeTypes} from 'node:util';
 export type GatewayCode =
   'DISABLED' | 'NOT_AUTHORIZED' | 'INVALID_EVIDENCE' |
   'MODEL_NOT_SELECTED' | 'REQUEST_LIMIT' | 'NETWORK_FAILED' |
-  'HTTP_REJECTED' | 'MODEL_LIST_UNAVAILABLE' | 'INVALID_RESPONSE' | 'CANCELLED';
+  'HTTP_REJECTED' | 'MODEL_LIST_UNAVAILABLE' | 'INVALID_RESPONSE' | 'CANCELLED' | 'INVALID_CANCEL_SIGNAL';
 export type GatewayFailure = Readonly<{ok:false;code:GatewayCode;automaticPatchAllowed:false}>;
 export type ModelDiscovery = Readonly<{ok:true;status:'MODELS_DISCOVERED'|'MANUAL_MODEL_FALLBACK';
   models:readonly string[];manualModelAvailable:boolean;automaticPatchAllowed:false}>;
@@ -140,6 +140,21 @@ async function limitedJson(response:Response,signal:AbortSignal):Promise<unknown
     try{reader.releaseLock();}catch{/* pending read can be revoked */}
   }
 }
+/** AbortSignal is a native capability, not a cancellation-shaped record.
+ * A Proxy/getter can execute caller code, and a fake signal passed to
+ * AbortSignal.any can throw after quota is spent. Check native internal slots.
+ */
+function validNativeCancelSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 export class OptionalAiGateway {
   private enabled=false;
   private requests=0;
@@ -178,6 +193,9 @@ export class OptionalAiGateway {
   }
   private async request(path:'/models'|'/chat/completions',init:RequestInit,
     signal?:AbortSignal):Promise<{response:Response;value:unknown}|GatewayFailure>{
+    // Reject untrusted signals before reading getters or consuming quota.
+    if(signal!==undefined&&!validNativeCancelSignal(signal))
+      return failure('INVALID_CANCEL_SIGNAL');
     if(signal?.aborted)return failure('CANCELLED');
     if(this.requests>=this.options.maxRequests)return failure('REQUEST_LIMIT');
     this.requests++; // failures consume quota; no silent retry
