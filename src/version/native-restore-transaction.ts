@@ -27,7 +27,7 @@ import {hasUnsafePathLink} from './path-boundary';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
  'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'SOURCE_LOCKED'|
- 'UNSAFE_PATH'|'RECOVERY_SAFETY_FAILED'|'IO_FAILURE';
+ 'UNSAFE_PATH'|'RECOVERY_SAFETY_FAILED'|'IO_FAILURE'|'CANCELLED';
 const noAuthority={
  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const,
  tampermonkeyVerified:false as const,businessVerified:false as const
@@ -214,9 +214,26 @@ async function recoveryBytes(path:string,length:number,sha:string):Promise<Buffe
  * retain BOTH backups and the intent journal; do not auto-repeat/overwrite.
  * A successful native restore does not verify Tampermonkey or its GM/behavior.
  */
+/** Internal native-only revocation. No renderer-provided signal can
+ * authorize or cancel a write; only genuine native AbortSignal slots pass.
+ * Cancellation cannot undo a rename once the OS operation has started.
+ */
+function nativeRestoreAbortSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(name=>
+       Object.prototype.hasOwnProperty.call(value,name)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
 export async function restoreVerifiedOriginalNativeOnly(
- untrustedOptions:unknown
+ untrustedOptions:unknown,signal?:AbortSignal
 ):Promise<NativeOriginalRestoreResult>{
+ if(signal!==undefined&&!nativeRestoreAbortSignal(signal))
+  return block('INVALID_REQUEST');
+ if(signal?.aborted)return block('CANCELLED');
  const opts=parse(untrustedOptions);
  if(!opts)return block('INVALID_REQUEST');
  if(!opts.userApproved||!opts.manualRestoreApproved)return block('NOT_AUTHORIZED');
@@ -275,6 +292,7 @@ export async function restoreVerifiedOriginalNativeOnly(
    return block('IO_FAILURE');
   }
   owner=await lstat(lock,{bigint:true});
+  if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
   const sourceInput={
@@ -293,6 +311,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
    return block('BACKUP_UNVERIFIED');
 
+  if(signal?.aborted)return block('CANCELLED');
   // Preserve the version that is about to be displaced. This itself uses
   // a separate source-inode mutex; the path-based restore lock remains held.
   const displaced=await createVerifiedBackupOnly({
@@ -369,6 +388,7 @@ export async function restoreVerifiedOriginalNativeOnly(
        journalPending,journalPath,journalPendingIdentity,journalParentIdentity))
     return block('RECOVERY_SAFETY_FAILED');
   journalPending=undefined;
+  if(signal?.aborted)return block('CANCELLED');
   if(await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
 
@@ -412,6 +432,9 @@ export async function restoreVerifiedOriginalNativeOnly(
      (finalPending.mode&0o777n)!==(sourceStart.mode&0o777n))
    return block('RECOVERY_SAFETY_FAILED');
 
+  // Final cooperative cancellation boundary before the irreversible source
+  // rename. This cannot cancel an OS rename already in progress.
+  if(signal?.aborted)return block('CANCELLED');
   await rename(pending,opts.sourcePath);
   pending=undefined;
   const restored=await verifyApprovedSourceFingerprint({
