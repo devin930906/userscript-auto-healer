@@ -203,8 +203,24 @@ export async function saveLimitedHealthArchive(
   for(const event of fresh){
    const latest=all[all.length-1];
    if(latest&&event.observedAtMs<=latest.observedAtMs){
-    if(event.observedAtMs===latest.observedAtMs&&event.status!==latest.status)
-     return Object.freeze({status:'BLOCKED',...emptyAuthority});
+    if(event.observedAtMs===latest.observedAtMs&&event.status!==latest.status){
+     // Only an ordered native snapshot that includes the previously saved
+     // status followed by the contradictory same-tick observation can
+     // reconcile that timestamp. A separate session's single conflicting
+     // report must never rewrite previously published archive evidence.
+     const inTick=snapshot.history.filter(
+      entry=>entry.observedAtMs===latest.observedAtMs);
+     const prior=inTick.findIndex(entry=>entry.status===latest.status);
+     if(prior<0||!inTick.slice(prior+1).some(
+      entry=>entry.status===event.status))
+      return Object.freeze({status:'BLOCKED',...emptyAuthority});
+     // The persisted representation has only one event per timestamp.
+     // Never promote an indeterminate archived observation to a DOM hit.
+     if(latest.status==='ELEMENT_FOUND_ONLY')
+      all[all.length-1]=Object.freeze({
+       observedAtMs:latest.observedAtMs,status:'INDETERMINATE' as const
+      });
+    }
     continue;
    }
    all.push(event);
