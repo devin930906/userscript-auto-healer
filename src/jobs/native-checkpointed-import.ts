@@ -77,7 +77,10 @@ export async function runCheckpointedNativeImportAnalysis(
   return fail(count,'UNSAFE_PATH');
  // No untrusted hash or path enters the directory name; the digest uses only
  // the native importer's verified bytes, ordered and domain-separated.
- const nameHash=createHash('sha256').update('uah-native-import-batch-v1\0');
+ // The old v1 directory holds maxAttempts=1 checkpoints. Keep its on-disk
+ // scheduling history intact; the new bounded-retry policy uses a different
+ // deterministic native namespace and never overwrites legacy records.
+ const nameHash=createHash('sha256').update('uah-native-import-batch-v2\0');
  const groups:Array<{scripts:typeof bound;fingerprint:string}>=[];
  for(const script of bound)nameHash.update(script.sha256);
  for(let offset=0;offset<bound.length;offset+=MAX_BATCH_PREVIEW_FILES){
@@ -118,15 +121,29 @@ export async function runCheckpointedNativeImportAnalysis(
  const observations:(ImportAnalysisPreview[]|undefined)[]=Array(groups.length);
  const lifetime=new AbortController();
  const worker=async(ordinal:number,abort:AbortSignal)=>{
-  const previews=await previewImportedBatchOffMain(groups[ordinal].scripts,abort);
+  let previews:ImportAnalysisPreview[];
+  try{
+   previews=await previewImportedBatchOffMain(groups[ordinal].scripts,abort);
+  }catch{
+   // A dead or rejected isolated AST worker is transient only for this
+   // trusted READ-ONLY task. Bounded retry cannot authorize any file write.
+   return abort.aborted||signal?.aborted||lifetime.signal.aborted
+    ?'PERMANENT_FAILURE' as const:'RETRYABLE_FAILURE' as const;
+  }
   if(abort.aborted||signal?.aborted||lifetime.signal.aborted||
-     previews.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
-       row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET'))
+     previews.some(row=>row.status==='SKIPPED_CANCELLED'||
+       row.status==='SKIPPED_BATCH_BUDGET'))
    return 'PERMANENT_FAILURE' as const;
+  // A worker crash or malformed / truncated reply has no trusted AST
+  // evidence. Retry once in an independent Worker, never accept partial
+  // output or use stale success as a substitute for fresh validation.
+  if(previews.length!==groups[ordinal].scripts.length||
+     previews.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'))
+   return 'RETRYABLE_FAILURE' as const;
   observations[ordinal]=previews;
   return 'DONE' as const;
  };
- const options={count:groups.length,concurrency:1,maxAttempts:1,
+ const options={count:groups.length,concurrency:1,maxAttempts:2,
   timeoutMs:15000,jobHashes:groups.map(g=>g.fingerprint)};
  const loaded=await loadReadOnlyBatchJournal(directory,options,worker);
  if(loaded.status==='BLOCKED'&&loaded.reason!=='NOT_FOUND')
