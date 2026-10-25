@@ -4,7 +4,7 @@ import {access,mkdtemp,rm} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {join,win32} from 'node:path';
 import {tmpdir} from 'node:os';
-import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
+import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
@@ -248,4 +248,24 @@ test('TASK-007/TEST-017/026: runtime inspection rejects forged AbortSignals befo
  cancelled.abort();
  assert.deepEqual(await inspectApprovedTampermonkeyRuntime(session,true,cancelled.signal),
   {ok:false,code:'CANCELLED'});
+});
+
+test('TASK-007/TEST-017/026: only native registered Chrome sessions may be inspected without getter or Proxy effects',async()=>{
+ let calls=0;
+ const poison=()=>{calls++;throw Error('FORGED_CHROME_SESSION_GETTER');};
+ const getter=Object.defineProperty({},'ok',{get:poison});
+ const proxy=new Proxy({ok:true,status:'OWNED_CDP_BROWSER_VERIFIED'},{
+  get:poison,getPrototypeOf:poison,ownKeys:poison
+ });
+ const revoked=Proxy.revocable({ok:true},{get:poison});
+ revoked.revoke();
+ const samples=[getter,proxy,revoked.proxy];
+ for(const candidate of samples){
+  const session=candidate as Parameters<typeof inspectApprovedTampermonkeyRuntime>[0];
+  assert.equal(isLiveApprovedChromeSession(session),false,
+   'ownership must be decided before observing caller session properties');
+  assert.deepEqual(await inspectApprovedTampermonkeyRuntime(session,true),
+   {ok:false,code:'UNVERIFIED_BROWSER'});
+ }
+ assert.equal(calls,0,'unregistered Chrome session accessors or Proxy traps must not execute');
 });
