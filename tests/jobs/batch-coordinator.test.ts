@@ -945,7 +945,7 @@ test('TASK-013/TEST-022/026: native read-only queue rejects forged cancellation 
 
 test('TASK-013/TEST-022: native read-only queue recovers an isolated transient AST Worker failure once',async()=>{
  const scripts=Array.from({length:17},(_,i)=>realNativeScript(1100+i));
- const saved=scripts.map(s=>Buffer.from(s.bytes));
+ const saved=scripts.map(s=>new Uint8Array(s.bytes));
  const isolated=require('../../src/analyze/isolated-batch-preview') as
   typeof import('../../src/analyze/isolated-batch-preview');
  const native=isolated.previewImportedBatchOffMain;
