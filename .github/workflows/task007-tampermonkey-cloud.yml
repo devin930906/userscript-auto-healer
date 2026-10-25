@@ -18,7 +18,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Download and verify the vendor package ONCE. Without this gate each of
+  # the 14 independent Windows runners would repeat a failing network call.
+  # A failed upstream source download never starts any manager/profile job.
+  approved-package:
+    name: Acquire signed Tampermonkey CRX once (NOT store attestation)
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Get vendor or official Chrome Web Store update package and verify signing key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $base = Join-Path $env:RUNNER_TEMP 'uah-tm-source'
+          if (Test-Path -LiteralPath $base) { throw 'Unexpected preexisting isolated source directory' }
+          New-Item -ItemType Directory -Path $base | Out-Null
+          $crx = Join-Path $base 'tampermonkey_stable.crx'
+          try {
+            Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 60
+            Write-Host 'CRX origin: Tampermonkey vendor official package'
+          } catch {
+            # Google/Chromium documents clients2.google.com as the official
+            # Chrome Web Store update endpoint. Do not use third-party mirrors,
+            # disable certificate validation or accept a mismatched signing key.
+            Write-Warning 'Vendor download unavailable: trying official Chrome Web Store update endpoint'
+            Remove-Item -LiteralPath $crx -Force -ErrorAction SilentlyContinue
+            $store = 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=155.0.0.0&acceptformat=crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc'
+            Invoke-WebRequest -Uri $store -OutFile $crx -MaximumRedirection 5 -TimeoutSec 90
+            Write-Host 'CRX origin: official Chrome Web Store update service'
+          }
+          node --test ./poc/crx3-package-integrity.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature parser regressions failed' }
+          $verifiedZip = Join-Path $base 'verified.zip'
+          node ./poc/crx3-package-integrity.cjs $crx $verifiedZip
+          if ($LASTEXITCODE -ne 0) { throw 'Source CRX3 signature/key binding verification failed' }
+          Write-Host ("Verified source CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
+      - name: Upload isolated signed source for same-run manager matrix
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: uah-tampermonkey-signed-crx
+          path: ${{ runner.temp }}/uah-tm-source/tampermonkey_stable.crx
+          if-no-files-found: error
+          retention-days: 1
+
   actual-tampermonkey:
+    needs: approved-package
     name: Tampermonkey ${{ matrix.run_at }} / ${{ matrix.variant }}
     runs-on: windows-2025
     timeout-minutes: 20
@@ -54,6 +103,15 @@ jobs:
             variant: product-original
           - run_at: document-start
             variant: product-candidate
+          # TASK-007/009/012 / TEST-017/018/019/023: validate the newly
+          # integrated getElementById ID-to-ID review-only candidate inside
+          # actual vendor-hosted Tampermonkey. Independent Profiles install
+          # native exported original vs verified candidate; candidate Profile
+          # also explicitly reinstalls the independent recovery export.
+          - run_at: document-idle
+            variant: product-id-original
+          - run_at: document-idle
+            variant: product-id-candidate
           # End-to-end manager installation of the actual native product fixture.
           # Unlike the AST-only PoC, this is the source served by production code.
           # Native product-generated GM diagnostic in every supported timing
@@ -72,7 +130,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - name: Download official-hosted MV3 CRX and validate disposable extraction boundaries
+      - name: Obtain signed source from same-run verified source job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: uah-tampermonkey-signed-crx
+          path: ${{ runner.temp }}/uah-tampermonkey-source
+      - name: Reverify pinned signing key and validate disposable extraction boundaries
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -83,9 +146,10 @@ jobs:
           $crx = Join-Path $base 'tampermonkey_stable.crx'
           $zip = Join-Path $base 'tampermonkey.zip'
           $extension = Join-Path $base 'extension'
-          # This URL is listed in the vendor's Q406 official-version FAQ.
-          # This download is not a claim to have verified a Chrome Web Store signature.
-          Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 120
+          # Artifact transport does not grant extension authenticity: copy only
+          # the fixed-name CRX from our upstream job and revalidate its
+          # pinned developer key and bounded ZIP bytes in EACH fresh profile.
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'uah-tampermonkey-source/tampermonkey_stable.crx') -Destination $crx -ErrorAction Stop
           # TEST-017/026: the CRX3 magic/header length alone does NOT
           # authenticate ZIP bytes. Verify a developer-key proof over the
           # exact signed header and archive before writing any ZIP for unzip.

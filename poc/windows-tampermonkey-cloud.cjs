@@ -25,14 +25,20 @@ const RUN_AT_MODES=Object.freeze([
 ]);
 const runAt=process.env.UAH_TM_RUN_AT;
 const variant=process.env.UAH_TM_VARIANT;
-assert.ok(['baseline','product-original','product-candidate','native-gm'].includes(variant),
+assert.ok([
+  'baseline','product-original','product-candidate',
+  'product-id-original','product-id-candidate','native-gm'
+].includes(variant),
   'Unreviewed fixture variant is forbidden');
-// The reviewed AST original/candidate pair is tested in both idle and
-// document-start modes: the latter proves that a real manager can execute
-// the EXACT product-generated replacement after the target is created.
-// The product's native GM diagnostic is independently tested in all four.
-if(variant==='product-original'||variant==='product-candidate')
-  assert.ok(['document-start','document-idle'].includes(runAt),
+// querySelector is tested at document-start and document-idle; the newer
+// getElementById native manual export is tested independently at idle.
+// Every variant uses an independent, disposable Tampermonkey Profile.
+const isProductOriginal=variant==='product-original'||variant==='product-id-original';
+const isProductCandidate=variant==='product-candidate'||variant==='product-id-candidate';
+const isIdProduct=variant==='product-id-original'||variant==='product-id-candidate';
+if(isProductOriginal||isProductCandidate)
+  assert.ok(isIdProduct?runAt==='document-idle':
+    ['document-start','document-idle'].includes(runAt),
     'AST product cases must use reviewed matrix injection modes');
 assert.ok(RUN_AT_MODES.includes(runAt),
   'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
@@ -78,23 +84,35 @@ let source=[
 ].join('\n');
 // Only a disposable selector source is ever handed to the application's
 // existing AST planner. Neither the real user's scripts nor site data are read.
-if(variant==='product-original'||variant==='product-candidate'){
-  const original=source.replace(
+if(isProductOriginal||isProductCandidate){
+  // TASK-007/009/012: never hand-write the repaired fixture installed by
+  // Tampermonkey. The latest getElementById support must pass the SAME real
+  // planner, independent audit, native backup and manual-export contract.
+  const healthy=isIdProduct?source.replace(
     'document.querySelector("#uah-ci-target")',
-    'document.querySelector("#uah-ci-stale-target")');
-  assert.notEqual(original,source,'Original fixture must contain exactly one selector');
+    'document.getElementById("uah-ci-target")'):source;
+  assert.ok(!isIdProduct||healthy!==source,
+    'The disposable fixture must contain exactly one native ID lookup');
+  const method=isIdProduct?'getElementById':'querySelector';
+  const healthyCall=isIdProduct?'document.getElementById("uah-ci-target")':
+    'document.querySelector("#uah-ci-target")';
+  const brokenCall=isIdProduct?'document.getElementById("uah-ci-stale-target")':
+    'document.querySelector("#uah-ci-stale-target")';
+  const original=healthy.replace(healthyCall,brokenCall);
+  assert.notEqual(original,healthy,'Original fixture must contain exactly one selector');
   const {analyzeSelectors}=require('../dist/src/analyze/selector-analyzer.js');
   const {proposeLiteralSelectorPatch,auditProposedLiteralSelectorPatch}=
     require('../dist/src/repair/patch-planner.js');
   const ast=analyzeSelectors(original);
   assert.equal(ast.status,'OK','Application AST analyzer must parse the original');
-  const sites=ast.sites.filter(site=>site.method==='querySelector'&&
-    site.selector==='#uah-ci-stale-target'&&site.kind==='literal');
+  const sites=ast.sites.filter(site=>site.method===method&&
+    site.selector===(isIdProduct?'uah-ci-stale-target':'#uah-ci-stale-target')&&
+    site.kind==='literal');
   assert.equal(sites.length,1,'Exactly one unambiguous AST site is required');
   const sha=value=>createHash('sha256').update(value,'utf8').digest('hex');
   const request={
     source:original,expectedSourceSha256:sha(original),callOffset:sites[0].offset,
-    method:'querySelector',originalSelector:'#uah-ci-stale-target',
+    method,originalSelector:'#uah-ci-stale-target',
     replacementSelector:'#uah-ci-target',faultEvidenceId:'disposable-selector-fixture'
   };
   const proposal=proposeLiteralSelectorPatch(request);
@@ -105,17 +123,17 @@ if(variant==='product-original'||variant==='product-candidate'){
     'Native application must independently audit its candidate');
   assert.equal(proposal.automaticPatchAllowed,false,
     'The offline proposal grants no automatic application permission');
-  assert.equal(proposal.candidateSource,source,
+  assert.equal(proposal.candidateSource,healthy,
     'No unrelated source or metadata edits are allowed');
   console.log('APPLICATION_GENERATED_CANDIDATE_RECEIPT '+JSON.stringify({
-    variant,runAt,originalSha256:sha(original),
+    variant,runAt,method,originalSha256:sha(original),
     candidateSha256:sha(proposal.candidateSource),audit:audit.status,
     automaticPatchAllowed:proposal.automaticPatchAllowed
   }));
-  // Both independent product variants must install real on-disk exports:
+  // Both independent product variants install real on-disk exports:
   // the candidate file OR the separately emitted ORIGINAL recovery .user.js.
   reviewedCandidateForExport={original,request,proposal};
-  source=variant==='product-candidate'?proposal.candidateSource:original;
+  source=isProductCandidate?proposal.candidateSource:original;
 }
 
 /** TASK-012 / TEST-023: exercise the REAL native stage and manual-export
@@ -246,7 +264,7 @@ async function main(){
  const server=http.createServer((req,res)=>{
   if(req.url==='/test.user.js'||req.url==='/test.user.js?manual-recovery=1'){
    const restoringInstalledCandidate=req.url.endsWith('?manual-recovery=1');
-   if(restoringInstalledCandidate&&(variant!=='product-candidate'||!nativeExport)){
+   if(restoringInstalledCandidate&&(!isProductCandidate||!nativeExport)){
     res.writeHead(404,{'Cache-Control':'no-store'});
     return res.end('UNAUTHORIZED_DISPOSABLE_RESTORE_URL');
    }
@@ -256,7 +274,7 @@ async function main(){
    // A missing or modified disk artifact MUST NOT get an HTTP 200 response.
    let bytes=source;
    if(nativeExport){
-    const fromOriginal=variant==='product-original'||restoringInstalledCandidate;
+    const fromOriginal=isProductOriginal||restoringInstalledCandidate;
     const installFile=fromOriginal
       ?nativeExport.originalRecoveryPath:nativeExport.exportedPath;
     const expectedSha=fromOriginal
@@ -564,7 +582,7 @@ async function main(){
   assert.deepEqual({
     injected:fixed.injected,gm:fixed.gm,gmDefault:fixed.gmDefault,
     gmRoundtrip:fixed.gmRoundtrip,business:fixed.business,action:fixed.action
-  },variant==='product-original'
+  },isProductOriginal
     ?{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'missing-target',action:null}
     :{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'recovered',action:'done'});
   // TASK-007 / TEST-017/026: a matching-origin child frame is not an
@@ -598,7 +616,7 @@ async function main(){
     'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
     ' fixture variant '+variant+' GM_getValue default + GM_setValue/readback and expected business assertions.');
-  if(variant==='product-original'){
+  if(isProductOriginal){
     assert.ok(nativeExport,'Original manager control must use the native recovery export');
     assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
       'Installing exported original in Tampermonkey must not rewrite original native script');
@@ -609,7 +627,7 @@ async function main(){
       nativeExport.originalSha256);
     console.log('PRODUCT_MANUAL_RECOVERY_EXPORT_REAL_MANAGER_ORIGINAL_BEHAVIOR_ONLY: native original recovery .user.js installed in independent disposable Tampermonkey; unchanged original still fails on target-present synthetic page; no installed-candidate rollback attested');
   }
-  if(variant==='product-candidate'){
+  if(isProductCandidate){
     assert.ok(nativeExport,'Product candidate must have a real native manual export');
     assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
       'Actual Tampermonkey installation must not mutate the original native script');
