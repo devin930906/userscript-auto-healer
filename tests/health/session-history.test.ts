@@ -329,3 +329,53 @@ test('TASK-015/TEST-026: independent same-tick contradictory archive updates rem
   assert.deepEqual(await readLimitedHealthArchive(userData,key),before);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024: same-millisecond later insufficient evidence downgrades persisted DOM observation',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-downgrade-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const timestamp=Date.now()-1000;
+  const registry=new LimitedHealthRegistry(()=>timestamp);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  // The next actual observation may happen before the millisecond clock ticks.
+  // Persisting it must not leave yesterday's more optimistic DOM-only status.
+  registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const restored=await readLimitedHealthArchive(userData,key);
+  assert.equal(restored.status,'ARCHIVE_READ_UNVERIFIED');
+  if(restored.status==='ARCHIVE_READ_UNVERIFIED'){
+   assert.deepEqual(restored.events,[{observedAtMs:timestamp,status:'INDETERMINATE'}]);
+   assert.equal(restored.currentStatus,'INDETERMINATE');
+   assert.equal(restored.businessVerified,false);
+   assert.equal(restored.automaticPatchAllowed,false);
+  }
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-015/TEST-024: same-tick DOM after insufficient evidence cannot promote saved history',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-no-promote-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const timestamp=Date.now()-1000;
+  const registry=new LimitedHealthRegistry(()=>timestamp);
+  registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const restored=await readLimitedHealthArchive(userData,key);
+  assert.equal(restored.status,'ARCHIVE_READ_UNVERIFIED');
+  if(restored.status==='ARCHIVE_READ_UNVERIFIED')
+   assert.deepEqual(restored.events,[{observedAtMs:timestamp,status:'INDETERMINATE'}]);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
