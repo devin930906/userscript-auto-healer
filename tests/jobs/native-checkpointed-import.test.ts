@@ -1,4 +1,5 @@
 import {test,mock} from 'node:test';
+import {createHash} from 'node:crypto';
 import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -182,6 +183,70 @@ test('TASK-013/TEST-022: repeated AST worker crashes exhaust retry budget withou
     assert.equal(again.resumed,true);
    assert.equal(calls,2,'persisted terminal failure must not endlessly retry');
   }finally{injected.mock.restore();}
+  assert.equal(await readFile(sourcePath,'utf8'),original);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+
+test('TASK-013/TEST-022/026: new retry policy preserves old v1 checkpoint evidence untouched',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-ast-v1-migration-'));
+ try{
+  const sourcePath=join(home,'review.user.js');
+  const original=header+'document.querySelector("#legacy");';
+  await writeFile(sourcePath,original);
+  const scripts=(await importApprovedPaths([sourcePath])).scripts;
+  assert.equal(scripts.length,1);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  await mkdir(root);
+  const oldBatchHash=createHash('sha256')
+   .update('uah-native-import-batch-v1\0')
+   .update(scripts[0].sha256).digest('hex');
+  const oldDir=join(root,'batch-'+oldBatchHash);
+  await mkdir(oldDir);
+  const oldFile=join(oldDir,BATCH_JOURNAL_FILENAME);
+  const legacy=Buffer.from('{"legacy":"untouched-v1-checkpoint"}');
+  await writeFile(oldFile,legacy);
+  const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(await readFile(oldFile),legacy,
+   'do not delete or rewrite a prior maxAttempts=1 journal');
+  const all=await readdir(root);
+  assert.equal(all.length,2,'new attempt policy uses a separate batch namespace');
+  assert.equal(all.includes('batch-'+oldBatchHash),true);
+  const current=join(root,all.find(n=>n!=='batch-'+oldBatchHash)!,
+   BATCH_JOURNAL_FILENAME);
+  const checkpoint=JSON.parse(await readFile(current,'utf8'));
+  assert.equal(checkpoint.maxAttempts,2);
+  assert.equal(await readFile(sourcePath,'utf8'),original);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022: rejected isolated AST worker restarts only once',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-ast-reject-'));
+ try{
+  const sourcePath=join(home,'review.user.js');
+  const original=header+'document.querySelector("#rejected");';
+  await writeFile(sourcePath,original);
+  const scripts=(await importApprovedPaths([sourcePath])).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patched=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    if(++calls===1)throw Error('INJECTED_ISOLATED_AST_CRASH');
+    return actual(...args);
+   });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(calls,2);
+   assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    assert.deepEqual(outcome.previews.map(p=>p.status),['STATIC_ANALYSIS_ONLY']);
+  }finally{patched.mock.restore();}
   assert.equal(await readFile(sourcePath,'utf8'),original);
  }finally{await rm(home,{recursive:true,force:true});}
 });
