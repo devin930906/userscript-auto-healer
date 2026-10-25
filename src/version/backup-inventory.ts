@@ -117,6 +117,10 @@ export async function inspectBackupInventoryReadOnly(
    }
    names.sort();
    const observations:ObservedBackupCandidate[]=[];
+   // Record the exact inode and content observed during the first pass.
+   // Earlier backups may change while later ones are being inspected.
+   const identities:Array<{path:string;file:BigIntStats;hash:string;bytes:number}>=[];
+
    for(const name of names){
      const path=join(backupDirectory,name);
      const before=await lstat(path,{bigint:true});
@@ -156,6 +160,28 @@ export async function inspectBackupInventoryReadOnly(
      observations.push(Object.freeze({
        backupFileName:name,observedSha256:observedHash,byteLength:bytes
      }));
+     identities.push({path,file:before,hash:observedHash,bytes});
+   }
+   // A read-only inventory is a bounded observation, never restoration
+   // authority. Recheck each previously inspected backup after ALL other
+   // asynchronous inspections; refuse if any inode or bytes are now stale.
+   for(const entry of identities){
+     if(await hasUnsafePathLink(entry.path))return blocked('UNSAFE_BACKUP');
+     const now=await lstat(entry.path,{bigint:true});
+     if(!now.isFile()||now.isSymbolicLink()||now.nlink!==1n||
+        !sameFile(entry.file,now))return blocked('UNSAFE_BACKUP');
+     const current=await verifyBackupRecoverySource({
+       sourcePath,backupDirectory,
+       backupFileName:basename(entry.path),
+       expectedSha256:entry.hash,expectedByteLength:entry.bytes,
+       userApproved:true
+     });
+     if(current.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+        current.sha256!==entry.hash||current.byteLength!==entry.bytes)
+       return blocked('UNSAFE_BACKUP');
+     const after=await lstat(entry.path,{bigint:true});
+     if(!sameFile(entry.file,after)||after.nlink!==1n)
+       return blocked('UNSAFE_BACKUP');
    }
    const sourceEnd=await lstat(sourcePath,{bigint:true});
    const directoryEnd=await lstat(backupDirectory,{bigint:true});
@@ -167,7 +193,11 @@ export async function inspectBackupInventoryReadOnly(
    if(!sameFile(sourceStart,sourceEnd)||sourceEnd.nlink!==1n||
       sourceEnd.isSymbolicLink())return blocked('SOURCE_CHANGED');
    if(directoryEnd.isSymbolicLink()||!directoryEnd.isDirectory()||
-      !sameDirectory(directoryStart,directoryEnd))
+      !sameDirectory(directoryStart,directoryEnd)||
+     // A newly inserted, removed or renamed backup invalidates the scanned
+     // namespace even when the directory inode itself has not changed.
+     directoryStart.mtimeNs!==directoryEnd.mtimeNs||
+     directoryStart.ctimeNs!==directoryEnd.ctimeNs)
      return blocked('BACKUP_DIRECTORY_INVALID');
    return Object.freeze({
      status:'OBSERVED_BACKUP_CANDIDATES_READ_ONLY' as const,
