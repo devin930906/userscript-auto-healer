@@ -17,10 +17,24 @@ export type ManagerPresenceResult =
     readonly scriptInstallationVerified:false;readonly scriptInjectionVerified:false;
     readonly gmApiVerified:false;readonly businessVerified:false}
  | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|'UNVERIFIED_BROWSER'|
-    'UNOWNED_LISTENER'|'INVALID_CDP_RESPONSE'|'RUNTIME_NOT_OBSERVED'|'CDP_FAILED'};
+    'UNOWNED_LISTENER'|'INVALID_CDP_RESPONSE'|'RUNTIME_NOT_OBSERVED'|'CDP_FAILED'|'INVALID_OPTIONS'};
 
 const acceptedTypes=new Set(['service_worker','background_page']);
 const invalidTargets=():ManagerPresenceResult=>({ok:false,code:'INVALID_CDP_RESPONSE'});
+/** AbortSignal is also a JS input boundary for this exported direct runtime API.
+ * Check its native internal slots and refuse Proxies and own method shadows
+ * before invoking aborted or attaching listeners. No caller hooks may run.
+ */
+function isNativeRuntimeSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
 /** Capture only own data descriptors, never invoke getters, proxies' get traps,
  * or a caller-supplied array iterator. Refuse Proxy values before any
  * reflective calls: even getPrototypeOf/ownKeys can invoke attacker traps.
@@ -118,6 +132,8 @@ export async function inspectApprovedTampermonkeyRuntime(
  session:ManagedLaunchResult,userApproved:boolean,signal?:AbortSignal
 ):Promise<ManagerPresenceResult>{
  if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+ if(signal!==undefined&&!isNativeRuntimeSignal(signal))
+   return {ok:false,code:'INVALID_OPTIONS'};
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!session?.ok||!isLiveApprovedChromeSession(session))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
