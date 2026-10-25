@@ -491,3 +491,44 @@ test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit 
    assert.equal((await readFile(paths[i],'utf8')).includes('#segment-'+i),true);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-013/TEST-022: resumed read-only AST display retries one transient Worker crash without rewriting the checkpoint',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-resumed-display-retry-'));
+ try{
+  const file=join(home,'review.user.js');
+  const source=header+'document.querySelector("#resumed-static");';
+  await writeFile(file,source);
+  const scripts=(await importApprovedPaths([file])).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const real=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const injected=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof real>)=>{
+    if(++calls===1)throw Error('TRANSIENT_RESUMED_DISPLAY_WORKER_CRASH');
+    return real(...args);
+   });
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.deepEqual(resumed.previews.map(p=>p.status),['STATIC_ANALYSIS_ONLY'],
+     'a transient crashed display worker must not permanently discard safe static evidence');
+    assert.equal(resumed.previews[0].automaticPatchAllowed,false);
+    assert.equal(resumed.previews[0].tampermonkeyVerified,false);
+    assert.equal(resumed.previews[0].businessVerified,false);
+   }
+   assert.equal(calls,2,'allow exactly one fresh independent retry for a transient display failure');
+  }finally{injected.mock.restore();}
+  assert.deepEqual(await readFile(journal),before,
+   'display-only replay must not modify a previously persisted scheduler journal');
+  assert.equal(await readFile(file,'utf8'),source);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
