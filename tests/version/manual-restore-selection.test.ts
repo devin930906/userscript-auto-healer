@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
@@ -84,5 +84,37 @@ test('TASK-011/TEST-020: a post-preflight source change cannot bypass native res
   });
   assert.equal(result.status,'BLOCKED');
   assert.deepEqual(await readFile(source),Buffer.from('// ==UserScript==\n// third party edit\n'));
+ });
+});
+
+test('TASK-011/TEST-020/026: manual restore selection rejects source changed during independent backup verification',async()=>{
+ await fixture(async({source,backupFile})=>{
+  const recovery=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const originalVerifier=recovery.verifyBackupRecoverySource;
+  const external=Buffer.from('// ==UserScript==\n// @name Externally Changed\n// ==/UserScript==\n');
+  let observed=0;
+  const intercepted=mock.method(recovery,'verifyBackupRecoverySource',
+   async(...args:Parameters<typeof originalVerifier>)=>{
+    const receipt=await originalVerifier(...args);
+    if(receipt.status==='RECOVERY_SOURCE_VERIFIED_READ_ONLY'){
+     observed++;
+     // The backup check can await filesystem work while another native
+     // editor changes the selected source. The earlier source receipt
+     // must not remain an eligible manual-restore selection.
+     await writeFile(source,external);
+    }
+    return receipt;
+   });
+  try{
+   const ready=await prepareManualOriginalRestoreSelection(source,backupFile);
+   assert.equal(observed,1,'test must intercept the real verified backup read');
+   assert.deepEqual(ready,{status:'BLOCKED',reason:'SOURCE_UNVERIFIED'},
+    'the UI must not show a stale hash receipt after an external source edit');
+   assert.deepEqual(await readFile(source),external,
+    'the selection preflight must never overwrite an external edit');
+   assert.deepEqual(await readFile(backupFile),original,
+    'independent recovery backup must remain intact');
+  }finally{intercepted.mock.restore();}
  });
 });
