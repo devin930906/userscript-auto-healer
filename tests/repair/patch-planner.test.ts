@@ -518,3 +518,41 @@ test('TASK-009/TEST-019/026: global document aliases cannot silently replace nat
  assert.equal(result.status,'CANDIDATE_ONLY');
  assert.equal(result.automaticPatchAllowed,false);
 });
+
+test('TASK-009/TEST-019/026: reflective global document replacement cannot yield an offline repair candidate',()=>{
+ const unsafe=[
+  "Object.defineProperty(window, 'document', {value: fakeDocument});",
+  "Object.defineProperty(globalThis, key, {value: fakeDocument});",
+  "Object.defineProperties(globalThis, {document:{value:fakeDocument}});",
+  "Object.assign(window, {document:fakeDocument});",
+  "Reflect.set(globalThis, 'document', fakeDocument);",
+  "Reflect.deleteProperty(window, 'document');",
+  "Object.setPrototypeOf(window, {document:fakeDocument});",
+  "Reflect.set(window, key, fakeDocument);",
+  "Object.defineProperty(globalThis['document'], 'querySelector', {value:()=>null});",
+  "Reflect.set(window['document'], 'querySelector', ()=>null);"
+ ];
+ for(const mutation of unsafe){
+  const script=meta+mutation+" document.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+    callOffset:script.lastIndexOf('document.querySelector(')
+  }));
+  assert.equal(result.status,'BLOCKED',mutation);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // Unrelated known properties on window are not an excuse to disable the
+ // entire conservative manual-candidate workflow.
+ for(const safeMutation of [
+  "Object.defineProperty(window,'unrelated',{value:1});",
+  "Object.assign(globalThis,{unrelated:true});",
+  "Reflect.set(window,'unrelated',true);"
+ ]){
+  const script=meta+safeMutation+" document.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+    callOffset:script.lastIndexOf('document.querySelector(')
+  }));
+  assert.equal(result.status,'CANDIDATE_ONLY',safeMutation);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});
