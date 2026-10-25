@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 
@@ -697,7 +697,7 @@ test('TEST-022: readers do not accept a checkpoint while native writer lock exis
 
 import {importDroppedBytes} from '../../src/import/import-service';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import {previewImportedScriptAnalysis} from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
 
 const QUEUE_HEADER=['// ==UserScript==','// @name actual-native-queue','// @match https://example.org/*','// ==/UserScript==',''].join(String.fromCharCode(10));
 function realNativeScript(index:number){
@@ -941,4 +941,58 @@ test('TASK-013/TEST-022/026: native read-only queue rejects forged cancellation 
   assert.equal(progress,0,'forged cancellation must not dispatch the worker');
  }
  assert.equal(traps,0,'no getter, Proxy trap or shadowed event method may execute');
+});
+
+test('TASK-013/TEST-022: native read-only queue recovers an isolated transient AST Worker failure once',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>realNativeScript(1100+i));
+ const saved=scripts.map(s=>Buffer.from(s.bytes));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const native=isolated.previewImportedBatchOffMain;
+ let attempts=0;
+ const progress:Array<[number,number]>=[];
+ const injected=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof native>)=>{
+   attempts++;
+   if(attempts===1)
+    return args[0].map(()=>unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+   return native(...args);
+  });
+ try{
+  const previews=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
+   (processed,total)=>progress.push([processed,total]));
+  assert.deepEqual(previews,scripts.map(previewImportedScriptAnalysis),
+   'the independent replacement Worker should restore real AST preview evidence');
+  assert.deepEqual(progress,[[16,17],[17,17]],
+   'one segment must only signal completion once despite its retry');
+  assert.equal(attempts,3,'first segment retries once; second segment runs independently');
+  for(let i=0;i<scripts.length;i++)assert.deepEqual(scripts[i].bytes,saved[i]);
+  assert.ok(previews.every(p=>!p.automaticPatchAllowed&&!p.tampermonkeyVerified&&!p.businessVerified));
+ }finally{injected.mock.restore();}
+});
+
+test('TASK-013/TEST-022/026: exhausted malformed AST segment stays failed without omitting subsequent scripts',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>realNativeScript(1200+i));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const native=isolated.previewImportedBatchOffMain;
+ let attempts=0;
+ const progress:Array<[number,number]>=[];
+ const injected=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof native>)=>{
+   attempts++;
+   if(attempts<=2)return [];
+   return native(...args);
+  });
+ try{
+  const previews=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
+   (processed,total)=>progress.push([processed,total]));
+  assert.equal(attempts,3,'truncated first segment must get exactly two attempts');
+  assert.equal(previews.length,17,'never omit even a failed imported file');
+  assert.deepEqual(previews.slice(0,16).map(x=>x.status),
+   Array(16).fill('ISOLATED_ANALYSIS_FAILED'));
+  assert.equal(previews[16].status,'STATIC_ANALYSIS_ONLY');
+  assert.deepEqual(progress,[[16,17],[17,17]]);
+  assert.ok(previews.every(p=>!p.automaticPatchAllowed&&!p.tampermonkeyVerified&&!p.businessVerified));
+ }finally{injected.mock.restore();}
 });
