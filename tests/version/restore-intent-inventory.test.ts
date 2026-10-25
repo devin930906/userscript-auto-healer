@@ -186,3 +186,56 @@ test('TASK-011/TEST-020/026: journal edited after individual inspection cannot y
    '{"tampermonkeyVerified":true}\n');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/026: in-place journal mutation after final per-item recheck blocks stale inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-intent-late-rewrite-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const backup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(backup.status,'BACKUP_ONLY');
+  if(backup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,updated);
+  const restored=await restoreVerifiedOriginalNativeOnly({
+   sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+   expectedCurrentSha256:sha(updated),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,userApproved:true,
+   manualRestoreApproved:true
+  });
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  const journal=(await readdir(backupDirectory)).find(n=>n.endsWith('.journal.json'));
+  assert.ok(journal);
+  const journalPath=join(backupDirectory,journal);
+  const inspection=require('../../src/version/restore-intent-inspection') as
+   typeof import('../../src/version/restore-intent-inspection');
+  const actual=inspection.inspectNativeRestoreIntentReadOnly;
+  let checks=0;
+  const patched=mock.method(inspection,'inspectNativeRestoreIntentReadOnly',
+   async(...args:Parameters<typeof actual>)=>{
+    const result=await actual(...args);
+    if(result.status==='RESTORE_INTENT_OBSERVED_READ_ONLY'&&++checks===2){
+     // The directory entries have not changed. A native external editor
+     // rewrites the already-rechecked journal before the aggregate returns.
+     await writeFile(journalPath,'{"tampermonkeyVerified":true}\\n');
+    }
+    return result;
+   });
+  try{
+   const inventory=await inspectNativeRestoreIntentInventoryReadOnly({
+    sourcePath,backupDirectory,userApproved:true
+   });
+   assert.ok(checks>=2,'must pass through the previously final per-item recheck');
+   assert.deepEqual([inventory.status,'reason' in inventory?inventory.reason:null],
+    ['BLOCKED','UNSAFE_PATH']);
+   assert.equal('originalPresent' in inventory,false,
+    'must not display stale original-present counts');
+  }finally{patched.mock.restore();}
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.equal((await readFile(journalPath,'utf8')),'{"tampermonkeyVerified":true}\\n');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
