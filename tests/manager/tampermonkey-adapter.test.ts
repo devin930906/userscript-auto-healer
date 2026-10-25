@@ -218,3 +218,34 @@ test('TEST-017/026: Proxy-based CDP targets never run reflection traps',()=>{
  }
  assert.equal(trapCalls,0,'Untrusted Proxy reflection traps must not execute');
 });
+
+test('TASK-007/TEST-017/026: runtime inspection rejects forged AbortSignals before any getter or CDP access',async()=>{
+ const session={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ let traps=0;
+ const accessor={
+  get aborted(){traps++;throw Error('HOSTILE_ABORTED_GETTER');}
+ } as unknown as AbortSignal;
+ const active=new Proxy(new AbortController().signal,{
+  get(){traps++;throw Error('HOSTILE_ABORT_PROXY_GET');},
+  getPrototypeOf(){traps++;throw Error('HOSTILE_ABORT_PROXY_PROTO');},
+  ownKeys(){traps++;throw Error('HOSTILE_ABORT_PROXY_KEYS');}
+ });
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+ const shadow=new AbortController().signal;
+ Object.defineProperty(shadow,'addEventListener',{value:()=>{
+  traps++;throw Error('HOSTILE_ABORT_LISTENER');
+ }});
+ for(const signal of [accessor,active,revoked.proxy,spoof,shadow]){
+  const result=await inspectApprovedTampermonkeyRuntime(session,true,signal);
+  assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'},
+   'a non-native or shadowed signal cannot invoke caller code or reach CDP');
+ }
+ assert.equal(traps,0,'no untrusted getter, proxy or listener is ever executed');
+ // Legitimate native cancellation continues to be handled distinctly.
+ const cancelled=new AbortController();
+ cancelled.abort();
+ assert.deepEqual(await inspectApprovedTampermonkeyRuntime(session,true,cancelled.signal),
+  {ok:false,code:'CANCELLED'});
+});
