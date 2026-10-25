@@ -45,6 +45,8 @@ let manualExportInProgress=false;
 // New independent files can already exist after final native write consent.
 // Never acknowledge cancellation that cannot unwind the write operation.
 let manualExportCommitInProgress=false;
+// Revoke pending manual restore before its source rename on shutdown.
+let nativeRestoreController:AbortController|null=null;
 const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
@@ -692,7 +694,12 @@ function registerSafeIpc(): void {
     // Serialized through the existing cross-module native-picking gate, so
     // other privileged pickers and imports cannot overlap this restore.
     nativeSelectionInProgress=true;
-    const revoked=()=>win!==mainWindow||win.isDestroyed();
+    const restoreController=new AbortController();
+    nativeRestoreController=restoreController;
+    const abortOnWindowClose=()=>restoreController.abort();
+    win.once('closed',abortOnWindowClose);
+    const revoked=()=>win!==mainWindow||win.isDestroyed()||
+      restoreController.signal.aborted;
     try{
       const initial=await dialog.showMessageBox(win,{
         type:'warning',buttons:['选择原文件和独立备份','取消'],
@@ -742,7 +749,7 @@ function registerSafeIpc(): void {
       const {status:_status,...selection}=prepared;
       const result=await restoreVerifiedOriginalNativeOnly({
         ...selection,userApproved:true,manualRestoreApproved:true
-      });
+      },restoreController.signal);
       if(result.status!=='RESTORED_NATIVE_ONLY')
         return {ok:false,code:result.reason,...unverified};
       return {ok:true,status:'RESTORED_NATIVE_ONLY',
@@ -751,7 +758,11 @@ function registerSafeIpc(): void {
         ...unverified};
     }catch{
       return {ok:false,code:'RESTORE_FAILED',...unverified};
-    }finally{nativeSelectionInProgress=false;}
+    }finally{
+      win.removeListener('closed',abortOnWindowClose);
+      if(nativeRestoreController===restoreController)nativeRestoreController=null;
+      nativeSelectionInProgress=false;
+    }
   });
 
   // Every path MUST come from the native OS picker, not renderer-provided input.
@@ -1625,6 +1636,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit',()=>{
+  nativeRestoreController?.abort();
   nativeImportController?.abort();
   droppedImportController?.abort();
   stopOnlyOwnedBrowser();
