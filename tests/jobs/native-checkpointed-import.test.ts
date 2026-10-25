@@ -411,7 +411,7 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
   const patch=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof actual>)=>{
     calls++;
-    if(calls===1)throw Error('INJECTED_RESUMED_AST_WORKER_FAILURE');
+    if(calls<=2)throw Error('INJECTED_RESUMED_AST_WORKER_FAILURE');
     return actual(...args);
    });
   const progress:Array<[number,number]>=[];
@@ -428,7 +428,7 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
     assert.equal(resumed.previews.every(row=>row.automaticPatchAllowed===false&&
      row.tampermonkeyVerified===false&&row.businessVerified===false),true);
    }
-   assert.equal(calls,2,'every resumed segment independently re-runs AST');
+   assert.equal(calls,3,'failed resumed segment retries once; next segment still runs AST');
    assert.deepEqual(progress,[[16,17],[17,17]]);
   }finally{patch.mock.restore();}
   assert.deepEqual(await readFile(journal),saved,
@@ -463,7 +463,7 @@ test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit 
   let calls=0;
   const patch=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof real>)=>{
-    if(++calls===1)return [] as Awaited<ReturnType<typeof real>>;
+    if(++calls<=2)return [] as Awaited<ReturnType<typeof real>>;
     return real(...args);
    });
   try{
@@ -482,12 +482,88 @@ test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit 
     assert.equal(resumed.previews.every(row=>
      !row.automaticPatchAllowed&&!row.tampermonkeyVerified&&!row.businessVerified),true);
    }
-   assert.equal(calls,2,'each resumed segment re-runs its isolated worker');
+   assert.equal(calls,3,'truncated segment retries once; next segment independently runs');
    assert.deepEqual(progress,[[16,17],[17,17]]);
   }finally{patch.mock.restore();}
   assert.deepEqual(await readFile(journal),before,
    'display-only recovery must leave persisted scheduling evidence untouched');
   for(let i=0;i<paths.length;i++)
    assert.equal((await readFile(paths[i],'utf8')).includes('#segment-'+i),true);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022: resumed read-only AST display retries one transient Worker crash without rewriting the checkpoint',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-resumed-display-retry-'));
+ try{
+  const file=join(home,'review.user.js');
+  const source=header+'document.querySelector("#resumed-static");';
+  await writeFile(file,source);
+  const scripts=(await importApprovedPaths([file])).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const real=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const injected=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof real>)=>{
+    if(++calls===1)throw Error('TRANSIENT_RESUMED_DISPLAY_WORKER_CRASH');
+    return real(...args);
+   });
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.deepEqual(resumed.previews.map(p=>p.status),['STATIC_ANALYSIS_ONLY'],
+     'a transient crashed display worker must not permanently discard safe static evidence');
+    assert.equal(resumed.previews[0].automaticPatchAllowed,false);
+    assert.equal(resumed.previews[0].tampermonkeyVerified,false);
+    assert.equal(resumed.previews[0].businessVerified,false);
+   }
+   assert.equal(calls,2,'allow exactly one fresh independent retry for a transient display failure');
+  }finally{injected.mock.restore();}
+  assert.deepEqual(await readFile(journal),before,
+   'display-only replay must not modify a previously persisted scheduler journal');
+  assert.equal(await readFile(file,'utf8'),source);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022: resumed AST display never retries a permanent worker budget result',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-resumed-budget-'));
+ try{
+  const file=join(home,'budget.user.js');
+  const script=header+'document.querySelector("#bounded-display");';
+  await writeFile(file,script);
+  const imported=(await importApprovedPaths([file])).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,imported);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',async()=>{
+   calls++;
+   return [unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED')];
+  });
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,imported);
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.deepEqual(resumed.previews.map(p=>p.status),['ISOLATED_ANALYSIS_FAILED']);
+    assert.equal(resumed.previews[0].automaticPatchAllowed,false);
+   }
+   assert.equal(calls,1,'a budget failure must NOT receive a second worker attempt');
+  }finally{patch.mock.restore();}
+  assert.deepEqual(await readFile(journal),before);
+  assert.equal(await readFile(file,'utf8'),script);
  }finally{await rm(home,{recursive:true,force:true});}
 });
