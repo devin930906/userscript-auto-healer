@@ -443,3 +443,46 @@ test('TEST-019/026: hostile Proxy inputs cannot run traps during local patch pla
   revoked.revoke();
   assert.equal(auditProposedLiteralSelectorPatch(req,revoked.proxy).status,'BLOCKED');
 });
+
+
+test('TASK-009/TEST-014/019: literal document.getElementById can propose only a reviewed ID-to-ID candidate',()=>{
+ const script=meta+
+  'const untouched = "old";\n'+
+  "const selected = document.getElementById('old');\n";
+ const req=request(script,{
+  callOffset:script.indexOf('document.getElementById'),
+  method:'getElementById' as LiteralPatchRequest['method'],
+  originalSelector:'#old',replacementSelector:'#new'
+ });
+ const proposed=proposeLiteralSelectorPatch(req);
+ assert.equal(proposed.status,'CANDIDATE_ONLY',JSON.stringify(proposed));
+ if(proposed.status!=='CANDIDATE_ONLY')return;
+ assert.equal(proposed.change.before,"'old'");
+ assert.equal(proposed.change.after,'"new"');
+ assert.equal(proposed.candidateSource,meta+
+  'const untouched = "old";\n'+
+  'const selected = document.getElementById("new");\n');
+ assert.equal(auditProposedLiteralSelectorPatch(req,proposed).status,'REVIEWABLE_ONLY');
+ assert.equal(proposed.automaticPatchAllowed,false);
+ assert.equal(proposed.businessRecoveredVerified,false);
+});
+
+test('TASK-009/TEST-019/026: ID-only candidate never changes classes, computed methods, or an overridden document API',()=>{
+ for(const [body,oldSelector,newSelector] of [
+  ["document.getElementById('old');",'.old','.new'],
+  ["document['getElementById']('old');",'#old','#new'],
+  ["document.getElementById = () => null; document.getElementById('old');",'#old','#new'],
+  ["Object.defineProperty(document, 'getElementById', {value: () => null}); document.getElementById('old');",'#old','#new'],
+  ["document.getElementById('old') || document.getElementById('other');",'#old','#new']
+ ]as const){
+  const script=meta+body;
+  const req=request(script,{
+   callOffset:script.indexOf('document.getElementById'),
+   method:'getElementById' as LiteralPatchRequest['method'],
+   originalSelector:oldSelector,replacementSelector:newSelector
+  });
+  const result=proposeLiteralSelectorPatch(req);
+  assert.equal(result.status,'BLOCKED',body);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});
