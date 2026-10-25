@@ -390,3 +390,17 @@ test('TASK-015/017 TEST-024/026: native-only archive has no arbitrary renderer p
  assert.match(preload,/readScenarioHistory: \(id: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:history',id\)/);
  assert.doesNotMatch(main,/ipcMain\.handle\('scenario:history',async\(event,(?:path|sourcePath|fileName|scriptHash)/);
 });
+
+test('TASK-011/TEST-020/026: native restore ties pre-rename revocation to window close and application exit',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const restore=main.slice(main.indexOf("ipcMain.handle('restore:manual-original'"),
+  main.indexOf('// Every path MUST come from the native OS picker'));
+ assert.match(restore,/const restoreController=new AbortController\(\)/);
+ assert.match(restore,/win\.once\('closed',abortOnWindowClose\)/);
+ assert.match(restore,/restoreVerifiedOriginalNativeOnly\([\s\S]*?restoreController\.signal\)/);
+ assert.match(restore,/win\.removeListener\('closed',abortOnWindowClose\)/);
+ assert.match(main,/app\.on\('before-quit',\(\)=>\{\s*nativeRestoreController\?\.abort\(\)/);
+ // Renderer must not supply abort signals, file paths or restore authority.
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.match(preload,/restoreManualOriginal: \(\): Promise<unknown> => ipcRenderer\.invoke\('restore:manual-original'\)/);
+});
