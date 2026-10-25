@@ -106,7 +106,9 @@ export interface ChromeLaunchOptions {
  * A serialized/forged success-shaped result is not an authorized session.
  */
 const liveSessions=new WeakMap<object,ChildProcess>();
-export function isLiveApprovedChromeSession(session:ManagedLaunchResult):boolean {
+export function isLiveApprovedChromeSession(
+  session:ManagedLaunchResult
+):session is Extract<ManagedLaunchResult,{ok:true}> {
   // An exported inspector can receive an arbitrary object at runtime. Only
   // objects already held by this private WeakMap may have their properties read.
   // WeakMap.get never invokes Proxy property/accessor traps, even for a
