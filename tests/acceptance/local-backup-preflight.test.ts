@@ -212,3 +212,23 @@ test('TASK-010/011 TEST-020/021/026: source changed during final backup check re
    'independent original recovery bytes must remain preserved');
  });
 });
+
+
+test('TASK-010/011 TEST-021/026: untrusted source hash accessor never executes before audit',async()=>{
+ await fixture(async paths=>{
+  let accessorCalls=0;
+  const hostileRequest={...request};
+  Object.defineProperty(hostileRequest,'expectedSourceSha256',{
+   enumerable:true,configurable:true,
+   get(){accessorCalls++;return sha(source);}
+  });
+  const result=await prepareReviewedLocalBackupOnly(hostileRequest,candidate,{
+   ...paths,userApproved:true
+  });
+  assert.equal(accessorCalls,0,'an untrusted property getter must never execute');
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.deepEqual(await readdir(paths.backupDirectory),[]);
+  assert.equal(await readFile(paths.sourcePath,'utf8'),source);
+ });
+});
