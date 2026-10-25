@@ -25,10 +25,13 @@ export async function verifyExactCandidateBytesReadOnly(
   try{
   if(!Buffer.isBuffer(expected)||!expected.length||
      expected.length>MAX_SCRIPT_BYTES)return 'CHANGED';
+  // Fix the approved comparison bytes synchronously, before the first await.
+  // A caller may mutate its Buffer while pathname/disk checks are pending.
+  const originalBytes=Buffer.from(expected);
   if(await hasUnsafePathLink(path))return 'CHANGED';
   const before=await lstat(path,{bigint:true});
   if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||
-     before.size!==BigInt(expected.length))return 'CHANGED';
+     before.size!==BigInt(originalBytes.length))return 'CHANGED';
 
   const handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
   try{
@@ -41,19 +44,19 @@ export async function verifyExactCandidateBytesReadOnly(
     while(true){
       // Read at most one byte beyond the expected length, never unbounded
       // bytes from an externally replaced or growing candidate.
-      const limit=Math.min(chunk.length,expected.length-count+1);
+      const limit=Math.min(chunk.length,originalBytes.length-count+1);
       const {bytesRead}=await handle.read(chunk,0,limit,null);
       if(bytesRead===0)break;
-      if(count+bytesRead>expected.length)return 'CHANGED';
+      if(count+bytesRead>originalBytes.length)return 'CHANGED';
       if(!chunk.subarray(0,bytesRead)
-         .equals(expected.subarray(count,count+bytesRead)))equal=false;
+         .equals(originalBytes.subarray(count,count+bytesRead)))equal=false;
       count+=bytesRead;
     }
     const after=await handle.stat({bigint:true});
     const byPath=await lstat(path,{bigint:true});
     if(byPath.isSymbolicLink()||!byPath.isFile()||byPath.nlink!==1n||
        !same(before,after)||!same(after,byPath)||
-       count!==expected.length||await hasUnsafePathLink(path))
+       count!==originalBytes.length||await hasUnsafePathLink(path))
       return 'CHANGED';
     return equal?'MATCH':'MISMATCH';
   }finally{await handle.close();}
