@@ -174,21 +174,28 @@ export async function runCheckpointedNativeImportAnalysis(
    // its bounded, isolated AST worker to return fresh, source-matched UI data.
    let reports=observations[ordinal];
    if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted){
-    try{
-     reports=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
-     // A persisted success only resumes scheduling, never certifies a fresh
-     // Worker response. Missing or failed replies must preserve one receipt
-     // per imported script without suppressing later independent segments.
-     if(reports.length!==group.scripts.length||
-        reports.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
-          row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET'))
-      reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');
-    }catch{
-     // A persisted SUCCEEDED scheduling hint is not current AST evidence.
-     // Isolate a rejected display-only Worker to its own script segment;
-     // later segments still run, and no prior journal is promoted to proof.
-     reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');
+    // A persisted success is a scheduling hint, not fresh AST evidence.
+    // Resumed display has the same TWO-attempt transient-worker budget as
+    // initial read-only analysis. Never rewrite the durable journal, and
+    // never retry cancelled or budget-limited requests.
+    for(let attempt=0;attempt<2;attempt++){
+     if(signal?.aborted||lifetime.signal.aborted)break;
+     try{
+      const fresh=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+      if(fresh.length===group.scripts.length&&
+         !fresh.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
+           row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET')){
+       reports=fresh;
+       break;
+      }
+      if(fresh.some(row=>row.status==='SKIPPED_CANCELLED'||
+         row.status==='SKIPPED_BATCH_BUDGET'))break;
+     }catch{
+      // A transient isolated Worker failure may receive one independent
+      // display-only retry. No prior checkpoint grants authenticity.
+     }
     }
+    if(!reports)reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');
    }
    // Resume reanalysis awaits a worker AFTER checkpoint settlement. Any
    // cancellation during that await revokes the display receipt, even when
