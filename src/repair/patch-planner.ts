@@ -118,25 +118,38 @@ function mayReplaceDomSelectorMethod(target:unknown):boolean{
       property.name==='getElementById');
 }
 
-/** Standard reflection can replace the selector method without an
- * AssignmentExpression on document. We cannot prove that a reflective
- * mutator leaves the native DOM API intact. Reject only when its first
- * argument is the global document (including window/globalThis.document).
- * A dynamic Object/Reflect member call is also ambiguous for that target.
- * This is an offline conservative heuristic, not a runtime attestation. */
+/** In a literal Object.assign/defineProperties bag, only a known
+ * non-document property can be ruled out. Spreads, dynamic names or an
+ * unknown bag may replace the global document, so block conservatively. */
+function mayContainDocumentProperty(value:unknown):boolean{
+ const bag=asNode(value);
+ if(bag?.type!=='ObjectExpression'||!Array.isArray(bag.properties))return true;
+ for(const value of bag.properties){
+  const entry=asNode(value);
+  if(entry?.type!=='Property')return true;
+  const key=asNode(entry.key);
+  const name=entry.computed===true?
+   (key?.type==='Literal'&&typeof key.value==='string'?key.value:null):
+   (key?.type==='Identifier'?key.name:
+    key?.type==='Literal'?String(key.value):null);
+  if(name===null||name==='document')return true;
+ }
+ return false;
+}
+
+/** Reflective writes can replace either a native selector method or the
+ * global document reference itself. Preserve unrelated known global keys,
+ * but refuse ambiguous/dynamic property names and prototype replacements.
+ * This is an offline conservative heuristic, never runtime attestation. */
 function mayReflectivelyMutateDocument(node:AstNode):boolean{
  if(node.type!=='CallExpression'||!Array.isArray(node.arguments)||
     node.arguments.length===0)return false;
  const argument=asNode(node.arguments[0]);
  const firstIsDocument=argument?.type==='Identifier'&&argument.name==='document';
- const nested=asNode(argument?.object);
- const nestedProperty=asNode(argument?.property);
- const aliasedDocument=argument?.type==='MemberExpression'&&
-   argument.computed===false&&
-   nested?.type==='Identifier'&&
-   (nested.name==='window'||nested.name==='globalThis')&&
-   nestedProperty?.type==='Identifier'&&nestedProperty.name==='document';
- if(!firstIsDocument&&!aliasedDocument)return false;
+ const aliasedDocument=isGlobalDocumentMember(argument);
+ const globalHost=argument?.type==='Identifier'&&
+   (argument.name==='window'||argument.name==='globalThis');
+ if(!firstIsDocument&&!aliasedDocument&&!globalHost)return false;
  const callee=asNode(node.callee);
  if(callee?.type!=='MemberExpression')return false;
  const receiver=asNode(callee.object);
@@ -148,9 +161,22 @@ function mayReflectivelyMutateDocument(node:AstNode):boolean{
       property.value:null):
    (property?.type==='Identifier'?property.name:null);
  if(typeof method!=='string')return true;
- return receiver.name==='Object'?
+ const mutatesDocument=receiver.name==='Object'?
    ['defineProperty','defineProperties','assign','setPrototypeOf'].includes(method):
    ['defineProperty','set','deleteProperty','setPrototypeOf'].includes(method);
+ if(!globalHost)return mutatesDocument;
+ if(method==='setPrototypeOf')return true;
+ if((receiver.name==='Object'&&method==='defineProperty')||
+    (receiver.name==='Reflect'&&
+     ['defineProperty','set','deleteProperty'].includes(method))){
+  const key=asNode(node.arguments[1]);
+  return key?.type!=='Literal'||typeof key.value!=='string'||
+     key.value==='document';
+ }
+ if(receiver.name==='Object'&&
+    (method==='assign'||method==='defineProperties'))
+  return node.arguments.slice(1).some(mayContainDocumentProperty);
+ return false;
 }
 
 /** Reject source whose `document` reference or selector methods cannot be
