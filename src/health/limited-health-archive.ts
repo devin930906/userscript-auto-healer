@@ -137,6 +137,10 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
       (event.kind==='LIMITED_DOM_OBSERVATION'?
        typeof event.evidenceHash!=='string'||!SHA.test(event.evidenceHash):
        event.evidenceHash!==null)||
+      // A native history event cannot assert a more (or less) optimistic
+      // status than its actual kind of limited observation permits.
+      (event.kind==='LIMITED_DOM_OBSERVATION'?
+       event.status!=='ELEMENT_FOUND_ONLY':event.status!=='INDETERMINATE')||
       !Number.isSafeInteger(event.observedAtMs)||event.observedAtMs<0||
       event.observedAtMs>maxObservedAtMs||
       (event.status!=='ELEMENT_FOUND_ONLY'&&event.status!=='INDETERMINATE')||

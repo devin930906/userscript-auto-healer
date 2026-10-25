@@ -405,3 +405,27 @@ test('TASK-015/TEST-024/026: native archive rejects forged event kind and eviden
    'invalid snapshots must not even create an archive directory');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: archive refuses status claims inconsistent with observation evidence',async()=>{
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-status-consistency-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  for(const [kind,evidenceHash,forgedStatus] of [
+   ['INSUFFICIENT_EVIDENCE',null,'ELEMENT_FOUND_ONLY'],
+   ['LIMITED_DOM_OBSERVATION',E,'INDETERMINATE']
+  ] as const){
+   const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+   registry.record({scriptHash:key,kind,evidenceHash});
+   const authentic=registry.snapshot(key);
+   const forged={...authentic,history:[{...authentic.history[0],status:forgedStatus}]};
+   assert.equal((await saveLimitedHealthArchive(userData,
+    forged as typeof authentic)).status,'BLOCKED',
+    `event ${kind} cannot be archived with forged ${forgedStatus} status`);
+  }
+  assert.deepEqual(await readdir(userData),[],
+   'a mismatched native event must not create a durable archive directory');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
