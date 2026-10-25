@@ -75,6 +75,38 @@ test('TEST-005/026: lower-level scenario flags must be actual booleans, never co
   assert.equal(registry.register(ready).state,'READY_TO_TEST');
 });
 
+test('TASK-004/TEST-005/026: untrusted metadata hint objects cannot execute getters or custom iterators',()=>{
+  let traps=0;
+  const hostile=():never=>{traps++;throw Error('PRIVATE_METADATA_TRAP');};
+  const valid={...bare,targetUrl:'https://example.test/app/a',
+    userApproved:true,requiresLogin:false};
+  const topProxy=new Proxy(metadata,{get:hostile});
+  const topAccessor={...metadata};
+  Object.defineProperty(topAccessor,'status',{enumerable:true,get:hostile});
+  const tagAccessor={...metadata};
+  Object.defineProperty(tagAccessor,'tags',{enumerable:true,get:hostile});
+  const nestedTags=Object.create(null) as Record<string,unknown>;
+  Object.defineProperty(nestedTags,'match',{enumerable:true,get:hostile});
+  const nestedAccessor={...metadata,tags:nestedTags};
+  const patterns=['https://example.test/app/*'];
+  Object.defineProperty(patterns,Symbol.iterator,{get:hostile});
+  const iteratorAccessor={...metadata,tags:{match:patterns}};
+  const nestedProxy={...metadata,tags:new Proxy(metadata.tags,{get:hostile})};
+  const revoked=Proxy.revocable(metadata,{});
+  revoked.revoke();
+  for(const item of [topProxy,topAccessor,tagAccessor,nestedAccessor,
+    iteratorAccessor,nestedProxy,revoked.proxy]){
+    assert.deepEqual(suggestSites(item as typeof metadata),[],
+      'invalid metadata may never produce site hints');
+    const checked=preflightScenario(valid,item as typeof metadata);
+    assert.equal(checked.state,'READY_TO_TEST',
+      'metadata hints must not silently grant or revoke user approval');
+    assert.deepEqual(checked.hints,[]);
+  }
+  assert.equal(traps,0,'metadata reflection must never execute caller code');
+  assert.equal(suggestSites(metadata).length,2,'parser-produced normal hints remain intact');
+});
+
 test('TEST-005: registry is isolated from caller mutation and duplicate IDs',()=>{
   const registry=new ScenarioRegistry();
   const ready={...bare,targetUrl:'https://example.test/app/a',userApproved:true,loginReady:true};

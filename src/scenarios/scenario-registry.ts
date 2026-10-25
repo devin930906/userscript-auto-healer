@@ -54,24 +54,58 @@ function normalizeUrl(input:unknown):string|null {
 }
 /** URL patterns are hints only: wildcards must never become invented real URLs. */
 export function suggestSites(metadata?:MetadataResult):SiteHint[] {
-  if(metadata?.status!=='OK')return [];
-  const hints:SiteHint[]=[];
-  const seen=new Set<string>();
-  for(const source of ['match','include'] as const) {
-    for(const pattern of metadata.tags[source] ?? []) {
-      const value=pattern.trim();
-      if(!value || seen.has(source+':'+value))continue;
-      seen.add(source+':'+value);
-      const match=/^(\*|https?):\/\/([^/\s]+)(?:\/|$)/i.exec(value);
-      const host=match?.[2] ?? null;
-      hints.push({
-        source,pattern:value,
-        scheme:match?.[1]?.toLowerCase() ?? null,
-        hostPattern:host && !host.includes('@') ? host : null
-      });
+  // Metadata can be supplied by an untrusted caller of the scenario
+  // registry. No getters, Proxy reflection or overridden array iterators
+  // may execute merely to generate non-authoritative site suggestions.
+  try {
+    if(!metadata||typeof metadata!=='object'||Array.isArray(metadata)||
+       nodeTypes.isProxy(metadata))return [];
+    const parent=Object.getPrototypeOf(metadata);
+    if(parent!==Object.prototype&&parent!==null)return [];
+    const status=Object.getOwnPropertyDescriptor(metadata,'status');
+    const slot=Object.getOwnPropertyDescriptor(metadata,'tags');
+    if(!status||!Object.prototype.hasOwnProperty.call(status,'value')||
+       status.value!=='OK'||!slot||
+       !Object.prototype.hasOwnProperty.call(slot,'value'))return [];
+    const tags:unknown=slot.value;
+    if(!tags||typeof tags!=='object'||Array.isArray(tags)||
+       nodeTypes.isProxy(tags))return [];
+    const tagsProto=Object.getPrototypeOf(tags);
+    if(tagsProto!==Object.prototype&&tagsProto!==null)return [];
+    const hints:SiteHint[]=[];
+    const seen=new Set<string>();
+    for(const source of ['match','include'] as const){
+      const row=Object.getOwnPropertyDescriptor(tags,source);
+      if(!row)continue;
+      if(!Object.prototype.hasOwnProperty.call(row,'value'))return [];
+      const patterns:unknown=row.value;
+      if(!Array.isArray(patterns)||nodeTypes.isProxy(patterns)||
+         Object.getPrototypeOf(patterns)!==Array.prototype)return [];
+      const length=Object.getOwnPropertyDescriptor(patterns,'length')?.value;
+      // A site-hint list is not a code execution or URL authorization gate.
+      // Cap input traversal instead of trusting a caller-provided length.
+      if(!Number.isSafeInteger(length)||length>1024)return [];
+      const entries=Object.getOwnPropertyDescriptors(patterns);
+      if(Reflect.ownKeys(entries).length!==length+1)return [];
+      for(let i=0;i<length;i++){
+        const item=entries[String(i)];
+        if(!item||!Object.prototype.hasOwnProperty.call(item,'value')||
+           typeof item.value!=='string')return [];
+        const pattern:string=item.value;
+        const value=pattern.trim();
+        if(!value||seen.has(source+':'+value))continue;
+        seen.add(source+':'+value);
+        const match=/^(\*|https?):\/\/([^/\s]+)(?:\/|$)/i.exec(value);
+        const host=match?.[2] ?? null;
+        hints.push({
+          source,pattern:value,
+          scheme:match?.[1]?.toLowerCase() ?? null,
+          hostPattern:host && !host.includes('@') ? host : null
+        });
+      }
     }
-  }
-  return hints;
+    return hints;
+  }catch{return [];}
 }
 /** Capture data descriptors without evaluating user-supplied accessors.
  * Proxy traps are caught and treated as malformed input, never surfaced.
