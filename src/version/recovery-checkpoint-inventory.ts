@@ -135,6 +135,19 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
         candidateSha256:inspected.candidateSha256
       }));
     }
+    // A checkpoint inspected earlier may be overwritten while later entries
+    // are checked. Repeat the existing bounded, independent source/backup/
+    // candidate verification and reject any changed result before reporting.
+    // These are only observational snapshots, not a cross-process file lock.
+    for(const earlier of observed){
+      const latest=await inspectRecoveryCheckpointReadOnly(
+        request,earlier.checkpointFileName,options);
+      if(latest.status!=='CHECKPOINT_RECHECKED_READ_ONLY'||
+         latest.checkpointSha256!==earlier.checkpointSha256||
+         latest.originalSha256!==earlier.originalSha256||
+         latest.candidateSha256!==earlier.candidateSha256)
+        return deny('UNSAFE_CHECKPOINT');
+    }
     if(await hasUnsafePathLink(options.sourcePath)||
        await hasUnsafePathLink(options.backupDirectory))
       return deny('UNSAFE_PATH');
@@ -147,8 +160,12 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
     if(!sameFile(sourceBefore,sourceAfter)||sourceAfter.nlink!==1n||
        sourceFinal.status!=='MATCHED_READ_ONLY')
       return deny('SOURCE_UNVERIFIED');
+    // The same directory inode can gain or lose checkpoint entries without
+    // changing its identity. An inventory over a changed namespace is stale.
     if(!sameDir(dirBefore,dirAfter)||dirAfter.isSymbolicLink()||
-       !dirAfter.isDirectory())return deny('UNSAFE_PATH');
+       !dirAfter.isDirectory()||
+       dirBefore.mtimeNs!==dirAfter.mtimeNs||
+       dirBefore.ctimeNs!==dirAfter.ctimeNs)return deny('UNSAFE_PATH');
     return Object.freeze({
       status:'OBSERVED_CHECKPOINTS_READ_ONLY' as const,
       checkpoints:Object.freeze(observed),...noAuthority
