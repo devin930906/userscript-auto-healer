@@ -798,12 +798,14 @@ test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native res
  });
 });
 
+const invokeNativeRestoreWithSignal=restoreVerifiedOriginalNativeOnly as
+ (options:unknown,signal:AbortSignal)=>ReturnType<typeof restoreVerifiedOriginalNativeOnly>;
 test('TASK-011/TEST-020/021/026: revoked native restore before start never touches selected source',async()=>{
  await fixture(async opts=>{
   const abort=new AbortController();
   abort.abort();
   const before=(await readdir(opts.backupDirectory)).sort();
-  const result=await restoreVerifiedOriginalNativeOnly(opts,abort.signal);
+  const result=await invokeNativeRestoreWithSignal(opts,abort.signal);
   assert.deepEqual([result.status,'reason' in result?result.reason:null],
    ['BLOCKED','CANCELLED']);
   assert.deepEqual(await readFile(opts.sourcePath),changed);
@@ -811,7 +813,7 @@ test('TASK-011/TEST-020/021/026: revoked native restore before start never touch
    'no displaced backup, journal, pending or lock may be created');
   let traps=0;
   const hostile=new Proxy(abort.signal,{get(){traps++;throw Error('signal trap');}});
-  const invalid=await restoreVerifiedOriginalNativeOnly(opts,hostile);
+  const invalid=await invokeNativeRestoreWithSignal(opts,hostile);
   assert.deepEqual([invalid.status,'reason' in invalid?invalid.reason:null],
    ['BLOCKED','INVALID_REQUEST']);
   assert.equal(traps,0,'never evaluate a foreign signal proxy');
@@ -833,7 +835,7 @@ test('TASK-011/TEST-020/021/026: revoked native window before final rename retai
    return completed;
   };
   try{
-   const result=await restoreVerifiedOriginalNativeOnly(opts,abort.signal);
+   const result=await invokeNativeRestoreWithSignal(opts,abort.signal);
    assert.equal(revokedAfterJournal,true,'must reach actual published journal');
    assert.deepEqual([result.status,'reason' in result?result.reason:null],
     ['BLOCKED','CANCELLED']);
