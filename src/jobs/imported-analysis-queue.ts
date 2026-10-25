@@ -27,6 +27,21 @@ type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
 const NATIVE_TYPED_ARRAY_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
  Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
 
+/** A cancellation handle is a privileged control surface, not an arbitrary
+ * object with an aborted property. Reject proxies, accessors and shadowed
+ * event methods before any callback or getter can execute caller code.
+ */
+function isNativeCancellationSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 
 /** Bind the source bytes and ordered hashes to the SAME private native
  * snapshot. The native importer hands us Uint8Arrays, which remain mutable
@@ -100,6 +115,10 @@ export async function runImportedReadOnlyAnalysisQueue(
  // Do not allocate per-slot placeholders for an invalid, potentially huge
  // caller-controlled array length. The native importer permits at most 1000.
  if(count>MAX_SELECTED_FILES)return [];
+ // Validate the native AbortSignal before reading aborted or subscribing to
+ // events. An invalid direct caller has no scheduling authority.
+ if(signal!==undefined&&!isNativeCancellationSignal(signal))
+  return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  const boundScripts=snapshotNativeScripts(scripts);
  if(!boundScripts)return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  // Do not call the caller's Array.prototype.map: an already-aborted native
