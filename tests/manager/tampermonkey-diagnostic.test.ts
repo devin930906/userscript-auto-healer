@@ -614,3 +614,20 @@ test('TEST-018/026: forged or incomplete blind-spot lists cannot certify GM fixt
  }
  assert.equal(calls,0,'blind-spot getters and Proxy traps were not invoked');
 });
+
+test('TASK-007/TEST-017/026: manual diagnostic refuses unregistered browser objects without reading untrusted getters',async()=>{
+ let calls=0;
+ const poison=()=>{calls++;throw Error('FORGED_MANUAL_CHROME_GETTER');};
+ const getter=Object.defineProperty({},'ok',{get:poison});
+ const proxy=new Proxy({ok:true,status:'OWNED_CDP_BROWSER_VERIFIED'},{
+  get:poison,getPrototypeOf:poison,ownKeys:poison
+ });
+ const revoked=Proxy.revocable({ok:true},{get:poison});
+ revoked.revoke();
+ for(const candidate of [getter,proxy,revoked.proxy]){
+  assert.deepEqual(await startApprovedTampermonkeyDiagnostic(
+   candidate as Parameters<typeof startApprovedTampermonkeyDiagnostic>[0],true),
+   {ok:false,code:'UNVERIFIED_BROWSER'});
+ }
+ assert.equal(calls,0,'manual diagnostic never invokes browser-session getters or Proxy traps');
+});
