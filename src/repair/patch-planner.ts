@@ -85,11 +85,28 @@ function bindsDocument(pattern:unknown):boolean{
  * also ambiguous: their property key might be a selector method at runtime.
  * These checks intentionally apply across the entire source, as phase-one
  * proposals cannot prove execution order or alias/side-effect boundaries. */
+/** A direct write through window/globalThis.document may rebind the actual
+ * browser document or override its native selector methods. Treat literal
+ * global document aliases as the same untrusted target, including ['document'].
+ * Dynamic aliases remain unsupported by the offline planner's scope model. */
+function isGlobalDocumentMember(target:unknown):boolean{
+  const member=asNode(target);
+  if(member?.type!=='MemberExpression')return false;
+  const host=asNode(member.object);
+  if(host?.type!=='Identifier'||
+     (host.name!=='window'&&host.name!=='globalThis'))return false;
+  const property=asNode(member.property);
+  return member.computed===true?
+    property?.type==='Literal'&&property.value==='document':
+    property?.type==='Identifier'&&property.name==='document';
+}
+
 function mayReplaceDomSelectorMethod(target:unknown):boolean{
   const member=asNode(target);
   if(member?.type!=='MemberExpression')return false;
   const object=asNode(member.object);
-  if(object?.type!=='Identifier'||object.name!=='document')return false;
+  if(!((object?.type==='Identifier'&&object.name==='document')||
+       isGlobalDocumentMember(object)))return false;
   const property=asNode(member.property);
   if(member.computed===true){
     if(property?.type!=='Literal'||typeof property.value!=='string')return true;
@@ -160,11 +177,14 @@ function ambiguousDocumentBinding(source:string):boolean{
        ((node.type==='ForInStatement'||node.type==='ForOfStatement')&&
         bindsDocument(node.left))||
        (node.type==='AssignmentExpression'&&
-        (bindsDocument(node.left)||mayReplaceDomSelectorMethod(node.left)))||
+        (bindsDocument(node.left)||isGlobalDocumentMember(node.left)||
+         mayReplaceDomSelectorMethod(node.left)))||
        (node.type==='UpdateExpression'&&
-        (bindsDocument(node.argument)||mayReplaceDomSelectorMethod(node.argument)))||
+        (bindsDocument(node.argument)||isGlobalDocumentMember(node.argument)||
+         mayReplaceDomSelectorMethod(node.argument)))||
        (node.type==='UnaryExpression'&&node.operator==='delete'&&
-        mayReplaceDomSelectorMethod(node.argument))||
+        (isGlobalDocumentMember(node.argument)||
+         mayReplaceDomSelectorMethod(node.argument)))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
         asNode(node.callee)?.name==='eval')||
        mayReflectivelyMutateDocument(node)){

@@ -486,3 +486,35 @@ test('TASK-009/TEST-019/026: ID-only candidate never changes classes, computed m
   assert.equal(result.automaticPatchAllowed,false);
  }
 });
+
+test('TASK-009/TEST-019/026: global document aliases cannot silently replace native selector APIs',()=>{
+ const unsafe=[
+  ["window.document.querySelector = () => null; document.querySelector('#old');",'querySelector'],
+  ["globalThis['document'].querySelectorAll = () => []; document.querySelector('#old');",'querySelector'],
+  ["delete globalThis.document.querySelector; document.querySelector('#old');",'querySelector'],
+  ["window.document = otherDocument; document.querySelector('#old');",'querySelector'],
+  ["globalThis['document'] = otherDocument; document.querySelector('#old');",'querySelector'],
+  ["globalThis.document.getElementById = () => null; document.getElementById('old');",'getElementById'],
+  ["delete window['document'].getElementById; document.getElementById('old');",'getElementById']
+ ] as const;
+ for(const [body,method] of unsafe){
+  const script=meta+body;
+  const offset=script.lastIndexOf('document.'+method+'(');
+  assert.ok(offset>=0,'test fixture contains a direct native-looking selector call');
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:offset,method,
+   originalSelector:'#old',replacementSelector:'#new'
+  }));
+  assert.equal(result.status,'BLOCKED',body);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // Unrelated properties on the global document remain eligible for manual
+ // review and must never be mistaken for native selector replacement.
+ const safe=meta+"window.document.title = 'ok'; document.querySelector('#old');";
+ const result=proposeLiteralSelectorPatch(request(safe,{
+  callOffset:safe.lastIndexOf('document.querySelector(')
+ }));
+ assert.equal(result.status,'CANDIDATE_ONLY');
+ assert.equal(result.automaticPatchAllowed,false);
+});
