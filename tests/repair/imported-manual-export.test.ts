@@ -320,3 +320,22 @@ test('TASK-009/012 TEST-019/020: forged native byteLength cannot induce an overs
   assert.equal(await readFile(scriptPath,'utf8'),source);
  });
 });
+
+
+test('TASK-009/012 TEST-014/019/020/023: imported getElementById is staged, independently backed up and manually exported',async()=>{
+ const source=header+"const target=document.getElementById('old');\n";
+ await fixture(async({script,scriptPath,backupDirectory,exportDirectory})=>{
+  const result=await exportReviewedImportedSelectorOnly(script,scenario(script.sha256),
+    observation(),{backupDirectory,exportDirectory,userApproved:true});
+  assert.equal(result.status,'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',JSON.stringify(result));
+  if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')return;
+  const expected=header+'const target=document.getElementById("new");\n';
+  assert.equal(await readFile(join(exportDirectory,result.exportFileName),'utf8'),expected);
+  assert.equal(await readFile(join(exportDirectory,result.recoveryExportFileName),'utf8'),source);
+  assert.equal(await readFile(join(backupDirectory,result.backupFileName),'utf8'),source);
+  assert.equal(await readFile(join(backupDirectory,result.candidateFileName),'utf8'),expected);
+  assert.equal(await readFile(scriptPath,'utf8'),source);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.businessVerified,false);
+ },source);
+});

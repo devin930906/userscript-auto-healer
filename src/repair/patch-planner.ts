@@ -20,7 +20,7 @@ export interface LiteralPatchRequest {
   readonly expectedSourceSha256:string;
   /** Acorn/SelectorSite CallExpression start offset (UTF-16 index). */
   readonly callOffset:number;
-  readonly method:'querySelector'|'querySelectorAll';
+  readonly method:'querySelector'|'querySelectorAll'|'getElementById';
   readonly originalSelector:string;
   readonly replacementSelector:string;
   /** Opaque diagnostic reference only, NOT authorization to apply a change. */
@@ -93,10 +93,12 @@ function mayReplaceDomSelectorMethod(target:unknown):boolean{
   const property=asNode(member.property);
   if(member.computed===true){
     if(property?.type!=='Literal'||typeof property.value!=='string')return true;
-    return property.value==='querySelector'||property.value==='querySelectorAll';
+    return property.value==='querySelector'||property.value==='querySelectorAll'||
+       property.value==='getElementById';
   }
   return property?.type==='Identifier'&&
-    (property.name==='querySelector'||property.name==='querySelectorAll');
+    (property.name==='querySelector'||property.name==='querySelectorAll'||
+      property.name==='getElementById');
 }
 
 /** Standard reflection can replace the selector method without an
@@ -273,14 +275,19 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
        !SHA256.test(request.expectedSourceSha256)||
        !Number.isSafeInteger(request.callOffset)||request.callOffset<0||
        !EVIDENCE_ID.test(request.faultEvidenceId)||
-       (request.method!=='querySelector'&&request.method!=='querySelectorAll')||
+       (request.method!=='querySelector'&&request.method!=='querySelectorAll'&&
+        request.method!=='getElementById')||
        typeof request.originalSelector!=='string'||
        typeof request.replacementSelector!=='string')
       return blocked('INVALID_INPUT');
     if(hash(request.source)!==request.expectedSourceSha256)return blocked('STALE_SOURCE');
     if(!SIMPLE_SELECTOR.test(request.originalSelector)||
        !SIMPLE_SELECTOR.test(request.replacementSelector)||
-       request.originalSelector===request.replacementSelector)
+       request.originalSelector===request.replacementSelector||
+       // getElementById takes a bare element ID rather than CSS syntax.
+       (request.method==='getElementById'&&
+        (!request.originalSelector.startsWith('#')||
+         !request.replacementSelector.startsWith('#'))))
       return blocked('INVALID_CANDIDATE');
     // A loose search for header markers anywhere in the file can accept
     // ordinary JavaScript with an embedded, non-installable userscript header.
@@ -298,14 +305,20 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
     if(analysis.status!=='OK')return blocked('UNSUPPORTED_SOURCE');
     const site=analysis.sites.find(s=>s.offset===request.callOffset);
     if(!site||site.kind!=='literal'||site.fallbackGroup!==null||
-       site.method!==request.method||site.selector!==request.originalSelector)
+       site.method!==request.method||site.selector!==
+       (request.method==='getElementById'?
+        request.originalSelector.slice(1):request.originalSelector))
       return blocked('UNSUPPORTED_TARGET');
     const argument=findLiteralArgument(request.source,request.callOffset,request.method);
+    const oldArg=request.method==='getElementById'?
+      request.originalSelector.slice(1):request.originalSelector;
+    const newArg=request.method==='getElementById'?
+      request.replacementSelector.slice(1):request.replacementSelector;
     if(!argument||argument.start<=boundary||
-       argument.value!==request.originalSelector)
+       argument.value!==oldArg)
       return blocked('UNSUPPORTED_TARGET');
     const before=request.source.slice(argument.start,argument.end);
-    const after=JSON.stringify(request.replacementSelector);
+    const after=JSON.stringify(newArg);
     const candidateSource=request.source.slice(0,argument.start)+after+
       request.source.slice(argument.end);
     // A valid changed AST must still point to the intended single literal call.
@@ -314,7 +327,7 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
     if(verifiedAst.status!=='OK'||verifiedAst.sites.length!==analysis.sites.length||
        changedSite?.method!==request.method||
        changedSite?.kind!=='literal'||
-       changedSite.selector!==request.replacementSelector||
+       changedSite.selector!==newArg||
        candidateSource.slice(0,boundary)!==request.source.slice(0,boundary))
       return blocked('UNSUPPORTED_SOURCE');
     return Object.freeze({
