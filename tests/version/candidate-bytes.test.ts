@@ -82,3 +82,24 @@ test('TEST-020: removed or unavailable staged candidate fails closed as CHANGED'
    join(root,'removed','reviewed.candidate.user.js'),expected),'CHANGED');
  });
 });
+
+test('TEST-020/026: candidate receipt snapshots expected bytes before asynchronous I/O',async()=>{
+ await inTemporaryDirectory(async(root)=>{
+  const file=join(root,'reviewed.candidate.user.js');
+  await writeFile(file,Buffer.from('trusted'));
+  const expected=Buffer.from('trusted');
+  const inFlight=verifyExactCandidateBytesReadOnly(file,expected);
+  // Callers must not be able to change an already-started review
+  // by mutating a same-length Buffer during asynchronous path checks.
+  expected.write('altered');
+  assert.equal(await inFlight,'MATCH',
+   'the original expected bytes matched at the instant review was requested');
+
+  await writeFile(file,Buffer.from('altered'));
+  const anotherExpected=Buffer.from('trusted');
+  const secondInFlight=verifyExactCandidateBytesReadOnly(file,anotherExpected);
+  anotherExpected.write('altered');
+  assert.equal(await secondInFlight,'MISMATCH',
+   'a later caller mutation must never turn unapproved bytes into MATCH');
+ });
+});
