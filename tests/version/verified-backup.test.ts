@@ -1,7 +1,7 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,symlink,truncate,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
@@ -280,4 +280,43 @@ test('TEST-020: backup publication readback rejects oversized and in-place corru
     assert.equal(await verifyExactCandidateBytesReadOnly(backup,script),'CHANGED');
     assert.deepEqual(await readFile(file),script);
   });
+});
+
+test('TEST-020/026: a relocated backup directory during final publication check cannot receive a verified success receipt',async()=>{
+ await fixture(async(file,backupDir,root)=>{
+  const relocated=join(root,'relocated-verified-backups');
+  const bytes=Buffer.from(script);
+  const module=require('../../src/version/candidate-bytes') as typeof import('../../src/version/candidate-bytes');
+  const originalVerify=module.verifyExactCandidateBytesReadOnly;
+  let moved=false;
+  const interception=mock.method(module,'verifyExactCandidateBytesReadOnly',
+   async(...args:Parameters<typeof originalVerify>)=>{
+    const checked=await originalVerify(...args);
+    if(!moved&&checked==='MATCH'&&String(args[0]).endsWith('.backup.user.js')){
+     moved=true;
+     // Uncooperative external process moves the ORIGINAL backup directory
+     // just after the last destination-byte check, then replaces its old
+     // pathname with a different empty directory.
+     await rename(backupDir,relocated);
+     await mkdir(backupDir);
+    }
+    return checked;
+   });
+  try{
+   const result=await createVerifiedBackupOnly({
+    sourcePath:file,backupDirectory:backupDir,
+    expectedSha256:hash(script),userApproved:true
+   });
+   assert.equal(moved,true,'fault must occur after real final backup digest');
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')
+    assert.equal(result.reason,'BACKUP_DIRECTORY_INVALID');
+   assert.deepEqual(await readFile(file),bytes,'external backup relocation must not change selected source');
+   assert.deepEqual(await readdir(backupDir),[],
+    'the replacement directory must never be treated as the verified backup destination');
+   const preserved=(await readdir(relocated)).filter(name=>name.endsWith('.backup.user.js'));
+   assert.equal(preserved.length,1,'the original valid backup remains for manual reconciliation');
+   assert.deepEqual(await readFile(join(relocated,preserved[0])),bytes);
+  }finally{interception.mock.restore();}
+ });
 });

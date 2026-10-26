@@ -183,6 +183,18 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
       // with bounded descriptor reads and recheck both file identities.
       if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
         return deny('IO_FAILURE');
+      // The bounded final backup read awaited filesystem I/O. An external
+      // process may have moved the previously verified directory and
+      // installed a NEW directory at the same selected pathname during
+      // that await. A matching digest from the old inode must not produce
+      // a BACKUP_ONLY receipt for a now-unreachable recovery path.
+      // This is a post-read identity snapshot, not a third-party path lock.
+      if(await hasUnsafePathLink(directory))
+        return deny('BACKUP_DIRECTORY_INVALID');
+      const finalDirectory=await lstat(directory,{bigint:true});
+      if(!finalDirectory.isDirectory()||finalDirectory.isSymbolicLink()||
+         !sameDirectory(backupDir,finalDirectory))
+        return deny('BACKUP_DIRECTORY_INVALID');
 
       return Object.freeze({status:'BACKUP_ONLY' as const,
         backupFileName:name,sha256:digest,byteLength:bytes.length,
