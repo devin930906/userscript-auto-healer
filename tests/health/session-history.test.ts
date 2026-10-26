@@ -470,3 +470,32 @@ test('TASK-015/TEST-024/026: hostile health snapshots cannot invoke accessors or
    'rejected input cannot create a persistent health archive');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: health archive rejects custom array iteration without invoking caller code',async()=>{
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-iterator-boundary-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const good=registry.snapshot(key);
+  let iteratorCalls=0;
+  const history=[...good.history];
+  Object.defineProperty(history,Symbol.iterator,{
+   configurable:true,
+   value:function*(){
+    iteratorCalls++;
+    yield* good.history;
+   }
+  });
+  assert.equal((await saveLimitedHealthArchive(
+   userData,{...good,history})).status,'BLOCKED',
+   'a caller-owned iterator must not supply apparently valid native events');
+  assert.equal(iteratorCalls,0,'untrusted array iterator must never run');
+  assert.deepEqual(await readdir(userData),[],
+   'invalid history cannot produce any persistent archive');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
