@@ -651,3 +651,32 @@ test('TASK-009/TEST-014/019: querySelectorAll NodeList[0] retains indexing and r
  })).status,'BLOCKED',
  'computed DOM method is not a verified direct native selector site');
 });
+
+test('TASK-009/TEST-019/026: document and prototype aliases cannot disguise a patched nonnative DOM API',()=>{
+ const hostile=[
+  // Both the global object and its native method can be replaced through
+  // a local reference, even though the chosen AST call looks native.
+  "const alias=document; alias.querySelector=()=>null;",
+  "const alias=window.document; Object.defineProperty(alias,'querySelector',{value:()=>null});",
+  "const alias=globalThis['document']; alias['querySelector']=()=>null;",
+  "const proto=Document.prototype; proto.querySelector=()=>null;",
+  "const proto=Object.getPrototypeOf(document); Reflect.set(proto,'querySelector',()=>null);",
+  "let alias; alias=document; alias.querySelector=()=>null;",
+  "function f(alias=document){alias.querySelector=()=>null;} f();"
+ ];
+ for(const body of hostile){
+  const script=meta+body+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'BLOCKED',body);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ const safe=meta+"const other={querySelector:()=>null}; other.querySelector('#old'); document.querySelector('#old');";
+ const unaffected=proposeLiteralSelectorPatch(request(safe,{
+  callOffset:safe.lastIndexOf("document.querySelector('#old')")
+ }));
+ assert.equal(unaffected.status,'CANDIDATE_ONLY',
+  'an unrelated object must not prevent ordinary manual review');
+});
