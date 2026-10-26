@@ -24,10 +24,11 @@ import {verifyBackupRecoverySource} from './recovery-source';
 import {createVerifiedBackupOnly} from './verified-backup';
 import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 import {hasUnsafePathLink} from './path-boundary';
+import {hasInterruptedRestoreStaging} from './restore-staging-residue';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
  'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'SOURCE_LOCKED'|
- 'UNSAFE_PATH'|'RECOVERY_SAFETY_FAILED'|'IO_FAILURE'|'CANCELLED';
+ 'UNSAFE_PATH'|'RECOVERY_SAFETY_FAILED'|'RECOVERY_REVIEW_REQUIRED'|'IO_FAILURE'|'CANCELLED';
 const noAuthority={
  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const,
  tampermonkeyVerified:false as const,businessVerified:false as const
@@ -282,6 +283,13 @@ export async function restoreVerifiedOriginalNativeOnly(
      // Never replace a deliberately read-only source, even if the current
      // process has elevated rights. Refuse BEFORE creating any backup/journal.
      (sourceStart.mode&0o222n)===0n)return block('UNSAFE_PATH');
+  // Prior interrupted restorations may leave unpublished staging bytes in
+  // the source parent or a recovery-intent pending file in the backup store.
+  // These files require independent manual reconciliation, not another write.
+  // Check both BEFORE acquiring this transaction's lock or creating backups.
+  if(await hasInterruptedRestoreStaging(parent)||
+     await hasInterruptedRestoreStaging(opts.backupDirectory))
+   return block('RECOVERY_REVIEW_REQUIRED');
   // Capture the actual directories, not only names used during cleanup.
   pendingParentIdentity=parentStart;
   journalParentIdentity=directoryStart;

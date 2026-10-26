@@ -10,6 +10,7 @@ import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
+import {hasInterruptedRestoreStaging} from './restore-staging-residue';
 import {inspectNativeRestoreIntentReadOnly} from './restore-intent-inspection';
 
 const JOURNAL=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.journal\.json$/;
@@ -168,6 +169,10 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
       file.ctimeNs!==audit.file.ctimeNs||file.nlink!==audit.file.nlink||
       file.mode!==audit.file.mode)return block('UNSAFE_PATH');
   }
+  // A recovered backup-directory inventory is NOT clean if a crashed
+  // restoration left an unrenamed source file in the selected script parent.
+  if(await hasInterruptedRestoreStaging(dirname(x.sourcePath)))
+   return block('RECOVERY_REVIEW_REQUIRED');
   // A restore may acquire the path mutex during the inventory scan.
   if(await nativeRestorePathLockPresent(x.sourcePath))
    return block('RECOVERY_REVIEW_REQUIRED');
