@@ -95,7 +95,15 @@ interface Window {
       reportedGmStorageRoundtripMatched?:boolean;
       reportedBrokenFailed?:boolean;reportedFixedRecovered?:boolean;
       consistencyStatus?:string;comparedModes?:number;
-      brokenDomAction?:number|null;fixedDomAction?:number|null}>;
+      brokenDomAction?:number|null;fixedDomAction?:number|null;
+      brokenReport?:Readonly<{reportStatus:'NOT_REPORTED'|'SELF_REPORTED_ONLY'|'REJECTED_REPORT';
+        reportedGmDefaultMatched:boolean|null;reportedGmStorageRoundtripMatched:boolean|null;
+        reportedBusinessAction:boolean|null;tampermonkeyVerified:false;
+        gmApiVerified:false;businessVerified:false}>;
+      fixedReport?:Readonly<{reportStatus:'NOT_REPORTED'|'SELF_REPORTED_ONLY'|'REJECTED_REPORT';
+        reportedGmDefaultMatched:boolean|null;reportedGmStorageRoundtripMatched:boolean|null;
+        reportedBusinessAction:boolean|null;tampermonkeyVerified:false;
+        gmApiVerified:false;businessVerified:false}>}>;
     visitGmFixture(mode:'broken'|'fixed'): Promise<{ok:boolean;code?:string;status?:string}>;
     observeGmFixture(mode:'broken'|'fixed'): Promise<{ok:boolean;code?:string;
       status?:string;actionCount?:number;fixtureDomMatchesExpected?:boolean}>;
@@ -921,7 +929,18 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
     '。如已安装临时脚本，请自行清理。');
   return;
  }
- if(gmResult)gmResult.textContent='报告模式数：'+(result.observedModes??0)+
+ const renderModeReport=(mode:'broken'|'fixed')=>{
+   const report=mode==='broken'?result.brokenReport:result.fixedReport;
+   if(!report)return mode+'：状态无法确认';
+   if(report.reportStatus==='NOT_REPORTED')return mode+'：尚无自报回执';
+   if(report.reportStatus==='REJECTED_REPORT')return mode+'：自报回执无效，已拒绝';
+   const flag=(v:boolean|null)=>v===true?'自报匹配':v===false?'自报未匹配':'未报告';
+   return mode+'：默认值 '+flag(report.reportedGmDefaultMatched)+
+     '、存储读回 '+flag(report.reportedGmStorageRoundtripMatched)+
+     '、页面动作 '+flag(report.reportedBusinessAction);
+  };
+  if(gmResult)gmResult.textContent=renderModeReport('broken')+'；'+
+    renderModeReport('fixed')+'。报告模式数：'+(result.observedModes??0)+
    '；自报 GM 默认值匹配：'+Boolean(result.reportedGmDefaultMatched)+
    '；自报 GM 存储写入读回：'+Boolean(result.reportedGmStorageRoundtripMatched)+
    '；自报 broken 失败：'+Boolean(result.reportedBrokenFailed)+
