@@ -547,3 +547,24 @@ test('TASK-013/TEST-022/026: lock cleanup denial cannot acknowledge an unusable 
   }
  });
 });
+
+
+test('TASK-013/TEST-022: checkpoint reservation prevents ordinary dispatch before initial durable save',async()=>{
+ await withJournal(async directory=>{
+  const dispatched:number[]=[];
+  const coordinator=new ReadOnlyBatchCoordinator(options,async ordinal=>{
+   dispatched.push(ordinal);
+   return 'DONE';
+  });
+  // The checkpointed operation must reserve its coordinator synchronously,
+  // before its first asynchronous filesystem await. Ordinary run() must
+  // not start workers that bypass the durable transition callback.
+  const pending=runCheckpointedReadOnlyBatch(directory,coordinator);
+  await assert.rejects(coordinator.run(),/BATCH_CHECKPOINT_RESERVED/);
+  const result=await pending;
+  assert.equal(result.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(dispatched,[0,1]);
+  const recovered=await loadReadOnlyBatchJournal(directory,options,completed);
+  assert.equal(recovered.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+ });
+});
