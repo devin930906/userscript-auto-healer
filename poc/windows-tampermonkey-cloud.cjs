@@ -143,6 +143,12 @@ if(isProductOriginal||isProductCandidate){
  * Every file is CI-created under a fresh temp root; no real user script or
  * manager profile is read or modified by the native export operation.
  */
+/** TASK-007/009/012 + TEST-017/018/019/023:
+ * Exercise the SAME native import → reviewed scenario → manual export entry
+ * used by the Electron product, not isolated lower-level stage/export methods.
+ * These synthetic DOM samples are EXPLICITLY fixture inputs, not actual CDP
+ * provenance. Real Tampermonkey + GM + business checks run only afterwards.
+ */
 async function prepareNativeManualExportForManager(reviewed){
  const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'uah-product-export-'));
  try{
@@ -152,49 +158,84 @@ async function prepareNativeManualExportForManager(reviewed){
   fs.mkdirSync(backupDirectory);
   fs.mkdirSync(exportDirectory);
   fs.writeFileSync(sourcePath,reviewed.original,{flag:'wx'});
-  const opts={sourcePath,backupDirectory,exportDirectory,userApproved:true};
-  const {stageReviewedCandidateOnly}=
-    require('../dist/src/version/staged-candidate.js');
-  const {exportReviewedCandidateForManualInstall}=
-    require('../dist/src/export/manual-candidate-export.js');
-  // Staging has its own three-field exact-data contract; the fourth export
-  // directory is only accepted by the subsequent manual-export interface.
-  const staged=await stageReviewedCandidateOnly(reviewed.request,reviewed.proposal,{
-   sourcePath,backupDirectory,userApproved:true
+  const {importApprovedPaths}=require('../dist/src/import/import-service.js');
+  const {exportReviewedImportedSelectorOnly}=
+    require('../dist/src/repair/imported-manual-export.js');
+  const imported=await importApprovedPaths([sourcePath]);
+  assert.equal(imported.errors.length,0,'Native importer must reject no fixture bytes');
+  assert.equal(imported.scripts.length,1,'Native import must read exactly one .user.js');
+  const script=imported.scripts[0];
+  const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+  assert.equal(script.sha256,reviewed.request.expectedSourceSha256,
+    'Imported source fingerprint must match reviewed AST request');
+  assert.equal(script.textEncoding,'utf-8','Only exact UTF-8 source may be staged');
+  assert.equal(script.sourcePath,sourcePath,'Native importer retains selected path');
+  const scenario={
+   id:'tm_product_'+runAt.replace(/-/g,'_'),
+   scriptSha256:script.sha256,
+   userApproved:true,requiresLogin:false,
+   targetUrl:'https://example.com/',
+   steps:[],assertions:[
+    {kind:'selector-present',selector:'#uah-ci-stale-target'},
+    {kind:'selector-present',selector:'#uah-ci-target'}
+   ]
+  };
+  // The fixture DOM observation is intentionally synthetic: stage only
+  // a reviewable candidate. Do not claim a browser observation occurred here.
+  const base=Date.now()-3000;
+  const sample=at=>({
+   ok:true,status:'LIMITED_DOM_OBSERVATION',
+   observedAt:new Date(at).toISOString(),
+   originMatchesApproved:true,routeChanged:false,
+   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,
+    blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']},
+   selectorCounts:{'#uah-ci-stale-target':0,'#uah-ci-target':1},
+   fullPageVerified:false,userscriptVerified:false
   });
-  assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED',
-    'Native candidate must have a separately verified original backup: '+JSON.stringify(staged));
-  assert.equal(staged.automaticPatchAllowed,false);
-  assert.equal(staged.automaticRollbackAllowed,false);
-  const exported=await exportReviewedCandidateForManualInstall(
-    reviewed.request,staged,opts);
-  assert.equal(exported.status,'EXPORTED_RUNTIME_UNVERIFIED',
-    'The actual native manual exporter must produce a reviewed .user.js: '+JSON.stringify(exported));
-  assert.equal(exported.managerInstalled,false);
+  const domSamples={
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
+   samples:[sample(base),sample(base+1000),sample(base+2000)],
+   routeChangeDetected:false,selectorCountChanged:false,
+   domCountChanged:false,userscriptVerified:false
+  };
+  const exported=await exportReviewedImportedSelectorOnly(
+   script,scenario,domSamples,
+   {backupDirectory,exportDirectory,userApproved:true}
+  );
+  assert.equal(exported.status,'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',
+    'Product native import → scenario → manual export chain must succeed: '+JSON.stringify(exported));
   assert.equal(exported.automaticPatchAllowed,false);
   assert.equal(exported.automaticRollbackAllowed,false);
+  assert.equal(exported.managerInstalled,false);
   assert.equal(exported.tampermonkeyVerified,false);
   assert.equal(exported.businessVerified,false);
   const exportedPath=path.join(exportDirectory,exported.exportFileName);
   const originalRecoveryPath=path.join(exportDirectory,exported.recoveryExportFileName);
-  const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
   const candidateBytes=fs.readFileSync(exportedPath);
   const originalBytes=Buffer.from(reviewed.original,'utf8');
   assert.deepEqual(candidateBytes,Buffer.from(reviewed.proposal.candidateSource,'utf8'),
-    'The actual manager-facing source must come from the native manual export');
+    'The actual manager-facing bytes must come from the product native manual export');
   assert.equal(sha(candidateBytes),reviewed.proposal.candidateSha256);
-  assert.deepEqual(fs.readFileSync(originalRecoveryPath),originalBytes,
-    'The independent manual recovery export must retain exact original bytes');
-  assert.deepEqual(fs.readFileSync(path.join(backupDirectory,staged.backupFileName)),
-    originalBytes,'Native independent backup must retain the actual original');
-  assert.deepEqual(fs.readFileSync(sourcePath),originalBytes,
-    'Native export must not overwrite the imported original script');
   assert.equal(exported.candidateSha256,reviewed.proposal.candidateSha256);
-  assert.equal(exported.byteLength,candidateBytes.byteLength);
-  console.log('NATIVE_MANUAL_EXPORT_FOR_REAL_MANAGER '+JSON.stringify({
-   runAt,originalSha256:sha(originalBytes),candidateSha256:sha(candidateBytes),
-   recoveryExportBytes:originalBytes.byteLength,stage:staged.status,
-   export:exported.status,automaticPatchAllowed:false,managerInstalled:false
+  assert.equal(exported.sourceSha256,script.sha256);
+  assert.equal(exported.candidateByteLength,candidateBytes.byteLength);
+  assert.deepEqual(fs.readFileSync(originalRecoveryPath),originalBytes,
+    'Native recovery file must preserve the exact pre-repair bytes');
+  assert.deepEqual(fs.readFileSync(path.join(backupDirectory,exported.backupFileName)),
+    originalBytes,'Independent native backup must retain the original');
+  assert.deepEqual(fs.readFileSync(path.join(backupDirectory,exported.candidateFileName)),
+    candidateBytes,'Staged candidate must equal the exported manager-facing bytes');
+  assert.deepEqual(fs.readFileSync(sourcePath),originalBytes,
+    'Product handoff must never overwrite the original imported source');
+  assert.equal(fs.readdirSync(exportDirectory).length,2,
+    'Only candidate and independent recovery exports may be created');
+  console.log('PRODUCT_NATIVE_IMPORT_TO_REAL_MANAGER '+JSON.stringify({
+   variant,runAt,originalSha256:sha(originalBytes),
+   candidateSha256:sha(candidateBytes),
+   importedBytes:script.byteLength,exportedBytes:candidateBytes.byteLength,
+   export:exported.status,syntheticDomFixtureOnly:true,
+   managerInstalled:false,automaticPatchAllowed:false,
+   automaticRollbackAllowed:false
   }));
   return {root,exportedPath,originalRecoveryPath,sourcePath,originalBytes,
    originalSha256:sha(originalBytes),candidateSha256:sha(candidateBytes)};
