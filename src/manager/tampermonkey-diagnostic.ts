@@ -300,6 +300,7 @@ export function correlateManualFixtureEvidence(
  if(!dom)return result('INVALID_DOM_EVIDENCE',0);
  let compared:0|1|2=0;
  const observedTimes=new Set<string>();
+ let firstObservationMs:number|undefined;
  const evidenceFields=[
    'status','mode','observedAt','targetCount','actionCount',
    'fixtureDomMatchesExpected','extensionAuthenticityVerified',
@@ -322,6 +323,14 @@ export function correlateManualFixtureEvidence(
       e.scriptInstallationVerified!==false||
       e.gmApiVerified!==false||e.businessVerified!==false)
      return result('INVALID_DOM_EVIDENCE',compared);
+   // The disposable GM probe lasts at most five minutes. Two correct-looking
+   // CDP observations from separate sessions cannot be one comparison.
+   // The tester can visit fixed or broken first; this grants no GM authority.
+   const observedMs=Date.parse(e.observedAt);
+   if(firstObservationMs!==undefined&&
+      Math.abs(observedMs-firstObservationMs)>MAX_GM_PROBE_TTL_MS)
+     return result('INVALID_DOM_EVIDENCE',compared);
+   if(firstObservationMs===undefined)firstObservationMs=observedMs;
    observedTimes.add(e.observedAt);
    const report=cleanReceipt(r?.[mode],mode);
    if(!report)return result('INVALID_DOM_EVIDENCE',compared);
