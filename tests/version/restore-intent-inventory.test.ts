@@ -239,3 +239,43 @@ test('TASK-011/TEST-020/026: in-place journal mutation after final per-item rech
   assert.equal((await readFile(journalPath,'utf8')),'{"tampermonkeyVerified":true}\\n');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/021/026: interrupted restore journal pending must not look like an empty clean inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-interrupted-journal-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await writeFile(sourcePath,original);await mkdir(backupDirectory);
+  const pending=join(backupDirectory,'.uah-restore-'+randomUUID()+'.pending');
+  await writeFile(pending,'partial journal from interrupted native restore');
+  const result=await inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  assert.deepEqual([result.status,'reason' in result?result.reason:null],
+   ['BLOCKED','RECOVERY_REVIEW_REQUIRED']);
+  assert.equal('inspected' in result,false,'a pending restore is not a reconciled empty history');
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.equal(await readFile(pending,'utf8'),'partial journal from interrupted native restore');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/021/026: stranded native restore path mutex blocks clean inventory receipt',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-interrupted-mutex-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await writeFile(sourcePath,original);await mkdir(backupDirectory);
+  const canonical=process.platform==='win32'?sourcePath.toLowerCase():sourcePath;
+  const lock=join(home,'.uah-restore-path-'+createHash('sha256').update(canonical).digest('hex'));
+  await mkdir(lock);
+  const result=await inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  assert.deepEqual([result.status,'reason' in result?result.reason:null],
+   ['BLOCKED','RECOVERY_REVIEW_REQUIRED']);
+  assert.equal('inspected' in result,false,'active or abandoned lock cannot be called clean');
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.ok((await readdir(home)).includes(lock.slice(home.length+1)),
+   'never clear an ambiguous lock automatically');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
