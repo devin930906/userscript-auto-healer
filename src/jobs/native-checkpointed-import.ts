@@ -15,7 +15,7 @@ import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
 import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {snapshotNativeScripts} from './imported-analysis-queue';
-import {ReadOnlyBatchCoordinator} from './batch-coordinator';
+import {ReadOnlyBatchCoordinator,type ReadOnlyBatchSnapshot} from './batch-coordinator';
 import {loadReadOnlyBatchJournal,runCheckpointedReadOnlyBatch,
  type BatchJournalFailure} from './batch-journal';
 
@@ -128,6 +128,23 @@ export async function runCheckpointedNativeImportAnalysis(
      await hasUnsafePathLink(directory))return fail(count,'UNSAFE_PATH');
  }catch{return fail(count,'UNSAFE_PATH');}
  const observations:(ImportAnalysisPreview[]|undefined)[]=Array(groups.length);
+ // A persisted success alone is not fresh AST evidence. Notify only for
+ // contiguous, newly analysed segments AFTER the terminal checkpoint write.
+ // Avoid duplicate progress when the final UI preview is assembled.
+ let lastReported=0;
+ const reportSavedProgress=(snapshot:ReadOnlyBatchSnapshot)=>{
+  if(signal?.aborted)return;
+  let processed=0;
+  for(let ordinal=0;ordinal<groups.length;ordinal++){
+   if(snapshot.jobs[ordinal]?.state!=='SUCCEEDED'||
+      observations[ordinal]?.length!==groups[ordinal].scripts.length)break;
+   processed+=groups[ordinal].scripts.length;
+  }
+  if(processed>lastReported){
+   lastReported=processed;
+   try{onProgress?.(processed,count);}catch{/* Advisory only. */}
+  }
+ };
  const lifetime=new AbortController();
  const worker=async(ordinal:number,abort:AbortSignal)=>{
   let previews:ImportAnalysisPreview[];
@@ -171,7 +188,7 @@ export async function runCheckpointedNativeImportAnalysis(
  lifetime.signal.addEventListener('abort',onAbort,{once:true});
  try{
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
-  const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator);
+  const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator,reportSavedProgress);
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   if(outcome.status==='BLOCKED')return fail(count,outcome.reason);
   const previews:ImportAnalysisPreview[]=[];
@@ -213,7 +230,10 @@ export async function runCheckpointedNativeImportAnalysis(
    previews.push(...(reports??blank(group.scripts.length,
     lifetime.signal.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED')));
    processed+=group.scripts.length;
-   try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
+   if(processed>lastReported){
+    lastReported=processed;
+    try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
+   }
   }
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,

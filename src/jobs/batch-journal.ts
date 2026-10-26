@@ -335,7 +335,8 @@ export type CheckpointedReadOnlyBatchResult=
  |Readonly<{status:'BLOCKED';reason:BatchJournalFailure}>;
 
 export async function runCheckpointedReadOnlyBatch(
- directory:string,coordinator:ReadOnlyBatchCoordinator
+ directory:string,coordinator:ReadOnlyBatchCoordinator,
+ onDurableTransition?:(snapshot:ReadOnlyBatchSnapshot)=>void
 ):Promise<CheckpointedReadOnlyBatchResult>{
  if(!ReadOnlyBatchCoordinator.isNativeInstance(coordinator))
   return deny('INVALID_INPUT');
@@ -362,6 +363,11 @@ export async function runCheckpointedReadOnlyBatch(
       saveFailure=saved.reason;
       throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
      }
+     // Advisory UI progress belongs only to an actually saved checkpoint.
+     // No status callback can authorize repair or invalidate the batch.
+     try{onDurableTransition?.(
+      ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator));}
+     catch{/* Native progress observers cannot change the journal result. */}
     },ticket
    );
    return Object.freeze({
