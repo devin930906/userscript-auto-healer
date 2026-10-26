@@ -1,6 +1,6 @@
 # 测试策略与验证体系
 
-> 状态（2026-10-26 当前主干）：Electron+TypeScript 产品源码与自动化测试已经存在，main `35033f74` 的 Windows 应用检查通过 599 项中的 598 项（0 失败，1 条件跳过）；隔离 Windows Tampermonkey 专项 15/15 Job 成功。上述属于部分 TEST 的阶段实证，不能将 TEST-001..028 或 Stable GATE 统一标为通过；真实用户 Chrome、产品自动应用/回滚和完整业务兼容性仍缺必要证据。
+> 状态（2026-10-26 当前主干）：Electron+TypeScript 产品源码与自动化测试已经存在；最新 `main@c3c28451636400a4228688d7354c8f42ba0ccbca` 的 Windows 应用回归 #40272189600（603 项：602 通过、0 失败、1 条件跳过；Electron smoke 成功），隔离 Windows Tampermonkey 专项 #40270144017 在较早源码 `35033f74` 上 15/15 Job 成功。这些都是阶段证据，不是对所有 TEST-001..028 或任何 Stable GATE 的完整验收；实际用户 Chrome/网站、产品自动修复和回滚仍有缺口。
 
 ## 测试范围
 REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用例中核查。静态样本包括字面/动态 selector、混淆依赖、畸形脚本；真实样本包括 SPA、iframe、管理器 GM API、登录态、CDP 端口冲突、备份失败与修复后功能断言。
