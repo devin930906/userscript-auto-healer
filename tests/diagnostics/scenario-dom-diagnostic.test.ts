@@ -515,7 +515,7 @@ test('TEST-013/026: untrusted observation descriptors and nested Proxies never e
   calls++;return 1;
  }});
  const nestedCounts={...good,selectorCounts:counts};
- const nestedBlind={...good,summary:{...good.ok&&good.summary,
+ const nestedBlind={...good,summary:{...(good as Extract<ObservationResult,{ok:true}>).summary,
   blindSpots:new Proxy([] as string[],{get(target,key,receiver){
    calls++;return Reflect.get(target,key,receiver);
   }})
