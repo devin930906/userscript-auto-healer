@@ -321,3 +321,9 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - TASK-007 / REQ-017/018 / TEST-017/018：隔离真实 Tampermonkey Windows 工作流 [#40270144017](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270144017) 15/15 Job 成功；本机 AST 候选与手动恢复导出可在测试扩展执行，但既未达到生产级管理器身份认证，也未允许自动应用或自动回滚，继续为开发中。
 - TASK-019/020 / REQ-027/028 / TEST-027/028：当前主干 Windows 开发候选 [#40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210) 成功；147 文件完整性和阶段性安装/便携验证通过，但正式 Stable 双包与全部实际用户环境 GATE 仍未满足，继续为开发中。
 - **下一实际开发方向**：优先补 TASK-007/010/011 的可信管理器/业务证据绑定和自动恢复闭环，基于现有代码增量实现；TASK-018 完整安全 E2E、TASK-019/020 正式产品双包及 TASK-021 GATE 全通过之前不得发布。没有为这一阶段另设 TASK 编号、第二套计划或额外功能。
+
+## （7）2026-10-27 TASK-011 / TEST-020/026 原生恢复暂存文件身份核验（阶段验证）
+
+- **实际缺陷与最小修复**：旧版 `hasInterruptedRestoreStaging` 允许仅根据 `.uah-restore-UUID.pending` 文件名豁免扫描，未核对它是否仍为刚核验的事务暂存 inode；同名文件被替换仍可能被忽略。现在仅在原生调用方提供已核验的 `BigIntStats`、扫描期间与扫描结束后的 `dev/ino`、字节长度、时间戳、模式及单硬链接身份全部一致时豁免；仅凭名称、同名替换、额外硬链接或暂存丢失均保守拒绝。保留原有目录前后身份检查和有限枚举，不宣称 OS 原子排他或避免最终检查之后的外部写入竞争。
+- **真实 TDD 证据**：测试先行提交 `b85cccac9cb64ce21263c60cc9231bc8b5a5fd5b`，Windows [RED #40357605794](https://github.com/devin930906/userscript-auto-healer/actions/runs/40357605794) 的 634 项测试为 632 通过、1 失败、1 条件跳过；唯一失败是新增 `TEST-020/026`，旧扫描错误地返回 `false`。实现及正反例提交 `da6a8bddd2d3d027f5ef24226aeefeb62ab338c2`，Windows [GREEN #40358325019](https://github.com/devin930906/userscript-auto-healer/actions/runs/40358325019) 对该 SHA 执行 636 项测试，635 通过、0 失败、1 条件跳过，TypeScript 检查及真实 Electron shell smoke 成功。
+- **阶段边界**：改动仅涉及 `src/version/restore-staging-residue.ts`、`src/version/native-restore-transaction.ts` 及其安全测试；实验仅在 Windows 隔离临时文件中执行，不能证明断电级原子回滚、外部非协作编辑者排他、用户实际原文件/真实 Tampermonkey 业务恢复。TASK-011、完整 TEST-020/021/026 及 GATE-006/007、全部 Stable GATE 仍未完成；正式 Windows EXE/ZIP 与 Release 未因此获得发布资格。
