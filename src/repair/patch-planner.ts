@@ -104,24 +104,48 @@ function isGlobalDocumentMember(target:unknown):boolean{
 /** A selector inherited from Document.prototype may be replaced without
  * assigning a method directly on document. Phase-one offline review cannot
  * trust that target, including explicit global constructor spellings. */
+/** Statically known property access only; dynamic aliases cannot prove which
+ * native selector was touched and are blocked by the caller. */
+function hasMemberName(node:AstNode,name:string):boolean{
+  const key=asNode(node.property);
+  return node.computed===true?
+    key?.type==='Literal'&&key.value===name:
+    key?.type==='Identifier'&&key.name===name;
+}
+function isDocumentReference(target:unknown):boolean{
+  const node=asNode(target);
+  return (node?.type==='Identifier'&&node.name==='document')||
+    isGlobalDocumentMember(node);
+}
+/** Both direct Document.prototype and inherited-instance prototype paths
+ * can mutate the native selector used by a later document.querySelector().
+ * Object/Reflect.getPrototypeOf and __proto__ are treated as aliases only
+ * when their receiver is the known global document; unrelated prototypes
+ * remain eligible for review-only candidate generation. */
 function isDocumentPrototype(target:unknown):boolean{
-  const member=asNode(target);
-  if(member?.type!=='MemberExpression')return false;
-  const key=asNode(member.property);
-  const prototype=member.computed===true?
-    key?.type==='Literal'&&key.value==='prototype':
-    key?.type==='Identifier'&&key.name==='prototype';
-  if(!prototype)return false;
-  const ctor=asNode(member.object);
+  const node=asNode(target);
+  if(node?.type==='CallExpression'&&Array.isArray(node.arguments)&&
+     node.arguments.length===1&&isDocumentReference(node.arguments[0])){
+    const callee=asNode(node.callee);
+    const host=asNode(callee?.object);
+    return callee?.type==='MemberExpression'&&
+      host?.type==='Identifier'&&
+      (host.name==='Object'||host.name==='Reflect')&&
+      hasMemberName(callee,'getPrototypeOf');
+  }
+  if(node?.type!=='MemberExpression')return false;
+  if(hasMemberName(node,'__proto__')&&isDocumentReference(node.object))
+    return true;
+  if(!hasMemberName(node,'prototype'))return false;
+  const ctor=asNode(node.object);
   if(ctor?.type==='Identifier')return ctor.name==='Document';
   if(ctor?.type!=='MemberExpression')return false;
+  if(hasMemberName(ctor,'constructor')&&isDocumentReference(ctor.object))
+    return true;
   const host=asNode(ctor.object);
-  const name=asNode(ctor.property);
   return host?.type==='Identifier'&&
     (host.name==='window'||host.name==='globalThis')&&
-    (ctor.computed===true?
-      name?.type==='Literal'&&name.value==='Document':
-      name?.type==='Identifier'&&name.name==='Document');
+    hasMemberName(ctor,'Document');
 }
 
 function mayReplaceDomSelectorMethod(target:unknown):boolean{
