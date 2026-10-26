@@ -7,7 +7,7 @@
  * Only a privileged native caller may select these filesystem paths.
  */
 import {createHash,randomUUID} from 'node:crypto';
-import {link,lstat,open,unlink} from 'node:fs/promises';
+import {link,lstat,open} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
