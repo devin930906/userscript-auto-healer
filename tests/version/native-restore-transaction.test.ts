@@ -984,3 +984,37 @@ test('TASK-011/TEST-020/026: string-only pending exception must not suppress unk
   assert.equal((await readFile(pending,'utf8')),'unrelated pending restore');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/026: genuine staged inode is exempt, same-name replacement is not',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-swap-'));
+ try{
+  const name='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,name);
+  const contents='same bytes, different file owner';
+  await writeFile(pending,contents);
+  const owned=await lstat(pending,{bigint:true});
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),false,
+   'a separately verified single-link staging inode is exempt');
+  const retired=join(root,'retired-staging');
+  await rename(pending,retired);
+  await writeFile(pending,contents);
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),true,
+   'a replacement at the identical filename and length is not owned');
+  assert.equal(await readFile(pending,'utf8'),contents);
+  assert.equal(await readFile(retired,'utf8'),contents);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/026: hardlinked staging inode cannot borrow restore exemption',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-links-'));
+ try{
+  const name='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,name);
+  await writeFile(pending,'private restore staging');
+  const owned=await lstat(pending,{bigint:true});
+  await link(pending,join(root,'other-hardlink'));
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),true,
+   'extra links invalidate an earlier exclusive staging identity');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
