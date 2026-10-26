@@ -108,6 +108,18 @@ function coherentLimitedEvidence(
  consistency:LimitedGmReport['consistency'],
  dom:LimitedGmReport['dom']
 ):boolean{
+ // These are aggregate HTTP receipt claims, NOT GM attestation. The
+ // collector derives both GM checks only when BOTH mode receipts exist,
+ // and no per-mode business claim can exist without its own receipt.
+ // Preserve partial legitimate reports but reject impossible combinations,
+ // including hand-edited reports submitted through native Save.
+ const n=assessment.observedModes;
+ if((n<2&&(assessment.reportedGmDefaultMatched||
+            assessment.reportedGmStorageRoundtripMatched))||
+    (n===0&&(assessment.reportedBrokenFailed||
+             assessment.reportedFixedRecovered))||
+    (n===1&&assessment.reportedBrokenFailed&&
+            assessment.reportedFixedRecovered))return false;
  const matchingReports=assessment.observedModes===2&&
    assessment.reportedGmDefaultMatched&&assessment.reportedGmStorageRoundtripMatched&&
    assessment.reportedBrokenFailed&&
