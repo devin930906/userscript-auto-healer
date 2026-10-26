@@ -240,6 +240,51 @@ function capturesMutableDocumentAlias(node:AstNode):boolean{
  return isDocumentReference(value)||isDocumentPrototype(value);
 }
 
+/** Capture destructuring aliases of global document / Document.prototype.
+ * Object and array patterns hide aliases from ordinary identifier-assignment
+ * checks. Until a verified JS binding/side-effect analysis exists, refuse
+ * review-only candidates when such a reference could escape through a pattern.
+ */
+function isDocumentConstructorReference(target:unknown):boolean{
+ const node=asNode(target);
+ if(node?.type==='Identifier')return node.name==='Document';
+ if(node?.type!=='MemberExpression')return false;
+ if(hasMemberName(node,'constructor')&&isDocumentReference(node.object))
+  return true;
+ const host=asNode(node.object);
+ return host?.type==='Identifier'&&
+   (host.name==='window'||host.name==='globalThis')&&
+   hasMemberName(node,'Document');
+}
+function capturesDestructuredDocumentAlias(node:AstNode):boolean{
+ if(node.type!=='VariableDeclarator'&&node.type!=='AssignmentExpression'&&
+    node.type!=='AssignmentPattern')return false;
+ const pattern=asNode(node.type==='VariableDeclarator'?node.id:node.left);
+ const value=asNode(node.type==='VariableDeclarator'?node.init:node.right);
+ if(!pattern||!value)return false;
+ if(pattern.type==='ArrayPattern'&&value.type==='ArrayExpression')
+  return Array.isArray(value.elements)&&value.elements.some(item=>
+    isDocumentReference(item)||isDocumentPrototype(item));
+ if(pattern.type!=='ObjectPattern')return false;
+ const fromGlobal=value.type==='Identifier'&&
+   (value.name==='window'||value.name==='globalThis');
+ const fromConstructor=isDocumentConstructorReference(value);
+ if(!fromGlobal&&!fromConstructor)return false;
+ if(!Array.isArray(pattern.properties))return true;
+ return pattern.properties.some(item=>{
+   const entry=asNode(item);
+   // Object rest can carry a document/prototype reference. Dynamic property
+   // keys may resolve to the sensitive key at runtime.
+   if(entry?.type!=='Property')return true;
+   const key=asNode(entry.key);
+   if(entry.computed===true&&
+      (key?.type!=='Literal'||typeof key.value!=='string'))return true;
+   const name=key?.type==='Identifier'&&entry.computed!==true?key.name:
+     key?.type==='Literal'?key.value:null;
+   return name===(fromGlobal?'document':'prototype');
+ });
+}
+
 /** Reject source whose `document` reference or selector methods cannot be
  * conservatively trusted. Direct eval and with-statements also make name
  * resolution ambiguous.
@@ -251,6 +296,7 @@ function ambiguousDocumentBinding(source:string):boolean{
   function walk(node:AstNode):void{
     if(ambiguous)return;
     if(node.type==='WithStatement'||capturesMutableDocumentAlias(node)||
+       capturesDestructuredDocumentAlias(node)||
        (node.type==='VariableDeclarator'&&bindsDocument(node.id))||
        (node.type==='CatchClause'&&bindsDocument(node.param))||
        ((node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
