@@ -111,6 +111,60 @@ test('TASK-013/TEST-022: real native imported scripts checkpoint and safely rean
 });
 
 
+test('TASK-013/TEST-022: native AST progress is visible after a durable segment before later workers finish',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-live-progress-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const native=isolated.previewImportedBatchOffMain;
+ let releaseSecond!:()=>void;
+ const waitForRelease=new Promise<void>(resolve=>{releaseSecond=resolve;});
+ let secondStarted!:()=>void;
+ const secondEntered=new Promise<void>(resolve=>{secondStarted=resolve;});
+ let running:ReturnType<typeof runCheckpointedNativeImportAnalysis>|undefined;
+ let calls=0;
+ const patched=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof native>)=>{
+   calls++;
+   // The scheduler must publish the first 16 real scripts as complete
+   // only AFTER its corresponding terminal state has been saved.
+   if(args[0].length===1){secondStarted();await waitForRelease;}
+   return native(...args);
+  });
+ try{
+  const files:string[]=[];
+  for(let i=0;i<17;i++){
+   const file=join(home,'batch-'+i+'.user.js');
+   await writeFile(file,header+'document.querySelector("#batch-'+i+'");');
+   files.push(file);
+  }
+  const scripts=(await importApprovedPaths(files)).scripts;
+  assert.equal(scripts.length,17);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const progress:Array<[number,number]>=[];
+  running=runCheckpointedNativeImportAnalysis(root,scripts,undefined,
+   (done,total)=>progress.push([done,total]));
+  await secondEntered;
+  const folder=(await readdir(root))[0];
+  const journal=JSON.parse(await readFile(join(root,folder,BATCH_JOURNAL_FILENAME),'utf8'));
+  assert.equal(journal.jobs[0].state,'SUCCEEDED');
+  assert.equal(journal.jobs[1].state,'RUNNING');
+  assert.deepEqual(progress,[[16,17]],
+   'a durable completed segment must reach native UI before the next Worker finishes');
+  releaseSecond();
+  const final=await running;
+  assert.equal(final.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(progress,[[16,17],[17,17]],
+   'durable scheduling updates and final display must not duplicate progress');
+  assert.equal(calls,2);
+ }finally{
+  releaseSecond();
+  if(running)await running;
+  patched.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/TEST-022: identical bytes under different approved text encodings use separate durable batches',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-encoding-identity-'));
  try{
