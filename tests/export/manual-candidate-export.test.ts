@@ -1,7 +1,7 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,readdir,rename,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -204,4 +204,46 @@ test('TEST-023/026: manual export rejects Proxy request, receipt and options bef
   assert.deepEqual(await readdir(options.exportDirectory),[]);
   assert.equal(await readFile(options.sourcePath,'utf8'),source);
  });
+});
+
+test('TEST-023/026: failed candidate or recovery publication never unlinks a foreign pending replacement',async()=>{
+ for(const stageName of ['candidate','recovery'] as const){
+  await fixture(async options=>{
+   const {candidate,staged}=await stage(options);
+   if(candidate.status!=='CANDIDATE_ONLY'||
+      staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const io=require('node:fs/promises') as typeof import('node:fs/promises');
+   const originalLink=io.link;
+   const foreign=Buffer.from('foreign process owns this pending path');
+   const retained=join(options.exportDirectory,'outside-owned-'+stageName+'.pending');
+   let replacedPath:string|undefined,intercepts=0;
+   const hook=mock.method(io,'link',async(...args:Parameters<typeof originalLink>)=>{
+    const [pending,destination]=args;
+    if((stageName==='candidate'&&String(destination).includes('UAH-Reviewed-'))||
+       (stageName==='recovery'&&String(destination).includes('UAH-Original-'))){
+     intercepts++;
+     // A separate process moves the app-created inode, then replaces the
+     // pending pathname before link() reports a publication failure.
+     await rename(pending,retained);
+     await writeFile(pending,foreign);
+     replacedPath=String(pending);
+     throw new Error('injected external pending replacement before failed link');
+    }
+    return originalLink(...args);
+   });
+   try{
+    const outcome=await exportReviewedCandidateForManualInstall(request,staged,options);
+    assert.equal(outcome.status,'BLOCKED',JSON.stringify(outcome));
+    assert.equal(intercepts,1,'the intended candidate/recovery publication must be reached');
+    assert.ok(replacedPath);
+    assert.deepEqual(await readFile(replacedPath!),foreign,
+      'a failed native export must never unlink another process\'s replacement');
+    assert.deepEqual(await readFile(retained),
+      stageName==='candidate'?Buffer.from(candidate.candidateSource):Buffer.from(source),
+      'the moved app-owned pending inode must not be silently deleted');
+    assert.deepEqual(await readFile(options.sourcePath),Buffer.from(source),
+      'manual export must not mutate the original userscript');
+   }finally{hook.mock.restore();}
+  });
+ }
 });
