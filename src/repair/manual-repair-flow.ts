@@ -12,7 +12,7 @@ import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
-import {exportReviewedCandidateForManualInstall} from '../export/manual-candidate-export';
+import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'DOM_CANDIDATE_BLOCKED'|
  'PATCH_REVIEW_BLOCKED'|'STAGE_BLOCKED'|'EXPORT_BLOCKED';
@@ -74,6 +74,10 @@ export async function prepareManualRepairExportOnly(
      !absolute(o.backupDirectory)||!absolute(o.exportDirectory)||
      typeof o.userApproved!=='boolean')return block('INVALID_REQUEST');
   if(!o.userApproved)return block('NOT_AUTHORIZED');
+  // Reject protected-store destination conflicts before staging a candidate
+  // or writing an independent backup that cannot be exported.
+  if(insideProtectedBackup(o.backupDirectory as string,o.exportDirectory as string))
+    return block('EXPORT_BLOCKED');
   const patch=p as unknown as LiteralPatchRequest;
   const linked=proposeFromReadOnlyDomDiagnostic(patch,scenario,domSamples,true);
   if(linked.status!=='CANDIDATE_ONLY')
