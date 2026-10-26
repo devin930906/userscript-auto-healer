@@ -7,11 +7,13 @@
  * rollback, and it must never be exposed as arbitrary filesystem IPC.
  * A boolean from a caller is NOT independent user authentication.
  */
+import {lstat} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,relative} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
+import {hasUnsafePathLink} from '../version/path-boundary';
 import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'DOM_CANDIDATE_BLOCKED'|
@@ -82,6 +84,28 @@ export async function prepareManualRepairExportOnly(
   // separate backups or staged candidates before the exporter's own check.
   if(relative(dirname(o.sourcePath as string),o.exportDirectory as string)==='')
     return block('EXPORT_BLOCKED');
+  // Refuse unusable export folders BEFORE publishing a backup or candidate.
+  // The exporter's independent check remains necessary after staging because
+  // third-party filesystem modifications can occur during awaited I/O.
+  try{
+    const exportPath=o.exportDirectory as string;
+    const backupPath=o.backupDirectory as string;
+    const sourceDir=dirname(o.sourcePath as string);
+    if(await hasUnsafePathLink(exportPath)||
+       await hasUnsafePathLink(backupPath)||
+       await hasUnsafePathLink(sourceDir))
+      return block('EXPORT_BLOCKED');
+    const [destination,backupDir,originalDir]=await Promise.all([
+      lstat(exportPath,{bigint:true}),lstat(backupPath,{bigint:true}),
+      lstat(sourceDir,{bigint:true})
+    ]);
+    if(!destination.isDirectory()||destination.isSymbolicLink()||
+       !backupDir.isDirectory()||backupDir.isSymbolicLink()||
+       !originalDir.isDirectory()||originalDir.isSymbolicLink()||
+       (destination.dev===backupDir.dev&&destination.ino===backupDir.ino)||
+       (destination.dev===originalDir.dev&&destination.ino===originalDir.ino))
+      return block('EXPORT_BLOCKED');
+  }catch{return block('EXPORT_BLOCKED');}
   const patch=p as unknown as LiteralPatchRequest;
   const linked=proposeFromReadOnlyDomDiagnostic(patch,scenario,domSamples,true);
   if(linked.status!=='CANDIDATE_ONLY')
