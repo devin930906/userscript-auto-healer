@@ -7,7 +7,7 @@ import {types as nodeTypes} from 'node:util';
 
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
-import {observeApprovedDom,observeApprovedDomSeries,type DynamicObservation,type ObservationResult} from '../observe/dom-observer';
+import {observeApprovedDom,observeApprovedDomSeries,isNativeCdpCancellationSignal,type DynamicObservation,type ObservationResult} from '../observe/dom-observer';
 import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
 import {classifyFaultSignals,BoundedFaultLog,type FaultTriage,type FaultSignal} from './fault-classifier';
 
@@ -265,6 +265,8 @@ export async function inspectApprovedScenarioDom(
 ):Promise<ScenarioDomTriage>{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
+ if(signal!==undefined&&!isNativeCdpCancellationSignal(signal))
+   return blocked('INVALID_OPTIONS');
  if(signal?.aborted)return blocked('CANCELLED');
  const observed=await observeApprovedDom(browser,target,checked.url,true,
    checked.selectors,signal);
@@ -337,6 +339,8 @@ export async function inspectApprovedScenarioDomSeries(
 ):Promise<ScenarioDomTriage>{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
+ if(signal!==undefined&&!isNativeCdpCancellationSignal(signal))
+   return blocked('INVALID_OPTIONS');
  if(signal?.aborted)return blocked('CANCELLED');
  const observed=await observeApprovedDomSeries(browser,target,checked.url,true,
    checked.selectors,sampleCount,intervalMs,signal);
