@@ -443,6 +443,15 @@ export async function restoreVerifiedOriginalNativeOnly(
      (finalPending.mode&0o777n)!==(sourceStart.mode&0o777n))
    return block('RECOVERY_SAFETY_FAILED');
 
+  // Crash evidence can appear AFTER the initial preflight while we await
+  // backup and intent publication. Before the irreversible rename, scan
+  // both namespaces again. Exempt ONLY the staged pathname whose inode,
+  // content and mode were just independently verified above; never ignore
+  // another process's pending restoration or unpublished journal.
+  // These bounded snapshots are not an OS-exclusive cross-process lock.
+  if(await hasInterruptedRestoreStaging(parent,basename(pending))||
+     await hasInterruptedRestoreStaging(opts.backupDirectory))
+   return block('RECOVERY_REVIEW_REQUIRED');
   // Final cooperative cancellation boundary before the irreversible source
   // rename. This cannot cancel an OS rename already in progress.
   if(signal?.aborted)return block('CANCELLED');

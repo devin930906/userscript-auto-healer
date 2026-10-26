@@ -911,3 +911,41 @@ test('TASK-011/TEST-020/021/026: an unfinished source or journal restore staging
   });
  }
 });
+
+test('TASK-011/TEST-020/021/026: crash residue appearing after intent publication blocks final source overwrite',async()=>{
+ for(const kind of ['source-parent','backup-directory'] as const){
+  await fixture(async opts=>{
+   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+   const nativeLink=fsPromises.link;
+   const location=kind==='source-parent'?dirname(opts.sourcePath):opts.backupDirectory;
+   const residue=join(location,'.uah-restore-'+randomUUID()+'.pending');
+   let injected=false;
+   (fsPromises as {link:typeof nativeLink}).link=async(from,to)=>{
+    const result=await nativeLink(from,to);
+    if(typeof to==='string'&&to.endsWith('.journal.json')){
+     injected=true;
+     await writeFile(residue,'another interrupted recovery');
+    }
+    return result;
+   };
+   try{
+    const restored=await restoreVerifiedOriginalNativeOnly(opts);
+    assert.equal(injected,true,'must inject after this restore published its own journal');
+    assert.deepEqual([restored.status,'reason' in restored?restored.reason:null],
+     ['BLOCKED','RECOVERY_REVIEW_REQUIRED'],
+     'later '+kind+' recovery evidence must be reconciled before an overwrite');
+    assert.deepEqual(await readFile(opts.sourcePath),changed,
+     'the selected source must not be replaced while crash evidence exists');
+    assert.equal(await readFile(residue,'utf8'),'another interrupted recovery');
+    const recovery=await readdir(opts.backupDirectory);
+    assert.ok(recovery.includes(opts.backupFileName));
+    assert.ok(recovery.some(n=>n.endsWith('.journal.json')),
+     'this interrupted attempt must keep its published recovery intent');
+    assert.ok(recovery.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName),
+     'displaced source must be independently preserved before interruption');
+   }finally{
+    (fsPromises as {link:typeof nativeLink}).link=nativeLink;
+   }
+  });
+ }
+});
