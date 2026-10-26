@@ -101,12 +101,35 @@ function isGlobalDocumentMember(target:unknown):boolean{
     property?.type==='Identifier'&&property.name==='document';
 }
 
+/** A selector inherited from Document.prototype may be replaced without
+ * assigning a method directly on document. Phase-one offline review cannot
+ * trust that target, including explicit global constructor spellings. */
+function isDocumentPrototype(target:unknown):boolean{
+  const member=asNode(target);
+  if(member?.type!=='MemberExpression')return false;
+  const key=asNode(member.property);
+  const prototype=member.computed===true?
+    key?.type==='Literal'&&key.value==='prototype':
+    key?.type==='Identifier'&&key.name==='prototype';
+  if(!prototype)return false;
+  const ctor=asNode(member.object);
+  if(ctor?.type==='Identifier')return ctor.name==='Document';
+  if(ctor?.type!=='MemberExpression')return false;
+  const host=asNode(ctor.object);
+  const name=asNode(ctor.property);
+  return host?.type==='Identifier'&&
+    (host.name==='window'||host.name==='globalThis')&&
+    (ctor.computed===true?
+      name?.type==='Literal'&&name.value==='Document':
+      name?.type==='Identifier'&&name.name==='Document');
+}
+
 function mayReplaceDomSelectorMethod(target:unknown):boolean{
   const member=asNode(target);
   if(member?.type!=='MemberExpression')return false;
   const object=asNode(member.object);
   if(!((object?.type==='Identifier'&&object.name==='document')||
-       isGlobalDocumentMember(object)))return false;
+       isGlobalDocumentMember(object)||isDocumentPrototype(object)))return false;
   const property=asNode(member.property);
   if(member.computed===true){
     if(property?.type!=='Literal'||typeof property.value!=='string')return true;
@@ -147,9 +170,10 @@ function mayReflectivelyMutateDocument(node:AstNode):boolean{
  const argument=asNode(node.arguments[0]);
  const firstIsDocument=argument?.type==='Identifier'&&argument.name==='document';
  const aliasedDocument=isGlobalDocumentMember(argument);
+ const documentPrototype=isDocumentPrototype(argument);
  const globalHost=argument?.type==='Identifier'&&
    (argument.name==='window'||argument.name==='globalThis');
- if(!firstIsDocument&&!aliasedDocument&&!globalHost)return false;
+ if(!firstIsDocument&&!aliasedDocument&&!documentPrototype&&!globalHost)return false;
  const callee=asNode(node.callee);
  if(callee?.type!=='MemberExpression')return false;
  const receiver=asNode(callee.object);
