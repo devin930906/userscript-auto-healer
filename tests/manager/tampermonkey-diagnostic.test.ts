@@ -380,6 +380,42 @@ test('TEST-018 stage: HTTP claims and independent DOM evidence must agree, never
  },visited,matched).status,'REPORTED_MISMATCH');
 });
 
+test('TASK-007/TEST-018/026: two DOM observations cannot span different five-minute GM sessions',()=>{
+ const dom=(mode:'broken'|'fixed',when:string)=>({
+  status:'LIMITED_FIXTURE_DOM_ONLY' as const,mode,
+  observedAt:when,targetCount:1 as const,
+  actionCount:(mode==='fixed'?1:0) as 0|1,
+  fixtureDomMatchesExpected:true,
+  extensionAuthenticityVerified:false as const,
+  scriptInstallationVerified:false as const,
+  gmApiVerified:false as const,businessVerified:false as const
+ });
+ const start='2026-10-18T00:00:00.000Z';
+ // Individual canonical timestamps and matching DOM/HTTP observations
+ // previously allowed a fabricated two-day "same session" comparison.
+ const distant=correlateManualFixtureEvidence(both,visited,{
+  broken:dom('broken',start),
+  fixed:dom('fixed','2026-10-20T00:00:00.000Z')
+ });
+ assert.deepEqual(distant,{
+  status:'INVALID_DOM_EVIDENCE',comparedModes:1,
+  extensionAuthenticityVerified:false,scriptInstallationVerified:false,
+  gmApiVerified:false,businessVerified:false
+ });
+ // At the maximum actual isolated GM fixture lifetime, consistent samples
+ // remain metadata-only evidence; never manager/GM/business VERIFIED.
+ const boundary=correlateManualFixtureEvidence(both,visited,{
+  broken:dom('broken',start),
+  fixed:dom('fixed','2026-10-18T00:05:00.000Z')
+ });
+ assert.equal(boundary.status,'CONSISTENT_UNVERIFIED_FIXTURE_ONLY');
+ const late=correlateManualFixtureEvidence(both,visited,{
+  broken:dom('broken',start),
+  fixed:dom('fixed','2026-10-18T00:05:00.001Z')
+ });
+ assert.equal(late.status,'INVALID_DOM_EVIDENCE');
+});
+
 /** Actual Windows CDP observation of the temporary fixture, with NO extension
  * installed. This negative is intentionally distinct from TEST-018's future
  * real Tampermonkey/GM and repaired userscript business acceptance.
