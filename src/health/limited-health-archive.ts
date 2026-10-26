@@ -142,7 +142,11 @@ function safeArchiveSnapshot(value:unknown):value is LimitedHealthSnapshot{
  ]))return false;
  const history=(value as LimitedHealthSnapshot).history;
  if(nodeTypes.isProxy(history)||!Array.isArray(history)||
-    history.length===0||history.length>32)return false;
+    Object.getPrototypeOf(history)!==Array.prototype||
+    history.length===0||history.length>32||
+    // A custom Symbol.iterator or array prototype must never become code
+    // execution in this native-only persistence boundary.
+    Reflect.ownKeys(history).length!==history.length+1)return false;
  for(let i=0;i<history.length;i++){
   const descriptor=Object.getOwnPropertyDescriptor(history,String(i));
   if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value')||
@@ -167,7 +171,8 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
      snapshot.history.length>32)return null;
   const result:ArchiveEvent[]=[];
   const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
-  for(const event of snapshot.history){
+  for(let i=0;i<snapshot.history.length;i++){
+   const event=snapshot.history[i];
    if((event.kind!=='LIMITED_DOM_OBSERVATION'&&event.kind!=='INSUFFICIENT_EVIDENCE')||
       (event.kind==='LIMITED_DOM_OBSERVATION'?
        typeof event.evidenceHash!=='string'||!SHA.test(event.evidenceHash):
