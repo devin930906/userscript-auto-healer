@@ -115,6 +115,20 @@ export async function withNativeSourceLock<T>(
          !sameDirectory(acquired,current))
         throw new NativeSourceLockError('SOURCE_CHANGED');
       await rmdir(lockPath);
+      // A non-cooperating editor can change the selected source while the
+      // lock directory is being retired, after the earlier post-action check.
+      // Refuse a stale success receipt with one last read-only identity
+      // snapshot. This does not create an OS lock on third-party writers or
+      // prevent changes after this function returns.
+      if(await hasUnsafePathLink(sourcePath))
+        throw new NativeSourceLockError('SOURCE_CHANGED');
+      const releasedSource=await lstat(sourcePath,{bigint:true});
+      const releasedParent=await lstat(parent,{bigint:true});
+      if(releasedSource.isSymbolicLink()||!releasedSource.isFile()||
+         releasedSource.nlink!==1n||!sameSource(start,releasedSource)||
+         releasedParent.isSymbolicLink()||!releasedParent.isDirectory()||
+         !sameDirectory(parentStart,releasedParent))
+        throw new NativeSourceLockError('SOURCE_CHANGED');
     }catch(error){throw failure(error);}
   }
 }
