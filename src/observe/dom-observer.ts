@@ -129,7 +129,7 @@ function safeSelectors(value:unknown):string[]|null {
    if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value')||
       typeof slot.value!=='string'||slot.value.length<1||
       slot.value.length>256||slot.value.trim()!==slot.value||
-      /[\\u0000-\\u001f]/.test(slot.value))return null;
+      /[\u0000-\u001f]/.test(slot.value))return null;
    result.push(slot.value);
   }
   return new Set(result).size===result.length?result:null;
