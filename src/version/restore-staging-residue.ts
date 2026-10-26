@@ -15,7 +15,15 @@ const MAX_ENTRIES=1024;
  * Throws on unreadable, redirected, changing or oversized directories so the
  * calling manual-restore / read-only inventory refuses a success receipt.
  */
-export async function hasInterruptedRestoreStaging(directory:string):Promise<boolean>{
+export async function hasInterruptedRestoreStaging(
+ directory:string,verifiedOwnPendingName?:string
+):Promise<boolean>{
+ // The exemption is only for a staging inode independently verified by
+ // its native owning transaction at the last pre-rename boundary. Never
+ // exempt an arbitrary filename, backup-store intent, or another restore.
+ if(verifiedOwnPendingName!==undefined&&
+    !RESTORE_PENDING.test(verifiedOwnPendingName))
+  throw new Error('invalid owned staging exception');
  if(await hasUnsafePathLink(directory))throw new Error('unsafe restore directory');
  const before=await lstat(directory,{bigint:true});
  if(!before.isDirectory()||before.isSymbolicLink())
@@ -24,7 +32,8 @@ export async function hasInterruptedRestoreStaging(directory:string):Promise<boo
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
-  if(RESTORE_PENDING.test(entry.name))pending=true;
+  if(RESTORE_PENDING.test(entry.name)&&entry.name!==verifiedOwnPendingName)
+   pending=true;
  }
  const after=await lstat(directory,{bigint:true});
  if(!after.isDirectory()||after.isSymbolicLink()||
