@@ -11,6 +11,7 @@ import {link,lstat,open,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
+import {removeOwnedStagingPending} from '../version/staging-pending-ownership';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyStagedCandidateReadOnly} from '../version/staged-candidate-recheck';
@@ -131,10 +132,14 @@ export async function exportReviewedCandidateForManualInstall(
   const pending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
   const final=join(options.exportDirectory,name);
   let pendingExists=false;
+  let pendingIdentity:BigIntStats|undefined;
   try{
     const handle=await open(pending,'wx',0o600);
     pendingExists=true;
-    try{await handle.writeFile(bytes);await handle.sync();}
+    try{
+      await handle.writeFile(bytes);await handle.sync();
+      pendingIdentity=await handle.stat({bigint:true});
+    }
     finally{await handle.close();}
     if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
       return block('EXPORT_FAILED');
@@ -146,7 +151,12 @@ export async function exportReviewedCandidateForManualInstall(
     // No overwrite, never rename over an unknown file; unsupported hard links
     // cause a conservative failure instead of an unsafe fallback.
     await link(pending,final);
-    await unlink(pending);
+    // A failed publication must never unlink a foreign replacement at the
+    // staging pathname. Confirm the source inode and both hard-link names
+    // in the originally selected native export directory before retiring it.
+    if(!pendingIdentity||!await removeOwnedStagingPending(
+        pending,pendingIdentity,exportBefore,final))
+      return block('EXPORT_FAILED');
     pendingExists=false;
     if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
       return block('EXPORT_FAILED');
@@ -179,10 +189,14 @@ export async function exportReviewedCandidateForManualInstall(
     const recoveryPending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
     const recoveryFinal=join(options.exportDirectory,recoveryName);
     let recoveryPendingExists=false;
+    let recoveryPendingIdentity:BigIntStats|undefined;
     try{
       const handle=await open(recoveryPending,'wx',0o600);
       recoveryPendingExists=true;
-      try{await handle.writeFile(originalBytes);await handle.sync();}
+      try{
+        await handle.writeFile(originalBytes);await handle.sync();
+        recoveryPendingIdentity=await handle.stat({bigint:true});
+      }
       finally{await handle.close();}
       if(await verifyExactCandidateBytesReadOnly(recoveryPending,originalBytes)!=='MATCH')
         return block('EXPORT_FAILED');
@@ -194,7 +208,9 @@ export async function exportReviewedCandidateForManualInstall(
       // Hard-link publication is no-clobber and keeps the previously staged
       // candidate intact even if this recovery export fails.
       await link(recoveryPending,recoveryFinal);
-      await unlink(recoveryPending);
+      if(!recoveryPendingIdentity||!await removeOwnedStagingPending(
+          recoveryPending,recoveryPendingIdentity,exportBefore,recoveryFinal))
+        return block('EXPORT_FAILED');
       recoveryPendingExists=false;
       if(await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH')
         return block('EXPORT_FAILED');
@@ -213,8 +229,11 @@ export async function exportReviewedCandidateForManualInstall(
          await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
         return block('EXPORT_FAILED');
     }finally{
-      if(recoveryPendingExists)await unlink(recoveryPending).catch(()=>{});
-      // Published but unverified files remain for explicit reconciliation.
+      if(recoveryPendingExists&&recoveryPendingIdentity)
+        await removeOwnedStagingPending(
+          recoveryPending,recoveryPendingIdentity,exportBefore);
+      // Unknown replacements and published but unverified files remain for
+      // explicit reconciliation; pathname alone grants no cleanup authority.
     }
     return Object.freeze({
       status:'EXPORTED_RUNTIME_UNVERIFIED' as const,
@@ -224,8 +243,9 @@ export async function exportReviewedCandidateForManualInstall(
     });
   }catch{return block('EXPORT_FAILED');}
   finally{
-    if(pendingExists)await unlink(pending).catch(()=>{});
-    // A published but unverified file remains for manual reconciliation.
+    if(pendingExists&&pendingIdentity)
+      await removeOwnedStagingPending(pending,pendingIdentity,exportBefore);
+    // Unknown replacements and published but unverified files are preserved.
   }
  }catch{
   // Do not leak user script bytes, absolute paths or native exception text.
