@@ -1,6 +1,6 @@
 # 测试策略与验证体系
 
-> 状态：正式产品 TEST-001..028 均未执行（无产品功能源码）；开发前 CDP、真实 Violentmonkey+GM_getValue 与临时打包 PoC 已有限实测，不能与正式 TEST 或 Stable 验收混为一谈。
+> 状态（2026-10-26 当前主干）：Electron+TypeScript 产品源码与自动化测试已经存在；最新 `main@c3c28451636400a4228688d7354c8f42ba0ccbca` 的 Windows 应用回归 #40272189600（603 项：602 通过、0 失败、1 条件跳过；Electron smoke 成功），隔离 Windows Tampermonkey 专项 #40270144017 在较早源码 `35033f74` 上 15/15 Job 成功。这些都是阶段证据，不是对所有 TEST-001..028 或任何 Stable GATE 的完整验收；实际用户 Chrome/网站、产品自动修复和回滚仍有缺口。
 
 ## 测试范围
 REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用例中核查。静态样本包括字面/动态 selector、混淆依赖、畸形脚本；真实样本包括 SPA、iframe、管理器 GM API、登录态、CDP 端口冲突、备份失败与修复后功能断言。
@@ -279,3 +279,11 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - 对本机已存记录及本次原生状态快照增加一致的时间上界（相对当前系统时间允许不超过五分钟的容差）；超过界限时只返回 `BLOCKED`，不得覆盖原归档、伪造成功记录或扩大自动修复权。此校验不能证明本机 JSON 记录的作者身份，不应宣称防篡改认证；本地系统时钟严重漂移时需人工检查，不自动重写历史。
 - Windows TDD RED：[Actions #40090211582](https://github.com/devin930906/userscript-auto-healer/actions/runs/40090211582)，修复前源码 `380d05977d266016952e8471516d61be18f53618`，538 tests / 535 passed / **2 新增失败** / 1 conditional skip。GREEN：[Actions #40090483982](https://github.com/devin930906/userscript-auto-healer/actions/runs/40090483982)，修复源码 `66e3264192151b8da4013650045ce88650f961ca`，538 tests / **537 passed / 0 failed** / 1 conditional skip，真实 Windows Electron sandbox/preload IPC smoke 通过。
 - 这仅为 TASK-015/TEST-024/026 时间序列安全增量，真实授权周期复检、Tampermonkey/GM/业务状态、跨真实用户 Windows 安装重启/迁移及完整 TEST-024、全部 GATE 仍未通过。
+
+## （7）2026-10-26 最新主干 TEST 阶段证据（非正式 Stable）
+
+- **目标提交**：`35033f74c52aa6edaca3723ac4ca23165db3d3d5`，不是历史 PoC SHA、PR 合成检出提交或发布标签。
+- **Windows 产品代码与安全回归**：Application Skeleton Checks [#40270063756](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270063756) 为 `success`；599 项 Node 测试中 598 `pass`、0 `fail`、1 条件 `skip`，Windows Electron shell smoke 通过。它不单独证明真实脚本自动修复成功。
+- **首选管理器专项**：TASK-007 Official Tampermonkey isolated Windows experiment [#40270144017](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270144017) 为 `success`，15/15 Job 成功，包含四种 `@run-at` 基线、原生 GM 和产品生成的 `querySelector` / `getElementById` 手动候选、原版失效／候选恢复、人工安装版本恢复与负向子框架断言。实际日志显示隔离 Chromium `141.0.7390.37`、厂商托管解包 Tampermonkey MV3 `5.4.1`、`GM_getValue` 和 `GM_setValue` 往返；运行时扩展 ID 不等于商店正式 ID (`officialStoreIdMatch=false`)。**不能称为商店身份认证，也不能推广至用户 Tampermonkey 5.5.1/Chrome 155 或所有生产网站**；原件、候选和恢复路径均为隔离测试，自动应用／自动回滚仍为 false。
+- **TASK-019/020 开发候选**：[Windows Candidate EXE and ZIP #40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210) 为 `success`，同一 `main` SHA 下 599 项中 598 通过、0 失败、1 跳过；147 个 ZIP 与 EXE 安装文件的内容 SHA-256 对照通过，附带限定搬移、只读目录启动、合成升级及卸载保留测试。这仅是开发候选，非 TEST-027/028 的完整正式验收。
+- **未解除的正式门槛**：真实目标网站与真实失效脚本、用户授权环境兼容矩阵、自动应用及原子回滚、异常断电恢复、完整端到端业务断言、正式双包签名/发布策略与 GATE-001..011。不要因多项 Job `success` 将整个 TEST-017/018、TEST-020/021/022、TEST-027/028 或 GATE 自动设为通过。

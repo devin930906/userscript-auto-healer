@@ -1,6 +1,6 @@
 # 项目开发交接
 
-> 状态：**（4）工程准备已完成期末审查并交接，（7）可按「有条件准入」从 TASK-001 开始**。正式产品源码尚未完成，真实用户环境全面兼容和 Stable 仍待后续任务验收。
+> 状态（2026-10-26）：**（4）准备阶段有条件准入并已交接；（7）已有持续实际工程成果**。当前主干 `c3c28451636400a4228688d7354c8f42ba0ccbca` 已具 Electron/TypeScript 应用源码，Windows 应用回归 #40272189600 为 603 项（602 通过、0 失败、1 条件跳过），旧基线 Tampermonkey 隔离矩阵 #40270144017 为 15/15 Job 通过。开发候选 EXE＋ZIP 已有阶段验证，但完整用户兼容、可信自动修复/回滚、正式 Stable GATE 和 GitHub Release 均未完成。历史“尚无源码”文字仅为准备阶段当时的快照。
 
 ## 项目身份
 仓库 https://github.com/devin930906/userscript-auto-healer；默认分支 main；产品为 Windows 本地优先、自动诊断与保守修复因网页变化失效的油猴脚本，交付 EXE 安装版与真实 ZIP 便携包。不得混淆其他用户项目。
@@ -264,3 +264,10 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 测试先行源码 `2cbc8941a48d50070311d0c6329d096f7477680c` 的 [Windows CI #39405858361](https://github.com/devin930906/userscript-auto-healer/actions/runs/39405858361) 实际失败：364 项中 361 pass、2 fail、1 skip，两项 TEST-022 均为超过原 64 份界限的断言；修复源码 `001b90f3bc466ac6760667ac6070666f44006e03` 的 [Application Checks #39406194800](https://github.com/devin930906/userscript-auto-healer/actions/runs/39406194800) success：364 项，363 pass、0 fail、1 skip，实际 Windows Electron sandbox/preload smoke 成功。已核验 70 份实际 Worker 预览和预先取消；完整 1000 份用户业务与性能基线尚未测试。
 
 [Windows 开发候选 EXE+ZIP #39406194811](https://github.com/devin930906/userscript-auto-healer/actions/runs/39406194811) 第一次测试因不涉及本次 AST 改动的 Chrome/CDP `CDP_TIMEOUT` 失败，保留失败证据；仅重跑一次后 attempt 2 success：同样 364 项回归、ZIP 138 文件哈希往返、只读路径启动、EXE 138 文件安装完整性、合成升级及卸载数据保留均通过。该候选构建实际 PR 测试合成源码为 `b2a7b1736c514fbb6e11fd648b3b3c3aa4023371`，不是 PR HEAD 或 main；Artifact ID `12257896775`，2026-10-23 到期，明确 CANDIDATE ONLY / NOT STABLE。候选 EXE SHA-256 `c8827b2c209d38da498091614fc63fb178250212a39a63bcc19ef9ed2c5572a5`、候选 ZIP SHA-256 `6ea313e15d7227f66c7d65bd05fa290d26d52e4060a2a796688e41224b9df462`，不能挪用为正式 Release 校验。本轮 TASK-013/TEST-022 仍是开发中，持久恢复、真实 Tampermonkey/GM/业务及最终 Stable GATE 未完成；合并状态及 main SHA 需独立复核。
+
+## （7）2026-10-26 主干交接证据更新
+
+- 仓库 `main` 已核验提交 `35033f74c52aa6edaca3723ac4ca23165db3d3d5`（PR #374 已合并）。当前会话读取时 Open PR 为 0；之后的状态必须重新查询，不得视为永久无 PR。
+- 主干代码及测试 [#40270063756](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270063756)：599 tests、598 pass、0 fail、1 conditional skip；Tampermonkey 官方厂商托管扩展隔离 Windows [#40270144017](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270144017)：15/15 Job 成功，实际版本 5.4.1、Chromium 141，扩展运行 ID 非商店正式 ID，原版/修复候选 GM+合成业务与人工原版恢复均有有限实证。
+- 发行候选 [#40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210)：同一 SHA 的 Windows EXE 与真实 ZIP 候选构建成功、147 文件完整性对照、受限 Windows 安装与便携 smoke 成功；Artifact `12628621628` 仅开发候选，非 Stable Release。
+- **恢复执行位置**：继续现有 TASK-007/010/011 的可信真实 Tampermonkey 验收、业务诊断、自动应用前硬门槛及可恢复事务实现；随后按原 TASK-018..021 与 GATE-001..011 执行。不得回到（4）重做或把全部矩阵仅凭这次隔离成功自动判绿。
