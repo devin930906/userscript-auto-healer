@@ -170,7 +170,7 @@ function ownObservationArray(input:unknown,max:number):unknown[]|null{
  if(nodeTypes.isProxy(input)||!Array.isArray(input)||
     Object.getPrototypeOf(input)!==Array.prototype)return null;
  const descriptors=Object.getOwnPropertyDescriptors(input);
- const length:unknown=descriptors.length?.value;
+ const length:unknown=Object.getOwnPropertyDescriptor(input,'length')?.value;
  if(typeof length!=='number'||!Number.isSafeInteger(length)||
     length<0||length>max||Reflect.ownKeys(descriptors).length!==length+1)
    return null;
