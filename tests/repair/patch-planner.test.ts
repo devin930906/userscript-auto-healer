@@ -680,3 +680,37 @@ test('TASK-009/TEST-019/026: document and prototype aliases cannot disguise a pa
  assert.equal(unaffected.status,'CANDIDATE_ONLY',
   'an unrelated object must not prevent ordinary manual review');
 });
+
+test('TASK-009/TEST-019/026: destructured native-document references cannot bypass review safety',()=>{
+ const hostile=[
+  "const {document: alias}=window; alias.querySelector=()=>null;",
+  "const {['document']: alias}=globalThis; alias['querySelector']=()=>null;",
+  "({document: alias}=window); alias.querySelector=()=>null;",
+  "const {prototype: proto}=Document; proto.querySelector=()=>null;",
+  "const {prototype: proto}=window.Document; Reflect.set(proto,'querySelector',()=>null);",
+  "const [alias]=[document]; alias.querySelector=()=>null;",
+  "([alias]=[Object.getPrototypeOf(document)]); alias.querySelector=()=>null;"
+ ];
+ for(const mutation of hostile){
+  const script=meta+mutation+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'BLOCKED',mutation);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // Unrelated destructured object/array data must not prevent review-only use.
+ for(const safe of [
+  "const {other: alias}=window; alias.querySelector=()=>null;",
+  "const {prototype: proto}=OtherClass; proto.querySelector=()=>null;",
+  "const [alias]=[otherObject]; alias.querySelector=()=>null;"
+ ]){
+  const script=meta+safe+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'CANDIDATE_ONLY',safe);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});
