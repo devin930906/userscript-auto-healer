@@ -10,7 +10,7 @@ import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {lstat,open,opendir} from 'node:fs/promises';
-import {basename,isAbsolute,join} from 'node:path';
+import {basename,dirname,isAbsolute,join} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
@@ -101,6 +101,12 @@ export async function inspectBackupInventoryReadOnly(
    const directoryStart=await lstat(backupDirectory,{bigint:true});
    if(directoryStart.isSymbolicLink()||!directoryStart.isDirectory())
      return blocked('BACKUP_DIRECTORY_INVALID');
+   // An empty report is not safe evidence when source and backup refer to
+   // the same directory. Reject before enumeration, even with zero entries.
+   const sourceParentStart=await lstat(dirname(sourcePath),{bigint:true});
+   if(!sourceParentStart.isDirectory()||sourceParentStart.isSymbolicLink()||
+      sameDirectory(sourceParentStart,directoryStart))
+     return blocked('BACKUP_DIRECTORY_INVALID');
    const prefix=backupPrefix(sourcePath)+'.';
    // Read entries incrementally. Materializing the entire directory before
    // enforcing the cap would allow an untrusted large folder to exhaust memory.
@@ -185,6 +191,7 @@ export async function inspectBackupInventoryReadOnly(
    }
    const sourceEnd=await lstat(sourcePath,{bigint:true});
    const directoryEnd=await lstat(backupDirectory,{bigint:true});
+   const sourceParentEnd=await lstat(dirname(sourcePath),{bigint:true});
    // Recheck after walking potentially untrusted directory entries: a newly
    // redirected ancestor must not yield an apparently clean inventory.
    if(await hasUnsafePathLink(sourcePath))return blocked('SOURCE_CHANGED');
@@ -192,6 +199,10 @@ export async function inspectBackupInventoryReadOnly(
      return blocked('BACKUP_DIRECTORY_INVALID');
    if(!sameFile(sourceStart,sourceEnd)||sourceEnd.nlink!==1n||
       sourceEnd.isSymbolicLink())return blocked('SOURCE_CHANGED');
+   if(!sourceParentEnd.isDirectory()||sourceParentEnd.isSymbolicLink()||
+      !sameDirectory(sourceParentStart,sourceParentEnd)||
+      sameDirectory(sourceParentEnd,directoryEnd))
+     return blocked('BACKUP_DIRECTORY_INVALID');
    if(directoryEnd.isSymbolicLink()||!directoryEnd.isDirectory()||
       !sameDirectory(directoryStart,directoryEnd)||
      // A newly inserted, removed or renamed backup invalidates the scanned

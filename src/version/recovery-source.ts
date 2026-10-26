@@ -9,7 +9,7 @@ import {createHash} from 'node:crypto';
 import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
 import {lstat,open} from 'node:fs/promises';
-import {basename,isAbsolute,join} from 'node:path';
+import {basename,dirname,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {backupPrefix} from './verified-backup';
 import {hasUnsafePathLink} from './path-boundary';
@@ -107,6 +107,13 @@ export async function verifyBackupRecoverySource(
   if(dirBefore.isSymbolicLink()||!dirBefore.isDirectory())
     return deny('BACKUP_DIRECTORY_INVALID');
   const sourceBefore=await lstat(source,{bigint:true});
+  // A content-matching backup moved into its own source folder is not an
+  // independent recovery source. Do not let old valid backup filenames or
+  // hashes bypass the native backup/restore writers' directory boundary.
+  const sourceParentBefore=await lstat(dirname(source),{bigint:true});
+  if(!sourceParentBefore.isDirectory()||sourceParentBefore.isSymbolicLink()||
+     sameDirectory(dirBefore,sourceParentBefore))
+    return deny('BACKUP_DIRECTORY_INVALID');
   if(sourceBefore.isSymbolicLink()||!sourceBefore.isFile())
     return deny('INVALID_PATH');
   // A valid old backup must not make an empty or oversized current source
@@ -148,12 +155,16 @@ export async function verifyBackupRecoverySource(
     const byPath=await lstat(path,{bigint:true});
     const sourceAfter=await lstat(source,{bigint:true});
     const dirAfter=await lstat(directory,{bigint:true});
+    const sourceParentAfter=await lstat(dirname(source),{bigint:true});
     if(await hasUnsafePathLink(directory)||await hasUnsafePathLink(source))
       return deny('FILE_CHANGED');
     if(byPath.isSymbolicLink()||!byPath.isFile()||byPath.nlink!==1n||
        sourceAfter.isSymbolicLink()||!sourceAfter.isFile()||
        sourceAfter.nlink!==1n||
        dirAfter.isSymbolicLink()||!dirAfter.isDirectory()||
+       !sourceParentAfter.isDirectory()||sourceParentAfter.isSymbolicLink()||
+       !sameDirectory(sourceParentBefore,sourceParentAfter)||
+       sameDirectory(dirAfter,sourceParentAfter)||
        !same(before,after)||!same(after,byPath)||
        !same(sourceBefore,sourceAfter)||!sameDirectory(dirBefore,dirAfter)||
        BigInt(count)!==after.size)
