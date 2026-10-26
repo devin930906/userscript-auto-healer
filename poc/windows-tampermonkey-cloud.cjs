@@ -149,7 +149,7 @@ if(isProductOriginal||isProductCandidate){
  * These synthetic DOM samples are EXPLICITLY fixture inputs, not actual CDP
  * provenance. Real Tampermonkey + GM + business checks run only afterwards.
  */
-async function prepareNativeManualExportForManager(reviewed){
+async function prepareNativeManualExportForManager(reviewed,browserContext){
  const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'uah-product-export-'));
  try{
   const sourcePath=path.join(root,'broken-original.user.js');
@@ -180,24 +180,104 @@ async function prepareNativeManualExportForManager(reviewed){
     {kind:'selector-present',selector:'#uah-ci-target'}
    ]
   };
-  // The fixture DOM observation is intentionally synthetic: stage only
-  // a reviewable candidate. Do not claim a browser observation occurred here.
-  const base=Date.now()-3000;
-  const sample=at=>({
-   ok:true,status:'LIMITED_DOM_OBSERVATION',
-   observedAt:new Date(at).toISOString(),
-   originMatchesApproved:true,routeChanged:false,
-   summary:{elementCount:4,iframeCount:0,visibleShadowRoots:0,
-    blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']},
-   selectorCounts:{'#uah-ci-stale-target':0,'#uah-ci-target':1},
-   fullPageVerified:false,userscriptVerified:false
-  });
-  const domSamples={
-   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
-   samples:[sample(base),sample(base+1000),sample(base+2000)],
-   routeChangeDetected:false,selectorCountChanged:false,
-   domCountChanged:false,userscriptVerified:false
-  };
+  // Observe an actual disposable Chromium document BEFORE installing the
+  // manager script. This measures real fixture DOM, rather than supplying
+  // invented selector counts. It is Playwright fixture evidence, NOT the
+  // product's owned-Chrome/CDP diagnostic or Tampermonkey/GM attestation.
+  const fixtureUrl='https://example.com/uah-native-observation-fixture';
+  scenario.targetUrl=fixtureUrl;
+  const observationPage=await browserContext.newPage();
+  let domSamples;
+  try{
+   await observationPage.route(fixtureUrl,route=>route.fulfill({
+    status:200,contentType:'text/html',
+    body:'<!doctype html><html><head><title>Disposable UAH DOM sample</title></head>'+
+     '<body><button id="uah-ci-target">Fixture only</button></body></html>'
+   }));
+   await observationPage.goto(fixtureUrl,{waitUntil:'load',timeout:20000});
+   const capture=async()=>{
+    const sample=await observationPage.evaluate(()=>{
+     const count=selector=>document.querySelectorAll(selector).length;
+     return {
+      elementCount:count('*'),iframeCount:count('iframe'),
+      visibleShadowRoots:[...document.querySelectorAll('*')]
+       .filter(node=>node.shadowRoot!==null).length,
+      oldCount:count('#uah-ci-stale-target'),nextCount:count('#uah-ci-target')
+     };
+    });
+    return {
+     ok:true,status:'LIMITED_DOM_OBSERVATION',
+     observedAt:new Date().toISOString(),
+     originMatchesApproved:new URL(observationPage.url()).origin===
+      new URL(fixtureUrl).origin,
+     routeChanged:observationPage.url()!==fixtureUrl,
+     summary:{
+      elementCount:sample.elementCount,iframeCount:sample.iframeCount,
+      visibleShadowRoots:sample.visibleShadowRoots,
+      blindSpots:['CLOSED_SHADOW_ROOT_UNKNOWN']
+     },
+     selectorCounts:{
+      '#uah-ci-stale-target':sample.oldCount,
+      '#uah-ci-target':sample.nextCount
+     },
+     fullPageVerified:false,userscriptVerified:false
+    };
+   };
+   const captureSeries=async()=>{
+    const samples=[];
+    for(let i=0;i<3;i++){
+     if(i)await sleep(300);
+     samples.push(await capture());
+    }
+    return {
+     ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples,
+     routeChangeDetected:samples.some(x=>x.routeChanged),
+     selectorCountChanged:samples.some(x=>
+      x.selectorCounts['#uah-ci-stale-target']!==samples[0].selectorCounts['#uah-ci-stale-target']||
+      x.selectorCounts['#uah-ci-target']!==samples[0].selectorCounts['#uah-ci-target']),
+     domCountChanged:samples.some(x=>
+      x.summary.elementCount!==samples[0].summary.elementCount),
+     userscriptVerified:false
+    };
+   };
+   // Negative control: a real browser DOM where the supposedly obsolete
+   // selector STILL exists must not create a backup, candidate or export.
+   await observationPage.evaluate(()=>{
+    const stale=document.createElement('div');
+    stale.id='uah-ci-stale-target';
+    document.body.append(stale);
+   });
+   const contaminated=await captureSeries();
+   assert.equal(contaminated.samples[0].selectorCounts['#uah-ci-stale-target'],1);
+   const denied=await exportReviewedImportedSelectorOnly(
+    script,scenario,contaminated,
+    {backupDirectory,exportDirectory,userApproved:true}
+   );
+   assert.equal(denied.status,'BLOCKED',
+    'A real DOM with the obsolete selector present may never export a patch');
+   assert.deepEqual(fs.readdirSync(backupDirectory),[],
+    'Rejected Chromium DOM must never create a backup');
+   assert.deepEqual(fs.readdirSync(exportDirectory),[],
+    'Rejected Chromium DOM must never create a manager install file');
+   assert.deepEqual(fs.readFileSync(sourcePath),Buffer.from(reviewed.original,'utf8'),
+    'Rejected DOM must not modify the imported original');
+   await observationPage.evaluate(
+    ()=>document.getElementById('uah-ci-stale-target').remove()
+   );
+   domSamples=await captureSeries();
+   assert.ok(domSamples.samples.every(x=>
+     x.originMatchesApproved&&!x.routeChanged&&
+     x.summary.iframeCount===0&&x.summary.visibleShadowRoots===0&&
+     x.selectorCounts['#uah-ci-stale-target']===0&&
+     x.selectorCounts['#uah-ci-target']===1),
+    'Actual Chromium DOM must remain stable and scoped to the disposable fixture');
+   console.log('PRODUCT_BROWSER_DOM_OBSERVATION '+JSON.stringify({
+    variant,runAt,realChromiumDomReadOnly:true,
+    observationMethod:'PLAYWRIGHT_DISPOSABLE_FIXTURE_NOT_PRODUCT_CDP',
+    rejectedStalePresent:true,stableSamples:domSamples.samples.length,
+    managerInstalled:false,automaticPatchAllowed:false
+   }));
+  }finally{await observationPage.close();}
   const exported=await exportReviewedImportedSelectorOnly(
    script,scenario,domSamples,
    {backupDirectory,exportDirectory,userApproved:true}
@@ -233,7 +313,7 @@ async function prepareNativeManualExportForManager(reviewed){
    variant,runAt,originalSha256:sha(originalBytes),
    candidateSha256:sha(candidateBytes),
    importedBytes:script.byteLength,exportedBytes:candidateBytes.byteLength,
-   export:exported.status,syntheticDomFixtureOnly:true,
+   export:exported.status,browserObservedFixtureOnly:true,productCdpVerified:false,
    managerInstalled:false,automaticPatchAllowed:false,
    automaticRollbackAllowed:false
   }));
@@ -300,8 +380,7 @@ async function optIn(context,id){
  }finally{await page.close();}
 }
 async function main(){
- const nativeExport=reviewedCandidateForExport
-  ?await prepareNativeManualExportForManager(reviewedCandidateForExport):null;
+ let nativeExport=null;
  const server=http.createServer((req,res)=>{
   if(req.url==='/test.user.js'||req.url==='/test.user.js?manual-recovery=1'){
    const restoringInstalledCandidate=req.url.endsWith('?manual-recovery=1');
@@ -373,6 +452,9 @@ async function main(){
  });
  try{
   context=await launch();
+  if(reviewedCandidateForExport)
+   nativeExport=await prepareNativeManualExportForManager(
+    reviewedCandidateForExport,context);
   console.log('TESTED_DECLARED_RUN_AT '+runAt);
   const cards=await extensionCards(context);
   const manager=cards.find(x=>/tampermonkey/i.test(x.name)&&
