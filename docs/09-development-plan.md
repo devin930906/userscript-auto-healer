@@ -334,3 +334,10 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - **真实 TDD RED**：测试先行提交 `095d08bc3ce7076fd9f4c431776ff1dab320a0f4`；Windows [Application Checks #40361851867](https://github.com/devin930906/userscript-auto-healer/actions/runs/40361851867) 共 638 项，635 pass、2 个预期新失败、1 conditional skip；失败分别为访问器返回 `true`、以及 Proxy 自定义异常外泄（TEST-013/026）。
 - **真实 GREEN**：实现提交 `cd984456e112f234c498c2ff555e0948d6a2eaf4`；Windows [Application Checks #40362392539](https://github.com/devin930906/userscript-auto-healer/actions/runs/40362392539) 为 completed/success，638 项中 637 pass、0 fail、1 conditional skip，TypeScript 检查与 Electron 真实 shell smoke 均成功。最终 PR HEAD 和合并后 main 仍需分别核验。
 - **验收边界**：仅为 TASK-008/TEST-013/026 的本机 CDP 证据分类安全增量；没有实际证明用户脚本执行、Tampermonkey 来源、GM API、真实业务恢复、自动修复/回滚或全部 TEST/GATE。仍按既有 GATE-001..011 标准推进，Stable EXE/ZIP 不是本轮交付。
+
+## （7）2026-10-27 TASK-009 / TEST-019/026 动态全局 document 别名安全修复
+
+- **修复范围**：`src/repair/patch-planner.ts` 的保守本地修复候选生成，在旧版已阻断 `window.document`/静态全局键变更的基础上，额外识别可能在运行时指向 `document` 的动态 `window[key]`、`globalThis[key]` 或计算表达式：直接赋值/删除/更新、通过不确定对象改写 `querySelector`/`querySelectorAll`/`getElementById`、`Object.defineProperty`/`Object.assign` 等反射式修改。无法静态证明不是 `document` 时保守拒绝候选；已知无关字面键和动态只读访问保持原有本地候选行为。未增改脚本、浏览器、管理器或自动应用权限。
+- **TDD RED**：测试先行提交 `666933f8bdb9dde2b5c323f83c13ebfaf3a6106c`；Windows [Application Skeleton Checks #40365611271](https://github.com/devin930906/userscript-auto-healer/actions/runs/40365611271) 共 639 项，637 pass、1 条新增测试失败、1 conditional skip。旧实现对 `const key='document'; window[key]=fakeDocument;` 仍返回 `CANDIDATE_ONLY`，违反 TEST-019/026 对不确定原生 DOM API 的保守安全要求。
+- **TDD GREEN**：修复提交 `2adc0dc146657978d41137c163ebf88bca534471`；Windows [Application Skeleton Checks #40366122929](https://github.com/devin930906/userscript-auto-healer/actions/runs/40366122929) completed/success，639 项中 638 pass、0 fail、1 conditional skip，TypeScript 检查与真实 Electron sandbox/preload smoke 均成功。
+- **边界**：仅属于 TASK-009/TEST-014/019/026 的候选生成安全阶段增量；不是实际 Tampermonkey 管理器身份认证、真实业务修复、自动应用/回滚或最终 Stable GATE。PR Head/合并后 main 仍须以各自新检查和提交 SHA 独立核验。
