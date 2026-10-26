@@ -112,6 +112,13 @@ jobs:
             variant: product-id-original
           - run_at: document-idle
             variant: product-id-candidate
+          # TASK-007/009/012: exercise querySelectorAll's NodeList[0] lookup
+          # using the same native import, AST audit and real manager manual
+          # install/recovery chain as the selector and ID variants.
+          - run_at: document-idle
+            variant: product-all-original
+          - run_at: document-idle
+            variant: product-all-candidate
           # End-to-end manager installation of the actual native product fixture.
           # Unlike the AST-only PoC, this is the source served by production code.
           # Native product-generated GM diagnostic in every supported timing
