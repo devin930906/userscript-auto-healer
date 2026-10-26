@@ -193,6 +193,18 @@ export class ReadOnlyBatchCoordinator{
    !nodeTypes.isProxy(value)&&#nativeBrand in value&&
    Object.getPrototypeOf(value)===ReadOnlyBatchCoordinator.prototype;
  }
+ /** Keep the first durability write ahead of every ordinary dispatch.
+  * This ticket is scheduling-only: it never grants script or file authority.
+  * Reserve synchronously before the first filesystem await. */
+ #checkpointReservation:symbol|null=null;
+ reserveCheckpointedRun():symbol|null{
+  if(this.#checkpointReservation||this.inFlight)return null;
+  this.#checkpointReservation=Symbol('uah-checkpoint-run');
+  return this.#checkpointReservation;
+ }
+ releaseCheckpointedRun(ticket:symbol):void{
+  if(this.#checkpointReservation===ticket)this.#checkpointReservation=null;
+ }
  private readonly jobs:MutableJob[];
  private readonly maxAttempts:number;
  private readonly concurrency:number;
@@ -267,7 +279,14 @@ export class ReadOnlyBatchCoordinator{
   * Only trusted native code may supply this callback; it grants no script
   * write, browser, manager or rollback permissions.
   */
- run(onTransition?:()=>Promise<void>):Promise<ReadOnlyBatchSnapshot>{
+ run(onTransition?:()=>Promise<void>,checkpointTicket?:symbol):Promise<ReadOnlyBatchSnapshot>{
+  // A pending initial journal save must not race an ordinary run() which
+  // would launch uncheckpointed workers before the first durable record.
+  // Only the native checkpoint runner holding this exact ticket may start.
+  if((this.#checkpointReservation!==null&&
+      (checkpointTicket!==this.#checkpointReservation||!onTransition))||
+     (this.#checkpointReservation===null&&checkpointTicket!==undefined))
+   return Promise.reject(Error('BATCH_CHECKPOINT_RESERVED'));
   if(onTransition!==undefined&&
      (typeof onTransition!=='function'||this.concurrency!==1))
    return Promise.reject(Error('INVALID_CHECKPOINT_CALLBACK'));
