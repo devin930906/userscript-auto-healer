@@ -3,6 +3,8 @@
  * Chrome/CDP observer. It never clicks, executes a script, installs a manager,
  * modifies a file or treats a DOM match as business/GM/API verification.
  */
+import {types as nodeTypes} from 'node:util';
+
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
 import {observeApprovedDom,observeApprovedDomSeries,type DynamicObservation,type ObservationResult} from '../observe/dom-observer';
@@ -143,6 +145,67 @@ function preflightReadOnlyScenario(
  try{return preflightReadOnlyScenarioUnchecked(input,userApproved);}
  catch{return {ok:false,code:'INVALID_SCENARIO'};}
 }
+/** Copy only own data descriptors before inspecting untrusted, serialized CDP
+ * results. Catching a thrown getter after invoking it is not a safe input
+ * boundary: it has already run caller code. Null-prototype snapshots also
+ * prevent inherited getters from supplying fabricated observation fields.
+ */
+function ownObservationData(input:unknown):Record<string,unknown>|null{
+ if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+    Array.isArray(input))return null;
+ const proto=Object.getPrototypeOf(input);
+ if(proto!==Object.prototype&&proto!==null)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ const snapshot:Record<string,unknown>=Object.create(null);
+ for(const key of Reflect.ownKeys(descriptors)){
+  if(typeof key!=='string'||
+     !Object.prototype.hasOwnProperty.call(descriptors[key],'value'))
+    return null;
+  snapshot[key]=descriptors[key].value;
+ }
+ return snapshot;
+}
+/** Accept no sparse, accessor-backed, subclassed or Proxy arrays. */
+function ownObservationArray(input:unknown,max:number):unknown[]|null{
+ if(nodeTypes.isProxy(input)||!Array.isArray(input)||
+    Object.getPrototypeOf(input)!==Array.prototype)return null;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ const length:unknown=descriptors.length?.value;
+ if(typeof length!=='number'||!Number.isSafeInteger(length)||
+    length<0||length>max||Reflect.ownKeys(descriptors).length!==length+1)
+   return null;
+ const result:unknown[]=[];
+ for(let i=0;i<length;i++){
+  const slot=descriptors[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
+    return null;
+  result.push(slot.value);
+ }
+ return result;
+}
+function snapshotObservation(input:unknown):ObservationResult|null{
+ const row=ownObservationData(input);
+ if(!row)return null;
+ if(row.ok!==true)return row as unknown as ObservationResult;
+ const counts=ownObservationData(row.selectorCounts);
+ const summary=ownObservationData(row.summary);
+ if(!counts||!summary)return null;
+ const blindSpots=ownObservationArray(summary.blindSpots,3);
+ if(!blindSpots)return null;
+ return {...row,selectorCounts:counts,summary:{...summary,blindSpots}}
+   as unknown as ObservationResult;
+}
+function snapshotObservationSeries(input:unknown):DynamicObservation|null{
+ const row=ownObservationData(input);
+ if(!row)return null;
+ if(row.ok!==true)return row as unknown as DynamicObservation;
+ const source=ownObservationArray(row.samples,8);
+ if(!source)return null;
+ const samples=source.map(snapshotObservation);
+ if(samples.some(s=>s===null))return null;
+ return {...row,samples} as unknown as DynamicObservation;
+}
+
 /** Pure mapping for regression tests. Synthetic samples are NEVER evidence of
  * real Chrome/Tampermonkey execution; the live API below obtains its own CDP
  * sample and makes the same limited, explicitly non-attesting classification.
@@ -153,8 +216,9 @@ export function summarizeReadOnlyScenarioDom(
  try{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
- if(!observed||typeof observed!=='object'||Array.isArray(observed))
-   return blocked('INVALID_OBSERVATION');
+ const safe=snapshotObservation(observed);
+ if(!safe)return blocked('INVALID_OBSERVATION');
+ observed=safe;
  if(observed.ok!==true)return failedObservation(observed);
  if(!validObservationTimestamp(observed.observedAt)||
    observed.status!=='LIMITED_DOM_OBSERVATION'||
@@ -220,8 +284,9 @@ export function summarizeReadOnlyScenarioDomSeries(
  try{
  const checked=preflightReadOnlyScenario(scenario,userApproved);
  if(!checked.ok)return blocked(checked.code);
- if(!observed||typeof observed!=='object'||Array.isArray(observed))
-   return blocked('INVALID_OBSERVATION');
+ const safe=snapshotObservationSeries(observed);
+ if(!safe)return blocked('INVALID_OBSERVATION');
+ observed=safe;
  if(observed.ok!==true)return failedObservation(observed);
  if(observed.status!=='LIMITED_DYNAMIC_OBSERVATION'||
     observed.userscriptVerified!==false||
