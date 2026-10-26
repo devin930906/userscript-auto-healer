@@ -13,6 +13,7 @@ import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {hasUnsafePathLink} from '../../src/version/path-boundary';
+import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
 const changed=Buffer.from('// ==UserScript==\n// @name Edited\n// ==/UserScript==\n');
@@ -966,4 +967,20 @@ test('TASK-011/TEST-020/021/026: manual restore refuses backup relocated into th
   assert.deepEqual((await readdir(sourceDirectory)).sort(),before,
    'reject before creating displaced backups, path locks or intent journals');
  });
+});
+
+
+test('TASK-011/TEST-020/026: string-only pending exception must not suppress unknown crash evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-ownership-'));
+ try{
+  const pendingName='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,pendingName);
+  await writeFile(pending,'unrelated pending restore');
+  assert.equal(await hasInterruptedRestoreStaging(root),true);
+  // The caller knows a name but has not supplied an independently verified
+  // inode identity. An unrelated process could have replaced that path.
+  assert.equal(await hasInterruptedRestoreStaging(root,pendingName),true,
+   'a filename by itself cannot authorize a crash-evidence exemption');
+  assert.equal((await readFile(pending,'utf8')),'unrelated pending restore');
+ }finally{await rm(root,{recursive:true,force:true});}
 });
