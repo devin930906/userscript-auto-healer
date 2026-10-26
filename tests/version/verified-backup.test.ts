@@ -320,3 +320,36 @@ test('TEST-020/026: a relocated backup directory during final publication check 
   }finally{interception.mock.restore();}
  });
 });
+
+test('TEST-020/026: backup-only refuses stale source after final published backup byte check',async()=>{
+ await fixture(async(file,backupDir)=>{
+  const later=Buffer.concat([script,Buffer.from('// external edit after published check\n')]);
+  const module=require('../../src/version/candidate-bytes') as typeof import('../../src/version/candidate-bytes');
+  const actual=module.verifyExactCandidateBytesReadOnly;
+  let changed=false;
+  const interception=mock.method(module,'verifyExactCandidateBytesReadOnly',
+   async(...args:Parameters<typeof actual>)=>{
+    const result=await actual(...args);
+    if(!changed&&result==='MATCH'&&String(args[0]).endsWith('.backup.user.js')){
+     changed=true;
+     // Another process changes ONLY the selected original AFTER the last
+     // published-backup byte verification, before BACKUP_ONLY is returned.
+     await writeFile(file,later);
+    }
+    return result;
+   });
+  try{
+   const result=await createVerifiedBackupOnly({
+    sourcePath:file,backupDirectory:backupDir,
+    expectedSha256:hash(script),userApproved:true
+   });
+   assert.equal(changed,true,'fault must fire after final published-backup verification');
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'SOURCE_CHANGED');
+   assert.deepEqual(await readFile(file),later,'never overwrite external edits');
+   const preserved=(await readdir(backupDir)).filter(n=>n.endsWith('.backup.user.js'));
+   assert.equal(preserved.length,1,'validated backup remains for manual reconciliation');
+   assert.deepEqual(await readFile(join(backupDir,preserved[0])),script);
+  }finally{interception.mock.restore();}
+ });
+});

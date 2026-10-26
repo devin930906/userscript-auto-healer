@@ -260,3 +260,31 @@ test('TEST-020: ancestor replaced with a junction during a native lock cannot pa
     assert.deepEqual(await readdir(backups),[]);
   });
 });
+
+test('TEST-020/026: source changed during native lock retirement is never reported as successful',async t=>{
+ await fixture(async(source,backups,root)=>{
+  const filesystem=require('node:fs/promises') as typeof import('node:fs/promises');
+  const originalRmdir=filesystem.rmdir;
+  const externallyChanged=Buffer.concat([bytes,Buffer.from('// foreign edit during unlock\n')]);
+  let intercepted=false;
+  t.mock.method(filesystem,'rmdir',async(...args:Parameters<typeof originalRmdir>)=>{
+   const result=await originalRmdir(...args);
+   if(!intercepted&&String(args[0]).includes('.uah-source-lock-')){
+    intercepted=true;
+    // The cooperative lock was retired after the OLD final identity
+    // check. Simulate another process modifying only the selected source
+    // before the privileged call can return its success receipt.
+    await writeFile(source,externallyChanged);
+   }
+   return result;
+  });
+  await assert.rejects(
+   withNativeSourceLock(source,async()=> 'successful-backup-observation'),
+   lockError('SOURCE_CHANGED')
+  );
+  assert.equal(intercepted,true,'fault must execute during lock retirement');
+  assert.deepEqual(await readFile(source),externallyChanged);
+  assert.deepEqual(await readdir(backups),[]);
+  assert.equal((await readdir(root)).some(n=>n.startsWith('.uah-source-lock-')),false);
+ });
+});
