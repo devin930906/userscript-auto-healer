@@ -346,26 +346,36 @@ export async function runCheckpointedReadOnlyBatch(
  if(current.concurrency!==1||!current.batchFingerprint||
     !/^[0-9a-f]{64}$/.test(current.batchFingerprint))
   return deny('INVALID_INPUT');
- const initial=await saveReadOnlyBatchJournal(directory,coordinator);
- if(initial.status==='BLOCKED')return initial;
- let saveFailure:BatchJournalFailure='IO_FAILURE';
+ // Claim the coordinator BEFORE the initial asynchronous save. Otherwise an
+ // ordinary run() can start a worker while the first checkpoint is pending.
+ const ticket=ReadOnlyBatchCoordinator.prototype.reserveCheckpointedRun.call(coordinator);
+ if(ticket===null)return deny('BUSY');
  try{
-  const final=await ReadOnlyBatchCoordinator.prototype.run.call(
-   coordinator,async()=>{
-    const saved=await saveReadOnlyBatchJournal(directory,coordinator);
-    if(saved.status==='BLOCKED'){
-     saveFailure=saved.reason;
-     throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
-    }
-   }
-  );
-  return Object.freeze({
-   status:'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED' as const,
-   snapshot:final
-  });
- }catch{
-  // The run loop has already stopped further dispatch on a failed write.
-  // Never report its in-memory outcome as a durable success receipt.
-  return deny(saveFailure);
+  const initial=await saveReadOnlyBatchJournal(directory,coordinator);
+  if(initial.status==='BLOCKED')return initial;
+  let saveFailure:BatchJournalFailure='IO_FAILURE';
+  try{
+   const final=await ReadOnlyBatchCoordinator.prototype.run.call(
+    coordinator,async()=>{
+     const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+     if(saved.status==='BLOCKED'){
+      saveFailure=saved.reason;
+      throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
+     }
+    },ticket
+   );
+   return Object.freeze({
+    status:'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED' as const,
+    snapshot:final
+   });
+  }catch{
+   // The run loop has already stopped further dispatch on a failed write.
+   // Never report its in-memory outcome as a durable success receipt.
+   return deny(saveFailure);
+  }
+ }finally{
+  // A rejected initial save must not strand the coordinator in BUSY state.
+  // This is a same-process reservation, not an OS lock or transaction.
+  ReadOnlyBatchCoordinator.prototype.releaseCheckpointedRun.call(coordinator,ticket);
  }
 }
