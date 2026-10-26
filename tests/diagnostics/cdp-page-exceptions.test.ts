@@ -29,6 +29,38 @@ test('TEST-013: delayed Page.frameNavigated replay is not a new route',()=>{
   assert.equal(isArmedFrameNavigationReplay({},armed),false);
 });
 
+test('TASK-008/TEST-013/026: navigation replay refuses accessor-backed CDP fields',()=>{
+ const armed={id:'frame-1',loaderId:'loader-1',url:'https://example.com/'};
+ let reads=0;
+ const accessorFrame={frame:Object.defineProperty({},'id',{
+  enumerable:true,get(){reads++;return armed.id;}
+ })};
+ Object.assign(accessorFrame.frame,{loaderId:armed.loaderId,url:armed.url});
+ assert.equal(isArmedFrameNavigationReplay(accessorFrame,armed),false);
+ const outer:Record<string,unknown>={};
+ Object.defineProperty(outer,'frame',{enumerable:true,get(){reads++;
+  return {id:armed.id,loaderId:armed.loaderId,url:armed.url};
+ }});
+ assert.equal(isArmedFrameNavigationReplay(outer,armed),false);
+ assert.equal(reads,0,'CDP replay classification must never invoke accessors');
+});
+
+test('TASK-008/TEST-013/026: navigation replay refuses live and revoked Proxy traps',()=>{
+ const armed={id:'frame-1',loaderId:'loader-1',url:'https://example.com/'};
+ const frame={...armed};
+ let traps=0;
+ const guarded=new Proxy(frame,{get(){traps++;throw Error('UNTRUSTED_CDP_TRAP');},
+  getPrototypeOf(){traps++;throw Error('UNTRUSTED_CDP_PROTO');}});
+ assert.equal(isArmedFrameNavigationReplay({frame:guarded},armed),false);
+ const wrapped=new Proxy({frame},{get(){traps++;throw Error('UNTRUSTED_CDP_OUTER');},
+  getPrototypeOf(){traps++;throw Error('UNTRUSTED_CDP_PROTO');}});
+ assert.equal(isArmedFrameNavigationReplay(wrapped,armed),false);
+ const revoked=Proxy.revocable({frame},{});
+ revoked.revoke();
+ assert.equal(isArmedFrameNavigationReplay(revoked.proxy,armed),false);
+ assert.equal(traps,0);
+});
+
 test('TEST-013: repeated CDP exception IDs still consume the 32-event budget',()=>{
   let total=0;
   for(let i=0;i<32;i++){
