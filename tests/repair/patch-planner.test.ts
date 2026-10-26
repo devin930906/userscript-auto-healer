@@ -623,3 +623,31 @@ test('TASK-009/TEST-019/026: prototype aliases cannot disguise a mutated native 
     assert.equal(result.automaticPatchAllowed,false);
   }
 });
+
+test('TASK-009/TEST-014/019: querySelectorAll NodeList[0] retains indexing and review-only identity',()=>{
+ const script=meta+
+  'const untouched = "#old";\n'+
+  'const selected = document.querySelectorAll("#old")[0];\n';
+ const req=request(script,{
+  callOffset:script.indexOf('document.querySelectorAll'),
+  method:'querySelectorAll' as LiteralPatchRequest['method'],
+  originalSelector:'#old',replacementSelector:'#new'
+ });
+ const proposal=proposeLiteralSelectorPatch(req);
+ assert.equal(proposal.status,'CANDIDATE_ONLY',JSON.stringify(proposal));
+ if(proposal.status!=='CANDIDATE_ONLY')return;
+ assert.equal(proposal.candidateSource,meta+
+  'const untouched = "#old";\n'+
+  'const selected = document.querySelectorAll("#new")[0];\n',
+  'patch must only update the AST string literal; NodeList indexing stays intact');
+ assert.equal(auditProposedLiteralSelectorPatch(req,proposal).status,'REVIEWABLE_ONLY');
+ assert.equal(proposal.automaticPatchAllowed,false);
+ assert.equal(proposal.tampermonkeyVerified,false);
+ assert.equal(proposal.businessRecoveredVerified,false);
+ const computed=script.replace('document.querySelectorAll(', 'document["querySelectorAll"](');
+ assert.equal(proposeLiteralSelectorPatch(request(computed,{
+  callOffset:computed.indexOf('document["querySelectorAll"]'),
+  method:'querySelectorAll' as LiteralPatchRequest['method']
+ })).status,'BLOCKED',
+ 'computed DOM method is not a verified direct native selector site');
+});

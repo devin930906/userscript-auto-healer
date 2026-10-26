@@ -27,17 +27,22 @@ const runAt=process.env.UAH_TM_RUN_AT;
 const variant=process.env.UAH_TM_VARIANT;
 assert.ok([
   'baseline','product-original','product-candidate',
-  'product-id-original','product-id-candidate','native-gm'
+  'product-id-original','product-id-candidate',
+  'product-all-original','product-all-candidate','native-gm'
 ].includes(variant),
   'Unreviewed fixture variant is forbidden');
-// querySelector is tested at document-start and document-idle; the newer
-// getElementById native manual export is tested independently at idle.
+// querySelector is tested at document-start and document-idle. The native
+// getElementById and querySelectorAll NodeList[0] manual export cases are
+// tested independently at idle; neither authorizes automatic installation.
 // Every variant uses an independent, disposable Tampermonkey Profile.
-const isProductOriginal=variant==='product-original'||variant==='product-id-original';
-const isProductCandidate=variant==='product-candidate'||variant==='product-id-candidate';
 const isIdProduct=variant==='product-id-original'||variant==='product-id-candidate';
+const isAllProduct=variant==='product-all-original'||variant==='product-all-candidate';
+const isProductOriginal=variant==='product-original'||
+ variant==='product-id-original'||variant==='product-all-original';
+const isProductCandidate=variant==='product-candidate'||
+ variant==='product-id-candidate'||variant==='product-all-candidate';
 if(isProductOriginal||isProductCandidate)
-  assert.ok(isIdProduct?runAt==='document-idle':
+  assert.ok(isIdProduct||isAllProduct?runAt==='document-idle':
     ['document-start','document-idle'].includes(runAt),
     'AST product cases must use reviewed matrix injection modes');
 assert.ok(RUN_AT_MODES.includes(runAt),
@@ -86,17 +91,23 @@ let source=[
 // existing AST planner. Neither the real user's scripts nor site data are read.
 if(isProductOriginal||isProductCandidate){
   // TASK-007/009/012: never hand-write the repaired fixture installed by
-  // Tampermonkey. The latest getElementById support must pass the SAME real
-  // planner, independent audit, native backup and manual-export contract.
+  // Tampermonkey. Both ID and NodeList[0] variants must pass the same native
+  // planner, independent audit, backup and manual-export contract.
   const healthy=isIdProduct?source.replace(
     'document.querySelector("#uah-ci-target")',
-    'document.getElementById("uah-ci-target")'):source;
-  assert.ok(!isIdProduct||healthy!==source,
-    'The disposable fixture must contain exactly one native ID lookup');
-  const method=isIdProduct?'getElementById':'querySelector';
+    'document.getElementById("uah-ci-target")'):
+   isAllProduct?source.replace(
+    'document.querySelector("#uah-ci-target")',
+    'document.querySelectorAll("#uah-ci-target")[0]'):source;
+  assert.ok(!(isIdProduct||isAllProduct)||healthy!==source,
+    'The disposable fixture must contain exactly one native lookup');
+  const method=isIdProduct?'getElementById':
+    isAllProduct?'querySelectorAll':'querySelector';
   const healthyCall=isIdProduct?'document.getElementById("uah-ci-target")':
+    isAllProduct?'document.querySelectorAll("#uah-ci-target")':
     'document.querySelector("#uah-ci-target")';
   const brokenCall=isIdProduct?'document.getElementById("uah-ci-stale-target")':
+    isAllProduct?'document.querySelectorAll("#uah-ci-stale-target")':
     'document.querySelector("#uah-ci-stale-target")';
   const original=healthy.replace(healthyCall,brokenCall);
   assert.notEqual(original,healthy,'Original fixture must contain exactly one selector');
