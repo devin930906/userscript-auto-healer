@@ -111,6 +111,42 @@ test('TASK-013/TEST-022: real native imported scripts checkpoint and safely rean
 });
 
 
+test('TASK-013/TEST-022: identical bytes under different approved text encodings use separate durable batches',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-encoding-identity-'));
+ try{
+  const file=join(home,'encoded.user.js');
+  await writeFile(file,header+'document.querySelector("#same-bytes");');
+  const imported=(await importApprovedPaths([file])).scripts;
+  assert.equal(imported.length,1);
+  assert.equal(imported[0].textEncoding,'utf-8');
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const first=await runCheckpointedNativeImportAnalysis(root,imported);
+  assert.equal(first.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(first.status!=='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')return;
+  assert.equal(first.resumed,false);
+  const originalDirectory=(await readdir(root))[0];
+  const originalJournal=await readFile(join(root,originalDirectory,BATCH_JOURNAL_FILENAME));
+  // Explicitly approved alternate decoder policy leaves raw bytes/SHA intact,
+  // but changes the semantics of the isolated AST parse and its retry budget.
+  // One encoding's SUCCEEDED/FAILED hints must not be replayed for another.
+  const alternate=imported.map(script=>({...script,textEncoding:'gb18030-explicit' as const}));
+  assert.equal(alternate[0].sha256,imported[0].sha256);
+  const second=await runCheckpointedNativeImportAnalysis(root,alternate);
+  assert.equal(second.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(second.status!=='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')return;
+  assert.equal(second.resumed,false,
+   'same script bytes decoded with another encoding must start its own durable batch');
+  assert.equal((await readdir(root)).length,2);
+  assert.deepEqual(await readFile(join(root,originalDirectory,BATCH_JOURNAL_FILENAME)),
+   originalJournal,'changing the decoder must not rewrite earlier durable evidence');
+  const repeat=await runCheckpointedNativeImportAnalysis(root,alternate);
+  assert.equal(repeat.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(repeat.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+   assert.equal(repeat.resumed,true,'the same byte and encoding identity may resume');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022: transient isolated AST worker failure is retried once and durably settles',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-ast-retry-'));
  try{

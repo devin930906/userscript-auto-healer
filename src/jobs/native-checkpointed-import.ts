@@ -77,17 +77,26 @@ export async function runCheckpointedNativeImportAnalysis(
   return fail(count,'UNSAFE_PATH');
  // No untrusted hash or path enters the directory name; the digest uses only
  // the native importer's verified bytes, ordered and domain-separated.
- // The old v1 directory holds maxAttempts=1 checkpoints. Keep its on-disk
- // scheduling history intact; the new bounded-retry policy uses a different
- // deterministic native namespace and never overwrites legacy records.
- const nameHash=createHash('sha256').update('uah-native-import-batch-v2\0');
+ // v1 and v2 durable namespaces used only raw SHA-256. The exact same
+ // bytes can be imported under another explicitly selected text decoder,
+ // changing AST interpretation without changing that hash. Do not resume
+ // another decoding policy's retry budget or re-write old journal evidence.
+ // v3 preserves both earlier directories untouched; this is still ONLY a
+ // scheduling hint and every resumed preview is freshly analysed.
+ const nameHash=createHash('sha256').update('uah-native-import-batch-v3\0');
  const groups:Array<{scripts:typeof bound;fingerprint:string}>=[];
- for(const script of bound)nameHash.update(script.sha256);
+ for(const script of bound){
+  nameHash.update(script.sha256);nameHash.update('\0');
+  nameHash.update(script.textEncoding);nameHash.update('\0');
+ }
  for(let offset=0;offset<bound.length;offset+=MAX_BATCH_PREVIEW_FILES){
   const segment=bound.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
-  const h=createHash('sha256').update('uah-native-import-segment-v1\0');
+  const h=createHash('sha256').update('uah-native-import-segment-v2\0');
   h.update(String(offset));h.update('\0');
-  for(const item of segment)h.update(item.sha256);
+  for(const item of segment){
+   h.update(item.sha256);h.update('\0');
+   h.update(item.textEncoding);h.update('\0');
+  }
   groups.push({scripts:segment,fingerprint:h.digest('hex')});
  }
  const directory=join(journalRoot,'batch-'+nameHash.digest('hex'));
