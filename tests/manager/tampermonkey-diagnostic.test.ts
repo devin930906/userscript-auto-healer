@@ -12,7 +12,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
  assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch,
- summarizeFixtureDomEvidence,correlateManualFixtureEvidence
+ summarizeFixtureDomEvidence,correlateManualFixtureEvidence,summarizeManualModeReceipts
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
 
@@ -68,6 +68,65 @@ test('TEST-017: visit latch rejects malformed runtime modes without mutating evi
  assert.deepEqual(Object.keys(visits.snapshot()).sort(),['broken','fixed']);
 });
 
+
+test('TASK-007/TEST-017: each GM mode reports its own pending, failing, or matching fixture values',()=>{
+ const noReports=summarizeManualModeReceipts({});
+ for(const mode of ['broken','fixed'] as const){
+  const item=noReports[mode];
+  assert.equal(item.reportStatus,'NOT_REPORTED');
+  assert.equal(item.reportedGmDefaultMatched,null);
+  assert.equal(item.reportedGmStorageRoundtripMatched,null);
+  assert.equal(item.reportedBusinessAction,null);
+  assert.equal(item.gmApiVerified,false);
+  assert.equal(item.businessVerified,false);
+  assert.equal(item.tampermonkeyVerified,false);
+ }
+ assert.equal(Object.isFrozen(noReports),true);
+ const one=summarizeManualModeReceipts({broken:selfReport('broken',true,false)});
+ assert.equal(one.broken.reportStatus,'SELF_REPORTED_ONLY');
+ assert.equal(one.broken.reportedGmDefaultMatched,true);
+ assert.equal(one.broken.reportedGmStorageRoundtripMatched,true);
+ assert.equal(one.broken.reportedBusinessAction,false);
+ assert.equal(one.fixed.reportStatus,'NOT_REPORTED');
+ const partial=summarizeManualModeReceipts({
+  broken:selfReport('broken',true,false),fixed:selfReport('fixed',false,true)
+ });
+ assert.equal(partial.fixed.reportStatus,'SELF_REPORTED_ONLY');
+ assert.equal(partial.fixed.reportedGmDefaultMatched,false);
+ assert.equal(partial.fixed.reportedGmStorageRoundtripMatched,false);
+ assert.equal(partial.fixed.reportedBusinessAction,true);
+ assert.equal(partial.broken.reportedBusinessAction,false);
+ assert.equal(Object.isFrozen(partial.fixed),true);
+ assert.equal(JSON.stringify(partial).includes('token'),false);
+});
+
+test('TASK-007/TEST-017/026: forged mode reports never run getters or grant GM authority',()=>{
+ let executed=0;
+ const hostile=Object.defineProperty({...selfReport('fixed',true,true)},
+   'reportedGmDefaultMatched',{enumerable:true,get(){executed++;return true;}});
+ const traps:ProxyHandler<object>={
+  get(){executed++;throw Error('untrusted get');},
+  getPrototypeOf(){executed++;throw Error('untrusted prototype');},
+  ownKeys(){executed++;throw Error('untrusted keys');}
+ };
+ const input=[
+  {fixed:{...selfReport('fixed',true,true),gmApiVerified:true}},
+  {fixed:{...selfReport('broken',true,false)}},
+  {fixed:hostile},
+  {fixed:new Proxy(selfReport('fixed',true,true),traps)},
+  {fixed:{...selfReport('fixed',true,true),privateToken:'secret'}},
+  Object.defineProperty({},'broken',{enumerable:true,get(){executed++;return selfReport('broken',true,false);}})
+ ];
+ for(const item of input){
+  const result=summarizeManualModeReceipts(item);
+  assert.notEqual(result.fixed.reportStatus,'SELF_REPORTED_ONLY');
+  assert.equal(result.fixed.gmApiVerified,false);
+  assert.equal(result.broken.businessVerified,false);
+ }
+ const revoked=Proxy.revocable({},{});revoked.revoke();
+ assert.equal(summarizeManualModeReceipts(revoked.proxy).broken.reportStatus,'REJECTED_REPORT');
+ assert.equal(executed,0);
+});
 
 test('TEST-018 stage: read-only DOM fixture marker is evidence, never a GM or manager attestation',()=>{
  const sample=(actionCount:number,routeChanged=false)=>({

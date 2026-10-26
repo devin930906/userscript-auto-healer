@@ -147,6 +147,29 @@ export function summarizeFixtureDomEvidence(
  })};
 }
 
+/** TASK-007 / TEST-017: independent *reported* values for each test mode.
+ * This is a display-only diagnostic, NEVER an authenticated GM result. */
+export interface ManualModeReceiptView {
+ readonly reportStatus:'NOT_REPORTED'|'SELF_REPORTED_ONLY'|'REJECTED_REPORT';
+ readonly reportedGmDefaultMatched:boolean|null;
+ readonly reportedGmStorageRoundtripMatched:boolean|null;
+ readonly reportedBusinessAction:boolean|null;
+ readonly tampermonkeyVerified:false;
+ readonly gmApiVerified:false;
+ readonly businessVerified:false;
+}
+/** Red-stage conservative placeholder: the tests define per-mode behavior. */
+export function summarizeManualModeReceipts(_receipts:unknown):
+ Readonly<Record<GmProbeMode,ManualModeReceiptView>> {
+ const missing=():ManualModeReceiptView=>Object.freeze({
+   reportStatus:'NOT_REPORTED' as const,
+   reportedGmDefaultMatched:null,reportedGmStorageRoundtripMatched:null,
+   reportedBusinessAction:null,tampermonkeyVerified:false as const,
+   gmApiVerified:false as const,businessVerified:false as const
+ });
+ return Object.freeze({broken:missing(),fixed:missing()});
+}
+
 /** Two independently limited observations can contradict each other, but even
  * matching reports and DOM never authenticate Tampermonkey, GM or a repair.
  */
