@@ -557,6 +557,49 @@ test('TASK-009/TEST-019/026: reflective global document replacement cannot yield
  }
 });
 
+test('TASK-009/TEST-019/026: computed global-document writes and aliases cannot authorize patches',()=>{
+ // These are not statically provable unrelated global properties: any of
+ // them can change the actual browser document or its native selector API.
+ // The candidate planner is an offline proposal, not a JS evaluator.
+ const unsafe=[
+  "const key='document'; window[key]=fakeDocument;",
+  "const key='document'; globalThis[key]=fakeDocument;",
+  "window['doc'+'ument']=fakeDocument;",
+  "const key='document'; delete window[key];",
+  "const key='document'; globalThis[key]++;",
+  "const key='document'; window[key].querySelector=()=>null;",
+  "const key='document'; globalThis[key]['getElementById']=()=>null;",
+  "const key='document'; Object.defineProperty(window[key], 'querySelector', {value:()=>null});",
+  "const key='document'; Object.assign(globalThis[key], {querySelector:()=>null});"
+ ];
+ for(const mutation of unsafe){
+  const script=meta+mutation+" document.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf('document.querySelector(')
+  }));
+  assert.equal(result.status,'BLOCKED',mutation);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // Literal unrelated global writes, and dynamic READ-ONLY lookups do not
+ // replace document or its native selectors. Keep review-only path usable.
+ const benign=[
+  "window['otherFeature']=true;",
+  "globalThis['otherFeature']++;",
+  "delete window['otherFeature'];",
+  "const key='unrelated'; const seen=window[key];",
+  "const key='unrelated'; Object.keys(window[key]);"
+ ];
+ for(const prefix of benign){
+  const script=meta+prefix+" document.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf('document.querySelector(')
+  }));
+  assert.equal(result.status,'CANDIDATE_ONLY',prefix);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});
+
 test('TASK-009/TEST-019/026: mutated Document prototype selector APIs block review-only candidates',()=>{
   // The target looks like a literal document.querySelector call, but
   // document's inherited DOM API has been replaced elsewhere in the script.
