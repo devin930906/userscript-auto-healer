@@ -4,21 +4,23 @@
  * bounded verification of source, journal and BOTH preserved backups.
  * Never return user file paths, script bytes, digests or journal names.
  */
+import {createHash} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
-import {basename,isAbsolute,join,resolve} from 'node:path';
+import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 import {inspectNativeRestoreIntentReadOnly} from './restore-intent-inspection';
 
 const JOURNAL=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.journal\.json$/;
+const UNPUBLISHED_RESTORE_INTENT=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/;
 const MAX_DIRECTORY_ENTRIES=1024;
 const MAX_RESTORE_INTENTS=32;
 const noAuthority={
  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const,
  tampermonkeyVerified:false as const,businessVerified:false as const
 };
-type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'UNSAFE_PATH'|'SCAN_LIMIT'|'IO_FAILURE';
+type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'UNSAFE_PATH'|'SCAN_LIMIT'|'IO_FAILURE'|'RECOVERY_REVIEW_REQUIRED';
 export type RestoreIntentInventory=
  |Readonly<{status:'BLOCKED';reason:Reason}&typeof noAuthority>
  |Readonly<{status:'RESTORE_INTENT_INVENTORY_READ_ONLY';
@@ -27,6 +29,18 @@ export type RestoreIntentInventory=
 const block=(reason:Reason):RestoreIntentInventory=>
  Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
 
+/** A same-source pathname mutex can be live or stranded after a crash.
+ * Never call the inventory clean while it exists, and never delete it.
+ */
+async function nativeRestorePathLockPresent(sourcePath:string):Promise<boolean>{
+ const identity=process.platform==='win32'?sourcePath.toLowerCase():sourcePath;
+ const name='.uah-restore-path-'+createHash('sha256').update(identity,'utf8').digest('hex');
+ try{await lstat(join(dirname(sourcePath),name));return true;}
+ catch(error){
+  if((error as NodeJS.ErrnoException).code==='ENOENT')return false;
+  throw error;
+ }
+}
 function parse(input:unknown):{sourcePath:string;backupDirectory:string;userApproved:boolean}|null{
  try{
   if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||Array.isArray(input))
@@ -73,6 +87,8 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   if(!src.isFile()||src.isSymbolicLink()||src.nlink!==1n||
      !dir.isDirectory()||dir.isSymbolicLink())
    return block('UNSAFE_PATH');
+  if(await nativeRestorePathLockPresent(x.sourcePath))
+   return block('RECOVERY_REVIEW_REQUIRED');
   let visited=0,inspected=0,originalPresent=0,displacedPresent=0,rejected=0;
   const observations:Array<{
    journalFileName:string;
@@ -81,6 +97,9 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   const handle=await opendir(x.backupDirectory);
   for await(const entry of handle){
    if(++visited>MAX_DIRECTORY_ENTRIES)return block('SCAN_LIMIT');
+   // An fsynced but unpublished journal is crash evidence, not a clean zero.
+   if(UNPUBLISHED_RESTORE_INTENT.test(entry.name))
+    return block('RECOVERY_REVIEW_REQUIRED');
    if(!JOURNAL.test(entry.name))continue;
    if(++inspected>MAX_RESTORE_INTENTS)return block('SCAN_LIMIT');
    // Dirent is only a hint; inspector verifies type, source binding,
@@ -149,6 +168,9 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
       file.ctimeNs!==audit.file.ctimeNs||file.nlink!==audit.file.nlink||
       file.mode!==audit.file.mode)return block('UNSAFE_PATH');
   }
+  // A restore may acquire the path mutex during the inventory scan.
+  if(await nativeRestorePathLockPresent(x.sourcePath))
+   return block('RECOVERY_REVIEW_REQUIRED');
   return Object.freeze({status:'RESTORE_INTENT_INVENTORY_READ_ONLY' as const,
    inspected,originalPresent,displacedPresent,rejected,...noAuthority});
  }catch{return block('IO_FAILURE');}
