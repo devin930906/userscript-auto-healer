@@ -1,6 +1,6 @@
 # 发布策略与最终 Stable 门槛
 
-> 状态：Windows runner 的 CDP、Inno Setup 临时 EXE 构建/安装/卸载及官方 WinRAR 限期评估真 RAR5 创建/解压已通过工具链 PoC；**真实 Electron 应用的开发候选 EXE+ZIP 已在 Windows CI 初步构建并完成局部启动/安装验证，但正式 Stable 双包、升级/数据、完整真实用户环境、签名及全部 GATE 仍未验收**；既有 RAR5 试用 PoC 为历史证据，已被 ZIP 发行决策取代，不能冒称已发布。
+> 状态（2026-10-26 当前主干）：`main@35033f74` 的开发候选 EXE＋真实 ZIP Windows 双包运行 #40270461210 已成功，147 个安装/便携文件的 SHA-256 对照、解压启动、只读目录、搬移、合成升级及卸载保留均有实测；**仍非 Stable 发行**。完整真实环境、真实历史版本迁移、产品自动修复/回滚、签名政策及 GATE-001..011 均未验收。旧 RAR 工具链仅保留历史依据，正式交付格式只有 EXE＋ZIP。
 
 ## 支持平台
 目标 Windows x64（起始支持建议，不表示用户确认最低 Windows/Chrome 版本）；应用运行依赖外部所选 Chrome 和授权的真实油猴管理器，Chrome 多便携版兼容范围由 POC-01/02 建立矩阵，不能保证任意 Chrome。
@@ -89,3 +89,11 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - 保留有意义的失败记录：[运行 #39373022139](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373022139) 在对整个目录递归应用 `(W)` ACL 时拒绝访问；[运行 #39373382713](https://github.com/devin930906/userscript-auto-healer/actions/runs/39373382713) 根目录通用 `(W)` ACL 导致 Windows `Start-Process` 拒绝启动。最终通过的方案仅限定禁止写入文件数据／新建文件（`WD`），**不证明阻止修改文件元数据、重命名或删除，也不等于完整只读 filesystem 安全模型**。绝不能把失败记录删除或修改判据以制造通过。
 - 本次独立开发候选 EXE SHA-256 `4f25593c11c3a46d4fb55c8d40fa84afd00d7a79fefe8876d1fa08a4472924f8`、真实 ZIP SHA-256 `05a0df227b108a5bd2d249412d914fc2b20fa98527d51fb823792a4bd0cdf7bd`，仅适用于上述 PR 合成源码临时候选。Actions Artifact `12242089996`，有效期至 2026-10-23 05:16:28 UTC；不是正式 Release。
 - TEST-028、TASK-020、GATE-009 仍**未完成完整验收**：缺真实用户数据持久性/选择路径、完整 Windows 用户／Chrome/Tampermonkey 业务与兼容性矩阵、升级替换、正式同 SHA 双包构建/发行检查及正式用户授权。GATE-001..011 无一可凭此候选检查直接宣布通过。
+
+## （7）2026-10-26 相同主干 Windows 候选双包核验（非 Stable）
+
+- **来源提交**：`35033f74c52aa6edaca3723ac4ca23165db3d3d5`；对应 [Windows Candidate EXE and ZIP #40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210)，Job `candidate-windows-packaging` 成功。
+- **同次自动化事实**：599 项 Node 测试（598 `pass`、0 `fail`、1 条件 `skip`）；147 个真正 ZIP 内部应用文件的 manifest/解压哈希比对成功；搬移至含 Unicode 与空格的路径后 Electron 可启动；三轮便携目录迁移均对照完整 SHA-256 与重新启动；实际 Windows ACL 只读提取树中启动成功，用户数据保留于外部目录。
+- **EXE 候选事实**：147 个已安装应用文件逐项 SHA-256 与暂存构建内容一致；合成旧版 Inno 安装器覆盖升级到当前开发候选并保留测试 AppData；卸载保持隔离用户数据。不是对真实历史稳定版本的升级兼容担保。
+- **产物身份**：临时 GitHub Actions Artifact `12628621628`，名称 `userscript-auto-healer-windows-CANDIDATE`（Actions 外层归档，不是正式 ZIP 便携包，也不是公开 GitHub Release）；仅可将其中经过脚本验证的产品 ZIP 视为**开发候选**。不得将 Actions 外层 ZIP 的 SHA-256 或 Artifact ID 当作最终 EXE/ZIP 发布文件校验值。
+- **正式 Release**：截至本轮查询尚无已发布 Release。没有确定全部 GATE 通过、正式签名策略与必要授权，不创建 Stable tag，不公开发布，不复用候选校验和为 Stable 校验。

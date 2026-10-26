@@ -1,6 +1,6 @@
 # 正式开发实施计划
 
-> 状态：Windows CDP、真实 GM 调用、两组 broken/fixed 人工选择器基准及临时 EXE 与历史 RAR5 工具链已有技术实证；现行便携格式改为 ZIP（ZIP 工具链 POC-03C 已有限通过，正式 ZIP 产品验证未执行）。ADR-001 已有条件选择 Electron+TypeScript 首期安全工程基线；TASK-001 可有限准入，目标 Tampermonkey/实机/真实修复与 Stable 均不得提前标注通过。代码路径仍为预计新增。
+> 状态（2026-10-26 当前主干）：（4）有条件准入与交接已执行，（7）Electron+TypeScript 代码、受控 Chrome、AST、有限人工修复/导出、只读持久批处理、Windows EXE＋ZIP 开发候选已经实际实现和阶段测试；任务表中的“预计新增”路径属于历史计划字段，不能反向认定代码尚不存在。最新主干 `35033f74` 的应用回归、Tampermonkey 隔离 E2E 与候选双包运行有独立成功证据；真实脚本自动应用/回滚、用户兼容性及全部 Stable GATE 仍未完成。
 
 ## 开发阶段
 M0：证实 Chrome/管理器/交付可行性；M1：可运行安全入口+导入+静态分析；M2：动态诊断与真实管理器验收；M3：修复/版本/批处理/AI/监控/共享层；M4：风险/性能/集成与 Windows 双包装；M5：全部 Stable 门槛和 Release。未人为指定发布日期。
@@ -314,3 +314,10 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 写入须先通过现有本机 Chrome 场景访问授权，并在 UI 显示本地归档告知；无 renderer 文件路径入口。新持久文件采用有界读取、身份复核、临时文件 fsync、首次硬链接不覆盖发布及本应用协作式路径互斥；存在未知文件、重解析路径、篡改或无法可靠清理时安全拒绝。不宣称对外部并发修改有 OS 级事务保证。
 - [Windows RED #40086563849](https://github.com/devin930906/userscript-auto-healer/actions/runs/40086563849) 为能力未实现的预期 3 失败；[中间运行 #40086990077](https://github.com/devin930906/userscript-auto-healer/actions/runs/40086990077) 与 [#40087238993](https://github.com/devin930906/userscript-auto-healer/actions/runs/40087238993) 保留真实开发/测试夹具失败；[GREEN #40087382259](https://github.com/devin930906/userscript-auto-healer/actions/runs/40087382259) 基于源 SHA `0910d093b3698332a71e403a9b62aa81e950d9b4`，536 项测试中 535 pass / 0 fail / 1 conditional skip，Windows Electron shell smoke 成功。
 - 这只满足 TEST-024 的受限本机历史持久化增量：**真实周期复检、Tampermonkey/GM/业务状态、跨真实应用重启的完整 GUI E2E、可信用户数据恢复及所有 Stable GATE 仍未全部验收**；不得据此声称正式健康监控完成、TEST-024/GATE-010 通过或 Stable 已完成。完整结果和整合以对应 PR/main 最新 CI 为准。
+
+## （7）2026-10-26 TASK-007/019/020 阶段续接定位
+
+- 当前已合并主干 `35033f74c52aa6edaca3723ac4ca23165db3d3d5`，查询时无 Open PR；PR #374 的批处理检查点预占竞态修复已整合，不能重复实施。
+- TASK-007 / REQ-017/018 / TEST-017/018：隔离真实 Tampermonkey Windows 工作流 [#40270144017](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270144017) 15/15 Job 成功；本机 AST 候选与手动恢复导出可在测试扩展执行，但既未达到生产级管理器身份认证，也未允许自动应用或自动回滚，继续为开发中。
+- TASK-019/020 / REQ-027/028 / TEST-027/028：当前主干 Windows 开发候选 [#40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210) 成功；147 文件完整性和阶段性安装/便携验证通过，但正式 Stable 双包与全部实际用户环境 GATE 仍未满足，继续为开发中。
+- **下一实际开发方向**：优先补 TASK-007/010/011 的可信管理器/业务证据绑定和自动恢复闭环，基于现有代码增量实现；TASK-018 完整安全 E2E、TASK-019/020 正式产品双包及 TASK-021 GATE 全通过之前不得发布。没有为这一阶段另设 TASK 编号、第二套计划或额外功能。
