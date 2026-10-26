@@ -175,3 +175,18 @@ test('TEST-019/023/026: manual repair rejects Proxy patch/options without reflec
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
  });
 });
+
+test('TEST-023/026: rejected alias of backup and export folders creates no orphan candidate',async()=>{
+ await fixture(async opts=>{
+  for(const exportDirectory of [opts.backupDirectory,join(opts.backupDirectory,'.')]){
+   const result=await prepareManualRepairExportOnly(
+     patch,scenario,samples(),{...opts,exportDirectory});
+   assert.equal(result.status,'BLOCKED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.deepEqual(await readdir(opts.backupDirectory),[],
+     'refused destinations must not leave a backup or staged candidate');
+   assert.deepEqual(await readdir(opts.exportDirectory),[]);
+   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  }
+ });
+});

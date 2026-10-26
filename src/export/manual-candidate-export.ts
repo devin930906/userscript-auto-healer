@@ -72,7 +72,7 @@ function sameDir(a:BigIntStats,b:BigIntStats):boolean{
  * components, not string prefixes (which would reject unrelated siblings).
  * Symlink/junction ancestry is separately rejected before any file write.
  */
-function insideProtectedBackup(backup:string,destination:string):boolean{
+export function insideProtectedBackup(backup:string,destination:string):boolean{
  const suffix=relative(backup,destination);
  return suffix===''||
    (suffix!=='..'&&!suffix.startsWith('..'+sep)&&!isAbsolute(suffix));
