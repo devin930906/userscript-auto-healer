@@ -418,3 +418,29 @@ test('TEST-002/026: dropped input snapshots bytes before decoding and rejects ho
   assert.deepEqual(importDroppedBytes('revoked.user.js',revoked.proxy),
     {filename:'revoked.user.js',code:'INVALID_DRAG_DATA'});
 });
+
+
+test('TEST-002/026: byte views cannot execute own byteLength getters or Proxy prototype traps',()=>{
+ const original=Buffer.from(script,'utf8');
+ const hostile=new Uint8Array(original);
+ let byteLengthReads=0;
+ Object.defineProperty(hostile,'byteLength',{get(){
+  byteLengthReads++;
+  throw Error('UNTRUSTED_BYTE_LENGTH_GETTER');
+ }});
+ const imported=importDroppedBytes('untrusted-view.user.js',hostile);
+ assert.equal(byteLengthReads,0,'import must not evaluate a caller-provided byteLength getter');
+ assert.equal('bytes' in imported,true,'native Uint8Array internal slots remain safely importable');
+ if('bytes' in imported){
+  assert.deepEqual(Buffer.from(imported.bytes),original);
+  assert.equal(imported.sha256,createHash('sha256').update(original).digest('hex'));
+ }
+ let prototypeTraps=0;
+ const proxy=new Proxy(new Uint8Array(original),{getPrototypeOf(value){
+  prototypeTraps++;
+  return Reflect.getPrototypeOf(value);
+ }});
+ assert.deepEqual(importDroppedBytes('trapped.user.js',proxy),
+  {filename:'trapped.user.js',code:'INVALID_DRAG_DATA'});
+ assert.equal(prototypeTraps,0,'a Proxy must be rejected before instanceof reflection');
+});
