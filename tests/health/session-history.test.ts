@@ -473,8 +473,8 @@ test('TASK-015/TEST-024/026: hostile health snapshots cannot invoke accessors or
 
 
 test('TASK-015/TEST-024/026: health archive rejects custom array iteration without invoking caller code',async()=>{
- const {saveLimitedHealthArchive}=require('../../src/health/limited-health-archive')
-  as typeof import('../../src/health/limited-health-archive');
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
  const home=await mkdtemp(join(tmpdir(),'uah-health-iterator-boundary-'));
  try{
   const userData=join(home,'user-data');await mkdir(userData);
