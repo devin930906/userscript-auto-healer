@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readdir,readFile,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -205,5 +205,42 @@ test('TEST-023/026: source-directory export rejection leaves no orphan backup or
    assert.deepEqual(await readdir(opts.exportDirectory),[]);
    assert.deepEqual(await readFile(opts.sourcePath,'utf8'),source);
   }
+ });
+});
+
+test('TEST-023/026: redirected export directory never stages independent backup or candidate',async(t)=>{
+ await fixture(async opts=>{
+  const alias=join(dirname(opts.sourcePath),'redirected-export');
+  try{await symlink(opts.backupDirectory,alias,
+   process.platform==='win32'?'junction':'dir');}
+  catch(error){
+   if(['EPERM','EACCES','ENOTSUP'].includes((error as NodeJS.ErrnoException).code??'')){
+    t.skip('directory junction or symlink unsupported in this Windows runner');
+    return;
+   }
+   throw error;
+  }
+  const result=await prepareManualRepairExportOnly(
+   patch,scenario,samples(),{...opts,exportDirectory:alias});
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.deepEqual(await readdir(opts.backupDirectory),[],
+   'a redirected export must not leave an orphan backup or staged candidate');
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
+test('TEST-023/026: missing manual export directory rejects before backing up source',async()=>{
+ await fixture(async opts=>{
+  const missing=join(dirname(opts.sourcePath),'nonexistent-export');
+  const result=await prepareManualRepairExportOnly(
+   patch,scenario,samples(),{...opts,exportDirectory:missing});
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.deepEqual(await readdir(opts.backupDirectory),[],
+   'unusable export destination cannot create a backup as a side effect');
+  assert.deepEqual(await readdir(opts.exportDirectory),[]);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
  });
 });
