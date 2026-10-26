@@ -277,6 +277,10 @@ export async function restoreVerifiedOriginalNativeOnly(
   const sourceStart=await lstat(opts.sourcePath,{bigint:true});
   if(!parentStart.isDirectory()||parentStart.isSymbolicLink()||
      !directoryStart.isDirectory()||directoryStart.isSymbolicLink()||
+     // A manual restore cannot use its own source folder as the separate
+     // backup/recovery store: a same-inode alias must fail BEFORE
+     // acquiring a lock or publishing a displaced version or intent.
+     sameDirectory(parentStart,directoryStart)||
      !sourceStart.isFile()||sourceStart.isSymbolicLink()||
      sourceStart.nlink!==1n||sourceStart.size<=0n||
      sourceStart.size>BigInt(MAX_SCRIPT_BYTES)||

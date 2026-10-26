@@ -353,3 +353,19 @@ test('TEST-020/026: backup-only refuses stale source after final published backu
   }finally{interception.mock.restore();}
  });
 });
+
+test('TASK-011/TEST-020/026: an independent original backup cannot share its selected source directory',async()=>{
+ await fixture(async(file,_backupDir,dir)=>{
+  const originalEntries=(await readdir(dir)).sort();
+  const rejected=await createVerifiedBackupOnly({
+   sourcePath:file,backupDirectory:dir,
+   expectedSha256:hash(script),userApproved:true
+  });
+  assert.deepEqual([rejected.status,'reason' in rejected?rejected.reason:null],
+   ['BLOCKED','BACKUP_DIRECTORY_INVALID'],
+   'a same-directory copy cannot be a separately recoverable backup store');
+  assert.deepEqual((await readdir(dir)).sort(),originalEntries,
+   'the declined destination must not create a backup or a lock artifact');
+  assert.deepEqual(await readFile(file),script);
+ });
+});

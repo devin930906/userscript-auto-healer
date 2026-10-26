@@ -8,7 +8,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {types as utilTypes} from 'node:util';
 import {constants} from 'node:fs';
 import {link,lstat,open} from 'node:fs/promises';
-import {basename,isAbsolute,join} from 'node:path';
+import {basename,dirname,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {NativeSourceLockError,withNativeSourceLock} from './native-source-lock';
 import {hasUnsafePathLink} from './path-boundary';
@@ -103,6 +103,14 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     if(await hasUnsafePathLink(directory))return deny('BACKUP_DIRECTORY_INVALID');
     const backupDir=await lstat(directory,{bigint:true});
     if(backupDir.isSymbolicLink()||!backupDir.isDirectory())
+      return deny('BACKUP_DIRECTORY_INVALID');
+    // A distinct filename is not an independent recovery location when
+    // both names live in the selected script's own directory. Compare
+    // native directory identities, not case-sensitive path spellings.
+    // Reject before opening or publishing a recovery copy.
+    const sourceParent=await lstat(dirname(path),{bigint:true});
+    if(!sourceParent.isDirectory()||sourceParent.isSymbolicLink()||
+       sameDirectory(sourceParent,backupDir))
       return deny('BACKUP_DIRECTORY_INVALID');
 
     // Open a stable descriptor and bound the actual bytes read, even if the
