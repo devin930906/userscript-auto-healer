@@ -6,12 +6,13 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {chmod,link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
+import {chmod,link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
+import {hasUnsafePathLink} from '../../src/version/path-boundary';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
 const changed=Buffer.from('// ==UserScript==\n// @name Edited\n// ==/UserScript==\n');
@@ -854,4 +855,34 @@ test('TASK-011/TEST-020/021/026: revoked native window before final rename retai
    (fsPromises as {link:typeof originalLink}).link=originalLink;
   }
  });
+});
+
+test('TEST-020/026: renamed ancestor junction must invalidate restore lock ownership',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-lock-ancestor-'));
+ const parent=join(root,'canonical');
+ const moved=join(root,'moved-canonical');
+ try{
+  await mkdir(parent);
+  const lockPath=join(parent,'.uah-restore-path-'+'a'.repeat(64));
+  await mkdir(lockPath);
+  const owned=await lstat(lockPath,{bigint:true});
+  assert.equal(await stillOwnNativeRestorePathLock(lockPath,owned),true);
+  // The lock directory itself retains the same dev/ino while an intermediate
+  // directory name is replaced with a symlink/junction to its moved parent.
+  await rename(parent,moved);
+  try{
+   await symlink(moved,parent,process.platform==='win32'?'junction':'dir');
+  }catch(error){
+   if(['EPERM','EACCES','ENOTSUP'].includes((error as NodeJS.ErrnoException).code??'')){
+    t.skip('Junction/symlink creation unavailable on this runner');
+    return;
+   }
+   throw error;
+  }
+  assert.equal(await hasUnsafePathLink(lockPath),true);
+  assert.equal(await stillOwnNativeRestorePathLock(lockPath,owned),false,
+   'the same lock inode reached through a newly redirected ancestor is not still owned');
+  assert.ok((await lstat(join(moved,'.uah-restore-path-'+'a'.repeat(64)))).isDirectory(),
+   'ownership checks must never delete or rewrite the lock');
+ }finally{await rm(root,{recursive:true,force:true});}
 });

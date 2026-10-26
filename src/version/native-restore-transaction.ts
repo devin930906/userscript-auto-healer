@@ -102,6 +102,9 @@ export async function stillOwnNativeRestorePathLock(
  lockPath:string,originalLock:BigIntStats
 ):Promise<boolean>{
  try{
+  // A redirected ancestor can still reach the SAME lock inode. Reject
+  // lexical aliases, symlinks and junctions before trusting its identity.
+  if(await hasUnsafePathLink(lockPath))return false;
   const current=await lstat(lockPath,{bigint:true});
   return current.isDirectory()&&!current.isSymbolicLink()&&
     sameDirectory(originalLock,current);
