@@ -361,6 +361,24 @@ export function createManualModeVisitLatch() {
  });
 }
 
+/** A per-observation cancellation token is a second untrusted entry point.
+ * Validate its native AbortSignal brand before reading .aborted or using
+ * AbortSignal.any(), so a forged signal cannot execute caller-owned traps.
+ */
+export function isNativeDiagnosticSignal(value:unknown):value is AbortSignal {
+ try{
+  if(!value||typeof value!=='object'||isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(
+      field=>Object.prototype.hasOwnProperty.call(value,field)))
+    return false;
+  const nativeAbortedGetter=Object.getOwnPropertyDescriptor(
+    AbortSignal.prototype,'aborted')?.get;
+  return typeof nativeAbortedGetter==='function'&&
+    typeof nativeAbortedGetter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 /** A native diagnostic accepts only inert, own-data option fields.
  * Never invoke an untrusted getter, Proxy trap or fake AbortSignal method.
  */
@@ -383,22 +401,7 @@ function snapshotDiagnosticOptions(value:unknown):{
    checked[name as string]=d.value;
   }
   const signal=checked.signal;
-  if(signal!==undefined&&(
-    !signal||typeof signal!=='object'||isProxy(signal)||
-    Object.getPrototypeOf(signal)!==AbortSignal.prototype||
-    ['aborted','addEventListener','removeEventListener'].some(
-     field=>Object.prototype.hasOwnProperty.call(signal,field))
-  ))return null;
-  if(signal!==undefined){
-   // Object.create(AbortSignal.prototype) passes a prototype equality
-   // check but has no native AbortSignal internal slots. Calling the
-   // built-in getter first performs a brand check without executing a
-   // forged instance accessor or event-handler method.
-   const nativeAbortedGetter=Object.getOwnPropertyDescriptor(
-     AbortSignal.prototype,'aborted')?.get;
-   if(typeof nativeAbortedGetter!=='function'||
-      typeof nativeAbortedGetter.call(signal)!=='boolean')return null;
-  }
+  if(signal!==undefined&&!isNativeDiagnosticSignal(signal))return null;
   return {ttlMs:checked.ttlMs as number|undefined,
    signal:signal as AbortSignal|undefined,
    runAt:checked.runAt as GmProbeRunAt|undefined};
@@ -496,6 +499,8 @@ export async function startApprovedTampermonkeyDiagnostic(
    async(mode,explicitUserApproved,signal)=>{
      if(explicitUserApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
      if(mode!=='broken'&&mode!=='fixed')return {ok:false,code:'INVALID_MODE'};
+     if(signal!==undefined&&!isNativeDiagnosticSignal(signal))
+       return {ok:false,code:'INVALID_OPTIONS'};
      if(!ready()||signal?.aborted)return {ok:false,code:'SESSION_NOT_ACTIVE'};
      const target=modeTargets[mode];
      if(!target)return {ok:false,code:'MODE_NOT_VISITED'};

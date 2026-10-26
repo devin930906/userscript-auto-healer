@@ -631,3 +631,35 @@ test('TASK-007/TEST-017/026: manual diagnostic refuses unregistered browser obje
  }
  assert.equal(calls,0,'manual diagnostic never invokes browser-session getters or Proxy traps');
 });
+
+test('TASK-007/TEST-017/026: observation cancellation rejects caller-owned AbortSignal traps without executing them',()=>{
+ const exports=require('../../src/manager/tampermonkey-diagnostic') as Record<string,unknown>;
+ const validate=exports.isNativeDiagnosticSignal;
+ assert.equal(typeof validate,'function',
+   'the manual observation boundary must expose a native signal check');
+ const guard=validate as (signal:unknown)=>boolean;
+ let invoked=0;
+ const poisoned=Object.defineProperty({},'aborted',{get(){
+   invoked++;throw Error('CALLER_ABORT_GETTER');
+ }});
+ const proxy=new Proxy(new AbortController().signal,{
+   get(){invoked++;throw Error('CALLER_PROXY_READ');},
+   getPrototypeOf(){invoked++;throw Error('CALLER_PROXY_REFLECTION');}
+ });
+ const shadowed=new AbortController().signal;
+ Object.defineProperty(shadowed,'addEventListener',{value:()=>{
+   invoked++;throw Error('CALLER_ABORT_LISTENER');
+ }});
+ const spoof=Object.create(AbortSignal.prototype);
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ for(const candidate of [poisoned,proxy,shadowed,spoof,revoked.proxy]){
+   assert.equal(guard(candidate),false,
+     'a forged signal must be rejected before observe() reads aborted or invokes AbortSignal.any');
+ }
+ assert.equal(invoked,0,'caller-owned accessors and Proxy traps were not invoked');
+ assert.equal(guard(new AbortController().signal),true,
+   'a native active signal remains supported');
+ assert.equal(guard(AbortSignal.abort()),true,
+   'a native cancelled signal remains supported for cancellation');
+});
