@@ -196,6 +196,17 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
          !sameDirectory(backupDir,finalDirectory))
         return deny('BACKUP_DIRECTORY_INVALID');
 
+      // The last published-backup read awaited disk I/O. An external editor
+      // can change the native-selected source AFTER the earlier source
+      // identity check, while the independent backup remains valid. A stale
+      // BACKUP_ONLY receipt must not imply the originally verified source is
+      // still present. This is a final read-only snapshot, not a file lock or
+      // authorization to modify or roll back the source.
+      if(await hasUnsafePathLink(path))return deny('SOURCE_CHANGED');
+      const finalSource=await lstat(path,{bigint:true});
+      if(finalSource.isSymbolicLink()||!finalSource.isFile()||
+         !same(original,finalSource))return deny('SOURCE_CHANGED');
+
       return Object.freeze({status:'BACKUP_ONLY' as const,
         backupFileName:name,sha256:digest,byteLength:bytes.length,
         automaticPatchAllowed:false as const});
