@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {lstat,mkdtemp,mkdir,readFile,readdir,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
+import {lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {inspectBackupInventoryReadOnly} from '../../src/version/backup-inventory';
@@ -303,5 +303,35 @@ test('TEST-020: empty inventory rejects linked ancestor paths without touching u
    assert.deepEqual(await readdir(nestedBackup),[]);
    assert.deepEqual(await readFile(source),fixtureBytes);
    assert.deepEqual(await readFile(nestedSource),fixtureBytes);
+ });
+});
+
+// Even a valid old filename cannot make the source directory an independent
+// backup inventory. Refuse an empty/co-located report as well.
+test('TASK-011/TEST-020/026: recovered inventory refuses backup directory identical to source parent',async()=>{
+ await withFixture(async(source,backupDir,root)=>{
+  const empty=await inspectBackupInventoryReadOnly({
+   sourcePath:source,backupDirectory:root,userApproved:true
+  });
+  assert.equal(empty.status,'BLOCKED',JSON.stringify(empty));
+  if(empty.status==='BLOCKED')assert.equal(empty.reason,'BACKUP_DIRECTORY_INVALID');
+  const created=await createVerifiedBackupOnly({
+   sourcePath:source,backupDirectory:backupDir,
+   expectedSha256:sha(fixtureBytes),userApproved:true
+  });
+  assert.equal(created.status,'BACKUP_ONLY');
+  if(created.status!=='BACKUP_ONLY')return;
+  const relocated=join(root,created.backupFileName);
+  await rename(join(backupDir,created.backupFileName),relocated);
+  const before=(await readdir(root)).sort();
+  const report=await inspectBackupInventoryReadOnly({
+   sourcePath:source,backupDirectory:root,userApproved:true
+  });
+  assert.equal(report.status,'BLOCKED',JSON.stringify(report));
+  if(report.status==='BLOCKED')assert.equal(report.reason,'BACKUP_DIRECTORY_INVALID');
+  assert.equal(report.automaticRollbackAllowed,false);
+  assert.deepEqual(await readFile(source),fixtureBytes);
+  assert.deepEqual(await readFile(relocated),fixtureBytes);
+  assert.deepEqual((await readdir(root)).sort(),before);
  });
 });

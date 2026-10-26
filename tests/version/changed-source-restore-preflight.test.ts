@@ -182,3 +182,22 @@ test('TEST-020: same-byte source replacement during preflight fails closed',asyn
   }
  });
 });
+
+// The higher-level read-only restore preflight must not elevate a relocated
+// co-located backup to a recoverable version before manual native consent.
+test('TASK-011/TEST-020/021: relocated backup cannot pass changed-source restore preflight',async()=>{
+ await fixture(async({root,sourcePath,backupDirectory,opts})=>{
+  const moved=join(root,opts.backupFileName);
+  await rename(join(backupDirectory,opts.backupFileName),moved);
+  const before=await readdir(root);
+  const result=await inspectChangedSourceRestorePreflightReadOnly({
+   ...opts,backupDirectory:root
+  });
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_UNVERIFIED');
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(await readFile(sourcePath,'utf8'),changed);
+  assert.deepEqual(await readFile(moved,'utf8'),source);
+  assert.deepEqual((await readdir(root)).sort(),before.sort());
+ });
+});

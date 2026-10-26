@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {link,lstat,mkdir,mkdtemp,readFile,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readFile,rename,rm,symlink,truncate,unlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
@@ -271,4 +271,19 @@ test('TEST-020: recovery receipt rejects junction in backup directory ancestry',
     assert.deepEqual(await readFile(backup),original);
     assert.deepEqual(await readFile(source),original);
   });
+});
+
+// TASK-011: a recovered name is not an independent backup if its owner
+// relocated it beside the selected script after the backup-only stage.
+test('TASK-011/TEST-020/026: moved backup beside original is not an independent verified recovery source',async()=>{
+ await fixture(async(req,backup,source,dir)=>{
+  const moved=join(dir,req.backupFileName);
+  await rename(backup,moved);
+  const result=await verifyBackupRecoverySource({...req,backupDirectory:dir});
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_DIRECTORY_INVALID');
+  assert.deepEqual(await readFile(source),original);
+  assert.deepEqual(await readFile(moved),original);
+  assert.equal(result.automaticRollbackAllowed,false);
+ });
 });
