@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import {prepareManualRepairExportOnly} from '../../src/repair/manual-repair-flow';
@@ -187,6 +187,23 @@ test('TEST-023/026: rejected alias of backup and export folders creates no orpha
      'refused destinations must not leave a backup or staged candidate');
    assert.deepEqual(await readdir(opts.exportDirectory),[]);
    assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  }
+ });
+});
+
+test('TEST-023/026: source-directory export rejection leaves no orphan backup or staged candidate',async()=>{
+ await fixture(async opts=>{
+  const originalFolder=dirname(opts.sourcePath);
+  for(const exportDirectory of [originalFolder,join(originalFolder,'.')]){
+   const outcome=await prepareManualRepairExportOnly(
+    patch,scenario,samples(),{...opts,exportDirectory});
+   assert.equal(outcome.status,'BLOCKED');
+   assert.equal(outcome.automaticPatchAllowed,false);
+   assert.equal(outcome.managerInstalled,false);
+   assert.deepEqual(await readdir(opts.backupDirectory),[],
+    'rejected source-folder export must not publish backup or candidate');
+   assert.deepEqual(await readdir(opts.exportDirectory),[]);
+   assert.deepEqual(await readFile(opts.sourcePath,'utf8'),source);
   }
  });
 });

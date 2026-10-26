@@ -7,7 +7,7 @@
  * rollback, and it must never be exposed as arbitrary filesystem IPC.
  * A boolean from a caller is NOT independent user authentication.
  */
-import {basename,isAbsolute} from 'node:path';
+import {basename,dirname,isAbsolute,relative} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
@@ -77,6 +77,10 @@ export async function prepareManualRepairExportOnly(
   // Reject protected-store destination conflicts before staging a candidate
   // or writing an independent backup that cannot be exported.
   if(insideProtectedBackup(o.backupDirectory as string,o.exportDirectory as string))
+    return block('EXPORT_BLOCKED');
+  // A rejected export into the original script folder must not create
+  // separate backups or staged candidates before the exporter's own check.
+  if(relative(dirname(o.sourcePath as string),o.exportDirectory as string)==='')
     return block('EXPORT_BLOCKED');
   const patch=p as unknown as LiteralPatchRequest;
   const linked=proposeFromReadOnlyDomDiagnostic(patch,scenario,domSamples,true);
