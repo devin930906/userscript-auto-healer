@@ -325,6 +325,21 @@ test('TEST-013: executable owned-browser entry refuses forged, unowned or cancel
    AbortSignal.abort())).code,'CANCELLED');
 });
 
+
+test('TASK-006/008/TEST-013/026: authorized scenario wrappers reject untrusted AbortSignal without running getters',async()=>{
+ const bogus={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ const target={ok:false as const,code:'UNVERIFIED_BROWSER' as const};
+ let evaluated=0;
+ const malicious=Object.defineProperty({},'aborted',{get(){
+  evaluated++;throw Error('WRAPPER_ABORT_GETTER');
+ }}) as AbortSignal;
+ assert.equal((await inspectApprovedScenarioDom(bogus,target,baseScenario,true,malicious)).code,
+  'INVALID_OPTIONS');
+ assert.equal((await inspectApprovedScenarioDomSeries(
+  bogus,target,baseScenario,true,2,150,malicious)).code,'INVALID_OPTIONS');
+ assert.equal(evaluated,0,'preflight must not invoke a caller-supplied cancellation getter');
+});
+
 test('TEST-013: blocked scenario attempts write only sanitized unknown entries',async()=>{
   const log=new BoundedFaultLog(2);
   const browser={ok:false,code:'PREFLIGHT_FAILED'} as const;
@@ -386,6 +401,26 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
+ // A user-controlled target hint must not execute a getter or Proxy trap,
+ // even while the browser itself is a legitimately owned live Chrome.
+ const {observeApprovedDom}=await import('../../src/observe/dom-observer');
+ let targetReads=0;
+ const forgedTarget=Object.defineProperty({
+  ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',businessVerified:false
+ },'targetId',{enumerable:true,get(){
+  targetReads++;throw Error('FORGED_TARGET_ID_GETTER');
+ }});
+ const proxyTarget=new Proxy(tab,{
+  get(){targetReads++;throw Error('FORGED_TARGET_PROXY_READ');},
+  getPrototypeOf(){targetReads++;throw Error('FORGED_TARGET_PROXY_PROTO');}
+ });
+ for(const input of [forgedTarget,proxyTarget]){
+  const hint=await observeApprovedDom(opened,
+   input as Parameters<typeof observeApprovedDom>[1],url,
+   true,['#current-target']);
+  assert.deepEqual(hint,{ok:false,code:'UNVERIFIED_TARGET'});
+ }
+ assert.equal(targetReads,0,'a forged target cannot touch privileged CDP input');
  const scenario={...baseScenario,targetUrl:url};
  let result:Awaited<ReturnType<typeof inspectApprovedScenarioDom>>|undefined;
  for(let attempt=0;attempt<25;attempt++){
