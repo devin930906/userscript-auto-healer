@@ -776,3 +776,19 @@ test('TEST-017/018: partial GM write that throws still triggers disposable-key c
  assert.equal(reports[0].gmStorageRoundtripMatched,false);
  assert.equal(reports[0].businessAction,true);
 });
+
+
+// TASK-007 / TEST-017: startup asynchronously opens a TCP listener. If the
+// authorization deadline passes before bind completes, returning a usable
+// session would misrepresent the actual GM diagnostic consent window.
+test('TASK-007/TEST-017/026: expired during asynchronous listener startup refuses the session',async t=>{
+ let now=Date.now();
+ t.mock.method(Date,'now',()=>now);
+ const pending=startIsolatedTampermonkeyGmProbe(true,1000,'document-idle');
+ // start() captured its deadline synchronously, but has not finished the
+ // asynchronous listen callback; emulate a blocked event loop/clock advance.
+ now+=1001;
+ const result=await pending;
+ if(result.ok)await result.session.stop();
+ assert.deepEqual(result,{ok:false,code:'SESSION_EXPIRED'});
+});

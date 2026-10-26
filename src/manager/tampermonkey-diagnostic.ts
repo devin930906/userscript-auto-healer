@@ -198,7 +198,7 @@ export type StartDiagnosticResult=
  |{readonly ok:true;readonly session:ManualTampermonkeyDiagnosticSession}
  |{readonly ok:false;readonly code:
    'NOT_AUTHORIZED'|'CANCELLED'|'UNVERIFIED_BROWSER'|
-   'INVALID_OPTIONS'|'BIND_FAILED'|
+   'INVALID_OPTIONS'|'BIND_FAILED'|'SESSION_EXPIRED'|
    Extract<ManagerPresenceResult,{ok:false}>['code']};
 
 const emptyFlags={

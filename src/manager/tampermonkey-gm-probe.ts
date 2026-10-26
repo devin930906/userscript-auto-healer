@@ -46,7 +46,7 @@ export interface GmProbeSession {
  readonly stop:()=>Promise<void>;
 }
 export type GmProbeStartResult=
- |{readonly ok:false;readonly code:'NOT_AUTHORIZED'|'INVALID_OPTIONS'|'BIND_FAILED'}
+ |{readonly ok:false;readonly code:'NOT_AUTHORIZED'|'INVALID_OPTIONS'|'BIND_FAILED'|'SESSION_EXPIRED'}
  |{readonly ok:true;readonly session:GmProbeSession};
 
 export const MAX_GM_PROBE_TTL_MS=300000 as const;
@@ -297,6 +297,17 @@ export async function startIsolatedTampermonkeyGmProbe(
    });
  }catch{try{server.close();}catch{}return {ok:false,code:'BIND_FAILED'};}
  const address=server.address() as AddressInfo;
+ // The expiration starts when consented setup begins, not when async
+ // listen() finally returns. A stalled event loop or delayed bind must not
+ // hand back an already-expired but apparently usable diagnostic session.
+ // Close the owned loopback listener before refusing the stale start.
+ if(Date.now()>=expiresAt){
+   await new Promise<void>(resolve=>{
+     server.close(()=>resolve());
+     server.closeAllConnections();
+   });
+   return {ok:false,code:'SESSION_EXPIRED'};
+ }
  const origin='http://127.0.0.1:'+address.port;
  // Expiration revokes the entire temporary listener, including active
  // keep-alive and incomplete POST connections. server.close() alone only
@@ -312,7 +323,10 @@ export async function startIsolatedTampermonkeyGmProbe(
    });
    return stopping;
  };
- expiryTimer=setTimeout(()=>{void stop();},ttlMs);
+ // Only the remaining authorized interval belongs to this listener: using
+ // the entire original TTL would extend the bound server beyond its deadline
+ // when asynchronous startup itself consumed time.
+ expiryTimer=setTimeout(()=>{void stop();},Math.max(1,expiresAt-Date.now()));
  expiryTimer.unref();
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',runAt,
