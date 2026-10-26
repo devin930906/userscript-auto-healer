@@ -429,3 +429,44 @@ test('TASK-015/TEST-024/026: archive refuses status claims inconsistent with obs
    'a mismatched native event must not create a durable archive directory');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: hostile health snapshots cannot invoke accessors or Proxy traps',async()=>{
+ const {saveLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-input-boundary-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const valid=registry.snapshot(key);
+  let accessorReads=0;
+  let proxyTraps=0;
+  const withGetter={...valid};
+  Object.defineProperty(withGetter,'history',{
+   enumerable:true,configurable:true,
+   get(){accessorReads++;return valid.history;}
+  });
+  const makeTrap=<T extends object>(object:T):T=>new Proxy(object,{
+   get(target,property,receiver){
+    proxyTraps++;
+    return Reflect.get(target,property,receiver);
+   }
+  });
+  const hostile:unknown[]=[
+   withGetter,
+   makeTrap({...valid}),
+   {...valid,history:makeTrap([...valid.history])},
+   {...valid,history:[makeTrap({...valid.history[0]})]}
+  ];
+  for(const candidate of hostile){
+   assert.equal((await saveLimitedHealthArchive(
+    userData,candidate as typeof valid)).status,'BLOCKED');
+  }
+  assert.equal(accessorReads,0,'never invoke caller-provided snapshot accessors');
+  assert.equal(proxyTraps,0,'never invoke caller-provided snapshot or event Proxy traps');
+  assert.deepEqual(await readdir(userData),[],
+   'rejected input cannot create a persistent health archive');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
