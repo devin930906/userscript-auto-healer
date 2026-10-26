@@ -156,6 +156,21 @@ test('TASK-006/008/TEST-010/013/026: CDP observation rejects forged cancellation
    suspect as Parameters<typeof observeApprovedDom>[0],target,
    'https://example.com/',true),{ok:false,code:'UNVERIFIED_BROWSER'});
  }
+ const selectorProxy=new Proxy(['#current-target'],{
+  get(){executed++;throw Error('UNTRUSTED_SELECTOR_ACCESS');},
+  getPrototypeOf(){executed++;throw Error('UNTRUSTED_SELECTOR_PROTO');}
+ });
+ const accessorSelectors=['#current-target'];
+ Object.defineProperty(accessorSelectors,0,{get(){
+  executed++;throw Error('UNTRUSTED_SELECTOR_GETTER');
+ }});
+ for(const selections of [selectorProxy,accessorSelectors]){
+  assert.deepEqual(await observeApprovedDom(browser,target,'https://example.com/',
+   true,selections),{ok:false,code:'INVALID_OPTIONS'});
+  assert.deepEqual(await observeApprovedDomSeries(
+   browser,target,'https://example.com/',true,selections,2,100),
+   {ok:false,code:'INVALID_OPTIONS'});
+ }
  assert.equal(executed,0,'untrusted getters/Proxy traps are never executed');
  assert.deepEqual(await observeApprovedDom(browser,target,'https://example.com/',true,[],
    AbortSignal.abort()),{ok:false,code:'CANCELLED'});
