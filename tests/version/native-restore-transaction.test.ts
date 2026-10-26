@@ -949,3 +949,21 @@ test('TASK-011/TEST-020/021/026: crash residue appearing after intent publicatio
   });
  }
 });
+
+test('TASK-011/TEST-020/021/026: manual restore refuses backup relocated into the selected source folder',async()=>{
+ await fixture(async opts=>{
+  const sourceDirectory=dirname(opts.sourcePath);
+  await rename(join(opts.backupDirectory,opts.backupFileName),
+   join(sourceDirectory,opts.backupFileName));
+  const before=(await readdir(sourceDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly({
+   ...opts,backupDirectory:sourceDirectory
+  });
+  assert.deepEqual([result.status,'reason' in result?result.reason:null],
+   ['BLOCKED','UNSAFE_PATH'],
+   'moving a backup beside its source cannot authorize a native restore');
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+  assert.deepEqual((await readdir(sourceDirectory)).sort(),before,
+   'reject before creating displaced backups, path locks or intent journals');
+ });
+});
