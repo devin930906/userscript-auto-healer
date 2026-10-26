@@ -266,6 +266,10 @@ export async function openApprovedTarget(
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
         if(signal?.aborted)return {ok:false,code:'CANCELLED'};
         if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
+        // The owned session may be stopped while the final PID query awaits.
+        // An earlier listener match cannot verify an already-ended browser.
+        if(!isLiveApprovedChromeSession(session))
+          return {ok:false,code:'UNVERIFIED_BROWSER'};
         verified=true;
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};

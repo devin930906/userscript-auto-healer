@@ -240,6 +240,31 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       globalThis.fetch=realFetch;
       controller.abort();
     }
+    // TEST-009/026: the final asynchronous port/PID check may finish after
+    // the application has stopped its OWN isolated Chrome. A previous PID
+    // match must not turn the now-dead browser session into a verified tab.
+    const listenerModule=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+    const verifyOriginal=listenerModule.verifyWindowsLoopbackListenerPid;
+    let verificationCalls=0;
+    (listenerModule as {verifyWindowsLoopbackListenerPid:typeof verifyOriginal})
+      .verifyWindowsLoopbackListenerPid=async(...args)=>{
+        const receipt=await verifyOriginal(...args);
+        verificationCalls++;
+        if(verificationCalls===2){
+          assert.equal(receipt.ok,true,'the disposable browser owned the listener');
+          result.stop();
+        }
+        return receipt;
+      };
+    try{
+      const stale=await openApprovedTarget(result,site,true);
+      assert.equal(verificationCalls,2,'stop must happen during final PID check');
+      assert.deepEqual(stale,{ok:false,code:'UNVERIFIED_BROWSER'},
+        'a stopped owned Chrome cannot return a verified new tab');
+    }finally{
+      (listenerModule as {verifyWindowsLoopbackListenerPid:typeof verifyOriginal})
+        .verifyWindowsLoopbackListenerPid=verifyOriginal;
+    }
     stop();
     assert.equal(isLiveApprovedChromeSession(result),false);
     await delay(350);
