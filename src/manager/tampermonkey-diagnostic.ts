@@ -147,6 +147,42 @@ export function summarizeFixtureDomEvidence(
  })};
 }
 
+/** TASK-007 / TEST-017: independent *reported* values for each test mode.
+ * This is a display-only diagnostic, NEVER an authenticated GM result. */
+export interface ManualModeReceiptView {
+ readonly reportStatus:'NOT_REPORTED'|'SELF_REPORTED_ONLY'|'REJECTED_REPORT';
+ readonly reportedGmDefaultMatched:boolean|null;
+ readonly reportedGmStorageRoundtripMatched:boolean|null;
+ readonly reportedBusinessAction:boolean|null;
+ readonly tampermonkeyVerified:false;
+ readonly gmApiVerified:false;
+ readonly businessVerified:false;
+}
+/** Capture each mode independently: self-reports cannot establish GM or
+ * manager provenance and are never permission to apply/restore a patch. */
+export function summarizeManualModeReceipts(receipts:unknown):
+ Readonly<Record<GmProbeMode,ManualModeReceiptView>> {
+ const collected=descriptorFields(receipts,['broken','fixed']);
+ const status=(mode:GmProbeMode):ManualModeReceiptView=>{
+  const noAuthority={tampermonkeyVerified:false as const,
+    gmApiVerified:false as const,businessVerified:false as const};
+  const unknown=(reason:'NOT_REPORTED'|'REJECTED_REPORT'):ManualModeReceiptView=>
+    Object.freeze({reportStatus:reason,
+      reportedGmDefaultMatched:null,reportedGmStorageRoundtripMatched:null,
+      reportedBusinessAction:null,...noAuthority});
+  if(!collected)return unknown('REJECTED_REPORT');
+  if(!Object.prototype.hasOwnProperty.call(collected,mode))
+    return unknown('NOT_REPORTED');
+  const checked=cleanReceipt(collected[mode],mode);
+  if(!checked)return unknown('REJECTED_REPORT');
+  return Object.freeze({reportStatus:'SELF_REPORTED_ONLY' as const,
+    reportedGmDefaultMatched:checked.reportedGmDefaultMatched,
+    reportedGmStorageRoundtripMatched:checked.reportedGmStorageRoundtripMatched,
+    reportedBusinessAction:checked.reportedBusinessAction,...noAuthority});
+ };
+ return Object.freeze({broken:status('broken'),fixed:status('fixed')});
+}
+
 /** Two independently limited observations can contradict each other, but even
  * matching reports and DOM never authenticate Tampermonkey, GM or a repair.
  */
@@ -187,6 +223,8 @@ export interface ManualTampermonkeyDiagnosticSession {
    signal?:AbortSignal)=>Promise<FixtureDomEvidenceResult>;
  /** Snapshot of limited, non-attesting DOM observations, no script token. */
  readonly domSnapshot:()=>Readonly<Partial<Record<GmProbeMode,FixtureDomEvidence>>>;
+ /** Per-mode, redacted, explicitly unverified fixture report observations. */
+ readonly modeReportSnapshot:()=>Readonly<Record<GmProbeMode,ManualModeReceiptView>>;
  /** Cross-check independent, non-attesting HTTP and DOM evidence. */
  readonly consistencySnapshot:()=>ManualFixtureConsistency;
  /** Always marks authenticity, installation, GM and business verification false. */
@@ -539,6 +577,8 @@ export async function startApprovedTampermonkeyDiagnostic(
    installUrl:probe.installUrl,
    origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
    visit,observe,domSnapshot,
+   modeReportSnapshot:()=>summarizeManualModeReceipts(
+     ready()?probe.receiptSnapshot():{}),
    consistencySnapshot:()=>correlateManualFixtureEvidence(
      ready()?probe.receiptSnapshot():{},visits.snapshot(),
      ready()?domEvidence:{}),snapshot,stop

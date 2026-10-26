@@ -422,7 +422,9 @@ function registerSafeIpc(): void {
     const summary=active.snapshot();
     const consistency=active.consistencySnapshot();
     const dom=active.domSnapshot();
+    const modeReports=active.modeReportSnapshot();
     return {ok:true,status:'UNVERIFIED_FIXTURE_CORRELATION_ONLY',
+      brokenReport:modeReports.broken,fixedReport:modeReports.fixed,
       expiresAt:active.expiresAt,
       observedModes:summary.observedModes,
       reportedGmDefaultMatched:summary.reportedGmDefaultMatched,
