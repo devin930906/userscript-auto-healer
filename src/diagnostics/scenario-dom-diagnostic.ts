@@ -192,8 +192,7 @@ function snapshotObservation(input:unknown):ObservationResult|null{
  if(!counts||!summary)return null;
  const blindSpots=ownObservationArray(summary.blindSpots,3);
  if(!blindSpots)return null;
- return {...row,selectorCounts:counts,summary:{...summary,blindSpots}}
-   as unknown as ObservationResult;
+ return {...row,selectorCounts:counts,summary:{...summary,blindSpots}} as unknown as ObservationResult;
 }
 function snapshotObservationSeries(input:unknown):DynamicObservation|null{
  const row=ownObservationData(input);
