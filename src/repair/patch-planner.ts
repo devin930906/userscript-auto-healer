@@ -148,12 +148,28 @@ function isDocumentPrototype(target:unknown):boolean{
     hasMemberName(ctor,'Document');
 }
 
+/** A computed global property whose name is not a static string may be
+ * 'document' at runtime. Offline AST analysis must not silently promote
+ * a selector call after such a mutation to a native-DOM repair candidate.
+ * Ordinary read-only aliases and known unrelated literal keys remain allowed.
+ */
+function isDynamicGlobalDocumentAlias(target:unknown):boolean{
+ const node=asNode(target);
+ if(node?.type!=='MemberExpression'||node.computed!==true)return false;
+ const host=asNode(node.object);
+ if(host?.type!=='Identifier'||
+    (host.name!=='window'&&host.name!=='globalThis'))return false;
+ const property=asNode(node.property);
+ return property?.type!=='Literal'||typeof property.value!=='string';
+}
+
 function mayReplaceDomSelectorMethod(target:unknown):boolean{
   const member=asNode(target);
   if(member?.type!=='MemberExpression')return false;
   const object=asNode(member.object);
   if(!((object?.type==='Identifier'&&object.name==='document')||
-       isGlobalDocumentMember(object)||isDocumentPrototype(object)))return false;
+       isGlobalDocumentMember(object)||isDynamicGlobalDocumentAlias(object)||
+       isDocumentPrototype(object)))return false;
   const property=asNode(member.property);
   if(member.computed===true){
     if(property?.type!=='Literal'||typeof property.value!=='string')return true;
@@ -193,7 +209,8 @@ function mayReflectivelyMutateDocument(node:AstNode):boolean{
     node.arguments.length===0)return false;
  const argument=asNode(node.arguments[0]);
  const firstIsDocument=argument?.type==='Identifier'&&argument.name==='document';
- const aliasedDocument=isGlobalDocumentMember(argument);
+ const aliasedDocument=isGlobalDocumentMember(argument)||
+   isDynamicGlobalDocumentAlias(argument);
  const documentPrototype=isDocumentPrototype(argument);
  const globalHost=argument?.type==='Identifier'&&
    (argument.name==='window'||argument.name==='globalThis');
@@ -311,12 +328,15 @@ function ambiguousDocumentBinding(source:string):boolean{
         bindsDocument(node.left))||
        (node.type==='AssignmentExpression'&&
         (bindsDocument(node.left)||isGlobalDocumentMember(node.left)||
+         isDynamicGlobalDocumentAlias(node.left)||
          mayReplaceDomSelectorMethod(node.left)))||
        (node.type==='UpdateExpression'&&
         (bindsDocument(node.argument)||isGlobalDocumentMember(node.argument)||
+         isDynamicGlobalDocumentAlias(node.argument)||
          mayReplaceDomSelectorMethod(node.argument)))||
        (node.type==='UnaryExpression'&&node.operator==='delete'&&
         (isGlobalDocumentMember(node.argument)||
+         isDynamicGlobalDocumentAlias(node.argument)||
          mayReplaceDomSelectorMethod(node.argument)))||
        (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
         asNode(node.callee)?.name==='eval')||
