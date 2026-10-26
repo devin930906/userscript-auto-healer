@@ -118,3 +118,33 @@ test('TASK-011/TEST-020/026: manual restore selection rejects source changed dur
   }finally{intercepted.mock.restore();}
  });
 });
+
+test('TASK-011/TEST-020/026: changed backup during final source recheck cannot remain a manual restore selection',async()=>{
+ await fixture(async({source,backupFile})=>{
+  const snapshots=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const originalVerifier=snapshots.verifyApprovedSourceFingerprint;
+  const external=Buffer.from('// ==UserScript==\\n// @name External Backup Edit\\n// ==/UserScript==\\n');
+  let observed=0;
+  const intercepted=mock.method(snapshots,'verifyApprovedSourceFingerprint',
+   async(...args:Parameters<typeof originalVerifier>)=>{
+    const receipt=await originalVerifier(...args);
+    if(receipt.status==='MATCHED_READ_ONLY'&&++observed===2){
+     // The last source verification can await external file activity.
+     // A formerly checked backup may no longer contain the selected bytes.
+     await writeFile(backupFile,external);
+    }
+    return receipt;
+   });
+  try{
+   const ready=await prepareManualOriginalRestoreSelection(source,backupFile);
+   assert.equal(observed,2,'fixture must hit the final source recheck');
+   assert.deepEqual(ready,{status:'BLOCKED',reason:'BACKUP_UNVERIFIED'},
+    'changed backup must not be presented to native UI as eligible for consent');
+   assert.deepEqual(await readFile(source),changed,
+    'read-only selection never overwrites the selected current script');
+   assert.deepEqual(await readFile(backupFile),external,
+    'read-only selection never repairs or overwrites a third-party backup edit');
+  }finally{intercepted.mock.restore();}
+ });
+});
