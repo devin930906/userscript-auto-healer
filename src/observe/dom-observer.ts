@@ -2,6 +2,7 @@
  * Never evaluate page JS, claim cross-origin completeness, or infer userscript health.
  */
 import {setTimeout as delay} from 'node:timers/promises';
+import {types as nodeTypes} from 'node:util';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession,readBoundedCdpJson} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
@@ -98,10 +99,64 @@ export function approvedTopFrameUrl(frameTree:unknown,approvedOrigin:string):str
 export function isApprovedTopFrame(frameTree:unknown,approvedOrigin:string):boolean {
   return approvedTopFrameUrl(frameTree,approvedOrigin)!==null;
 }
-function validateSelectors(value:unknown):value is string[]{
-  return Array.isArray(value)&&value.length<=8&&
-    value.every(s=>typeof s==='string'&&s.length>=1&&s.length<=256&&
-      s.trim()===s&&!/[\u0000-\u001f]/.test(s))&&new Set(value).size===value.length;
+/** Only native AbortSignals may control privileged CDP transports.
+ * A Proxy, prototype spoof or shadowed event method must not run caller code.
+ */
+export function isNativeCdpCancellationSignal(value:unknown):value is AbortSignal {
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+/** Copy a bounded selector list before asynchronous owner/CDP checks.
+ * Accessor-backed arrays and Proxies cannot supply executable field reads.
+ */
+function safeSelectors(value:unknown):string[]|null {
+ try{
+  if(!Array.isArray(value)||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==Array.prototype)return null;
+  const desc=Object.getOwnPropertyDescriptors(value);
+  const length=Object.getOwnPropertyDescriptor(value,'length')?.value;
+  if(!Number.isSafeInteger(length)||length<0||length>8||
+     Reflect.ownKeys(desc).length!==length+1)return null;
+  const result:string[]=[];
+  for(let i=0;i<length;i++){
+   const slot=desc[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value')||
+      typeof slot.value!=='string'||slot.value.length<1||
+      slot.value.length>256||slot.value.trim()!==slot.value||
+      /[\\u0000-\\u001f]/.test(slot.value))return null;
+   result.push(slot.value);
+  }
+  return new Set(result).size===result.length?result:null;
+ }catch{return null;}
+}
+/** Browser provenance is checked independently; a target hint is only inert
+ * data until the owned browser's live /json/list re-confirms its identity.
+ */
+function safeTargetId(value:unknown):string|null{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Array.isArray(value))return null;
+  const proto=Object.getPrototypeOf(value);
+  if(proto!==Object.prototype&&proto!==null)return null;
+  const desc=Object.getOwnPropertyDescriptors(value);
+  const keys=Reflect.ownKeys(desc);
+  const expected=['ok','status','targetId','businessVerified'];
+  if(keys.length!==expected.length||
+     keys.some(k=>typeof k!=='string'||!expected.includes(k))||
+     expected.some(k=>!Object.prototype.hasOwnProperty.call(desc,k)||
+       !Object.prototype.hasOwnProperty.call(desc[k],'value')))return null;
+  const id=desc.targetId.value;
+  return desc.ok.value===true&&
+    desc.status.value==='TARGET_ID_AND_URL_MATCH_ONLY'&&
+    desc.businessVerified.value===false&&typeof id==='string'&&
+    /^[a-zA-Z0-9_-]{8,128}$/.test(id)?id:null;
+ }catch{return null;}
 }
 /**
  * TASK-006/007 / TEST-010/017: cancellation-aware CDP socket handshake.
@@ -111,6 +166,8 @@ function validateSelectors(value:unknown):value is string[]{
 export function awaitReadOnlyCdpSocketOpen(
   socket:WebSocket,signal?:AbortSignal
 ):Promise<boolean>{
+  if(signal!==undefined&&!isNativeCdpCancellationSignal(signal))
+    return Promise.resolve(false);
   return new Promise(resolve=>{
     let settled=false;
     const settle=(opened:boolean)=>{
@@ -212,13 +269,17 @@ export async function observeApprovedDom(
   userApproved:boolean,selectors:string[]=[],signal?:AbortSignal
 ):Promise<ObservationResult>{
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
-  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-  if(!session?.ok||!isLiveApprovedChromeSession(session))
-    return {ok:false,code:'UNVERIFIED_BROWSER'};
-  if(!target?.ok||target.status!=='TARGET_ID_AND_URL_MATCH_ONLY')
-    return {ok:false,code:'UNVERIFIED_TARGET'};
-  if(!validateSelectors(selectors)||typeof expectedUrl!=='string'||expectedUrl.length>4096)
+  if(signal!==undefined&&!isNativeCdpCancellationSignal(signal))
     return {ok:false,code:'INVALID_OPTIONS'};
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+  const checkedSelectors=safeSelectors(selectors);
+  if(!checkedSelectors||typeof expectedUrl!=='string'||expectedUrl.length>4096)
+    return {ok:false,code:'INVALID_OPTIONS'};
+  // Reject forged sessions before reading any of their properties.
+  if(!isLiveApprovedChromeSession(session))
+    return {ok:false,code:'UNVERIFIED_BROWSER'};
+  const targetId=safeTargetId(target);
+  if(!targetId)return {ok:false,code:'UNVERIFIED_TARGET'};
   let approved:URL,socket:URL;
   try{approved=new URL(expectedUrl);socket=new URL(session.browserWebsocket);}
   catch{return {ok:false,code:'INVALID_OPTIONS'};}
@@ -248,7 +309,7 @@ export async function observeApprovedDom(
   }
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!Array.isArray(json))return {ok:false,code:'UNVERIFIED_TARGET'};
-  const item=json.find(x=>record(x)&&x.id===target.targetId);
+  const item=json.find(x=>record(x)&&x.id===targetId);
   if(!record(item)||typeof item.url!=='string')
     return {ok:false,code:'UNVERIFIED_TARGET'};
   let actual:URL;
@@ -256,9 +317,9 @@ export async function observeApprovedDom(
   if(!['http:','https:'].includes(actual.protocol)||actual.origin!==approved.origin)
     return {ok:false,code:'UNVERIFIED_TARGET'};
   const checked=inspectCdpTargetList(json,port,actual.href);
-  if(!checked.ok||checked.targetId!==target.targetId)
+  if(!checked.ok||checked.targetId!==targetId)
     return {ok:false,code:'UNVERIFIED_TARGET'};
-  const found=await pageCdp(checked.websocketUrl,selectors,approved.origin,signal);
+  const found=await pageCdp(checked.websocketUrl,checkedSelectors,approved.origin,signal);
   if(signal?.aborted)return {ok:false,code:'CANCELLED'};
   if(!found)return {ok:false,code:'CDP_FAILED'};
   if(!isLiveApprovedChromeSession(session))
@@ -285,7 +346,10 @@ export async function observeApprovedDomSeries(
   signal?:AbortSignal
 ):Promise<DynamicObservation>{
   if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
-  if(!validateSelectors(selectors)||
+  if(signal!==undefined&&!isNativeCdpCancellationSignal(signal))
+    return {ok:false,code:'INVALID_OPTIONS'};
+  const checkedSelectors=safeSelectors(selectors);
+  if(!checkedSelectors||
      !Number.isInteger(sampleCount)||sampleCount<2||sampleCount>8||
      !Number.isInteger(intervalMs)||intervalMs<100||intervalMs>3000)
     return {ok:false,code:'INVALID_OPTIONS'};
@@ -297,14 +361,14 @@ export async function observeApprovedDomSeries(
       catch{return {ok:false,code:'CANCELLED'};}
     }
     const result=await observeApprovedDom(session,target,expectedUrl,
-      true,selectors,signal);
+      true,checkedSelectors,signal);
     if(!result.ok)return result;
     samples.push(result);
   }
   const first=samples[0];
   return {ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples,
     routeChangeDetected:samples.some(s=>s.routeChanged),
-    selectorCountChanged:samples.some(s=>selectors.some(
+    selectorCountChanged:samples.some(s=>checkedSelectors.some(
       selector=>s.selectorCounts[selector]!==first.selectorCounts[selector])),
     domCountChanged:samples.some(s=>s.summary.elementCount!==first.summary.elementCount),
     userscriptVerified:false};
