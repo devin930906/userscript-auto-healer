@@ -585,3 +585,41 @@ test('TASK-009/TEST-019/026: mutated Document prototype selector APIs block revi
     callOffset:normal.lastIndexOf('document.querySelector(')
   })).status,'CANDIDATE_ONLY');
 });
+
+
+test('TASK-009/TEST-019/026: prototype aliases cannot disguise a mutated native document selector',()=>{
+  // In browser code these references reach the same DOM prototype as
+  // Document.prototype. An offline reviewer must not treat the later call
+  // as a native DOM selector without a trustworthy runtime provenance.
+  const mutations=[
+    "document.__proto__.querySelector = () => null;",
+    "window.document['__proto__']['querySelector'] = () => null;",
+    "document.__proto__[selectorName] = () => null;",
+    "Object.getPrototypeOf(document).querySelector = () => null;",
+    "Reflect.getPrototypeOf(globalThis.document).querySelector = () => null;",
+    "document.constructor.prototype.querySelector = () => null;",
+    "Object.defineProperty(document.__proto__, 'querySelector', {value:()=>null});",
+    "Reflect.set(Object.getPrototypeOf(document), 'querySelector', ()=>null);"
+  ];
+  for(const mutation of mutations){
+    const script=meta+mutation+"\nconst node = document.querySelector('#old');\n";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf("document.querySelector(")
+    }));
+    assert.equal(result.status,'BLOCKED',mutation);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  for(const harmless of [
+    "document.__proto__.unrelated = true;",
+    "Object.getPrototypeOf(document).unrelated = true;",
+    "Object.getPrototypeOf(otherObject).querySelector = () => null;"
+  ]){
+    const script=meta+harmless+"\nconst node = document.querySelector('#old');\n";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf("document.querySelector(")
+    }));
+    assert.equal(result.status,'CANDIDATE_ONLY',harmless);
+    assert.equal(result.automaticPatchAllowed,false);
+  }
+});
