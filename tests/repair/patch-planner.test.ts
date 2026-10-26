@@ -556,3 +556,32 @@ test('TASK-009/TEST-019/026: reflective global document replacement cannot yield
   assert.equal(result.automaticPatchAllowed,false);
  }
 });
+
+test('TASK-009/TEST-019/026: mutated Document prototype selector APIs block review-only candidates',()=>{
+  // The target looks like a literal document.querySelector call, but
+  // document's inherited DOM API has been replaced elsewhere in the script.
+  // Never use such a call as evidence for a conservative selector patch.
+  for(const mutation of [
+    "Document.prototype.querySelector = () => null;",
+    "Document.prototype['querySelector'] = () => null;",
+    "Document.prototype[methodName] = () => null;",
+    "window.Document.prototype.querySelector = () => null;",
+    "Object.defineProperty(Document.prototype, 'querySelector', {value: () => null});",
+    "Object.assign(Document.prototype, {querySelector: () => null});",
+    "Reflect.set(Document.prototype, 'querySelector', () => null);",
+    "Object.setPrototypeOf(Document.prototype, {});",
+    "delete Document.prototype.querySelector;"
+  ]){
+    const script=meta+mutation+"\ndocument.querySelector('#old');";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf("document.querySelector(")
+    }));
+    assert.equal(result.status,'BLOCKED',mutation);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  const normal=meta+"Document.prototype.unrelated = true;\ndocument.querySelector('#old');";
+  assert.equal(proposeLiteralSelectorPatch(request(normal,{
+    callOffset:normal.lastIndexOf('document.querySelector(')
+  })).status,'CANDIDATE_ONLY');
+});
