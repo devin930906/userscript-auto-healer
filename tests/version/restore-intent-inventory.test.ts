@@ -279,3 +279,23 @@ test('TASK-011/TEST-020/021/026: stranded native restore path mutex blocks clean
    'never clear an ambiguous lock automatically');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/021/026: source-parent staging residue cannot be a clean zero-intent recovery inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-intent-source-staging-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const pending=join(home,'.uah-restore-'+randomUUID()+'.pending');
+  await writeFile(pending,'unresolved source staging');
+  const inspected=await inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  assert.deepEqual([inspected.status,'reason' in inspected?inspected.reason:null],
+   ['BLOCKED','RECOVERY_REVIEW_REQUIRED']);
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.equal(await readFile(pending,'utf8'),'unresolved source staging');
+ }finally{await rm(home,{recursive:true,force:true});}
+});

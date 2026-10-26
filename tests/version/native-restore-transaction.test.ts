@@ -886,3 +886,28 @@ test('TEST-020/026: renamed ancestor junction must invalidate restore lock owner
    'ownership checks must never delete or rewrite the lock');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/021/026: an unfinished source or journal restore staging file blocks a new manual overwrite',async()=>{
+ for(const target of ['source-parent','backup-directory'] as const){
+  await fixture(async opts=>{
+   const folder=target==='source-parent'?dirname(opts.sourcePath):opts.backupDirectory;
+   const strandedName='.uah-restore-'+randomUUID()+'.pending';
+   const strandedPath=join(folder,strandedName);
+   await writeFile(strandedPath,'unresolved restore after interruption');
+   const filesBefore=(await readdir(opts.backupDirectory)).sort();
+   const originalParentBefore=(await readdir(dirname(opts.sourcePath))).sort();
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.deepEqual([result.status,'reason' in result?result.reason:null],
+    ['BLOCKED','RECOVERY_REVIEW_REQUIRED'],
+    'unreconciled '+target+' staging cannot authorize another source overwrite');
+   assert.deepEqual(await readFile(opts.sourcePath),changed,
+    'current script must stay untouched during unresolved recovery');
+   assert.deepEqual((await readdir(opts.backupDirectory)).sort(),filesBefore,
+    'no new displaced backup or journal may appear');
+   assert.deepEqual((await readdir(dirname(opts.sourcePath))).sort(),originalParentBefore,
+    'no new restore lock or source staging may appear');
+   assert.equal((await readFile(strandedPath,'utf8')),
+    'unresolved restore after interruption');
+  });
+ }
+});
