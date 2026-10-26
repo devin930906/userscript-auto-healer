@@ -8,12 +8,16 @@ import { createHash } from 'node:crypto';
 import { constants, type BigIntStats, type Dirent } from 'node:fs';
 import { lstat, opendir, open, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import {types as nodeTypes} from 'node:util';
 
 export const MAX_SCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_SELECTED_FILES = 1000;
 export const MAX_DIRECTORY_DEPTH = 8;
 export const MAX_DIRECTORY_ENTRIES = 10000;
 export const MAX_TOTAL_IMPORTED_BYTES = 128 * 1024 * 1024;
+// Copy the intrinsic byte length before any user-overridden TypedArray accessors.
+const NATIVE_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
 
 export type ImportFailureCode =
   'INVALID_PATH' | 'NOT_USER_SCRIPT' | 'SYMLINK_REJECTED' | 'NOT_REGULAR_FILE' |
@@ -106,7 +110,13 @@ function fromBytes(name: string, bytes: Uint8Array, allowGb18030 = false):
   // copies the typed-array bytes without calling overridden JS methods.
   let copied:Uint8Array;
   try {
-    if (bytes.byteLength > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
+    // A renderer-provided view may have a side-effectful own byteLength
+    // getter. Use the intrinsic TypedArray internal-slot accessor instead.
+    // Reject proxies before invoking any view conversion or reflection.
+    if (nodeTypes.isProxy(bytes) || !NATIVE_BYTE_LENGTH)
+      return failure(name, 'INVALID_DRAG_DATA');
+    const length = NATIVE_BYTE_LENGTH.call(bytes) as number;
+    if (length > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
     copied = new Uint8Array(bytes);
   } catch {
     return failure(name, 'INVALID_DRAG_DATA');
@@ -129,7 +139,8 @@ function fromBytes(name: string, bytes: Uint8Array, allowGb18030 = false):
 export function importDroppedBytes(name: unknown, bytes: unknown): ImportedScript | ImportFailure {
   if (!validName(name)) return failure(typeof name === 'string' ? name : '(invalid)', 'NOT_USER_SCRIPT');
   try {
-    if (!(bytes instanceof Uint8Array)) return failure(name, 'INVALID_DRAG_DATA');
+    if (nodeTypes.isProxy(bytes) || !(bytes instanceof Uint8Array))
+      return failure(name, 'INVALID_DRAG_DATA');
     return fromBytes(name, bytes);
   } catch {
     // instanceof on a revoked Proxy can throw; it must not escape the IPC
