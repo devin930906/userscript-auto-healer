@@ -227,6 +227,19 @@ function mayReflectivelyMutateDocument(node:AstNode):boolean{
  return false;
 }
 
+/** Capturing the real document or its prototype into another variable can
+ * let the script override querySelector through that alias, bypassing
+ * direct document.method mutation checks. Phase-one review deliberately
+ * rejects these aliases rather than assuming it can solve complete JS alias
+ * and execution-order analysis. Read-only aliases may also be refused.
+ */
+function capturesMutableDocumentAlias(node:AstNode):boolean{
+ const value=node.type==='VariableDeclarator'?node.init:
+   node.type==='AssignmentExpression'||node.type==='AssignmentPattern'?
+     node.right:undefined;
+ return isDocumentReference(value)||isDocumentPrototype(value);
+}
+
 /** Reject source whose `document` reference or selector methods cannot be
  * conservatively trusted. Direct eval and with-statements also make name
  * resolution ambiguous.
@@ -237,7 +250,7 @@ function ambiguousDocumentBinding(source:string):boolean{
   let ambiguous=false;
   function walk(node:AstNode):void{
     if(ambiguous)return;
-    if(node.type==='WithStatement'||
+    if(node.type==='WithStatement'||capturesMutableDocumentAlias(node)||
        (node.type==='VariableDeclarator'&&bindsDocument(node.id))||
        (node.type==='CatchClause'&&bindsDocument(node.param))||
        ((node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
