@@ -58,6 +58,52 @@ test('TEST-017: report includes bounded unverified evidence but no source, token
  }
  assert.ok(Buffer.byteLength(serialized)<4096);
 });
+test('TASK-007/TEST-017/026: GM report aggregates cannot claim evidence from missing receipts',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-receipt-invariants-'));
+ const at=Date.parse('2026-10-19T02:02:00.000Z');
+ const pendingStatus='AWAITING_BROWSER_VISITS' as const;
+ const emptyAssessment={...summary,status:pendingStatus,observedModes:0,
+  reportedGmDefaultMatched:false,reportedGmStorageRoundtripMatched:false,
+  reportedBrokenFailed:false,reportedFixedRecovered:false};
+ const pendingConsistency={...consistency,status:pendingStatus,comparedModes:0 as const};
+ const emptySession={...session,snapshot:()=>emptyAssessment,
+  consistencySnapshot:()=>pendingConsistency,domSnapshot:()=>({})};
+ try{
+  const empty=createLimitedGmReport(emptySession,at);
+  assert.equal(empty.status,'UNVERIFIED_REPORT_READY');
+  if(empty.status!=='UNVERIFIED_REPORT_READY')return;
+  const singleAssessment={...emptyAssessment,observedModes:1,
+   reportedBrokenFailed:true};
+  const singleSession={...emptySession,snapshot:()=>singleAssessment};
+  const single=createLimitedGmReport(singleSession,at);
+  assert.equal(single.status,'UNVERIFIED_REPORT_READY');
+  if(single.status!=='UNVERIFIED_REPORT_READY')return;
+  const cases=[
+   {base:empty.report,session:emptySession,changes:{reportedGmDefaultMatched:true}},
+   {base:empty.report,session:emptySession,changes:{reportedGmStorageRoundtripMatched:true}},
+   {base:empty.report,session:emptySession,changes:{reportedBrokenFailed:true}},
+   {base:empty.report,session:emptySession,changes:{reportedFixedRecovered:true}},
+   {base:single.report,session:singleSession,changes:{reportedGmDefaultMatched:true}},
+   {base:single.report,session:singleSession,changes:{reportedGmStorageRoundtripMatched:true}},
+   {base:single.report,session:singleSession,changes:{reportedFixedRecovered:true}}
+  ];
+  for(const [index,item] of cases.entries()){
+   const injected={...item.session,
+    snapshot:()=>({...item.session.snapshot(),...item.changes})};
+   assert.equal(createLimitedGmReport(injected,at).status,'BLOCKED',
+    'capture must reject impossible receipt aggregate '+index);
+   const forged={...item.base,
+    assessment:{...item.base.assessment,...item.changes}};
+   const result=await saveLimitedGmReportOnly(forged,
+    join(root,'forged-'+index+'.json'),true);
+   assert.equal(result.status,'BLOCKED',
+    'native save must reject impossible receipt aggregate '+index);
+  }
+  assert.deepEqual(await readdir(root),[],
+   'no contradictory diagnostic report may reach the filesystem');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-017/026: report capture never executes forged session or snapshot accessors and proxy traps',()=>{
  const at=Date.parse('2026-10-19T02:02:00.000Z');
  let getters=0;let traps=0;
