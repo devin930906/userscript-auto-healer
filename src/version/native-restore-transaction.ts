@@ -453,7 +453,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   // content and mode were just independently verified above; never ignore
   // another process's pending restoration or unpublished journal.
   // These bounded snapshots are not an OS-exclusive cross-process lock.
-  if(await hasInterruptedRestoreStaging(parent,basename(pending))||
+  if(await hasInterruptedRestoreStaging(parent,basename(pending),finalPending)||
      await hasInterruptedRestoreStaging(opts.backupDirectory))
    return block('RECOVERY_REVIEW_REQUIRED');
   // Final cooperative cancellation boundary before the irreversible source

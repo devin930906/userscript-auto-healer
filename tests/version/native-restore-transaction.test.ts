@@ -13,6 +13,7 @@ import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {hasUnsafePathLink} from '../../src/version/path-boundary';
+import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
 
 const original=Buffer.from('// ==UserScript==\n// @name Original\n// ==/UserScript==\n');
 const changed=Buffer.from('// ==UserScript==\n// @name Edited\n// ==/UserScript==\n');
@@ -966,4 +967,54 @@ test('TASK-011/TEST-020/021/026: manual restore refuses backup relocated into th
   assert.deepEqual((await readdir(sourceDirectory)).sort(),before,
    'reject before creating displaced backups, path locks or intent journals');
  });
+});
+
+
+test('TASK-011/TEST-020/026: string-only pending exception must not suppress unknown crash evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-ownership-'));
+ try{
+  const pendingName='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,pendingName);
+  await writeFile(pending,'unrelated pending restore');
+  assert.equal(await hasInterruptedRestoreStaging(root),true);
+  // The caller knows a name but has not supplied an independently verified
+  // inode identity. An unrelated process could have replaced that path.
+  assert.equal(await hasInterruptedRestoreStaging(root,pendingName),true,
+   'a filename by itself cannot authorize a crash-evidence exemption');
+  assert.equal((await readFile(pending,'utf8')),'unrelated pending restore');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('TASK-011/TEST-020/026: genuine staged inode is exempt, same-name replacement is not',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-swap-'));
+ try{
+  const name='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,name);
+  const contents='same bytes, different file owner';
+  await writeFile(pending,contents);
+  const owned=await lstat(pending,{bigint:true});
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),false,
+   'a separately verified single-link staging inode is exempt');
+  const retired=join(root,'retired-staging');
+  await rename(pending,retired);
+  await writeFile(pending,contents);
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),true,
+   'a replacement at the identical filename and length is not owned');
+  assert.equal(await readFile(pending,'utf8'),contents);
+  assert.equal(await readFile(retired,'utf8'),contents);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/026: hardlinked staging inode cannot borrow restore exemption',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-links-'));
+ try{
+  const name='.uah-restore-'+randomUUID()+'.pending';
+  const pending=join(root,name);
+  await writeFile(pending,'private restore staging');
+  const owned=await lstat(pending,{bigint:true});
+  await link(pending,join(root,'other-hardlink'));
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),true,
+   'extra links invalidate an earlier exclusive staging identity');
+ }finally{await rm(root,{recursive:true,force:true});}
 });

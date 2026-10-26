@@ -5,35 +5,71 @@
  * after the directory changes during enumeration. The scan is bounded and
  * cannot substitute for an atomic filesystem lock against external writers.
  */
+import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
+import {join} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 
 const RESTORE_PENDING=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/;
 const MAX_ENTRIES=1024;
+/** Only a separately captured native inode can exempt this transaction's
+ * own staging file. The filename alone is NOT evidence of ownership.
+ */
+function sameOwnedPending(actual:BigIntStats,owned:BigIntStats):boolean{
+ return actual.isFile()&&!actual.isSymbolicLink()&&actual.nlink===1n&&
+  owned.isFile()&&!owned.isSymbolicLink()&&owned.nlink===1n&&
+  actual.dev===owned.dev&&actual.ino===owned.ino&&
+  actual.size===owned.size&&actual.mtimeNs===owned.mtimeNs&&
+  actual.ctimeNs===owned.ctimeNs&&
+  (actual.mode&0o777n)===(owned.mode&0o777n);
+}
 
 /** Native-only directory path from an independently consented OS selection.
  * Throws on unreadable, redirected, changing or oversized directories so the
  * calling manual-restore / read-only inventory refuses a success receipt.
  */
 export async function hasInterruptedRestoreStaging(
- directory:string,verifiedOwnPendingName?:string
+ directory:string,verifiedOwnPendingName?:string,
+ verifiedOwnPendingIdentity?:BigIntStats
 ):Promise<boolean>{
  // The exemption is only for a staging inode independently verified by
  // its native owning transaction at the last pre-rename boundary. Never
  // exempt an arbitrary filename, backup-store intent, or another restore.
- if(verifiedOwnPendingName!==undefined&&
-    !RESTORE_PENDING.test(verifiedOwnPendingName))
+ if((verifiedOwnPendingName!==undefined&&
+     !RESTORE_PENDING.test(verifiedOwnPendingName))||
+    (verifiedOwnPendingIdentity!==undefined&&verifiedOwnPendingName===undefined))
   throw new Error('invalid owned staging exception');
  if(await hasUnsafePathLink(directory))throw new Error('unsafe restore directory');
  const before=await lstat(directory,{bigint:true});
  if(!before.isDirectory()||before.isSymbolicLink())
   throw new Error('invalid restore directory');
- let entries=0,pending=false;
+ let entries=0,pending=false,ownedSeen=false;
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
-  if(RESTORE_PENDING.test(entry.name)&&entry.name!==verifiedOwnPendingName)
-   pending=true;
+  if(!RESTORE_PENDING.test(entry.name))continue;
+  if(entry.name!==verifiedOwnPendingName||!verifiedOwnPendingIdentity){
+   pending=true;continue;
+  }
+  // The sole exemption must still identify the same pre-verified inode.
+  // A same-name replacement, symlink or added hard link remains evidence
+  // requiring manual reconciliation.
+  ownedSeen=true;
+  try{
+   const current=await lstat(join(directory,entry.name),{bigint:true});
+   if(!sameOwnedPending(current,verifiedOwnPendingIdentity))pending=true;
+  }catch{pending=true;}
+ }
+ // Recheck after awaited enumeration; a name swap during this scan cannot
+ // silently inherit the previously captured ownership claim.
+ if(verifiedOwnPendingName!==undefined){
+  if(!ownedSeen||!verifiedOwnPendingIdentity)pending=true;
+  else{
+   try{
+    const current=await lstat(join(directory,verifiedOwnPendingName),{bigint:true});
+    if(!sameOwnedPending(current,verifiedOwnPendingIdentity))pending=true;
+   }catch{pending=true;}
+  }
  }
  const after=await lstat(directory,{bigint:true});
  if(!after.isDirectory()||after.isSymbolicLink()||
