@@ -5,6 +5,7 @@
  * No Runtime.evaluate, script installation, source/message/stack storage,
  * browsing history, or file writes are performed here.
  */
+import {types as nodeTypes} from 'node:util';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession,readBoundedCdpJson} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
@@ -75,16 +76,41 @@ function getArmedFrameIdentity(reply:unknown,expectedUrl:string):FrameIdentity|n
      typeof frame.loaderId!=='string'||!frame.loaderId)return null;
   return {id:frame.id,loaderId:frame.loaderId,url:expectedUrl};
 }
+/** Reject accessor/Proxy navigation metadata before any property reads.
+ * CDP events normally arrive from JSON, but this exported evidence predicate
+ * must not execute caller-controlled code or certify a fabricated replay.
+ */
+function ownPlainNavigationFields(input:unknown):Record<string,unknown>|null{
+ try{
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+     Array.isArray(input))return null;
+  const proto=Object.getPrototypeOf(input);
+  if(proto!==Object.prototype&&proto!==null)return null;
+  const fields=Object.getOwnPropertyDescriptors(input);
+  const values:Record<string,unknown>=Object.create(null);
+  for(const [key,descriptor] of Object.entries(fields)){
+   if(!Object.prototype.hasOwnProperty.call(descriptor,'value'))
+    return null;
+   values[key]=descriptor.value;
+  }
+  // Symbols cannot represent CDP JSON fields and may hide hostile metadata.
+  if(Reflect.ownKeys(fields).some(key=>typeof key!=='string'))return null;
+  return values;
+ }catch{return null;}
+}
 export function isArmedFrameNavigationReplay(
   params:unknown,armed:FrameIdentity|null
 ):boolean{
-  if(!armed||!params||typeof params!=='object'||Array.isArray(params))
-    return false;
-  const frame=(params as {frame?:unknown}).frame;
-  if(!frame||typeof frame!=='object'||Array.isArray(frame))return false;
-  const data=frame as Record<string,unknown>;
-  return data.id===armed.id&&data.loaderId===armed.loaderId&&
-    data.url===armed.url;
+ const outer=ownPlainNavigationFields(params);
+ const trusted=ownPlainNavigationFields(armed);
+ if(!outer||!trusted)return false;
+ const frame=ownPlainNavigationFields(outer.frame);
+ if(!frame)return false;
+ const {id,loaderId,url}=trusted;
+ return typeof id==='string'&&id.length>0&&
+   typeof loaderId==='string'&&loaderId.length>0&&
+   typeof url==='string'&&url.length>0&&
+   frame.id===id&&frame.loaderId===loaderId&&frame.url===url;
 }
 
 function exactMainFrame(reply:unknown,expectedUrl:string):boolean{
