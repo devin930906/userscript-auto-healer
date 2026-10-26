@@ -115,3 +115,50 @@ test('TEST-010: CDP open succeeds only on timely OPEN, and fails on socket loss'
  assert.equal(await closed,false);
  failed.dispatchEvent(new Event('open'));
 });
+
+test('TASK-006/008/TEST-010/013/026: CDP observation rejects forged cancellation and session getters before effects',async()=>{
+ const {observeApprovedDomSeries}=await import('../../src/observe/dom-observer');
+ const browser={ok:false as const,code:'PREFLIGHT_FAILED' as const};
+ const target={ok:false as const,code:'UNVERIFIED_BROWSER' as const};
+ let executed=0;
+ const poison=Object.defineProperty({},'aborted',{get(){
+  executed++;throw Error('UNTRUSTED_ABORT_GETTER');
+ }}) as AbortSignal;
+ const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+ const proxy=new Proxy(new AbortController().signal,{
+  get(){executed++;throw Error('UNTRUSTED_ABORT_PROXY');},
+  getPrototypeOf(){executed++;throw Error('UNTRUSTED_ABORT_REFLECT');}
+ });
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ const shadowed=new AbortController().signal;
+ Object.defineProperty(shadowed,'addEventListener',{value:()=>{
+  executed++;throw Error('UNTRUSTED_ABORT_LISTENER');
+ }});
+ for(const signal of [poison,spoof,proxy,revoked.proxy,shadowed]){
+  assert.deepEqual(await observeApprovedDom(browser,target,'https://example.com/',true,[],signal),
+   {ok:false,code:'INVALID_OPTIONS'});
+  assert.deepEqual(await observeApprovedDomSeries(
+   browser,target,'https://example.com/',true,[],2,100,signal),
+   {ok:false,code:'INVALID_OPTIONS'});
+  assert.equal(await awaitReadOnlyCdpSocketOpen(new EventTarget() as WebSocket,signal),
+   false,'transport must not register fake AbortSignal listeners');
+ }
+ const fakeBrowser=Object.defineProperty({},'ok',{get(){
+  executed++;throw Error('UNTRUSTED_BROWSER_GETTER');
+ }});
+ const trappedBrowser=new Proxy({ok:true},{
+  get(){executed++;throw Error('UNTRUSTED_BROWSER_PROXY');},
+  getPrototypeOf(){executed++;throw Error('UNTRUSTED_BROWSER_REFLECT');}
+ });
+ for(const suspect of [fakeBrowser,trappedBrowser]){
+  assert.deepEqual(await observeApprovedDom(
+   suspect as Parameters<typeof observeApprovedDom>[0],target,
+   'https://example.com/',true),{ok:false,code:'UNVERIFIED_BROWSER'});
+ }
+ assert.equal(executed,0,'untrusted getters/Proxy traps are never executed');
+ assert.deepEqual(await observeApprovedDom(browser,target,'https://example.com/',true,[],
+   AbortSignal.abort()),{ok:false,code:'CANCELLED'});
+ assert.deepEqual(await observeApprovedDom(browser,target,'https://example.com/',false,[],
+   poison),{ok:false,code:'NOT_AUTHORIZED'});
+});
