@@ -12,6 +12,7 @@
  * not an OS-enforced transaction against arbitrary external editors.
  */
 import {randomUUID} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {lstat,mkdir,open,link,rename,rmdir,unlink} from 'node:fs/promises';
@@ -119,8 +120,42 @@ async function inspectFile(path:string,key:string):Promise<Entry|'NOT_FOUND'|nul
   }finally{await h.close();}
  }catch{return null;}
 }
+// Archive snapshots originate in the native registry, but this exported
+// persistence boundary must never execute a forged Getter or Proxy trap.
+// Check data descriptors, including each dense array element, before reading.
+function plainArchiveRecord(value:unknown,keys:readonly string[]):boolean{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Array.isArray(value))return false;
+  const prototype=Object.getPrototypeOf(value);
+  if(prototype!==Object.prototype&&prototype!==null)return false;
+  const descriptors=Object.getOwnPropertyDescriptors(value);
+  return Reflect.ownKeys(descriptors).length===keys.length&&keys.every(key=>
+   Object.prototype.hasOwnProperty.call(descriptors,key)&&
+   Object.prototype.hasOwnProperty.call(descriptors[key],'value'));
+ }catch{return false;}
+}
+function safeArchiveSnapshot(value:unknown):value is LimitedHealthSnapshot{
+ if(!plainArchiveRecord(value,[
+  'schema','phase','scriptHash','status','history','tampermonkeyVerified',
+  'businessVerified','automaticPatchAllowed','automaticRollbackAllowed'
+ ]))return false;
+ const history=(value as LimitedHealthSnapshot).history;
+ if(nodeTypes.isProxy(history)||!Array.isArray(history)||
+    history.length===0||history.length>32)return false;
+ for(let i=0;i<history.length;i++){
+  const descriptor=Object.getOwnPropertyDescriptor(history,String(i));
+  if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value')||
+     !plainArchiveRecord(descriptor.value,[
+      'kind','evidenceHash','observedAtMs','status'
+     ]))return false;
+ }
+ return true;
+}
+
 function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
  try{
+  if(!safeArchiveSnapshot(snapshot))return null;
   if(!snapshot||!SHA.test(snapshot.scriptHash)||
      snapshot.schema!=='uah-limited-health-v1'||
      snapshot.phase!=='UNVERIFIED_LOCAL_HISTORY'||
