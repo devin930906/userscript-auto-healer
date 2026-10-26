@@ -504,3 +504,57 @@ test('TEST-013/026: diagnostic preflight never invokes caller consent or login g
  assert.equal(result.code,'INVALID_SCENARIO');
  assert.equal(calls,0,'reject Proxy before any reflective access');
 });
+
+
+test('TEST-013/026: untrusted observation descriptors and nested Proxies never execute caller code',()=>{
+ let calls=0;
+ const recorded=()=>{calls++;return true;};
+ const good=sample(matched);
+ const top=Object.defineProperty({...good},'ok',{get:recorded});
+ const counts=Object.defineProperty({...matched},'#current-target',{get(){
+  calls++;return 1;
+ }});
+ const nestedCounts={...good,selectorCounts:counts};
+ const nestedBlind={...good,summary:{...good.ok&&good.summary,
+  blindSpots:new Proxy([] as string[],{get(target,key,receiver){
+   calls++;return Reflect.get(target,key,receiver);
+  }})
+ }};
+ const observedProxy=new Proxy({...good},{get(target,key,receiver){
+  calls++;return Reflect.get(target,key,receiver);
+ }});
+ for(const untrusted of [top,nestedCounts,nestedBlind,observedProxy]){
+  calls=0;
+  const result=summarizeReadOnlyScenarioDom(
+   baseScenario,untrusted as unknown as ObservationResult,true);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'INVALID_OBSERVATION');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(calls,0,'never execute accessors or Proxy traps during CDP receipt inspection');
+ }
+ const later={...good,observedAt:'2026-10-18T00:00:01Z'};
+ const variants=[
+  {ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',userscriptVerified:false,
+   routeChangeDetected:false,selectorCountChanged:false,domCountChanged:false,
+   samples:new Proxy([good,later],{get(target,key,receiver){
+    calls++;return Reflect.get(target,key,receiver);
+   }})},
+  Object.defineProperty({
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',userscriptVerified:false,
+   routeChangeDetected:false,selectorCountChanged:false,domCountChanged:false,
+   samples:[good,later]
+  },'routeChangeDetected',{get(){
+   calls++;return false;
+  }})
+ ];
+ for(const untrusted of variants){
+  calls=0;
+  const result=summarizeReadOnlyScenarioDomSeries(baseScenario,
+   untrusted as unknown as Parameters<typeof summarizeReadOnlyScenarioDomSeries>[1],true);
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'INVALID_OBSERVATION');
+  assert.equal(calls,0,'series metadata must be copied without untrusted reflection');
+ }
+ const first=summarizeReadOnlyScenarioDom(baseScenario,good,true);
+ assert.equal(first.status,'LIMITED_DOM_SIGNAL_ONLY','regular CDP fixture remains supported');
+});
