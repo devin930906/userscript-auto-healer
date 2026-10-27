@@ -189,7 +189,21 @@ export async function runCheckpointedNativeImportAnalysis(
  try{
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator,reportSavedProgress);
-  if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
+  if(signal?.aborted||lifetime.signal.aborted){
+   // Cancellation revokes the batch receipt but should not erase results
+   // from independently completed segments. A durable SUCCEEDED state is
+   // insufficient on its own: also require current-session Worker evidence.
+   // A checkpoint write failure leaves NO trusted durability evidence.
+   if(outcome.status==='BLOCKED')return fail(count,'CANCELLED');
+   const partial=groups.flatMap((group,ordinal)=>{
+    const fresh=observations[ordinal];
+    return outcome.snapshot.jobs[ordinal].state==='SUCCEEDED'&&
+     fresh?.length===group.scripts.length
+     ?fresh:blank(group.scripts.length,'SKIPPED_CANCELLED');
+   });
+   return Object.freeze({status:'BLOCKED' as const,
+    reason:'CANCELLED' as const,previews:partial});
+  }
   if(outcome.status==='BLOCKED')return fail(count,outcome.reason);
   const previews:ImportAnalysisPreview[]=[];
   let processed=0;
@@ -226,7 +240,10 @@ export async function runCheckpointedNativeImportAnalysis(
    // Resume reanalysis awaits a worker AFTER checkpoint settlement. Any
    // cancellation during that await revokes the display receipt, even when
    // the previously persisted scheduling hint was SUCCEEDED.
-   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
+   if(signal?.aborted||lifetime.signal.aborted)
+    return Object.freeze({status:'BLOCKED' as const,
+     reason:'CANCELLED' as const,
+     previews:[...previews,...blank(count-previews.length,'SKIPPED_CANCELLED')]});
    previews.push(...(reports??blank(group.scripts.length,
     lifetime.signal.aborted?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED')));
    processed+=group.scripts.length;
@@ -235,7 +252,9 @@ export async function runCheckpointedNativeImportAnalysis(
     try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
    }
   }
-  if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
+  if(signal?.aborted||lifetime.signal.aborted)
+   return Object.freeze({status:'BLOCKED' as const,
+    reason:'CANCELLED' as const,previews});
   return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
    resumed,previews});
  }finally{
