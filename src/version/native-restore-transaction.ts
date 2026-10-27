@@ -124,6 +124,25 @@ async function restorePathUnclaimed(lockPath:string):Promise<boolean>{
   return (error as NodeJS.ErrnoException).code==='ENOENT';
  }
 }
+/** Check that the published restore-intent pathname STILL refers to the
+ * single-link file actually published by this transaction, in the same
+ * original recovery store. Identical JSON bytes are not proof of ownership:
+ * an external process may replace the inode without changing any digest.
+ * This is a bounded snapshot, not an OS-exclusive cross-process file lock.
+ */
+async function stillOwnPublishedRestoreIntent(
+ path:string,published:BigIntStats,ownedDirectory:BigIntStats
+):Promise<boolean>{
+ try{
+  if(await hasUnsafePathLink(path))return false;
+  const dir=await lstat(dirname(path),{bigint:true});
+  const file=await lstat(path,{bigint:true});
+  return dir.isDirectory()&&!dir.isSymbolicLink()&&
+   sameDirectory(dir,ownedDirectory)&&
+   file.isFile()&&!file.isSymbolicLink()&&file.nlink===1n&&
+   sameFile(published,file);
+ }catch{return false;}
+}
 /**
  * TASK-011 / TEST-020/026: best-effort cleanup of ONLY the staging inode
  * created by this restore. A malicious/accidental rename at the .pending
@@ -280,6 +299,8 @@ export async function restoreVerifiedOriginalNativeOnly(
  let journalPending:string|undefined;
  let pendingIdentity:BigIntStats|undefined;
  let journalPendingIdentity:BigIntStats|undefined;
+ // Capture AFTER the staging hard link is retired: link/unlink change ctime.
+ let publishedJournalIdentity:BigIntStats|undefined;
  let pendingParentIdentity:BigIntStats|undefined;
  let journalParentIdentity:BigIntStats|undefined;
  try{
@@ -416,8 +437,18 @@ export async function restoreVerifiedOriginalNativeOnly(
        journalPending,journalPath,journalPendingIdentity,journalParentIdentity))
     return block('RECOVERY_SAFETY_FAILED');
   journalPending=undefined;
+  // Bind future acceptance to the actual fsynced file published by our
+  // no-clobber hard link. The pre-link staging ctime cannot be reused here.
+  const publishedJournal=await lstat(journalPath,{bigint:true});
+  if(!journalPendingIdentity||!publishedJournal.isFile()||
+     publishedJournal.isSymbolicLink()||publishedJournal.nlink!==1n||
+     !sameDirectory(journalPendingIdentity,publishedJournal))
+   return block('RECOVERY_SAFETY_FAILED');
+  publishedJournalIdentity=publishedJournal;
   if(signal?.aborted)return block('CANCELLED');
-  if(await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
+  if(await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH'||
+     !await stillOwnPublishedRestoreIntent(
+      journalPath,publishedJournalIdentity,directoryStart))
    return block('RECOVERY_SAFETY_FAILED');
 
   // Recheck after all filesystem I/O. A cooperative mutex does not
@@ -469,6 +500,12 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(await hasInterruptedRestoreStaging(parent,basename(pending),finalPending)||
      await hasInterruptedRestoreStaging(opts.backupDirectory))
    return block('RECOVERY_REVIEW_REQUIRED');
+  // Even a same-byte external journal inode replacement cannot authorize
+  // the irreversible source rename.
+  if(!publishedJournalIdentity||
+     !await stillOwnPublishedRestoreIntent(
+      journalPath,publishedJournalIdentity,directoryStart))
+   return block('RECOVERY_SAFETY_FAILED');
   // Final cooperative cancellation boundary before the irreversible source
   // rename. This cannot cancel an OS rename already in progress.
   if(signal?.aborted)return block('CANCELLED');
@@ -495,7 +532,10 @@ export async function restoreVerifiedOriginalNativeOnly(
      (await verifyBackupRecoverySource({
        ...displacedInput,sourcePath:opts.sourcePath
      })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
-     await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH')
+     await verifyExactCandidateBytesReadOnly(journalPath,journal)!=='MATCH'||
+     !publishedJournalIdentity||
+     !await stillOwnPublishedRestoreIntent(
+      journalPath,publishedJournalIdentity,directoryStart))
    return block('RECOVERY_SAFETY_FAILED');
   // A lost lock after replacement must not yield a clean restore receipt.
   // Keep backups and the intent journal for independent native inspection.
@@ -563,7 +603,11 @@ export async function restoreVerifiedOriginalNativeOnly(
  // Once rmdir frees our owned mutex, a competing native restore may claim
  // the same source path before this asynchronous verification starts.
  // Never delete that foreign lock, and never return a stale success receipt.
- if(!await restorePathUnclaimed(lock))return block('RECOVERY_SAFETY_FAILED');
+ if(!await restorePathUnclaimed(lock)||!publishedJournalIdentity||
+    !journalParentIdentity||
+    !await stillOwnPublishedRestoreIntent(
+     receiptJournal.path,publishedJournalIdentity,journalParentIdentity))
+  return block('RECOVERY_SAFETY_FAILED');
  // Releasing our mutex awaits the filesystem. A third-party edit during
  // that await can invalidate an earlier success receipt. Recheck the same
  // restored inode, the original/displaced backups and the published intent
@@ -609,6 +653,8 @@ export async function restoreVerifiedOriginalNativeOnly(
   const last=await lstat(opts.sourcePath,{bigint:true});
   if(!sameFile(receiptSource,last)||last.nlink!==1n||
      await hasUnsafePathLink(opts.sourcePath)||
+     !await stillOwnPublishedRestoreIntent(
+      receiptJournal.path,publishedJournalIdentity,journalParentIdentity)||
      // The final source and recovery evidence checks await disk I/O.
      // Another restore might have claimed the mutex during that interval
      // without changing source bytes yet.
