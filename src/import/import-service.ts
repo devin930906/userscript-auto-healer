@@ -58,7 +58,7 @@ function validName(name: unknown): name is string {
   // Enforce the same rule for native picker imports and dropped byte payloads.
   return typeof name === 'string' && name.length > 0 && name.length <= 255 &&
     /^[^\\/:*?"<>|\u0000-\u001f]+\.user\.js$/i.test(name) &&
-    !/^(?:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(name);
+    !/^(?:con|conin\$|conout\$|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(name);
 }
 
 function decode(raw: Uint8Array, allowGb18030: boolean):
