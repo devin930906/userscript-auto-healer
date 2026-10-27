@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,mkdtemp,readdir,readFile,rm,utimes,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -68,6 +68,50 @@ test('TEST-020: discover persisted checkpoint after loss of staged receipt, with
     }
     assert.equal(await readFile(options.sourcePath,'utf8'),source);
   });
+});
+
+test('TASK-011/TEST-020/026: same-byte in-place checkpoint rewrite between successful reads cannot yield a stale inventory',async t=>{
+ await fixture(async options=>{
+   const staged=await stageReviewedCandidateOnly(request,
+     proposeLiteralSelectorPatch(request),options);
+   assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+   if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const made=await stageRecoveryCheckpointOnly(request,staged,options);
+   assert.equal(made.status,'CHECKPOINT_STAGED_UNVERIFIED');
+   if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+   const path=join(options.backupDirectory,made.checkpointFileName);
+   const initial=await lstat(path,{bigint:true});
+   const exactBytes=await readFile(path);
+   const module=require('../../src/version/recovery-checkpoint') as
+     typeof import('../../src/version/recovery-checkpoint');
+   const real=module.inspectRecoveryCheckpointReadOnly;
+   let checks=0;
+   t.mock.method(module,'inspectRecoveryCheckpointReadOnly',async(
+     ...args:Parameters<typeof real>)=>{
+       const verified=await real(...args);
+       checks++;
+       if(checks===1){
+         assert.equal(verified.status,'CHECKPOINT_RECHECKED_READ_ONLY');
+         // An external writer edits the SAME inode AFTER its valid first
+         // inspection. Rewriting identical bytes keeps the SHA unchanged,
+         // and a file's mtime does not alter its parent directory's times.
+         await writeFile(path,exactBytes);
+         await utimes(path,new Date('2001-01-01T00:00:00Z'),
+           new Date('2001-01-01T00:00:00Z'));
+       }
+       return verified;
+     });
+   const inventory=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+   const last=await lstat(path,{bigint:true});
+   assert.ok(checks>=2,'both independent content inspections must execute');
+   assert.equal(last.ino,initial.ino,'fixture mutates in place, not via rename');
+   assert.notEqual(last.mtimeNs,initial.mtimeNs,
+     'fixture must change checkpoint metadata without changing bytes');
+   assert.deepEqual(await readFile(path),exactBytes);
+   assert.equal(inventory.status,'BLOCKED',
+     'same-byte metadata mutation between two successful inspections invalidates the whole inventory');
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
 });
 
 test('TASK-011/TEST-020/026: checkpoint changed while subsequent entries are checked invalidates inventory',async t=>{
