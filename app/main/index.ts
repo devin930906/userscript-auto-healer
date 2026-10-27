@@ -1137,6 +1137,7 @@ function registerSafeIpc(): void {
         candidateFileName:result.candidateFileName,
         exportFileName:result.exportFileName,
         recoveryExportFileName:result.recoveryExportFileName,
+        checkpointFileName:result.checkpointFileName,
         candidateSha256:result.candidateSha256,
         candidateByteLength:result.candidateByteLength,
         ...unverified};
