@@ -276,3 +276,8 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 
 - 当前开发分支 `fix/task003-untrusted-metadata-byte-boundary` 已提交新增 TEST-004/026 恶意字节输入负例及解析器最小修复。RED `339007a66aa68b4b9d303e47071f1ee3abd19bfa` 对应 [Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 642 项：640 pass / 1 预期失败 / 1 skip；GREEN `ad10c62c071b486f7f9dd0398816aea09ec6091c` 对应 [Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) 641 pass / 0 fail / 1 skip，Electron 真实沙箱 smoke success。
 - 该安全修复仅限制不可信字节容器触发解析器任意 Getter、Proxy 或伪造 `subarray` 方法，不执行脚本、不认证 Tampermonkey、不触碰脚本原件、不授予自动应用/回滚权限。PR 整合与合并后 main HEAD/Checks 以最新 GitHub 记录为准；下个仍需优先处理的关键链路为 TASK-007/010/011、TASK-018 与 GATE-001..011。
+
+## （7）2026-10-27 TASK-011 检查点回执新鲜度修复与续接
+- 在 `fix/task011-checkpoint-final-receipt` 上实现既有 TASK-011 / TEST-020/026 的原生检查点安全增量：发布后仍等待源/备份/候选复核期间，检查点被独立修改或同名同字节文件替换，不再获得陈旧的“已暂存”成功回执；源码与独立备份不被本项修改。
+- TDD RED `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca`、[Windows #40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095) 643 tests（641 pass/1 预期新失败/1 skip）；GREEN `74eb05cf6c971e13a212b87ede93fdcb15d596e9`、[Windows #40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319) 643 tests（642 pass/0 fail/1 skip），Electron shell smoke success。
+- 此项没有实现自动脚本应用、真实 Tampermonkey 业务、原子断电回滚或正式 Stable GATE；本次 PR/合并后的 main 最新 SHA 与 Checks 必须重新核查。优先续接 TASK-007/010/011 可信业务和恢复链路及其全部必要 TEST，再推进 TASK-018..021。

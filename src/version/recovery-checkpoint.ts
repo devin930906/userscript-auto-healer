@@ -171,11 +171,38 @@ export async function stageRecoveryCheckpointOnly(
       const afterPublish=await lstat(opts.backupDirectory,{bigint:true});
       if(!afterPublish.isDirectory()||afterPublish.isSymbolicLink()||
          !sameDirectory(dir,afterPublish))return block('UNSAFE_DESTINATION');
+      // Bind the receipt to OUR published inode, not merely its filename or
+      // SHA-256. An external editor can replace a file with identical bytes.
+      // The earlier hard-link retirement legitimately changes ctime/nlink.
+      const published=await lstat(final,{bigint:true});
+      if(!pendingIdentity||!published.isFile()||published.isSymbolicLink()||
+         published.nlink!==1n||published.dev!==pendingIdentity.dev||
+         published.ino!==pendingIdentity.ino||
+         published.size!==pendingIdentity.size||
+         published.mtimeNs!==pendingIdentity.mtimeNs)
+        return block('CHECKPOINT_FAILED');
       // Any stale disk file during publication invalidates this observation.
       // The record remains for explicit investigation, NEVER for auto-apply.
       const rechecked=await verifyStagedCandidateReadOnly(stableRequest,data,opts);
       if(rechecked.status!=='CANDIDATE_RECHECKED_READ_ONLY')
         return block('RECHECK_FAILED');
+      // Rechecking source/backup/candidate is asynchronous. The published
+      // checkpoint itself may have changed or been swapped during that await.
+      // No stale success receipt: compare both exact bytes AND same file
+      // identity after the final candidate check, without deleting it.
+      if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH'||
+         await hasUnsafePathLink(final)||
+         await hasUnsafePathLink(opts.backupDirectory))
+        return block('CHECKPOINT_FAILED');
+      const last=await lstat(final,{bigint:true});
+      const lastDirectory=await lstat(opts.backupDirectory,{bigint:true});
+      if(!last.isFile()||last.isSymbolicLink()||last.nlink!==1n||
+         last.dev!==published.dev||last.ino!==published.ino||
+         last.size!==published.size||last.mtimeNs!==published.mtimeNs||
+         last.ctimeNs!==published.ctimeNs||
+         !lastDirectory.isDirectory()||lastDirectory.isSymbolicLink()||
+         !sameDirectory(dir,lastDirectory))
+        return block('CHECKPOINT_FAILED');
       return Object.freeze({
         status:'CHECKPOINT_STAGED_UNVERIFIED' as const,
         checkpointFileName,checkpointSha256:expectedHash,

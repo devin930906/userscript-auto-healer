@@ -354,3 +354,8 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 已定位：原 `readUserscriptSource` 在检查字节容器真实性前直接读取 `script.bytes`，并允许虚构对象的 `subarray()` 被调用。现从普通对象自有数据属性读取来源，仅接受非 Proxy 的真实 Uint8Array/Buffer，通过原生 TypedArray 内部 Getter 获取字节视图；异常、伪造对象或 Getter 全部返回无效编码，保留只读 BOM/字符集解析。
 - RED 测试提交 `339007a66aa68b4b9d303e47071f1ee3abd19bfa`：[Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 642 tests、640 pass、1 fail、1 skip；GREEN 修复 `ad10c62c071b486f7f9dd0398816aea09ec6091c`：[Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) 642 tests、641 pass、0 fail、1 skip，真实 Electron smoke success。
 - 仅防回归增量，不重启已完成 TASK-003；TASK-007/010/011 的完整可信业务链路、TASK-018 与正式 Stable GATE 仍需各自实证，不以此增量改变原始任务状态。
+
+## （7）2026-10-27 TASK-011 / TEST-020/026 检查点异步验收时间窗修复
+- 原有检查点在首次发布字节校验后仍执行异步候选完整性复核，期间外部进程改写 checkpoint JSON、或同名同字节替换 inode，可让原先的 `CHECKPOINT_STAGED_UNVERIFIED` 回执失去现时依据。仅在原有 TASK-011 准许的无自动写入检查点范围内补齐后验：发布 inode 须绑定原 pending inode；在最后候选复核后，重新验证 checkpoint 字节、inode、mtime/ctime、nlink、目录与链接安全。
+- 测试提交 `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca` 的 RED [#40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095)：643 总计，641 pass/1 fail/1 skip，旧实现因外部内容修改仍成功而失败。实现提交 `74eb05cf6c971e13a212b87ede93fdcb15d596e9` 的 GREEN [#40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319)：643 总计，642 pass/0 fail/1 skip，Windows Electron smoke 成功。
+- 保留 TASK-011 真正跨崩溃事务与可信恢复、TASK-007/010 管理器验收、TASK-018..021 和 GATE-001..011 现有剩余工作；不重新计为完整 TASK-011，也不提升自动补丁或回滚权限。
