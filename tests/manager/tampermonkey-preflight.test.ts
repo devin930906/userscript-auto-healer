@@ -111,6 +111,35 @@ test('TEST-017: consent and real owned-target hint stage cannot be bypassed',()=
   {ok:false,code:'RUNTIME_NOT_OBSERVED'},report,normal,'https://example.com/',true
  ).ok,false);
 });
+test('TASK-007/TEST-017/026: contradictory runtime presence hints never qualify unverified GM preflight',()=>{
+ assert.equal(runtime.ok,true);
+ if(!runtime.ok)return;
+ const mutations:Array<[string,Record<string,unknown>]>=[
+  ['zero observed targets',{matchedRuntimeTargets:0}],
+  ['negative observed targets',{matchedRuntimeTargets:-1}],
+  ['fractional observed targets',{matchedRuntimeTargets:1.5}],
+  ['over-limit observed targets',{matchedRuntimeTargets:513}],
+  ['wrong manager label',{manager:'Other'}],
+  ['forged extension verification',{extensionAuthenticityVerified:true}],
+  ['forged version verification',{versionVerified:true}],
+  ['forged permission verification',{permissionVerified:true}],
+  ['forged script installation verification',{scriptInstallationVerified:true}],
+  ['forged injection verification',{scriptInjectionVerified:true}],
+  ['forged GM verification',{gmApiVerified:true}],
+  ['forged business verification',{businessVerified:true}]
+ ];
+ for(const [label,change] of mutations){
+  const inconsistent={...runtime,...change} as unknown as Parameters<
+    typeof inspectReportedTampermonkeyPreflight>[0];
+  const result=inspectReportedTampermonkeyPreflight(
+    inconsistent,report,normal,'https://example.com/foo',true);
+  assert.deepEqual(result,{
+    ok:false,status:'BLOCKED',code:'RUNTIME_NOT_OBSERVED',
+    gmApiVerified:false,businessVerified:false
+  },label);
+ }
+});
+
 test('TEST-017: wrong extension, disabled manager, missing userScripts permission and absent installation are blocked',()=>{
  const cases:[Partial<typeof report>,string][]=[
   [{extensionId:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'},'WRONG_MANAGER'],
