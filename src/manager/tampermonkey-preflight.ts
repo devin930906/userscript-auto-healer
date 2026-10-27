@@ -78,8 +78,20 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  userApproved:boolean
 ):TampermonkeyPreflightResult {
  if(userApproved!==true)return blocked('NOT_AUTHORIZED');
+ // A caller-supplied runtime hint must have the exact invariants emitted by
+ // inspectTampermonkeyTargetHints. Contradictory counts or claims of verified
+ // extension/GM/business state are not evidence of an observed native target.
  if(!runtime||runtime.ok!==true||runtime.status!=='RUNTIME_TARGET_HINT_ONLY'||
-    runtime.extensionId!==TAMPERMONKEY_EXTENSION_ID)return blocked('RUNTIME_NOT_OBSERVED');
+    runtime.extensionId!==TAMPERMONKEY_EXTENSION_ID||
+    runtime.manager!=='Tampermonkey'||
+    !Number.isSafeInteger(runtime.matchedRuntimeTargets)||
+    runtime.matchedRuntimeTargets<1||runtime.matchedRuntimeTargets>512||
+    runtime.extensionAuthenticityVerified!==false||
+    runtime.versionVerified!==false||runtime.permissionVerified!==false||
+    runtime.scriptInstallationVerified!==false||
+    runtime.scriptInjectionVerified!==false||
+    runtime.gmApiVerified!==false||runtime.businessVerified!==false)
+   return blocked('RUNTIME_NOT_OBSERVED');
  if(!report||typeof report!=='object'||Array.isArray(report)||
     typeof targetUrl!=='string'||targetUrl.length>4096)return blocked('INVALID_INPUT');
  if(report.extensionId!==TAMPERMONKEY_EXTENSION_ID)return blocked('WRONG_MANAGER');
