@@ -247,3 +247,47 @@ test('TEST-023/026: failed candidate or recovery publication never unlinks a for
   });
  }
 });
+
+test('TEST-023/026: an externally replaced byte-identical published export cannot receive a success receipt',async()=>{
+ for(const target of ['candidate','recovery'] as const){
+  await fixture(async options=>{
+   const {candidate,staged}=await stage(options);
+   if(candidate.status!=='CANDIDATE_ONLY'||
+      staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const checker=require('../../src/version/staged-candidate-recheck') as
+     typeof import('../../src/version/staged-candidate-recheck');
+   const originalCheck=checker.verifyStagedCandidateReadOnly;
+   let checks=0;
+   let displacedPath:string|undefined;
+   const hook=mock.method(checker,'verifyStagedCandidateReadOnly',
+    async(...args:Parameters<typeof originalCheck>)=>{
+     const outcome=await originalCheck(...args);
+     checks++;
+     if(checks===3&&outcome.status==='CANDIDATE_RECHECKED_READ_ONLY'){
+      const prefix=target==='candidate'?'UAH-Reviewed-':'UAH-Original-';
+      const filename=(await readdir(options.exportDirectory)).find(
+       name=>name.startsWith(prefix));
+      assert.ok(filename,'both manually exported files exist before last check');
+      const published=join(options.exportDirectory,filename);
+      displacedPath=join(options.exportDirectory,'displaced-'+target+'.user.js');
+      await rename(published,displacedPath);
+      // Same bytes, different inode: a digest comparison alone cannot
+      // establish ownership of the pathname receiving a success receipt.
+      await writeFile(published,await readFile(displacedPath));
+     }
+     return outcome;
+    });
+   try{
+    const result=await exportReviewedCandidateForManualInstall(request,staged,options);
+    assert.equal(checks,3,'replacement must occur after the final candidate recheck');
+    assert.ok(displacedPath);
+    assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+    if(result.status==='BLOCKED')assert.equal(result.reason,'EXPORT_FAILED');
+    assert.deepEqual(await readFile(displacedPath!),
+     Buffer.from(target==='candidate'?candidate.candidateSource:source));
+    assert.equal(await readFile(options.sourcePath,'utf8'),source,
+     'the original userscript is never modified');
+   }finally{hook.mock.restore();}
+  });
+ }
+});
