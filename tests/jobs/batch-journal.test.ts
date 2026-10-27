@@ -219,21 +219,24 @@ test('TASK-013/TEST-022/026: a replaced pending checkpoint must not become the c
  });
 });
 
-test('TASK-013/TEST-022/026: post-rename matching bytes from a different inode must not attest a saved journal',async()=>{
+test('TASK-013/TEST-022/026: post-publish matching bytes from a different inode must not attest a saved journal',async()=>{
  await withJournal(async directory=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
-  const realRename=fsPromises.rename;
+  const nativeUnlink=fsPromises.unlink;
+  const nativeRename=fsPromises.rename;
   const journal=join(directory,BATCH_JOURNAL_FILENAME);
   const retained=join(directory,'owned-journal-retained-for-review');
   let injected=false;
-  // Interpose precisely after the native rename: the replacement is byte-for-byte
-  // identical but a DIFFERENT inode. No arbitrary data is exposed or deleted.
-  (fsPromises as {rename:typeof realRename}).rename=async(from,to)=>{
-   await realRename(from,to);
-   if(to===journal){
+  // Initial publication now uses a no-clobber link followed by staging unlink.
+  // Replace the published journal immediately AFTER its staging link retires:
+  // this is the same real post-publish boundary as the former rename test.
+  (fsPromises as {unlink:typeof nativeUnlink}).unlink=async path=>{
+   await nativeUnlink(path);
+   if(typeof path==='string' &&
+      path.startsWith(join(directory,'.uah-readonly-batch-')) && existsSync(journal)){
     injected=true;
     const bytes=await readFile(journal);
-    await realRename(journal,retained);
+    await nativeRename(journal,retained);
     await writeFile(journal,bytes);
    }
   };
@@ -243,7 +246,7 @@ test('TASK-013/TEST-022/026: post-rename matching bytes from a different inode m
    assert.equal(injected,true);
    assert.deepEqual(output,{status:'BLOCKED',reason:'IO_FAILURE'});
    assert.deepEqual(await readFile(journal),await readFile(retained));
-  }finally{(fsPromises as {rename:typeof realRename}).rename=realRename;}
+  }finally{(fsPromises as {unlink:typeof nativeUnlink}).unlink=nativeUnlink;}
  });
 });
 
@@ -326,16 +329,18 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
   });
   const original=ReadOnlyBatchCoordinator.prototype.snapshot;
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
-  const nativeRename=fsPromises.rename;
+  const nativeUnlink=fsPromises.unlink;
   const lock=join(directory,'.uah-readonly-batch-v2.lock');
   const target=join(directory,BATCH_JOURNAL_FILENAME);
   let firstJournalPublished=false,foreignLockInjected=false;
   // Install the foreign lock ONLY after the first fully published journal
   // has released its writer lock, just before the RUNNING transition tries
   // to persist. Do not depend on how many safety snapshots save() takes.
-  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
-   await nativeRename(from,to);
-   if(to===target)firstJournalPublished=true;
+  (fsPromises as {unlink:typeof nativeUnlink}).unlink=async path=>{
+   await nativeUnlink(path);
+   if(typeof path==='string' &&
+      path.startsWith(join(directory,'.uah-readonly-batch-')) &&
+      existsSync(target))firstJournalPublished=true;
   };
   ReadOnlyBatchCoordinator.prototype.snapshot=function(this:ReadOnlyBatchCoordinator){
    if(firstJournalPublished&&!foreignLockInjected&&!existsSync(lock)){
@@ -354,7 +359,7 @@ test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting 
     ['QUEUED','QUEUED']);
   }finally{
    ReadOnlyBatchCoordinator.prototype.snapshot=original;
-   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+   (fsPromises as {unlink:typeof nativeUnlink}).unlink=nativeUnlink;
   }
  });
 });
@@ -376,19 +381,19 @@ test('TASK-013/TEST-022: checkpointed run refuses concurrency two and unbound ba
 });
 
 
-test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return a stale success receipt',async()=>{
+test('TASK-013/TEST-022/026: cancellation during checkpoint publication cannot return a stale success receipt',async()=>{
  await withJournal(async directory=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
-  const nativeRename=fsPromises.rename;
+  const nativeUnlink=fsPromises.unlink;
   const target=join(directory,BATCH_JOURNAL_FILENAME);
   const coordinator=new ReadOnlyBatchCoordinator(options,completed);
   let cancelledDuringPublish=false;
-  // Reproduce the real async gap AFTER the earlier native snapshot check:
-  // the rename completed, then a user cancellation changed queued jobs
-  // before the original save() returned. No foreign file is introduced.
-  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
-   await nativeRename(from,to);
-   if(to===target){
+  // Reproduce cancellation after the no-clobber hard-link was published
+  // and its staging name retired, but before save() returned.
+  (fsPromises as {unlink:typeof nativeUnlink}).unlink=async path=>{
+   await nativeUnlink(path);
+   if(typeof path==='string' &&
+      path.startsWith(join(directory,'.uah-readonly-batch-'))&&existsSync(target)){
     cancelledDuringPublish=true;
     coordinator.cancel();
    }
@@ -404,7 +409,7 @@ test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return
    assert.deepEqual(coordinator.snapshot().jobs.map(job=>job.state),
     ['CANCELLED','CANCELLED'],'do not erase a legitimate cancellation');
   }finally{
-   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+   (fsPromises as {unlink:typeof nativeUnlink}).unlink=nativeUnlink;
   }
   // A fresh, legitimate save of the current terminal state remains possible.
   const retry=await saveReadOnlyBatchJournal(directory,coordinator);
@@ -418,17 +423,20 @@ test('TASK-013/TEST-022/026: cancellation during checkpoint rename cannot return
 test('TASK-013/TEST-022/026: cancellation during final writer-lock recheck refuses stale receipt',async()=>{
  await withJournal(async directory=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
-  const nativeRename=fsPromises.rename;
+  const nativeUnlink=fsPromises.unlink;
   const nativeLstat=fsPromises.lstat;
   const target=join(directory,BATCH_JOURNAL_FILENAME);
   const lock=join(directory,'.uah-readonly-batch-v2.lock');
   const coordinator=new ReadOnlyBatchCoordinator(options,completed);
   let published=false,lockChecks=0,cancelledDuringFinalCheck=false;
   // Interpose at the second post-publication lock identity read, AFTER
-  // the initial post-rename verification and before the save receipt.
-  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
-   await nativeRename(from,to);
-   if(to===target)published=true;
+  // the initial no-clobber publish verification and before the save receipt.
+  (fsPromises as {unlink:typeof nativeUnlink}).unlink=async path=>{
+   await nativeUnlink(path);
+   if(typeof path==='string' &&
+      path.startsWith(join(directory,'.uah-readonly-batch-'))&&existsSync(target)){
+    published=true;
+   }
   };
   (fsPromises as {lstat:typeof nativeLstat}).lstat=(async(
    ...args:Parameters<typeof nativeLstat>
@@ -450,7 +458,7 @@ test('TASK-013/TEST-022/026: cancellation during final writer-lock recheck refus
     ['CANCELLED','CANCELLED']);
   }finally{
    (fsPromises as {lstat:typeof nativeLstat}).lstat=nativeLstat;
-   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+   (fsPromises as {unlink:typeof nativeUnlink}).unlink=nativeUnlink;
   }
  });
 });
