@@ -8,7 +8,7 @@
  */
 import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
-import {lstat,mkdir,open,rename,rm,rmdir} from 'node:fs/promises';
+import {link,lstat,mkdir,open,rename,rm,rmdir,unlink} from 'node:fs/promises';
 import {isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {ReadOnlyBatchCoordinator,type ReadOnlyWorker,type ReadOnlyBatchSnapshot} from './batch-coordinator';
@@ -194,7 +194,27 @@ export async function saveReadOnlyBatchJournal(directory:string,coordinator:Read
    return deny('INVALID_CHECKPOINT');
   if(!await stillOwnWriterLock(directory,start,ownedLock))
    return deny('BUSY');
-  await rename(staging,target);
+  if(previousTarget){
+   // Existing same-batch journals follow the checked single-writer update.
+   await rename(staging,target);
+  }else{
+   // Initial creation must be NO-CLOBBER. A competing process can install
+   // a new target between the last lstat() and publication; rename() would
+   // silently overwrite it despite the native cooperative writer mutex.
+   // A same-directory hard link fails with EEXIST instead of replacing it.
+   await link(staging,target);
+   const targetLink=await lstat(target,{bigint:true});
+   const pendingLink=await lstat(staging,{bigint:true});
+   if(!ownedStaging||!targetLink.isFile()||targetLink.isSymbolicLink()||
+      !pendingLink.isFile()||pendingLink.isSymbolicLink()||
+      targetLink.nlink!==2n||pendingLink.nlink!==2n||
+      !sameDir(ownedStaging,targetLink)||
+      !sameDir(ownedStaging,pendingLink)||
+      targetLink.size!==ownedStaging.size||
+      pendingLink.size!==ownedStaging.size)
+    return deny('INVALID_CHECKPOINT');
+   await unlink(staging);
+  }
   staging=undefined;
   const stored=await boundedRead(target);
   const finalDir=await checkedDirectory(directory);
