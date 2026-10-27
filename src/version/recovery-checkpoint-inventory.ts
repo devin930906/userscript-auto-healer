@@ -124,7 +124,15 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
       checkpointFileName:string;checkpointSha256:string;
       originalSha256:string;candidateSha256:string
     }>=[];
+    // Bind every observation to the SAME checkpoint inode and metadata
+    // across the entire inventory, not merely matching SHA-256.
+    // In-place edits do not change the parent directory's timestamps.
+    const checkpointFiles:Array<{name:string;file:BigIntStats}>=[];
     for(const name of matches){
+      const before=await lstat(join(options.backupDirectory,name),{bigint:true});
+      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n)
+        return deny('UNSAFE_CHECKPOINT');
+      checkpointFiles.push({name,file:before});
       const inspected=await inspectRecoveryCheckpointReadOnly(
         request,name,options);
       if(inspected.status!=='CHECKPOINT_RECHECKED_READ_ONLY')
@@ -166,6 +174,19 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
        !dirAfter.isDirectory()||
        dirBefore.mtimeNs!==dirAfter.mtimeNs||
        dirBefore.ctimeNs!==dirAfter.ctimeNs)return deny('UNSAFE_PATH');
+    // Both independent inspectors can accept identical checkpoint bytes
+    // even after an external process rewrites a file BETWEEN their calls.
+    // The directory is unchanged by this edit; compare original inode,
+    // ctime/mtime, mode and link count at the aggregate boundary.
+    // A read-only snapshot is not an OS-enforced cross-process lock.
+    for(const entry of checkpointFiles){
+      const last=await lstat(join(options.backupDirectory,entry.name),
+        {bigint:true});
+      if(!last.isFile()||last.isSymbolicLink()||last.nlink!==1n||
+         !sameFile(entry.file,last)||entry.file.mode!==last.mode||
+         entry.file.nlink!==last.nlink)
+        return deny('UNSAFE_CHECKPOINT');
+    }
     return Object.freeze({
       status:'OBSERVED_CHECKPOINTS_READ_ONLY' as const,
       checkpoints:Object.freeze(observed),...noAuthority
