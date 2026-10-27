@@ -67,6 +67,18 @@ function absolute(value:unknown):value is string{
 function sameDir(a:BigIntStats,b:BigIntStats):boolean{
  return a.isDirectory()&&b.isDirectory()&&a.dev===b.dev&&a.ino===b.ino;
 }
+/** A byte-identical file at a reused pathname is not the file we published.
+ * The hard-link retirement changes ctime, so bind the receipt to the inode
+ * after publication and compare its subsequent metadata separately.
+ */
+function samePublishedOwner(file:BigIntStats,owned:BigIntStats):boolean{
+ return file.isFile()&&!file.isSymbolicLink()&&file.nlink===1n&&
+  file.dev===owned.dev&&file.ino===owned.ino&&
+  file.size===owned.size&&file.mtimeNs===owned.mtimeNs;
+}
+function samePublishedReceipt(file:BigIntStats,published:BigIntStats):boolean{
+ return samePublishedOwner(file,published)&&file.ctimeNs===published.ctimeNs;
+}
 /** A manually installable candidate must not be placed anywhere inside the
  * protected backup store, including a child directory. Compare complete path
  * components, not string prefixes (which would reject unrelated siblings).
@@ -160,6 +172,10 @@ export async function exportReviewedCandidateForManualInstall(
     pendingExists=false;
     if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
       return block('EXPORT_FAILED');
+    if(!pendingIdentity)return block('EXPORT_FAILED');
+    const publishedCandidate=await lstat(final,{bigint:true});
+    if(!samePublishedOwner(publishedCandidate,pendingIdentity))
+      return block('EXPORT_FAILED');
     if(await hasUnsafePathLink(options.exportDirectory))
       return block('UNSAFE_DESTINATION');
     const afterExport=await lstat(options.exportDirectory,{bigint:true});
@@ -214,6 +230,10 @@ export async function exportReviewedCandidateForManualInstall(
       recoveryPendingExists=false;
       if(await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH')
         return block('EXPORT_FAILED');
+      if(!recoveryPendingIdentity)return block('EXPORT_FAILED');
+      const publishedRecovery=await lstat(recoveryFinal,{bigint:true});
+      if(!samePublishedOwner(publishedRecovery,recoveryPendingIdentity))
+        return block('EXPORT_FAILED');
       const afterRecovery=await verifyStagedCandidateReadOnly(
         request,receipt,nativeOptions);
       if(afterRecovery.status!=='CANDIDATE_RECHECKED_READ_ONLY'||
@@ -227,6 +247,13 @@ export async function exportReviewedCandidateForManualInstall(
          recoveryDirAfter.isSymbolicLink()||
          await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH'||
          await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
+        return block('EXPORT_FAILED');
+      // Both files were asynchronously rechecked after publication. Bind the
+      // success receipt to their ORIGINAL inodes, not just equal digests.
+      const finalCandidate=await lstat(final,{bigint:true});
+      const finalRecovery=await lstat(recoveryFinal,{bigint:true});
+      if(!samePublishedReceipt(finalCandidate,publishedCandidate)||
+         !samePublishedReceipt(finalRecovery,publishedRecovery))
         return block('EXPORT_FAILED');
     }finally{
       if(recoveryPendingExists&&recoveryPendingIdentity)
