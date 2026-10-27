@@ -438,3 +438,25 @@ test('TASK-011: native manual export displays a persisted unverified checkpoint 
  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:checkpoint-apply'/);
  assert.doesNotMatch(main,/ipcMain\.handle\('restore:checkpoint-apply'/);
 });
+
+
+test('TASK-007/011 / TEST-017/018/020/023: real isolated manager handoff requires verified native recovery checkpoint',()=>{
+ const poc=readFileSync(join(process.cwd(),'poc/windows-tampermonkey-cloud.cjs'),'utf8');
+ const start=poc.indexOf('async function prepareNativeManualExportForManager(');
+ const end=poc.indexOf('const sleep=',start);
+ assert.ok(start>=0&&end>start,'Inspect the actual native-to-manager preparation function');
+ const handoff=poc.slice(start,end);
+ assert.match(handoff,/inspectRecoveryCheckpointReadOnly/);
+ assert.match(handoff,/checkpointFileName/);
+ assert.match(handoff,/checkpointSha256/);
+ assert.match(handoff,/checkpointInspection\.status,'CHECKPOINT_RECHECKED_READ_ONLY'/);
+ assert.match(handoff,/checkpointInspection\.originalSha256/);
+ assert.match(handoff,/checkpointInspection\.candidateSha256/);
+ assert.match(handoff,/checkpointInspection\.automaticPatchAllowed,false/);
+ assert.match(handoff,/checkpointInspection\.automaticRollbackAllowed,false/);
+ // Do not silently treat a checkpoint as a browser extension or user
+ // authorization, and do not add a new renderer or filesystem IPC ability.
+ assert.doesNotMatch(handoff,/checkpointInspection\.(?:managerInstalled|businessVerified),true/);
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:checkpoint-apply'/);
+});
