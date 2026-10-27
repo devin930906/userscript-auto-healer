@@ -3,6 +3,7 @@ import {strict as assert} from 'node:assert';
 import {parseUserscriptMetadata,type MetadataResult} from '../../src/analyze/metadata-parser';
 import {inspectTampermonkeyTargetHints,TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 import {inspectReportedTampermonkeyPreflight} from '../../src/manager/tampermonkey-preflight';
+import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 
 const runtime=inspectTampermonkeyTargetHints([
  {targetId:'verified-structure-01',type:'service_worker',
@@ -450,5 +451,46 @@ test('TEST-017/026: preflight rejects a forged tag map inconsistent with the sup
    ok:false,status:'BLOCKED',code:'INVALID_SCRIPT_METADATA',
    gmApiVerified:false,businessVerified:false
   },hidden);
+ }
+});
+
+
+test('TASK-007/TEST-017/026: current isolated three-GM roundtrip fixture passes metadata-only preflight, not runtime verification',async t=>{
+ for(const timing of ['document-start','document-body','document-end','document-idle'] as const){
+  const started=await startIsolatedTampermonkeyGmProbe(true,30000,timing);
+  assert.equal(started.ok,true);
+  if(!started.ok)continue;
+  t.after(()=>started.session.stop());
+  const fixture=started.session;
+  const parse=(source:string)=>parseUserscriptMetadata({
+   bytes:Buffer.from(source),textEncoding:'utf-8'
+  });
+  const checked=parse(fixture.source);
+  assert.equal(checked.status,'OK');
+  assert.deepEqual(checked.tags.grant,['GM_getValue','GM_setValue','GM_deleteValue']);
+  const result=inspect(report,checked,fixture.origin+'/?mode=fixed');
+  assert.equal(result.ok,true,timing+': '+JSON.stringify(result));
+  if(result.ok){
+   assert.equal(result.status,'METADATA_ELIGIBLE_ONLY');
+   assert.equal(result.extensionAuthenticityVerified,false);
+   assert.equal(result.scriptInstallationVerified,false);
+   assert.equal(result.gmApiVerified,false);
+   assert.equal(result.businessVerified,false);
+  }
+  for(const [label,edited] of [
+   ['external domain',fixture.source.replace(
+     '// @match http://127.0.0.1/*','// @match https://example.com/*')],
+   ['extra privilege',fixture.source.replace(
+     '// @grant GM_deleteValue','// @grant GM_deleteValue\n// @grant GM_xmlhttpRequest')],
+   ['missing noframes',fixture.source.replace('// @noframes\n','')],
+   ['wrong namespace',fixture.source.replace(
+     '// @namespace uah-isolated-gm-probe.','// @namespace external-script.')],
+   ['wrong name',fixture.source.replace(
+     '// @name UAH Isolated GM Diagnostic ','// @name Unrelated Script ')],
+   ['wrong version',fixture.source.replace('// @version 0.0.1','// @version 9.9.9')]
+  ] as const){
+   const outcome=inspect(report,parse(edited),fixture.origin+'/?mode=fixed');
+   assert.equal(outcome.ok,false,timing+' / '+label+' should remain blocked');
+  }
  }
 });
