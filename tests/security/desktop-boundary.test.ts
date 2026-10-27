@@ -180,6 +180,21 @@ test('TASK-001: reject daily Chrome User Data, drive roots and traversal', () =>
   }
 });
 
+test('TASK-005/TEST-007/026: reject default profiles of Chrome channels and other Chromium browsers', () => {
+  for (const profile of [
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome Beta\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome Dev\User Data\Default`,
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome SxS\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Microsoft\Edge\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Microsoft\Edge Beta\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Microsoft\Edge Dev\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Chromium\User Data`
+  ]) {
+    assert.deepEqual(validateBrowserConfig({...allowed, userDataDir: profile}),
+      {ok:false, code:'UNSAFE_PROFILE'}, 'daily-use browser Profile is not isolated: '+profile);
+  }
+});
+
 test('TASK-001: reject privileged, out-of-range and fractional CDP ports', () => {
   for (const port of [0, 80, 1023, 65536, 9223.5, '9223', NaN]) {
     assert.equal(validateBrowserConfig({...allowed, remoteDebuggingPort: port}).ok, false);

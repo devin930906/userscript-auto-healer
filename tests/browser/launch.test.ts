@@ -37,6 +37,19 @@ test('TEST-007: denies unsafe Chrome default profiles and active locks',async t=
   const active=await preflightChrome(config(f.executable,f.profile));
   assert.deepEqual(active,{ok:false,code:'PROFILE_IN_USE'});
 });
+test('TASK-005/TEST-007: preflight refuses Chrome Beta/Dev/Canary default profiles before disk lookup',async t=>{
+  if(process.platform!=='win32'){t.skip('Windows-only Chrome Profile preflight');return;}
+  const f=await fixture(t);
+  for(const profile of [
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome Beta\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome Dev\User Data`,
+    String.raw`C:\Users\Person\AppData\Local\Google\Chrome SxS\User Data`
+  ]) {
+    assert.deepEqual(await preflightChrome(config(f.executable,profile)),
+      {ok:false,code:'INVALID_CONFIG'}, 'reject unsafe config before a filesystem check: '+profile);
+  }
+});
+
 test('TEST-006/007: missing selected Chrome/profile fails without creation',async t=>{
   if(process.platform!=='win32')return;
   const f=await fixture(t);

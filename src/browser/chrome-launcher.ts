@@ -6,7 +6,7 @@
 import { lstat, readdir, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
-import { validateBrowserConfig, type BrowserConfig } from '../security/browser-config';
+import { validateBrowserConfig, isDefaultBrowserProfilePath, type BrowserConfig } from '../security/browser-config';
 
 export type BrowserPreflightFailure =
   'INVALID_CONFIG' | 'UNSUPPORTED_PLATFORM' | 'EXECUTABLE_NOT_FOUND' |
@@ -18,12 +18,6 @@ export type BrowserPreflight =
       readonly config: BrowserConfig; readonly runtimeIdentityVerified: false }
   | { readonly ok: false; readonly code: BrowserPreflightFailure };
 
-function isDefaultProfile(path:string):boolean {
-  const normalized=win32.normalize(path).toLowerCase().replace(/\\+$/,'');
-  return /\\google\\chrome\\user data(?:\\|$)/.test(normalized) ||
-    /\\microsoft\\edge\\user data(?:\\|$)/.test(normalized) ||
-    /\\chromium\\user data(?:\\|$)/.test(normalized);
-}
 async function hasLinkedComponent(path:string):Promise<boolean> {
   const normalized=win32.normalize(path);
   const parts=normalized.split('\\').filter(Boolean);
@@ -55,7 +49,7 @@ export async function preflightChrome(input:unknown):Promise<BrowserPreflight>{
   const parsed=validateBrowserConfig(input);
   if(!parsed.ok)return {ok:false,code:'INVALID_CONFIG'};
   const config=parsed.config;
-  if(isDefaultProfile(config.userDataDir))return {ok:false,code:'UNSAFE_PROFILE'};
+  if(isDefaultBrowserProfilePath(config.userDataDir))return {ok:false,code:'UNSAFE_PROFILE'};
   try{
     if(await hasLinkedComponent(config.executablePath))return {ok:false,code:'EXECUTABLE_LINK_REJECTED'};
     const exe=await lstat(config.executablePath);
@@ -154,7 +148,7 @@ export async function prepareApprovedIsolatedProfile(
   const valid=validateBrowserConfig(input);
   if(!valid.ok)return {ok:false,code:'INVALID_CONFIG'};
   const cfg=valid.config;
-  if(isDefaultProfile(cfg.userDataDir))return {ok:false,code:'INVALID_CONFIG'};
+  if(isDefaultBrowserProfilePath(cfg.userDataDir))return {ok:false,code:'INVALID_CONFIG'};
   const parent=win32.dirname(cfg.userDataDir);
   try{
     if(await hasLinkedComponent(parent))return {ok:false,code:'UNSAFE_PARENT'};
