@@ -10,7 +10,7 @@ const KNOWN = new Set([
 ]);
 /** The untrusted report boundary must only accept parser-canonical tag keys. */
 export function isCanonicalKnownUserscriptMetadataTag(name:string):boolean {
- return name===name.toLowerCase()&&KNOWN.has(name);
+ return typeof name==='string'&&name===name.toLowerCase()&&KNOWN.has(name);
 }
 export interface MetadataLine {
   readonly line: number;
