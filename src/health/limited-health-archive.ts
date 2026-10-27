@@ -238,6 +238,7 @@ export async function saveLimitedHealthArchive(
  const mutex=join(dir,'.health-'+key+'.lock');
  const pending=join(dir,'.health-'+randomUUID()+'.pending');
  let owner:BigIntStats|undefined,staged:BigIntStats|undefined;
+ let publishedIdentity:BigIntStats|undefined;
  let created=false,lockReleased=false,committed=false;
  let bytes:Buffer|undefined;
  try{
@@ -309,8 +310,12 @@ export async function saveLimitedHealthArchive(
    created=false;
   }
   const published=await inspectFile(target,key);
-  if(!published||published==='NOT_FOUND'||!published.bytes.equals(bytes))
+  if(!published||published==='NOT_FOUND'||!published.bytes.equals(bytes)||
+     !staged||!directorySame(staged,published.identity))
    return Object.freeze({status:'BLOCKED',...emptyAuthority});
+  // Archive bytes alone do not prove ownership: retain the exact inode
+  // that our staging file published across mutex release/cleanup awaits.
+  publishedIdentity=published.identity;
   committed=true;
  }catch{return Object.freeze({status:'BLOCKED',...emptyAuthority});}
  finally{
@@ -333,7 +338,8 @@ export async function saveLimitedHealthArchive(
  }
  if(!committed||!lockReleased||!bytes)return Object.freeze({status:'BLOCKED',...emptyAuthority});
  const final=await inspectFile(target,key);
- if(!final||final==='NOT_FOUND'||!final.bytes.equals(bytes))
+ if(!final||final==='NOT_FOUND'||!final.bytes.equals(bytes)||
+    !publishedIdentity||!same(publishedIdentity,final.identity))
   return Object.freeze({status:'BLOCKED',...emptyAuthority});
  return Object.freeze({status:'ARCHIVE_SAVED_UNVERIFIED',...emptyAuthority});
 }
