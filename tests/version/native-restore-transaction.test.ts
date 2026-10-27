@@ -801,6 +801,47 @@ test('TASK-011/TEST-020/021: journal changed while mutex is released cannot get 
   }finally{(fsPromises as {rmdir:typeof originalRmdir}).rmdir=originalRmdir;}
  });
 });
+test('TASK-011/TEST-020/021/026: newly acquired same-source mutex after cleanup revokes restore success',async()=>{
+ await fixture(async opts=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const realRmdir=fsPromises.rmdir;
+  const lock=join(dirname(opts.sourcePath),
+   '.uah-restore-path-'+createHash('sha256').update(
+    process.platform==='win32'?opts.sourcePath.toLowerCase():opts.sourcePath,
+    'utf8').digest('hex'));
+  let acquiredByAnother=false;
+  (fsPromises as {rmdir:typeof realRmdir}).rmdir=async(path,...rest)=>{
+   const done=await realRmdir(path,...rest);
+   if(path===lock){
+    // Another restore legitimately acquires the same cooperative path
+    // lock during the first transaction's awaited lock release.
+    await mkdir(lock);
+    acquiredByAnother=true;
+   }
+   return done;
+  };
+  try{
+   const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(acquiredByAnother,true,'must exercise competing lock handoff');
+   assert.deepEqual(receipt,{
+    status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   },'must not claim a clean restore while another same-source restore owns the mutex');
+   assert.equal((await lstat(lock)).isDirectory(),true,
+    'foreign replacement lock must never be removed by our cleanup');
+   assert.deepEqual(await readFile(opts.sourcePath),original,
+    'already-restored bytes may remain; never undo another process');
+   const evidence=await readdir(opts.backupDirectory);
+   assert.ok(evidence.some(name=>name.endsWith('.journal.json')));
+   assert.ok(evidence.some(name=>name.endsWith('.backup.user.js')&&
+     name!==opts.backupFileName));
+  }finally{
+   (fsPromises as {rmdir:typeof realRmdir}).rmdir=realRmdir;
+  }
+ });
+});
+
 test('TASK-011/TEST-020/026: lock cleanup denied cannot acknowledge a native restore',async()=>{
  await fixture(async opts=>{
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');

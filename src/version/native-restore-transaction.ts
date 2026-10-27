@@ -111,6 +111,19 @@ export async function stillOwnNativeRestorePathLock(
     sameDirectory(originalLock,current);
  }catch{return false;}
 }
+/** A successful mutex release does not guarantee the canonical path
+ * stays unlocked. Another independent restore can acquire it during the
+ * asynchronous post-release evidence checks; reject a stale success receipt.
+ * This remains a read-only snapshot, not a new OS-enforced reservation.
+ */
+async function restorePathUnclaimed(lockPath:string):Promise<boolean>{
+ try{
+  await lstat(lockPath);
+  return false;
+ }catch(error){
+  return (error as NodeJS.ErrnoException).code==='ENOENT';
+ }
+}
 /**
  * TASK-011 / TEST-020/026: best-effort cleanup of ONLY the staging inode
  * created by this restore. A malicious/accidental rename at the .pending
@@ -547,6 +560,10 @@ export async function restoreVerifiedOriginalNativeOnly(
  if(!completedRestore||!lockReleased||!receiptSource||
     !receiptJournal||!receiptDisplaced)
   return block('RECOVERY_SAFETY_FAILED');
+ // Once rmdir frees our owned mutex, a competing native restore may claim
+ // the same source path before this asynchronous verification starts.
+ // Never delete that foreign lock, and never return a stale success receipt.
+ if(!await restorePathUnclaimed(lock))return block('RECOVERY_SAFETY_FAILED');
  // Releasing our mutex awaits the filesystem. A third-party edit during
  // that await can invalidate an earlier success receipt. Recheck the same
  // restored inode, the original/displaced backups and the published intent
@@ -591,7 +608,11 @@ export async function restoreVerifiedOriginalNativeOnly(
    return block('RECOVERY_SAFETY_FAILED');
   const last=await lstat(opts.sourcePath,{bigint:true});
   if(!sameFile(receiptSource,last)||last.nlink!==1n||
-     await hasUnsafePathLink(opts.sourcePath))
+     await hasUnsafePathLink(opts.sourcePath)||
+     // The final source and recovery evidence checks await disk I/O.
+     // Another restore might have claimed the mutex during that interval
+     // without changing source bytes yet.
+     !await restorePathUnclaimed(lock))
    return block('RECOVERY_SAFETY_FAILED');
   return completedRestore;
  }catch{return block('RECOVERY_SAFETY_FAILED');}
