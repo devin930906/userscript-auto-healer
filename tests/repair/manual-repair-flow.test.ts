@@ -7,6 +7,7 @@ import {dirname,join} from 'node:path';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import {prepareManualRepairExportOnly} from '../../src/repair/manual-repair-flow';
+import {inspectRecoveryCheckpointReadOnly} from '../../src/version/recovery-checkpoint';
 
 const header='// ==UserScript==\n// @name Manual repair flow\n'+
   '// @match https://example.com/*\n// @grant none\n// ==/UserScript==\n';
@@ -66,6 +67,20 @@ test('TEST-014/019/020/023: stable DOM failure becomes separate reviewed manual 
    assert.equal(result.sourceSha256,hash(source));
    assert.equal(result.candidateSha256,hash(exported));
    assert.equal(result.candidateByteLength,Buffer.byteLength(exported));
+   const checkpointName=(result as typeof result & {checkpointFileName:string}).checkpointFileName;
+   assert.match(checkpointName,/\.checkpoint\.json$/);
+   const checkpoint=await readFile(join(opts.backupDirectory,checkpointName));
+   assert.equal((result as typeof result & {checkpointSha256:string}).checkpointSha256,hash(checkpoint));
+   const parsed=JSON.parse(checkpoint.toString('utf8')) as Record<string,unknown>;
+   assert.equal(parsed.status,'RECOVERY_CHECKPOINT_UNVERIFIED');
+   assert.equal(parsed.originalSha256,hash(source));
+   assert.equal(parsed.candidateSha256,hash(exported));
+   const inspected=await inspectRecoveryCheckpointReadOnly(patch,checkpointName,{
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,userApproved:true
+   });
+   assert.equal(inspected.status,'CHECKPOINT_RECHECKED_READ_ONLY',JSON.stringify(inspected));
+   assert.equal(inspected.automaticPatchAllowed,false);
+   assert.equal(inspected.automaticRollbackAllowed,false);
    assert.equal(result.automaticPatchAllowed,false);
    assert.equal(result.automaticRollbackAllowed,false);
    assert.equal(result.tampermonkeyVerified,false);
@@ -74,7 +89,7 @@ test('TEST-014/019/020/023: stable DOM failure becomes separate reviewed manual 
    assert.deepEqual(await readFile(opts.sourcePath,'utf8'),source);
    assert.deepEqual(await readFile(join(opts.backupDirectory,result.backupFileName),'utf8'),source);
    assert.deepEqual((await readdir(opts.backupDirectory)).sort(),
-     [result.backupFileName,result.candidateFileName].sort());
+     [result.backupFileName,result.candidateFileName,checkpointName].sort());
    assert.equal(await readFile(join(opts.exportDirectory,result.recoveryExportFileName),'utf8'),source);
    assert.notEqual(result.recoveryExportFileName,result.exportFileName);
    assert.equal((await readdir(opts.exportDirectory)).length,2);

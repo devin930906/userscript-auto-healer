@@ -74,6 +74,12 @@ test('TEST-014/019/020/023: native imported bytes and unique AST site produce a 
   assert.equal(result.sourceSha256,hash(source));
   assert.equal(result.candidateSha256,hash(expected));
   assert.equal(result.candidateByteLength,Buffer.byteLength(expected));
+  const checkpointName=(result as typeof result & {checkpointFileName:string}).checkpointFileName;
+  assert.match(checkpointName,/\.checkpoint\.json$/);
+  const persisted=JSON.parse(await readFile(join(backupDirectory,checkpointName),'utf8')) as Record<string,unknown>;
+  assert.equal(persisted.status,'RECOVERY_CHECKPOINT_UNVERIFIED');
+  assert.equal(persisted.originalSha256,hash(source));
+  assert.equal(persisted.candidateSha256,hash(expected));
   assert.equal(result.automaticPatchAllowed,false);
   assert.equal(result.automaticRollbackAllowed,false);
   assert.equal(result.tampermonkeyVerified,false);

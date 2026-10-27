@@ -13,11 +13,12 @@ import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
+import {stageRecoveryCheckpointOnly} from '../version/recovery-checkpoint';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'DOM_CANDIDATE_BLOCKED'|
- 'PATCH_REVIEW_BLOCKED'|'STAGE_BLOCKED'|'EXPORT_BLOCKED';
+ 'PATCH_REVIEW_BLOCKED'|'STAGE_BLOCKED'|'CHECKPOINT_BLOCKED'|'EXPORT_BLOCKED';
 const noAuthority={
   automaticPatchAllowed:false as const,
   automaticRollbackAllowed:false as const,
@@ -29,7 +30,8 @@ export type ManualRepairFlowResult=
  |Readonly<{status:'BLOCKED';reason:Reason}&typeof noAuthority>
  |Readonly<{status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED';
    backupFileName:string;candidateFileName:string;exportFileName:string;
-   recoveryExportFileName:string;
+   recoveryExportFileName:string;checkpointFileName:string;
+   checkpointSha256:string;
    sourceSha256:string;candidateSha256:string;candidateByteLength:number
   }&typeof noAuthority>;
 const block=(reason:Reason):ManualRepairFlowResult=>
@@ -123,6 +125,13 @@ export async function prepareManualRepairExportOnly(
   const staged=await stageReviewedCandidateOnly(patch,candidate,files);
   if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')
     return block('STAGE_BLOCKED');
+  // A byte-verified, non-authoritative recovery checkpoint is a prerequisite
+  // of this manual export. Failure preserves staged files for native review.
+  const checkpoint=await stageRecoveryCheckpointOnly(patch,staged,files);
+  if(checkpoint.status!=='CHECKPOINT_STAGED_UNVERIFIED'||
+     checkpoint.originalSha256!==staged.originalSha256||
+     checkpoint.candidateSha256!==staged.candidateSha256)
+    return block('CHECKPOINT_BLOCKED');
   const exported=await exportReviewedCandidateForManualInstall(
     patch,staged,{...files,exportDirectory:o.exportDirectory});
   if(exported.status!=='EXPORTED_RUNTIME_UNVERIFIED'||
@@ -134,6 +143,8 @@ export async function prepareManualRepairExportOnly(
     candidateFileName:staged.candidateFileName,
     exportFileName:exported.exportFileName,
     recoveryExportFileName:exported.recoveryExportFileName,
+    checkpointFileName:checkpoint.checkpointFileName,
+    checkpointSha256:checkpoint.checkpointSha256,
     sourceSha256:staged.originalSha256,
     candidateSha256:staged.candidateSha256,
     candidateByteLength:exported.byteLength,

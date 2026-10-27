@@ -44,7 +44,7 @@
       <p id="scenario-history-summary" role="status" aria-live="polite">尚未查询观察历史；此功能不需要启动 Chrome。</p>
       <ol id="scenario-history-entries" aria-live="polite"></ol>
       <button id="scenario-export-manual" type="button" disabled>单独授权实时 DOM 复核并导出人工候选（不改原脚本）</button>
-      <p>人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
+      <p>人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。导出前会在独立备份目录持久保存恢复检查点；若检查点不能核验则不会继续导出。恢复检查点不提供自动应用或回滚权限。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
       <button id="scenario-cancel" type="button" disabled>取消 DOM 检查或人工导出准备（写入前）</button>
       <p>人工导出在最终系统写入确认之前可以取消；开始创建独立备份／候选之后不能撤销既有文件，原始脚本仍不被覆盖。若中断请检查所选输出目录。</p>
       <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
