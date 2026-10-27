@@ -409,7 +409,7 @@ public static class UahCandidateRestartManagerProbe {
         uint result=RmGetList(h,out needed,ref provided,entries,out rebootReason);
         if(result==0) {
           if(provided>(uint)entries.Length) return new int[]{-1};
-          int[] counts=new int[28];
+          int[] counts=new int[31];
           counts[0]=(int)provided;
           int currentPid=Environment.ProcessId;
           for(int j=0;j<(int)provided;j++) {
@@ -418,6 +418,19 @@ public static class UahCandidateRestartManagerProbe {
             int category=ImageCategory(entries[j].process, candidateExe,
               runnerTemp, out scope);
             counts[scope]++;
+            // Aggregate only start-age ranges for identity-checked live images.
+            // Never publish exact launch time, image path or PID.
+            if(category==14) counts[30]++;
+            else {
+              try {
+                long ticks=((long)entries[j].process.started.hi<<32) |
+                  (long)entries[j].process.started.lo;
+                double age=(DateTime.UtcNow-DateTime.FromFileTimeUtc(ticks)).TotalSeconds;
+                if(age<0) counts[30]++;
+                else if(age<=60) counts[28]++;
+                else counts[29]++;
+              } catch { counts[30]++; }
+            }
             if(category>=15 && category<=23) {
               counts[13]++; // tool families remain part of "other"
               counts[category]++;
@@ -448,7 +461,7 @@ public static class UahCandidateRestartManagerProbe {
     $candidateExe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
     $counts=[UahCandidateRestartManagerProbe]::CountAffectedByType(
       [string[]]$sample,$candidateExe,$runner)
-    if($null -eq $counts -or $counts.Length -ne 28 -or $counts[0] -lt 0) {
+    if($null -eq $counts -or $counts.Length -ne 31 -or $counts[0] -lt 0) {
       return 'rm=unavailable'
     }
     $classified=0
@@ -457,8 +470,9 @@ public static class UahCandidateRestartManagerProbe {
     foreach($i in 8..14) { $images+=$counts[$i] }
     $scoped=0
     foreach($i in 24..27) { $scoped+=$counts[$i] }
-    if($classified -ne $counts[0] -or $images -ne $counts[0] -or
-       $scoped -ne $counts[0] -or $counts[7] -gt $counts[0]) {
+    $ageTotal=$counts[28]+$counts[29]+$counts[30]
+     if($classified -ne $counts[0] -or $images -ne $counts[0] -or
+       $scoped -ne $counts[0] -or $ageTotal -ne $counts[0] -or $counts[7] -gt $counts[0]) {
       return 'rm=unavailable'
     }
     # The initial RM registration sees only the first 40 candidate files.
@@ -476,7 +490,7 @@ public static class UahCandidateRestartManagerProbe {
         $next=@($probeOrder | Select-Object -Skip $offset -First 40)
         $extra=[UahCandidateRestartManagerProbe]::CountAffectedByType(
           [string[]]$next,$candidateExe,$runner)
-        if($null -eq $extra -or $extra.Length -ne 28 -or $extra[0] -lt 0) {
+        if($null -eq $extra -or $extra.Length -ne 31 -or $extra[0] -lt 0) {
           $unavailable++
           continue
         }
@@ -486,8 +500,9 @@ public static class UahCandidateRestartManagerProbe {
         foreach($i in 8..14) { $extraImages+=$extra[$i] }
         $extraScopes=0
         foreach($i in 24..27) { $extraScopes+=$extra[$i] }
-        if($extraTypes -ne $extra[0] -or $extraImages -ne $extra[0] -or
-           $extraScopes -ne $extra[0] -or $extra[7] -gt $extra[0]) {
+        $extraAges=$extra[28]+$extra[29]+$extra[30]
+         if($extraTypes -ne $extra[0] -or $extraImages -ne $extra[0] -or
+           $extraScopes -ne $extra[0] -or $extraAges -ne $extra[0] -or $extra[7] -gt $extra[0]) {
           $unavailable++
           continue
         }
@@ -499,7 +514,7 @@ public static class UahCandidateRestartManagerProbe {
       } else { 'false' }
       $coverage=" coverage=[batches=$batches sampled=$checked total=$($probeOrder.Count) complete=$complete extraAffectedObservations=$extraAffectedObservations unavailableBatches=$unavailable]"
     }
-    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " imageScope=[candidateTree=$($counts[24]) runnerOther=$($counts[25]) outsideRunner=$($counts[26]) unknown=$($counts[27])]" + $coverage
+    return "rm=ok sampled=$($sample.Count) total=$($paths.Count) affected=$($counts[0]) types=[window=$($counts[1]) service=$($counts[2]) explorer=$($counts[3]) console=$($counts[4]) critical=$($counts[5]) unknown=$($counts[6])]" + " self=$($counts[7]) images=[candidate=$($counts[8]) consoleHost=$($counts[9]) shell=$($counts[10]) node=$($counts[11]) runner=$($counts[12]) other=$($counts[13]) unknown=$($counts[14])]" + " tools=[command=$($counts[15]) explorer=$($counts[16]) dllHost=$($counts[17]) runDll=$($counts[18]) crash=$($counts[19]) compat=$($counts[20]) security=$($counts[21]) compiler=$($counts[22]) serviceHost=$($counts[23])]" + " imageScope=[candidateTree=$($counts[24]) runnerOther=$($counts[25]) outsideRunner=$($counts[26]) unknown=$($counts[27])]" + " ageBuckets=[recent=$($counts[28]) established=$($counts[29]) unknown=$($counts[30])]" + $coverage
   } catch {
     # Fail closed: an unavailable native diagnostic cannot alter an actual
     # directory move result or be represented as zero affected processes.
