@@ -605,8 +605,9 @@ test('TASK-013/TEST-022/026: first checkpoint publish cannot overwrite a foreign
   // Inject a competing file at the real filesystem publish syscall.
   // The ordinary earlier lstat() must see an ABSENT target. Both rename
   // (legacy) and hard-link (safe no-clobber) encounter the same adversary.
-  const insertBeforePublish=(from:string,to:string)=>{
-   if(to===target && from.startsWith(join(directory,'.uah-readonly-batch-'))){
+  const insertBeforePublish=(from:import('node:fs').PathLike,to:import('node:fs').PathLike)=>{
+   if(typeof from==='string' && typeof to==='string' &&
+      to===target && from.startsWith(join(directory,'.uah-readonly-batch-'))){
     injected++;
     writeFileSync(target,foreign,{flag:'wx'});
    }
