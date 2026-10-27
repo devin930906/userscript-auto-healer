@@ -1,4 +1,5 @@
 /** TASK-003 / REQ-004: read-only userscript metadata extraction. */
+import {types as nodeTypes} from 'node:util';
 import type { ImportedScript } from '../import/import-service';
 
 const KNOWN = new Set([
@@ -28,29 +29,57 @@ export interface MetadataResult {
   readonly unknownNames: string[];
 }
 export function readUserscriptSource(script: Pick<ImportedScript, 'bytes'|'textEncoding'>): string | null {
-  const raw = script.bytes;
-  let bytes = raw;
-  let encoding = 'utf-8';
-  switch (script.textEncoding) {
-    case 'utf-8-bom':
-      if (raw[0] !== 0xef || raw[1] !== 0xbb || raw[2] !== 0xbf) return null;
-      bytes = raw.subarray(3); break;
-    case 'utf-16le-bom':
-      if (raw[0] !== 0xff || raw[1] !== 0xfe) return null;
-      bytes = raw.subarray(2); encoding = 'utf-16le'; break;
-    case 'utf-16be-bom':
-      if (raw[0] !== 0xfe || raw[1] !== 0xff || (raw.length - 2) % 2) return null;
-      bytes = Uint8Array.from(raw.subarray(2));
-      for (let i = 0; i < bytes.length; i += 2) {
-        const value = bytes[i]; bytes[i] = bytes[i + 1]; bytes[i + 1] = value;
-      }
-      encoding = 'utf-16le'; break;
-    case 'gb18030-explicit': encoding = 'gb18030'; break;
-    case 'utf-8': break;
-    default: return null;
+  try {
+    // This exported parser also receives direct caller input outside the
+    // vetted native import path. Do not execute hostile property accessors,
+    // Proxy traps, fake subarray methods or custom TypedArray constructors.
+    if (!script || typeof script !== 'object' || nodeTypes.isProxy(script)) return null;
+    const proto = Object.getPrototypeOf(script);
+    if (proto !== Object.prototype && proto !== null) return null;
+    const fields = Object.getOwnPropertyDescriptors(script);
+    const source = fields.bytes;
+    const declaredEncoding = fields.textEncoding;
+    if (!source || !declaredEncoding ||
+        !Object.prototype.hasOwnProperty.call(source, 'value') ||
+        !Object.prototype.hasOwnProperty.call(declaredEncoding, 'value')) return null;
+    const raw: unknown = source.value;
+    if (!raw || nodeTypes.isProxy(raw) || !(raw instanceof Uint8Array)) return null;
+
+    // Call intrinsic TypedArray getters rather than caller-shadowable
+    // .buffer/.byteOffset/.byteLength or .subarray/.slice/.constructor.
+    const intrinsic = Object.getPrototypeOf(Uint8Array.prototype);
+    const backing = Object.getOwnPropertyDescriptor(intrinsic, 'buffer')?.get?.call(raw) as ArrayBuffer;
+    const offset = Object.getOwnPropertyDescriptor(intrinsic, 'byteOffset')?.get?.call(raw) as number;
+    const length = Object.getOwnPropertyDescriptor(intrinsic, 'byteLength')?.get?.call(raw) as number;
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
+        offset < 0 || length < 0) return null;
+    const view = new Uint8Array(backing, offset, length);
+
+    let bytes: Uint8Array = view;
+    let encoding = 'utf-8';
+    switch (declaredEncoding.value) {
+      case 'utf-8-bom':
+        if (view[0] !== 0xef || view[1] !== 0xbb || view[2] !== 0xbf) return null;
+        bytes = view.subarray(3); break;
+      case 'utf-16le-bom':
+        if (view[0] !== 0xff || view[1] !== 0xfe) return null;
+        bytes = view.subarray(2); encoding = 'utf-16le'; break;
+      case 'utf-16be-bom':
+        if (view[0] !== 0xfe || view[1] !== 0xff || (view.length - 2) % 2) return null;
+        bytes = new Uint8Array(view.length - 2);
+        for (let i = 0; i < bytes.length; i += 2) {
+          bytes[i] = view[i + 3];
+          bytes[i + 1] = view[i + 2];
+        }
+        encoding = 'utf-16le'; break;
+      case 'gb18030-explicit': encoding = 'gb18030'; break;
+      case 'utf-8': break;
+      default: return null;
+    }
+    return new TextDecoder(encoding, {fatal:true}).decode(bytes);
+  } catch {
+    return null;
   }
-  try { return new TextDecoder(encoding, {fatal:true}).decode(bytes); }
-  catch { return null; }
 }
 export function parseUserscriptMetadata(script: Pick<ImportedScript, 'bytes'|'textEncoding'>): MetadataResult {
   const source = readUserscriptSource(script);
