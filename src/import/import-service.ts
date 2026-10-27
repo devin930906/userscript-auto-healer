@@ -19,6 +19,51 @@ export const MAX_TOTAL_IMPORTED_BYTES = 128 * 1024 * 1024;
 const NATIVE_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
 
+
+/** TASK-002 / TEST-002/026: trust only plain native picker array data.
+ * Capture the entire selection before the first await. A later progress
+ * callback must never redirect a still-pending read to another local path.
+ * Do not consult Proxy traps, inherited slots or attacker-defined getters.
+ */
+function snapshotNativeSelectedPaths(input:unknown):
+ {ok:true;paths:readonly string[]}|{ok:false;code:'INVALID_PATH'|'SCAN_LIMIT'} {
+ try {
+  if(nodeTypes.isProxy(input)||!Array.isArray(input)||
+     Object.getPrototypeOf(input)!==Array.prototype)
+    return {ok:false,code:'INVALID_PATH'};
+  const descriptors=Object.getOwnPropertyDescriptors(input);
+  const length:unknown=descriptors.length?.value;
+  if(typeof length!=='number'||!Number.isSafeInteger(length)||length<0)
+    return {ok:false,code:'INVALID_PATH'};
+  if(length>MAX_SELECTED_FILES)return {ok:false,code:'SCAN_LIMIT'};
+  if(Reflect.ownKeys(descriptors).length!==length+1)
+    return {ok:false,code:'INVALID_PATH'};
+  const selected:string[]=[];
+  for(let i=0;i<length;i++){
+   const slot=descriptors[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value')||
+      typeof slot.value!=='string')return {ok:false,code:'INVALID_PATH'};
+   selected.push(slot.value);
+  }
+  return {ok:true,paths:selected};
+ } catch{return {ok:false,code:'INVALID_PATH'};}
+}
+
+/** A forged abort signal can execute arbitrary JS during native file reads.
+ * Validate the built-in AbortSignal internal slot before accessing aborted or
+ * adding listeners. A genuine browser/node signal remains fully supported.
+ */
+function isNativeImportCancellationSignal(input:unknown):input is AbortSignal{
+ try{
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
+     Object.getPrototypeOf(input)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+       Object.prototype.hasOwnProperty.call(input,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(input)==='boolean';
+ }catch{return false;}
+}
+
 export type ImportFailureCode =
   'INVALID_PATH' | 'NOT_USER_SCRIPT' | 'SYMLINK_REJECTED' | 'NOT_REGULAR_FILE' |
   'FILE_TOO_LARGE' | 'INVALID_ENCODING' | 'EMPTY_FILE' | 'BINARY_CONTENT' |
@@ -240,20 +285,26 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
   // After the aggregate read limit, do not access any remaining file.
   // Report every skipped selection so progress cannot silently stop early.
   let budgetExhausted = false;
-  if (!Array.isArray(paths) || paths.length > MAX_SELECTED_FILES) {
-    outcome.errors.push(failure('(selection)', 'SCAN_LIMIT'));
+  const selection=snapshotNativeSelectedPaths(paths);
+  if(!selection.ok){
+    outcome.errors.push(failure('(selection)',selection.code));
     return outcome;
   }
-  for (let index = 0; index < paths.length; index++) {
+  if(signal!==undefined&&!isNativeImportCancellationSignal(signal)){
+    outcome.errors.push(failure('(selection)','INVALID_PATH'));
+    return outcome;
+  }
+  const selectedPaths=selection.paths;
+  for (let index = 0; index < selectedPaths.length; index++) {
     // Cooperative cancellation takes effect between files; do not interrupt a
     // descriptor read mid-flight or discard already validated script results.
     if (signal?.aborted) {
       outcome.canceled = true;
-      outcome.unprocessed = paths.length - index;
+      outcome.unprocessed = selectedPaths.length - index;
       break;
     }
     try {
-    const path = paths[index];
+    const path = selectedPaths[index];
     const display = typeof path === 'string' ? basename(path) : '(invalid)';
     if (budgetExhausted) {
       outcome.errors.push(failure(display, 'SCAN_LIMIT'));
@@ -307,7 +358,7 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
       // Do not allow a failed UI status listener to stop a validated import.
       // A native cancel still occurs between scripts, not in a file read.
       try { onProgress?.(Object.freeze({
-        phase:'IMPORTING_READ_ONLY',processed:index+1,total:paths.length,
+        phase:'IMPORTING_READ_ONLY',processed:index+1,total:selectedPaths.length,
         accepted:outcome.scripts.length,duplicates:outcome.duplicates,
         failed:outcome.errors.length
       })); } catch { /* progress reporting has no file authority */ }
@@ -323,6 +374,10 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
 export async function scanApprovedDirectory(root: string, signal?: AbortSignal,
   onProgress?:ImportProgressCallback): Promise<ImportOutcome> {
   const outcome: ImportOutcome = { scripts: [], errors: [], duplicates: 0 };
+  if(signal!==undefined&&!isNativeImportCancellationSignal(signal)){
+    outcome.errors.push(failure('(folder)','INVALID_PATH'));
+    return outcome;
+  }
   if (signal?.aborted) { outcome.canceled = true; return outcome; }
   // Match the native-selected directory exactly; aliases must not be
   // reinterpreted before the linked-ancestor and containment checks.
