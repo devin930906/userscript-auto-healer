@@ -563,6 +563,40 @@ test('TEST-020/026: manual approval, exact journal name and untrusted Proxy are 
  });
 });
 
+test('TASK-011/TEST-020/026: same-byte journal replacement before source rename must block the restore',async t=>{
+ await fixture(async opts=>{
+  const module=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const nativeVerify=module.verifyExactCandidateBytesReadOnly;
+  let substituted=false;
+  t.mock.method(module,'verifyExactCandidateBytesReadOnly',
+   async (path:Parameters<typeof nativeVerify>[0],expected:Parameters<typeof nativeVerify>[1])=>{
+    const result=await nativeVerify(path,expected);
+    if(!substituted&&path.endsWith('.journal.json')&&result==='MATCH'){
+     // Publication was complete, but a foreign writer installs a different
+     // inode with precisely the same JSON bytes before source replacement.
+     const retained=join(opts.backupDirectory,'retained-original-intent');
+     await rename(path,retained);
+     await writeFile(path,await readFile(retained));
+     assert.notEqual((await lstat(path,{bigint:true})).ino,
+       (await lstat(retained,{bigint:true})).ino);
+     substituted=true;
+    }
+    return result;
+   });
+  const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(substituted,true);
+  assert.deepEqual(receipt,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false});
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'same-byte foreign journal must not authorize irreversible rename');
+  assert.deepEqual(await readFile(join(opts.backupDirectory,opts.backupFileName)),original);
+  assert.ok((await readdir(opts.backupDirectory))
+   .some(name=>name.endsWith('.backup.user.js')&&name!==opts.backupFileName));
+ });
+});
+
 test('TASK-011/TEST-020/026: post-rename journal corruption must not receive a success receipt',async t=>{
  await fixture(async opts=>{
   const snapshot=require('../../src/version/source-snapshot') as
@@ -737,6 +771,41 @@ test('TASK-011/TEST-020/026: Windows case aliases must share a native restore pa
    assert.deepEqual(await readdir(opts.backupDirectory),before,
     'blocked aliases must not publish a backup, intent, or staged restore');
   }finally{await rm(expectedLock,{recursive:true,force:true});}
+ });
+});
+
+test('TASK-011/TEST-020/026: same-byte journal inode swap during lock release revokes a clean receipt',async()=>{
+ await fixture(async opts=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRmdir=fsPromises.rmdir;
+  let substituted=false;
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(path,...args)=>{
+   const outcome=await nativeRmdir(path,...args);
+   if(typeof path==='string'&&path.includes('.uah-restore-path-')){
+    const journals=(await readdir(opts.backupDirectory))
+     .filter(name=>name.endsWith('.journal.json'));
+    assert.equal(journals.length,1);
+    const journal=join(opts.backupDirectory,journals[0]);
+    const retained=join(opts.backupDirectory,'retained-published-intent');
+    await rename(journal,retained);
+    await writeFile(journal,await readFile(retained));
+    assert.notEqual((await lstat(journal,{bigint:true})).ino,
+      (await lstat(retained,{bigint:true})).ino);
+    substituted=true;
+   }
+   return outcome;
+  };
+  try{
+   const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(substituted,true,'must exercise actual post-rename lock release');
+   assert.deepEqual(receipt,{status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false});
+   assert.deepEqual(await readFile(opts.sourcePath),original,
+    'do not blindly reverse a completed original-file restore');
+   assert.ok((await readdir(opts.backupDirectory))
+    .some(name=>name.endsWith('.backup.user.js')&&name!==opts.backupFileName));
+  }finally{(fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;}
  });
 });
 
