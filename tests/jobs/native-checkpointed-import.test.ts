@@ -165,6 +165,61 @@ test('TASK-013/TEST-022: native AST progress is visible after a durable segment 
  }
 });
 
+test('TASK-013/TEST-022: cancelling later AST segment retains only earlier durable static previews',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-partial-cancel-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const actual=isolated.previewImportedBatchOffMain;
+ const controller=new AbortController();
+ let calls=0;
+ const patched=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof actual>)=>{
+   calls++;
+   if(calls===2)controller.abort();
+   return actual(...args);
+  });
+ try{
+  const filenames:string[]=[];
+  for(let i=0;i<17;i++){
+   const path=join(home,'selected-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#partial-'+i+'");');
+   filenames.push(path);
+  }
+  const scripts=(await importApprovedPaths(filenames)).scripts;
+  assert.equal(scripts.length,17);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const progress:Array<[number,number]>=[];
+  const outcome=await runCheckpointedNativeImportAnalysis(root,scripts,
+   controller.signal,(done,total)=>progress.push([done,total]));
+  assert.equal(calls,2,'must cancel during the second independent Worker');
+  assert.equal(controller.signal.aborted,true);
+  assert.equal(outcome.status,'BLOCKED','cancellation never acknowledges batch success');
+  if(outcome.status!=='BLOCKED')return;
+  assert.equal(outcome.reason,'CANCELLED');
+  assert.equal(outcome.previews.length,17);
+  assert.deepEqual(outcome.previews.slice(0,16).map(p=>p.status),
+   Array(16).fill('STATIC_ANALYSIS_ONLY'),
+   'an independently saved successful segment must retain its read-only evidence');
+  assert.equal(outcome.previews[16].status,'SKIPPED_CANCELLED',
+   'an unfinished segment must never be presented as successful analysis');
+  assert.equal(outcome.previews.every(p=>p.automaticPatchAllowed===false&&
+   p.tampermonkeyVerified===false&&p.businessVerified===false),true);
+  assert.deepEqual(progress,[[16,17]],
+   'only durably settled work may count as completed progress');
+  const directory=join(root,(await readdir(root))[0]);
+  const disk=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
+  assert.deepEqual(disk.jobs.map((x:{state:string})=>x.state),
+   ['SUCCEEDED','CANCELLED']);
+  for(let i=0;i<17;i++)
+   assert.equal((await readFile(filenames[i],'utf8')).includes('#partial-'+i),true,
+    'cancellation must never modify user-selected script bytes');
+ }finally{
+  patched.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/TEST-022: identical bytes under different approved text encodings use separate durable batches',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-encoding-identity-'));
  try{
