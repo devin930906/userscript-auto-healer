@@ -36,6 +36,14 @@ function safeWindowsDrivePath(value: unknown): value is string {
   return true;
 }
 
+/** Known daily-use Chrome/Edge/Chromium channel Profiles are never isolated UAH Profiles.
+ * This lexical check is a preflight deny list, not proof that other paths are safe.
+ */
+export function isDefaultBrowserProfilePath(value: string): boolean {
+  const normalized = win32.normalize(value).toLowerCase().replace(/\\+$/, '');
+  return /\\(?:google\\chrome(?: beta| dev| sxs)?|microsoft\\edge(?: beta| dev| sxs)?|chromium)\\user data(?:\\|$)/.test(normalized);
+}
+
 export function validateBrowserConfig(input: unknown): ConfigValidation {
   // Renderer-supplied IPC objects have no authority to run getters, Proxy
   // traps or carry hidden/symbol properties. Reject Proxies before reflection,
@@ -76,7 +84,7 @@ export function validateBrowserConfig(input: unknown): ConfigValidation {
   // A root, Chrome's existing daily-use profile, or an application binary directory
   // can never be accepted as a proposed isolated profile.
   if (/^[a-z]:$/.test(profile) ||
-      /\\google\\chrome\\user data(?:\\|$)/.test(profile) ||
+      isDefaultBrowserProfilePath(profile) ||
       profile === parent || executable.startsWith(profile + '\\')) {
     return { ok: false, code: 'UNSAFE_PROFILE' };
   }
