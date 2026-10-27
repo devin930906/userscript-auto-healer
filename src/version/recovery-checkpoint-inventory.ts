@@ -5,7 +5,7 @@
  */
 import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
-import {basename,isAbsolute} from 'node:path';
+import {basename,isAbsolute,join} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
