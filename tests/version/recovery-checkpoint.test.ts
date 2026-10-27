@@ -334,3 +334,48 @@ test('TASK-011/TEST-020/026: final checkpoint receipt rejects a file changed or 
     });
   }
 });
+
+test('TASK-011/TEST-020/026: checkpoint inspection refuses same-byte inode replacement during asynchronous candidate recheck',async t=>{
+ await fixture(async opts=>{
+  const staged=await stageReviewedCandidateOnly(request,candidate,opts);
+  assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const saved=await stageRecoveryCheckpointOnly(request,staged,opts);
+  assert.equal(saved.status,'CHECKPOINT_STAGED_UNVERIFIED');
+  if(saved.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+  // A normal unchanged checkpoint remains readable and strictly non-authoritative.
+  assert.equal((await inspectRecoveryCheckpointReadOnly(
+   request,saved.checkpointFileName,opts)).status,'CHECKPOINT_RECHECKED_READ_ONLY');
+  const checkpointPath=join(opts.backupDirectory,saved.checkpointFileName);
+  const originalBytes=await readFile(checkpointPath);
+  const first=await lstat(checkpointPath,{bigint:true});
+  const verifier=require('../../src/version/staged-candidate-recheck') as
+    typeof import('../../src/version/staged-candidate-recheck');
+  const real=verifier.verifyStagedCandidateReadOnly;
+  let swaps=0;
+  t.mock.method(verifier,'verifyStagedCandidateReadOnly',
+   async (...args:Parameters<typeof real>)=>{
+    const result=await real(...args);
+    if(result.status==='CANDIDATE_RECHECKED_READ_ONLY'){
+     // The checkpoint was opened and read before this callback. Publish
+     // identical bytes at the SAME pathname, but through a different inode.
+     await rename(checkpointPath,join(opts.backupDirectory,'retained-original-checkpoint'));
+     await writeFile(checkpointPath,originalBytes);
+     swaps++;
+    }
+    return result;
+   });
+  const inspection=await inspectRecoveryCheckpointReadOnly(
+   request,saved.checkpointFileName,opts);
+  assert.equal(swaps,1,'must exercise the real asynchronous recheck window');
+  const replacement=await lstat(checkpointPath,{bigint:true});
+  assert.notEqual(replacement.ino,first.ino);
+  assert.equal(await readFile(checkpointPath,'utf8'),originalBytes.toString('utf8'));
+  assert.equal(inspection.status,'BLOCKED',
+   'same-byte replacement is not the independently inspected checkpoint');
+  assert.equal(inspection.automaticPatchAllowed,false);
+  assert.equal(inspection.automaticRollbackAllowed,false);
+  assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  assert.equal(await readFile(join(opts.backupDirectory,staged.backupFileName),'utf8'),source);
+ });
+});
