@@ -5,6 +5,7 @@
  * Never return user file paths, script bytes, digests or journal names.
  */
 import {createHash} from 'node:crypto';
+import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
@@ -85,8 +86,15 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      await hasUnsafePathLink(x.backupDirectory))return block('UNSAFE_PATH');
   const src=await lstat(x.sourcePath,{bigint:true});
   const dir=await lstat(x.backupDirectory,{bigint:true});
+  // An empty journal is meaningful only for a bounded selected source and
+  // an independent recovery directory. A clean zero-intent inventory must
+  // obey the same restrictions as native backup verification.
+  const sourceParent=await lstat(dirname(x.sourcePath),{bigint:true});
   if(!src.isFile()||src.isSymbolicLink()||src.nlink!==1n||
-     !dir.isDirectory()||dir.isSymbolicLink())
+     src.size<=0n||src.size>BigInt(MAX_SCRIPT_BYTES)||
+     !dir.isDirectory()||dir.isSymbolicLink()||
+     !sourceParent.isDirectory()||sourceParent.isSymbolicLink()||
+     (sourceParent.dev===dir.dev&&sourceParent.ino===dir.ino))
    return block('UNSAFE_PATH');
   if(await nativeRestorePathLockPresent(x.sourcePath))
    return block('RECOVERY_REVIEW_REQUIRED');
@@ -145,11 +153,16 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   }
   const srcAfter=await lstat(x.sourcePath,{bigint:true});
   const dirAfter=await lstat(x.backupDirectory,{bigint:true});
+  const sourceParentAfter=await lstat(dirname(x.sourcePath),{bigint:true});
   if(!srcAfter.isFile()||srcAfter.isSymbolicLink()||srcAfter.nlink!==1n||
      src.dev!==srcAfter.dev||src.ino!==srcAfter.ino||
      src.size!==srcAfter.size||src.mtimeNs!==srcAfter.mtimeNs||
      src.ctimeNs!==srcAfter.ctimeNs||
      !dirAfter.isDirectory()||dirAfter.isSymbolicLink()||
+     !sourceParentAfter.isDirectory()||sourceParentAfter.isSymbolicLink()||
+     sourceParent.dev!==sourceParentAfter.dev||
+     sourceParent.ino!==sourceParentAfter.ino||
+     (sourceParentAfter.dev===dirAfter.dev&&sourceParentAfter.ino===dirAfter.ino)||
      dir.dev!==dirAfter.dev||dir.ino!==dirAfter.ino||
      // A directory may keep its inode while a concurrent editor adds, removes
      // or renames restore intents during enumeration. Do not show counts from

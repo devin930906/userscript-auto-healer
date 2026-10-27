@@ -2,16 +2,58 @@
 import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,rm,symlink,utimes,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,readdir,rm,stat,symlink,truncate,utimes,writeFile} from 'node:fs/promises';
 import {promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 const original=Buffer.from('// ==UserScript==\n// @name old\n// ==/UserScript==\n');
 const updated=Buffer.from('// ==UserScript==\n// @name new\n// ==/UserScript==\n');
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
+
+test('TASK-011/TEST-020/021/026: empty, oversized or co-located source cannot yield clean zero-intent inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-intent-invalid-source-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const inspect=(directory:string)=>inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory:directory,userApproved:true
+  });
+  const clean=await inspect(backupDirectory);
+  assert.equal(clean.status,'RESTORE_INTENT_INVENTORY_READ_ONLY',
+   'a valid isolated empty recovery folder remains inspectable');
+  if(clean.status==='RESTORE_INTENT_INVENTORY_READ_ONLY')
+   assert.equal(clean.inspected,0);
+
+  const coLocated=await inspect(home);
+  assert.deepEqual(coLocated,{status:'BLOCKED',reason:'UNSAFE_PATH',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false},
+   'source parent cannot double as backup store even with no journal');
+
+  await writeFile(sourcePath,'');
+  const empty=await inspect(backupDirectory);
+  assert.equal(empty.status,'BLOCKED',
+   'a zero-byte userscript cannot generate a clean recovery observation');
+  assert.equal('reason' in empty?empty.reason:null,'UNSAFE_PATH');
+
+  await writeFile(sourcePath,original);
+  await truncate(sourcePath,MAX_SCRIPT_BYTES+1);
+  const oversized=await inspect(backupDirectory);
+  assert.equal(oversized.status,'BLOCKED',
+   'a source beyond the native bounded script limit cannot be treated as clean');
+  assert.equal('reason' in oversized?oversized.reason:null,'UNSAFE_PATH');
+  assert.equal((await stat(sourcePath)).size,MAX_SCRIPT_BYTES+1,
+   'read-only recovery inspection must never touch the source');
+  assert.deepEqual(await readdir(backupDirectory),[],
+   'rejected inventory must never create or delete recovery files');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
 
 test('TASK-011/TEST-020/021: inspect original/displaced and reject forged journal with no source mutation',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-intent-inventory-'));
