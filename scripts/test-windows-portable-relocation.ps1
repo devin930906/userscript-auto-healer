@@ -467,7 +467,7 @@ try {
     # Windows Restart Manager publicly documents these application categories.
     # A nonempty genuine file lock must be classified without logging any
     # process identifiers, names, paths or caller-owned handles.
-    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\] imageScope=\[candidateTree=([0-9]+) runnerOther=([0-9]+) outsideRunner=([0-9]+) unknown=([0-9]+)\]$'
+    $rmPattern='^rm=ok sampled=1 total=1 affected=([0-9]+) types=\[window=([0-9]+) service=([0-9]+) explorer=([0-9]+) console=([0-9]+) critical=([0-9]+) unknown=([0-9]+)\] self=([0-9]+) images=\[candidate=([0-9]+) consoleHost=([0-9]+) shell=([0-9]+) node=([0-9]+) runner=([0-9]+) other=([0-9]+) unknown=([0-9]+)\] tools=\[command=([0-9]+) explorer=([0-9]+) dllHost=([0-9]+) runDll=([0-9]+) crash=([0-9]+) compat=([0-9]+) security=([0-9]+) compiler=([0-9]+) serviceHost=([0-9]+)\] imageScope=\[candidateTree=([0-9]+) runnerOther=([0-9]+) outsideRunner=([0-9]+) unknown=([0-9]+)\] ageBuckets=\[recent=([0-9]+) established=([0-9]+) unknown=([0-9]+)\]$'
     if($rmLocked -cmatch $rmPattern) {
       $affected=[int]$Matches[1]
       $classified=0
@@ -489,6 +489,14 @@ try {
       if($images -ne $affected -or $imageScoped -ne $affected -or
          [int]$Matches[11] -lt 1 -or [int]$Matches[27] -lt 1) {
         throw 'Restart Manager did not scope its time-matched external PowerShell image'
+      }
+      # A real RM process start time must map to exactly one anonymous age
+      # bucket; this does not disclose process IDs, names or precise times.
+      $ages=0
+      foreach($kind in 29..31) { $ages+=[int]$Matches[$kind] }
+      if($ages -ne $affected -or
+         ([int]$Matches[29]+[int]$Matches[30]) -lt 1) {
+        throw 'Restart Manager lost process start-age classification'
       }
       # This file handle was opened by THIS pwsh.exe process in this test.
       # The PID must never be emitted; identity is checked within the probe.
