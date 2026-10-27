@@ -185,6 +185,12 @@ export async function inspectNativeRestoreIntentReadOnly(
      sourceStart.size>BigInt(MAX_SCRIPT_BYTES)||
      !dirStart.isDirectory()||dirStart.isSymbolicLink())return deny('UNSAFE_PATH');
   const journalPath=join(x.backupDirectory,x.journalFileName);
+  // The bounded reader verifies its own descriptor, but subsequent asynchronous
+  // backup/source checks can observe a different journal inode with identical
+  // bytes. Bind the complete observation to one published file identity.
+  const journalBefore=await lstat(journalPath,{bigint:true});
+  if(!journalBefore.isFile()||journalBefore.isSymbolicLink()||
+     journalBefore.nlink!==1n)return deny('UNSAFE_JOURNAL');
   const contents=await readJournal(journalPath);
   if(contents===null)return deny('UNSAFE_JOURNAL');
   const j=parseJournal(contents,x.sourcePath);
@@ -244,6 +250,12 @@ export async function inspectNativeRestoreIntentReadOnly(
   // journal once more after the final source verification. This remains a
   // read-only, bounded observation, not an atomic cross-process lock.
   if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Matching content is not enough: replacement by a new same-byte inode
+  // must not receive the original journal's read-only observation.
+  const journalAfter=await lstat(journalPath,{bigint:true});
+  if(!journalAfter.isFile()||journalAfter.isSymbolicLink()||
+     journalAfter.nlink!==1n||!sameFile(journalBefore,journalAfter)||
+     journalBefore.mode!==journalAfter.mode)return deny('UNSAFE_JOURNAL');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
    sourceState,originalSha256:j.originalSha256,
    displacedSha256:j.displacedSha256,...noAuthority});
