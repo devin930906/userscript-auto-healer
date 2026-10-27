@@ -591,3 +591,48 @@ test('TASK-013/TEST-022: checkpoint reservation prevents ordinary dispatch befor
   assert.equal(recovered.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
  });
 });
+
+
+test('TASK-013/TEST-022/026: first checkpoint publish cannot overwrite a foreign target created after preflight',async()=>{
+ await withJournal(async directory=>{
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeRename=fsPromises.rename;
+  const nativeLink=fsPromises.link;
+  const target=join(directory,BATCH_JOURNAL_FILENAME);
+  const foreign='FOREIGN_UNTRUSTED_BATCH_MUST_NOT_BE_OVERWRITTEN';
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  let injected=0;
+  // Inject a competing file at the real filesystem publish syscall.
+  // The ordinary earlier lstat() must see an ABSENT target. Both rename
+  // (legacy) and hard-link (safe no-clobber) encounter the same adversary.
+  const insertBeforePublish=(from:string,to:string)=>{
+   if(to===target && from.startsWith(join(directory,'.uah-readonly-batch-'))){
+    injected++;
+    writeFileSync(target,foreign,{flag:'wx'});
+   }
+  };
+  (fsPromises as {rename:typeof nativeRename}).rename=async(from,to)=>{
+   insertBeforePublish(from,to);
+   return nativeRename(from,to);
+  };
+  (fsPromises as {link:typeof nativeLink}).link=async(from,to)=>{
+   insertBeforePublish(from,to);
+   return nativeLink(from,to);
+  };
+  try{
+   const result=await saveReadOnlyBatchJournal(directory,coordinator);
+   assert.equal(injected,1,'test must interleave after preflight and before publication');
+   assert.equal(result.status,'BLOCKED',
+    'a competing first-write target must never receive a successful checkpoint receipt');
+   assert.equal(await readFile(target,'utf8'),foreign,
+    'the owner of the newly appeared target keeps its original bytes');
+   assert.deepEqual(coordinator.snapshot().jobs.map(j=>j.state),
+    ['QUEUED','QUEUED'],'no read-only jobs may be reported as dispatched');
+   assert.deepEqual(await loadReadOnlyBatchJournal(directory,options,completed),
+    {status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  }finally{
+   (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
+   (fsPromises as {link:typeof nativeLink}).link=nativeLink;
+  }
+ });
+});
