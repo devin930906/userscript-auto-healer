@@ -398,6 +398,15 @@ export async function saveLimitedGmReportOnly(
     !isAbsolute(outputPath)||outputPath!==resolve(outputPath)||
     !/^[^\\/\u0000-\u001f]+\.json$/i.test(basename(outputPath)))
    return block('INVALID_REQUEST');
+ // Only standalone files are valid native export destinations. A colon
+ // in the leaf can designate an NTFS alternate data stream; Win32 device
+ // aliases such as NUL.json do not denote ordinary independent files.
+ // Refuse both before open('wx'), which alone cannot enforce this boundary.
+ const leaf=basename(outputPath);
+ if(leaf.includes(':')||
+    (process.platform==='win32'&&
+     /^(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(leaf)))
+   return block('INVALID_REQUEST');
  try{
   const sanitized=sanitizeReportForSave(report);
   if(!sanitized)return block('INVALID_REQUEST');
