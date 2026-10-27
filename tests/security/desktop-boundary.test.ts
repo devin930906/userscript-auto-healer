@@ -419,3 +419,20 @@ test('TASK-011/TEST-020/026: native restore ties pre-rename revocation to window
  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
  assert.match(preload,/restoreManualOriginal: \(\): Promise<unknown> => ipcRenderer\.invoke\('restore:manual-original'\)/);
 });
+
+// TASK-011 / TEST-020/023/026: real manual UI must persist a strictly
+// non-authoritative checkpoint before reporting an exportable candidate.
+test('TASK-011: native manual export displays a persisted unverified checkpoint without giving write authority',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const flow=readFileSync(join(process.cwd(),'src/repair/manual-repair-flow.ts'),'utf8');
+ assert.match(flow,/stageRecoveryCheckpointOnly\(patch,staged,files\)/);
+ assert.match(flow,/if\(checkpoint\.status!=='CHECKPOINT_STAGED_UNVERIFIED'\)/);
+ assert.match(main,/checkpointFileName:result\.checkpointFileName/);
+ assert.match(ui,/checkpointFileName/);
+ assert.match(html,/恢复检查点/);
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:checkpoint-apply'/);
+ assert.doesNotMatch(main,/ipcMain\.handle\('restore:checkpoint-apply'/);
+});
