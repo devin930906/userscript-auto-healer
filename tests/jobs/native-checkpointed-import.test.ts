@@ -211,9 +211,34 @@ test('TASK-013/TEST-022: cancelling later AST segment retains only earlier durab
   const disk=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
   assert.deepEqual(disk.jobs.map((x:{state:string})=>x.state),
    ['SUCCEEDED','CANCELLED']);
+  // A later native picker can reselect the exact same script bytes after an
+  // app restart. A persisted CANCELLED job must remain cancelled, not be
+  // silently reclassified as a successful or failed AST batch.
+  const beforeRestart=await readFile(join(directory,BATCH_JOURNAL_FILENAME));
+  const pickedAgain=(await importApprovedPaths(filenames)).scripts;
+  const recoveredProgress:Array<[number,number]>=[];
+  const recovered=await runCheckpointedNativeImportAnalysis(root,pickedAgain,
+   undefined,(done,total)=>recoveredProgress.push([done,total]));
+  assert.equal(recovered.status,'BLOCKED',
+   'reimport cannot turn a previously cancelled durable job into batch success');
+  if(recovered.status==='BLOCKED'){
+   assert.equal(recovered.reason,'CANCELLED');
+   assert.deepEqual(recovered.previews.slice(0,16).map(p=>p.status),
+    Array(16).fill('STATIC_ANALYSIS_ONLY'),
+    'old SUCCEEDED hints must be independently re-analysed before display');
+   assert.equal(recovered.previews[16].status,'SKIPPED_CANCELLED',
+    'persisted cancellation is not a worker crash or analysis failure');
+   assert.equal(recovered.previews.every(p=>
+    p.automaticPatchAllowed===false&&p.tampermonkeyVerified===false&&
+    p.businessVerified===false),true);
+  }
+  assert.deepEqual(recoveredProgress,[[16,17]],
+   'resumed progress must not count a cancelled job as completed');
+  assert.deepEqual(await readFile(join(directory,BATCH_JOURNAL_FILENAME)),
+   beforeRestart,'reimport must not erase terminal cancellation evidence');
   for(let i=0;i<17;i++)
    assert.equal((await readFile(filenames[i],'utf8')).includes('#partial-'+i),true,
-    'cancellation must never modify user-selected script bytes');
+    'cancellation and restart must never modify user-selected script bytes');
  }finally{
   patched.mock.restore();
   await rm(home,{recursive:true,force:true});
