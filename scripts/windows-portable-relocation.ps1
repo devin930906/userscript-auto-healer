@@ -778,6 +778,74 @@ function Get-CandidatePortableSiblingRenameControl([string]$source) {
   }
 }
 
+# TEST-028: Electron and filesystem filters may create files AFTER the caller
+# snapshots its manifest. An RM query restricted to that old list can report
+# affected=0 while the actual new child file prevents the same-parent rename.
+# Refresh only runner-contained, non-reparse candidate files at the denial.
+# If the bounded snapshot is incomplete, return 'unavailable'; never claim
+# that no process is associated. Read-only; no processes are stopped.
+function Get-CandidatePortableCurrentRmManifest(
+  [string]$source,[string[]]$candidateFiles
+) {
+  $unavailable=[pscustomobject]@{State='unavailable';Files=@()}
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       $null -eq $candidateFiles -or $candidateFiles.Count -lt 1 -or
+       $candidateFiles.Count -gt 512 -or
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return $unavailable
+    }
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    $prefix=$base+[IO.Path]::DirectorySeparatorChar
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return $unavailable }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $expected=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($file in $candidateFiles) {
+      if([string]::IsNullOrWhiteSpace($file) -or
+         -not [IO.Path]::IsPathFullyQualified($file)) { return $unavailable }
+      $full=[IO.Path]::GetFullPath($file)
+      if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+         -not [IO.File]::Exists($full) -or
+         -not $expected.Add($full)) { return $unavailable }
+      Assert-CandidatePortableNoReparsePath $runner $full
+    }
+    $found=[Collections.Generic.List[string]]::new()
+    $foundSet=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $pending=[Collections.Generic.Queue[string]]::new()
+    $pending.Enqueue($base)
+    $directoryCount=0
+    while($pending.Count -gt 0) {
+      $parent=$pending.Dequeue()
+      foreach($child in @(Get-ChildItem -LiteralPath $parent -Force -ErrorAction Stop)) {
+        $full=[IO.Path]::GetFullPath([string]$child.FullName)
+        if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+           (([int]$child.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0)) {
+          return $unavailable
+        }
+        if($child.PSIsContainer) {
+          $directoryCount++
+          if($directoryCount -gt 512) { return $unavailable }
+          $pending.Enqueue($full)
+        } elseif($child -is [IO.FileInfo]) {
+          if(-not $foundSet.Add($full)) { return $unavailable }
+          $found.Add($full)
+          if($found.Count -gt 512) { return $unavailable }
+        } else { return $unavailable }
+      }
+    }
+    if($found.Count -eq 0) { return $unavailable }
+    foreach($file in $expected) {
+      if(-not $foundSet.Contains($file)) { return $unavailable }
+    }
+    return [pscustomobject]@{State='ok';Files=@($found.ToArray())}
+  } catch { return $unavailable }
+}
+
 # ISSUE-215: capture evidence at the FIRST access denial rather than only
 # after bounded retries. A transient denial may disappear before the final
 # attempt; the caller provides its already enumerated candidate-only files.
@@ -790,7 +858,10 @@ function Get-CandidatePortableFirstDenialSummary(
   $sharing=Get-CandidatePortableFileShareSummary $source $candidateFiles
   $sibling=Get-CandidatePortableSiblingRenameControl $source
   $acl=Get-CandidatePortableRenameAclSummary $source
-  $rm=Get-CandidatePortableRestartManagerSummary $source $candidateFiles
+  $rmSnapshot=Get-CandidatePortableCurrentRmManifest $source $candidateFiles
+  $rm=if($rmSnapshot.State -eq 'ok') {
+    Get-CandidatePortableRestartManagerSummary $source $rmSnapshot.Files
+  } else { 'rm=unavailable' }
   # Run individual attribution only when a batch already observed an
   # outside-runner association. Never treat this evidence as causal proof.
   $rmFiles='rmFiles=not-probed'
@@ -798,7 +869,7 @@ function Get-CandidatePortableFirstDenialSummary(
      $rm -match ' coverage=\[[^\]]*extraAffectedObservations=([1-9][0-9]*)') {
     # A later 40-file RM batch may be the ONLY place with an association.
     # Inspect targeted batches even when the first batch reports zero.
-    $rmFiles=Get-CandidatePortableRmFileAssociationSummary $source $candidateFiles
+    $rmFiles=Get-CandidatePortableRmFileAssociationSummary $source $rmSnapshot.Files
   }
   return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm] fileAssociations=[$rmFiles]"
 }
