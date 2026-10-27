@@ -271,3 +271,8 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 主干代码及测试 [#40270063756](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270063756)：599 tests、598 pass、0 fail、1 conditional skip；Tampermonkey 官方厂商托管扩展隔离 Windows [#40270144017](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270144017)：15/15 Job 成功，实际版本 5.4.1、Chromium 141，扩展运行 ID 非商店正式 ID，原版/修复候选 GM+合成业务与人工原版恢复均有有限实证。
 - 发行候选 [#40270461210](https://github.com/devin930906/userscript-auto-healer/actions/runs/40270461210)：同一 SHA 的 Windows EXE 与真实 ZIP 候选构建成功、147 文件完整性对照、受限 Windows 安装与便携 smoke 成功；Artifact `12628621628` 仅开发候选，非 Stable Release。
 - **恢复执行位置**：继续现有 TASK-007/010/011 的可信真实 Tampermonkey 验收、业务诊断、自动应用前硬门槛及可恢复事务实现；随后按原 TASK-018..021 与 GATE-001..011 执行。不得回到（4）重做或把全部矩阵仅凭这次隔离成功自动判绿。
+
+## （7）2026-10-27 TASK-003 安全回归续接
+
+- 当前开发分支 `fix/task003-untrusted-metadata-byte-boundary` 已提交新增 TEST-004/026 恶意字节输入负例及解析器最小修复。RED `339007a66aa68b4b9d303e47071f1ee3abd19bfa` 对应 [Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 642 项：640 pass / 1 预期失败 / 1 skip；GREEN `ad10c62c071b486f7f9dd0398816aea09ec6091c` 对应 [Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) 641 pass / 0 fail / 1 skip，Electron 真实沙箱 smoke success。
+- 该安全修复仅限制不可信字节容器触发解析器任意 Getter、Proxy 或伪造 `subarray` 方法，不执行脚本、不认证 Tampermonkey、不触碰脚本原件、不授予自动应用/回滚权限。PR 整合与合并后 main HEAD/Checks 以最新 GitHub 记录为准；下个仍需优先处理的关键链路为 TASK-007/010/011、TASK-018 与 GATE-001..011。

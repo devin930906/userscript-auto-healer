@@ -314,3 +314,10 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - **TDD RED**：提交 `135809d93da759e77b151deec2740f42eda262b2`；Windows [Application Checks #40369693086](https://github.com/devin930906/userscript-auto-healer/actions/runs/40369693086) 641 cases：638 pass、2 条新增用例预期失败、1 conditional skip。未实现时，单独 broken 自报被错误地显示为未报告，并且无效/撤销 Proxy 未被标为已拒绝。
 - **TDD GREEN**：原生每模式分类提交 `4f431753409588e494d35db873baca0c909e2178`；桌面 IPC/UI 与报告元数据兼容提交 `8a75d908c41ff46813a929ac2984d75c857ad8b2`；Windows [Application Checks #40370576818](https://github.com/devin930906/userscript-auto-healer/actions/runs/40370576818) completed/success，641 cases：640 pass、0 fail、1 conditional skip；TypeScript 类型检查与真实 Electron isolated renderer/preload smoke 成功。
 - **持续阻断**：这是对现有 TASK-007 手动测试的可解释诊断信息增强，不认证 Tampermonkey 商店签名/管理器身份，也不证明真实脚本修复、GM API 可用性、业务恢复、自动应用或回滚。完整 TEST-017/018、GATE-004/005 与 Stable 正式发行仍未满足；主分支集成后的 SHA 和检查需重新核实。
+
+## （7）2026-10-27 TASK-003 / TEST-004/026 不可信元数据字节输入隔离
+
+- **回归目标**：`readUserscriptSource` / `parseUserscriptMetadata` 是导入后的只读解析入口；伪造的字节对象、Getter、活跃/已撤销 Proxy 不得在特权进程执行任意外来 JavaScript。保留合法 Uint8Array/Buffer、UTF-8、UTF-8 BOM、UTF-16 LE/BE BOM、显式 GB18030 的既有解码行为，不读取、更改或执行实际用户脚本。
+- **TDD RED**：测试先行 `339007a66aa68b4b9d303e47071f1ee3abd19bfa`；[Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 共 642 项，640 pass、1 fail（新增用例以 `PRIVATE_METADATA_INPUT_EXECUTED` 证明旧代码调用外来 Getter）、1 skip，类型检查成功。
+- **TDD GREEN**：`ad10c62c071b486f7f9dd0398816aea09ec6091c`；[Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) completed/success，642 项中 641 pass、0 fail、1 conditional skip，Windows Electron sandbox/preload smoke 同样成功。
+- **验收边界**：这是 TASK-003 已整合模块的一项 TEST-004/026 安全回归补丁，未改变需求或管理器能力；真正 Tampermonkey、可信自动修复/回滚、正式 TEST/GATE、EXE/ZIP Stable 验收仍独立受阻。分支是否完成 PR 集成须按实时 GitHub 状态复核。

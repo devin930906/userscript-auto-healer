@@ -348,3 +348,9 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - **TDD RED**：提交 `135809d93da759e77b151deec2740f42eda262b2`；Windows [Application Checks #40369693086](https://github.com/devin930906/userscript-auto-healer/actions/runs/40369693086) 641 cases：638 pass、2 条新增用例预期失败、1 conditional skip。未实现时，单独 broken 自报被错误地显示为未报告，并且无效/撤销 Proxy 未被标为已拒绝。
 - **TDD GREEN**：原生每模式分类提交 `4f431753409588e494d35db873baca0c909e2178`；桌面 IPC/UI 与报告元数据兼容提交 `8a75d908c41ff46813a929ac2984d75c857ad8b2`；Windows [Application Checks #40370576818](https://github.com/devin930906/userscript-auto-healer/actions/runs/40370576818) completed/success，641 cases：640 pass、0 fail、1 conditional skip；TypeScript 类型检查与真实 Electron isolated renderer/preload smoke 成功。
 - **持续阻断**：这是对现有 TASK-007 手动测试的可解释诊断信息增强，不认证 Tampermonkey 商店签名/管理器身份，也不证明真实脚本修复、GM API 可用性、业务恢复、自动应用或回滚。完整 TEST-017/018、GATE-004/005 与 Stable 正式发行仍未满足；主分支集成后的 SHA 和检查需重新核实。
+
+## （7）2026-10-27 TASK-003 / TEST-004/026 元数据解析对象与原生字节边界修复
+
+- 已定位：原 `readUserscriptSource` 在检查字节容器真实性前直接读取 `script.bytes`，并允许虚构对象的 `subarray()` 被调用。现从普通对象自有数据属性读取来源，仅接受非 Proxy 的真实 Uint8Array/Buffer，通过原生 TypedArray 内部 Getter 获取字节视图；异常、伪造对象或 Getter 全部返回无效编码，保留只读 BOM/字符集解析。
+- RED 测试提交 `339007a66aa68b4b9d303e47071f1ee3abd19bfa`：[Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 642 tests、640 pass、1 fail、1 skip；GREEN 修复 `ad10c62c071b486f7f9dd0398816aea09ec6091c`：[Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) 642 tests、641 pass、0 fail、1 skip，真实 Electron smoke success。
+- 仅防回归增量，不重启已完成 TASK-003；TASK-007/010/011 的完整可信业务链路、TASK-018 与正式 Stable GATE 仍需各自实证，不以此增量改变原始任务状态。

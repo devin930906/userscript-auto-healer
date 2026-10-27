@@ -50,3 +50,31 @@ test('TEST-004: BOM and missing/invalid metadata fail safely', () => {
   assert.equal(parseUserscriptMetadata({bytes:Buffer.from('// ==UserScript==\n// @name X'),textEncoding:'utf-8'}).status,'UNTERMINATED_HEADER');
   assert.equal(parseUserscriptMetadata({bytes:Buffer.from([0xff]),textEncoding:'utf-8'}).status,'INVALID_ENCODING');
 });
+test('TASK-003/TEST-004/026: parser refuses hostile byte descriptors and fake byte containers before executing caller hooks', () => {
+  const script=Buffer.from('// ==UserScript==\n// @name Safe\n// ==/UserScript==\n');
+  let executed=0;
+  const poison=():never=>{executed++;throw Error('PRIVATE_METADATA_INPUT_EXECUTED');};
+  const accessor={textEncoding:'utf-8'} as Record<string,unknown>;
+  Object.defineProperty(accessor,'bytes',{enumerable:true,get:poison});
+  const forgedByteContainer={
+    0:0xef,1:0xbb,2:0xbf,length:script.length+3,
+    subarray:()=>{executed++;return script;}
+  };
+  const wrapped=new Proxy({bytes:script,textEncoding:'utf-8'},{get:poison,ownKeys:poison});
+  const revoked=Proxy.revocable({bytes:script,textEncoding:'utf-8'},{get:poison});
+  revoked.revoke();
+  const proxyBytes=new Proxy(Buffer.from([0xef,0xbb,0xbf,...script]),{get:poison});
+  const invalid:unknown[]=[
+    accessor,wrapped,revoked.proxy,
+    {bytes:forgedByteContainer,textEncoding:'utf-8-bom'},
+    {bytes:proxyBytes,textEncoding:'utf-8-bom'}
+  ];
+  for(const hostile of invalid){
+    assert.doesNotThrow(()=>{
+      assert.equal(readUserscriptSource(hostile as Parameters<typeof readUserscriptSource>[0]),null);
+      assert.equal(parseUserscriptMetadata(hostile as Parameters<typeof parseUserscriptMetadata>[0]).status,'INVALID_ENCODING');
+    });
+  }
+  assert.equal(executed,0,'no untrusted getter, proxy trap or replacement subarray method may execute');
+  assert.equal(parseUserscriptMetadata({bytes:script,textEncoding:'utf-8'}).status,'OK');
+});
