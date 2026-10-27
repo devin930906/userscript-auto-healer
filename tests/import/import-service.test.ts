@@ -463,3 +463,74 @@ test('TEST-002/026: byte views cannot execute own byteLength getters or Proxy pr
   {filename:'trapped.user.js',code:'INVALID_DRAG_DATA'});
  assert.equal(prototypeTraps,0,'a Proxy must be rejected before instanceof reflection');
 });
+
+
+test('TASK-002/TEST-002/026: native selection rejects Proxy, revoked Proxy and accessor slots without invoking caller hooks',async t=>{
+  const root=await workspace(t);
+  const safe=join(root,'safe.user.js');
+  await writeFile(safe,script);
+  let hooks=0;
+  const hostile=new Proxy([safe],{
+    get(){hooks++;throw Error('UNTRUSTED_NATIVE_SELECTION_GET');},
+    getPrototypeOf(){hooks++;throw Error('UNTRUSTED_NATIVE_SELECTION_PROTOTYPE');},
+    ownKeys(){hooks++;throw Error('UNTRUSTED_NATIVE_SELECTION_KEYS');}
+  });
+  const revoked=Proxy.revocable([safe],{});
+  revoked.revoke();
+  const indexed=[safe];
+  Object.defineProperty(indexed,'0',{configurable:true,enumerable:true,
+    get(){hooks++;return safe;}});
+  const unexpected=[safe] as string[] & {extra?:string};
+  unexpected.extra='unauthorized';
+  for(const selection of [hostile,revoked.proxy,indexed,unexpected]){
+    const result=await importApprovedPaths(selection);
+    assert.equal(result.scripts.length,0);
+    assert.deepEqual(result.errors.map(error=>error.code),['INVALID_PATH']);
+  }
+  assert.equal(hooks,0,'native batch parsing must not execute Proxy traps or array getters');
+  assert.equal((await readFile(safe,'utf8')),script);
+});
+
+test('TASK-002/TEST-002/026: forged cancellation signals never execute getters or traverse a native folder',async t=>{
+  const root=await workspace(t);
+  const safe=join(root,'safe.user.js');
+  await writeFile(safe,script);
+  let hooks=0;
+  const forged={get aborted(){hooks++;throw Error('UNTRUSTED_ABORT_GETTER');}} as unknown as AbortSignal;
+  const proxied=new Proxy(new AbortController().signal,{
+    get(){hooks++;throw Error('UNTRUSTED_ABORT_PROPERTY');},
+    getPrototypeOf(){hooks++;throw Error('UNTRUSTED_ABORT_PROTOTYPE');}
+  });
+  const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+  const revoked=Proxy.revocable(new AbortController().signal,{});
+  revoked.revoke();
+  for(const signal of [forged,proxied,spoof,revoked.proxy]){
+    const files=await importApprovedPaths([safe],signal);
+    assert.equal(files.scripts.length,0);
+    assert.deepEqual(files.errors.map(error=>error.code),['INVALID_PATH']);
+    const folder=await scanApprovedDirectory(root,signal);
+    assert.equal(folder.scripts.length,0);
+    assert.deepEqual(folder.errors.map(error=>error.code),['INVALID_PATH']);
+  }
+  assert.equal(hooks,0,'invalid cancellation must never call untrusted JS');
+  assert.equal((await readFile(safe,'utf8')),script);
+});
+
+test('TASK-002/TEST-002/022: native file selection remains a fixed snapshot across awaited progress callbacks',async t=>{
+  const root=await workspace(t);
+  const first=join(root,'first.user.js');
+  const second=join(root,'second.user.js');
+  const decoy=join(root,'decoy.user.js');
+  await writeFile(first,script+'// first');
+  await writeFile(second,script+'// second');
+  await writeFile(decoy,script+'// decoy');
+  const selected=[first,second];
+  const observed=await importApprovedPaths(selected,undefined,status=>{
+    if(status.processed===1)selected[1]=decoy;
+  });
+  assert.equal(observed.scripts.length,2);
+  assert.deepEqual(observed.scripts.map(s=>s.filename),
+    ['first.user.js','second.user.js'],
+    'a progress callback cannot change the authorized native selection in flight');
+  assert.equal((await readFile(decoy,'utf8')),script+'// decoy');
+});
