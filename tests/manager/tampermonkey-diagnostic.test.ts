@@ -100,6 +100,29 @@ test('TASK-007/TEST-017: each GM mode reports its own pending, failing, or match
  assert.equal(JSON.stringify(partial).includes('token'),false);
 });
 
+test('TASK-007/TEST-017/018/026: impossible broken success is rejected at every manual diagnostic summary',()=>{
+ // The shipped controlled test page has #current-target, never #obsolete-target.
+ // Even a forged plain-object receipt with otherwise valid fields must not
+ // re-enter diagnostics after the loopback server began rejecting this claim.
+ const impossible={broken:selfReport('broken',true,true),fixed:both.fixed};
+ const view=summarizeManualModeReceipts(impossible);
+ assert.equal(view.broken.reportStatus,'REJECTED_REPORT');
+ assert.equal(view.broken.reportedBusinessAction,null);
+ assert.equal(view.broken.gmApiVerified,false);
+ assert.equal(view.fixed.reportStatus,'SELF_REPORTED_ONLY');
+ const assessed=assessManualProbeObservations(impossible,visited);
+ assert.equal(assessed.observedModes,1);
+ assert.equal(assessed.status,'REPORTED_MISMATCH');
+ assert.equal(assessed.reportedBrokenFailed,false);
+ assert.equal(assessed.businessVerified,false);
+ assert.equal(correlateManualFixtureEvidence(impossible,visited,{}).status,
+  'REPORTED_MISMATCH');
+ // The valid broken-failure and fixed-success reports remain eligible.
+ assert.equal(summarizeManualModeReceipts(both).broken.reportStatus,
+  'SELF_REPORTED_ONLY');
+ assert.equal(assessManualProbeObservations(both,visited).observedModes,2);
+});
+
 test('TASK-007/TEST-017/026: forged mode reports never run getters or grant GM authority',()=>{
  let executed=0;
  const hostile=Object.defineProperty({...selfReport('fixed',true,true)},

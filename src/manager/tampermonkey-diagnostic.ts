@@ -277,6 +277,10 @@ function cleanReceipt(value:unknown,mode:GmProbeMode):GmProbeReceipt|null{
    typeof x.reportedGmDefaultMatched!=='boolean'||
    typeof x.reportedGmStorageRoundtripMatched!=='boolean'||
    typeof x.reportedBusinessAction!=='boolean'||
+   // The controlled broken fixture cannot produce a business action: it has
+   // no #obsolete-target. Reject forged downstream snapshots consistently
+   // with the localhost receiver, even before human-facing summaries.
+   (mode==='broken'&&x.reportedBusinessAction!==false)||
    x.extensionAuthenticityVerified!==false||
    x.scriptInstallationVerified!==false||
    x.gmApiVerified!==false||x.businessVerified!==false)
