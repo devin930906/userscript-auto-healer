@@ -4,6 +4,32 @@ import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 
 const SCRIPT_A='a'.repeat(64), SCRIPT_B='b'.repeat(64), SCRIPT_C='c'.repeat(64);
 
+test('TASK-013/TEST-022/026: serial checkpoint cannot finish a later job before an earlier pending job',()=>{
+ const serial={count:2,concurrency:1,maxAttempts:2,jobHashes:[SCRIPT_A,SCRIPT_B]};
+ const source=new ReadOnlyBatchCoordinator(serial,async()=> 'DONE');
+ const checkpoint=source.snapshot();
+ for(const later of ['RUNNING','SUCCEEDED','FAILED'] as const){
+  // With one worker, ordinal 1 cannot start or finish while ordinal 0
+  // has never been dispatched. Otherwise a forged disk hint skips work.
+  const impossible={...checkpoint,jobs:[
+   {ordinal:0,state:'QUEUED' as const,attempts:0},
+   {ordinal:1,state:later,attempts:1}
+  ]};
+  assert.throws(()=>new ReadOnlyBatchCoordinator(serial,async()=> 'DONE',impossible),
+   /INVALID_BATCH_CHECKPOINT/,later);
+ }
+ // Two real concurrent workers can legitimately finish the second ordinal
+ // while the first remains running: do not apply a serial-only invariant.
+ const parallel={...serial,concurrency:2};
+ const parallelSource=new ReadOnlyBatchCoordinator(parallel,async()=> 'DONE');
+ const parallelCheckpoint={...parallelSource.snapshot(),jobs:[
+  {ordinal:0,state:'RUNNING' as const,attempts:1},
+  {ordinal:1,state:'SUCCEEDED' as const,attempts:1}
+ ]};
+ const allowed=new ReadOnlyBatchCoordinator(parallel,async()=> 'DONE',parallelCheckpoint);
+ assert.deepEqual(allowed.snapshot().jobs.map(x=>x.state),['QUEUED','SUCCEEDED']);
+});
+
 test('TEST-022: independent batch results, bounded transient retry and no automatic authority',async()=>{
  const visited:number[]=[];
  const coordinator=new ReadOnlyBatchCoordinator({count:4,maxAttempts:2},

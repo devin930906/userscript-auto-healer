@@ -23,6 +23,29 @@ async function withJournal(run:(directory:string)=>Promise<void>){
  finally{await rm(directory,{recursive:true,force:true});}
 }
 
+test('TASK-013/TEST-022/026: forged out-of-order serial journal cannot skip a native worker',async()=>{
+ await withJournal(async directory=>{
+  const source=new ReadOnlyBatchCoordinator(options,completed);
+  const forged={...source.snapshot(),jobs:[
+   {ordinal:0,state:'QUEUED' as const,attempts:0},
+   {ordinal:1,state:'SUCCEEDED' as const,attempts:1}
+  ]};
+  const file=join(directory,BATCH_JOURNAL_FILENAME);
+  const bytes=JSON.stringify(forged);
+  await writeFile(file,bytes);
+  let dispatched=0;
+  const restored=await loadReadOnlyBatchJournal(directory,options,async()=>{
+   dispatched++;return 'DONE';
+  });
+  assert.deepEqual(restored,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+  assert.equal(dispatched,0,'untrusted impossible state cannot resume/skips jobs');
+  assert.deepEqual(await saveReadOnlyBatchJournal(directory,source),
+   {status:'BLOCKED',reason:'INVALID_CHECKPOINT'},
+   'existing corrupted journal may not be overwritten by a fresh save');
+  assert.equal(await readFile(file,'utf8'),bytes);
+ });
+});
+
 test('TASK-013/TEST-022: native checkpoint survives restart without granting repair authority',async()=>{
  await withJournal(async directory=>{
   const seen:number[]=[];
