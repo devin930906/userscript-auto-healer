@@ -280,6 +280,30 @@ test('TEST-017: native report creates a private separate JSON only once and neve
   assert.deepEqual(await readdir(root),['manual-qa.json']);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('TASK-007/TEST-017/026: native GM report never opens ADS or Windows device-name JSON destinations',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-leaf-boundary-'));
+ try{
+  const ready=createLimitedGmReport(session,Date.parse('2026-10-19T02:02:00.000Z'));
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  const ordinaryFile=join(root,'owner.txt');
+  await writeFile(ordinaryFile,'ORIGINAL_DO_NOT_MODIFY','utf8');
+  const names=['owner.txt:shadow.json'];
+  if(process.platform==='win32')
+   names.push('NUL.json','CON.json','CONIN$.json','COM1.json','LPT1.json');
+  for(const name of names){
+   const result=await saveLimitedGmReportOnly(ready.report,join(root,name),true);
+   assert.equal(result.status,'BLOCKED',name);
+   if(result.status==='BLOCKED')
+    assert.equal(result.code,'INVALID_REQUEST',name+' must be rejected before open');
+  }
+  assert.equal(await readFile(ordinaryFile,'utf8'),'ORIGINAL_DO_NOT_MODIFY');
+  assert.deepEqual((await readdir(root)).sort(),['owner.txt']);
+  // A Windows ADS is invisible to readdir; read the stream directly too.
+  await assert.rejects(readFile(join(root,'owner.txt:shadow.json')));
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-017: redirected directory and invalid report path cannot write native evidence',async t=>{
  const root=await mkdtemp(join(tmpdir(),'uah-gm-report-negative-'));
  try{
