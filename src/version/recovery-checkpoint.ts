@@ -329,6 +329,20 @@ export async function inspectRecoveryCheckpointReadOnly(
     if(folderAfter.isSymbolicLink()||!folderAfter.isDirectory()||
        !sameDirectory(folderBefore,folderAfter))
       return block('UNSAFE_DESTINATION');
+    // Candidate verification awaits independent disk I/O. The persisted
+    // checkpoint pathname can be replaced with IDENTICAL bytes while that
+    // check runs. Match the originally read inode and metadata, not only
+    // the SHA-256, before returning any recovery observation.
+    const fileAfter=await lstat(path,{bigint:true});
+    if(!fileAfter.isFile()||fileAfter.isSymbolicLink()||
+       fileAfter.nlink!==1n||
+       fileAfter.dev!==fileBefore.dev||fileAfter.ino!==fileBefore.ino||
+       fileAfter.size!==fileBefore.size||
+       fileAfter.mtimeNs!==fileBefore.mtimeNs||
+       fileAfter.ctimeNs!==fileBefore.ctimeNs||
+       fileAfter.mode!==fileBefore.mode||
+       await hasUnsafePathLink(path))
+      return block('CHECKPOINT_FAILED');
     return Object.freeze({
       status:'CHECKPOINT_RECHECKED_READ_ONLY' as const,
       checkpointSha256:createHash('sha256').update(bytes).digest('hex'),
