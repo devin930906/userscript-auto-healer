@@ -318,13 +318,39 @@ async function prepareNativeManualExportForManager(reviewed,browserContext){
     candidateBytes,'Staged candidate must equal the exported manager-facing bytes');
   assert.deepEqual(fs.readFileSync(sourcePath),originalBytes,
     'Product handoff must never overwrite the original imported source');
+
+  // TEST-017/018/020/023: product native export must have persisted a
+  // real recovery checkpoint before disposable Tampermonkey installation.
+  // Reread and independently verify its bound source/backup/candidate
+  // bytes. A checkpoint is NEVER permission to patch or roll back.
+  assert.match(exported.checkpointFileName,/\.checkpoint\.json$/);
+  const checkpointPath=path.join(backupDirectory,exported.checkpointFileName);
+  const checkpointBytes=fs.readFileSync(checkpointPath);
+  assert.equal(sha(checkpointBytes),exported.checkpointSha256);
+  const {inspectRecoveryCheckpointReadOnly}=
+    require('../dist/src/version/recovery-checkpoint.js');
+  const checkpointInspection=await inspectRecoveryCheckpointReadOnly(
+    reviewed.request,exported.checkpointFileName,
+    {sourcePath,backupDirectory,userApproved:true}
+  );
+  assert.equal(checkpointInspection.status,'CHECKPOINT_RECHECKED_READ_ONLY',
+    'Real manager handoff refuses an unverified native recovery checkpoint');
+  assert.equal(checkpointInspection.checkpointSha256,exported.checkpointSha256);
+  assert.equal(checkpointInspection.originalSha256,script.sha256);
+  assert.equal(checkpointInspection.candidateSha256,sha(candidateBytes));
+  assert.equal(checkpointInspection.automaticPatchAllowed,false);
+  assert.equal(checkpointInspection.automaticRollbackAllowed,false);
+  assert.equal(checkpointInspection.tampermonkeyVerified,false);
+  assert.equal(checkpointInspection.businessVerified,false);
+
   assert.equal(fs.readdirSync(exportDirectory).length,2,
     'Only candidate and independent recovery exports may be created');
   console.log('PRODUCT_NATIVE_IMPORT_TO_REAL_MANAGER '+JSON.stringify({
    variant,runAt,originalSha256:sha(originalBytes),
    candidateSha256:sha(candidateBytes),
    importedBytes:script.byteLength,exportedBytes:candidateBytes.byteLength,
-   export:exported.status,browserObservedFixtureOnly:true,productCdpVerified:false,
+   export:exported.status,checkpointRecheckedReadOnly:true,
+   browserObservedFixtureOnly:true,productCdpVerified:false,
    managerInstalled:false,automaticPatchAllowed:false,
    automaticRollbackAllowed:false
   }));
