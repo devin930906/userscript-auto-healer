@@ -274,6 +274,12 @@ export async function startIsolatedTampermonkeyGmProbe(
      // First receipt wins per mode: replay or a late contradictory POST must
      // never silently rewrite an earlier captured diagnostic observation.
      if(receipts[mode]!==undefined){res.writeHead(409).end();return;}
+     // The consented broken fixture contains no #obsolete-target. Its business
+     // action can never succeed, even if a sender knows this session's token.
+     // Reject impossible FIRST reports without changing 409 replay semantics.
+     if(mode==='broken'&&input.businessAction!==false){
+       res.writeHead(403).end();return;
+     }
      // Preserve the raw reported failures; never rewrite them into success.
      receipts[mode]=Object.freeze({
        status:'SELF_REPORTED_FIXTURE_ONLY',mode,

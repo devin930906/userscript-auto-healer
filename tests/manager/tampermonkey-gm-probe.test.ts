@@ -296,6 +296,30 @@ test('TEST-017/018 stage: isolated local probe generates explicit GM userscript 
  const wrongRoute=await fetch(probe.origin+'/unrelated');
  assert.equal(wrongRoute.status,404);
 });
+test('TASK-007/TEST-017/018/026: impossible broken-mode success cannot become a diagnostic receipt',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+ assert.ok(token);
+ const send=(businessAction:boolean)=>fetch(probe.origin+'/receipt',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({token,mode:'broken',
+   gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction})
+ });
+ // The shipped broken fixture contains #current-target but no #obsolete-target.
+ // A true businessAction is inconsistent even for a caller holding the token.
+ assert.equal((await send(true)).status,403);
+ assert.deepEqual(probe.receiptSnapshot(),{},
+  'contradictory data cannot consume the first valid per-mode receipt');
+ assert.equal((await send(false)).status,204);
+ const receipt=probe.receiptSnapshot().broken;
+ assert.equal(receipt?.reportedBusinessAction,false);
+ assert.equal(receipt?.businessVerified,false);
+});
+
 test('TEST-018 stage: untrusted posted receipts never become manager/GM/business VERIFIED',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
