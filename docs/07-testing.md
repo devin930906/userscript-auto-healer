@@ -321,3 +321,9 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - **TDD RED**：测试先行 `339007a66aa68b4b9d303e47071f1ee3abd19bfa`；[Windows #40454762079](https://github.com/devin930906/userscript-auto-healer/actions/runs/40454762079) 共 642 项，640 pass、1 fail（新增用例以 `PRIVATE_METADATA_INPUT_EXECUTED` 证明旧代码调用外来 Getter）、1 skip，类型检查成功。
 - **TDD GREEN**：`ad10c62c071b486f7f9dd0398816aea09ec6091c`；[Windows #40455069810](https://github.com/devin930906/userscript-auto-healer/actions/runs/40455069810) completed/success，642 项中 641 pass、0 fail、1 conditional skip，Windows Electron sandbox/preload smoke 同样成功。
 - **验收边界**：这是 TASK-003 已整合模块的一项 TEST-004/026 安全回归补丁，未改变需求或管理器能力；真正 Tampermonkey、可信自动修复/回滚、正式 TEST/GATE、EXE/ZIP Stable 验收仍独立受阻。分支是否完成 PR 集成须按实时 GitHub 状态复核。
+
+## （7）2026-10-27 TASK-011 / TEST-020/026 恢复检查点最终回执的磁盘身份复核
+- **边界与风险**：原生 `stageRecoveryCheckpointOnly` 原先校验发布后的 JSON，然后异步重新验证原始源码/备份/候选。外部进程能在后续 I/O 时间窗改写已发布检查点，或用相同字节替换文件 inode，但旧代码仍返回 `CHECKPOINT_STAGED_UNVERIFIED`。这是无授权的“回执陈旧”风险；本函数始终禁止自动应用、自动回滚及 Tampermonkey/业务已验证声明。
+- **真实 RED**：新增 `tests/version/recovery-checkpoint.test.ts` 的 TEST-020/026 两种磁盘故障注入，源码 `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca`；Windows [#40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095) 643 tests，641 pass、1 fail（内容被外部修改后仍错误返回成功）、1 conditional skip；TypeScript 检查成功。
+- **真实 GREEN**：实现 `74eb05cf6c971e13a212b87ede93fdcb15d596e9`，记录原暂存 inode 对应的已发布文件对象，在末次候选复核后再次验证检查点原始字节、inode、时间戳、单硬链及父目录身份；失败保留文件供人工核对、不覆盖源脚本。[Windows #40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319) 643 tests，642 pass、0 fail、1 conditional skip，类型检查和实际 Electron shell smoke 成功。
+- **未解除的发布门槛**：属于 TASK-011 本地检查点阶段的安全回归，不提供操作系统排他锁或断电原子性证明，不实现可信 Tampermonkey 业务验收、源脚本自动修复/回滚，也不代表 TEST-020/021/026 全量、GATE-006/007 或 Stable 发布通过。PR 整合及主线验证须独立复核。
