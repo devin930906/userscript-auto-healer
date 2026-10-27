@@ -210,6 +210,13 @@ export async function runCheckpointedNativeImportAnalysis(
   for(let ordinal=0;ordinal<groups.length;ordinal++){
    const group=groups[ordinal];
    const state=outcome.snapshot.jobs[ordinal].state;
+   // A cancelled journal job is terminal, not an AST Worker failure or
+   // successful batch work. Re-importing identical approved bytes must not
+   // silently resume it, reclassify it as a crash, or count it as processed.
+   if(state==='CANCELLED'){
+    previews.push(...blank(group.scripts.length,'SKIPPED_CANCELLED'));
+    continue;
+   }
    // A prior success is an unauthenticated scheduling hint. Always rerun
    // its bounded, isolated AST worker to return fresh, source-matched UI data.
    let reports=observations[ordinal];
@@ -252,7 +259,8 @@ export async function runCheckpointedNativeImportAnalysis(
     try{onProgress?.(processed,count);}catch{/* advisory UI counters only */}
    }
   }
-  if(signal?.aborted||lifetime.signal.aborted)
+  if(signal?.aborted||lifetime.signal.aborted||
+     outcome.snapshot.jobs.some(job=>job.state==='CANCELLED'))
    return Object.freeze({status:'BLOCKED' as const,
     reason:'CANCELLED' as const,previews});
   return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
