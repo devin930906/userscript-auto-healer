@@ -94,9 +94,28 @@ function inspectReportedTampermonkeyPreflightUnchecked(
     !Array.isArray(metadata.unknownNames)||metadata.unknownNames.length!==0||
     !Array.isArray(metadata.tags.grant)||!Array.isArray(metadata.tags.match))
     return blocked('INVALID_SCRIPT_METADATA');
- // The consented GM_getValue fixture has only one authorized GM capability.
- // Other grants, including duplicated declarations, need a separate review.
- if(metadata.tags.grant.length!==1||metadata.tags.grant[0]!=='GM_getValue')
+ // Preserve the original one-grant smoke check. The *current* native
+ // disposable roundtrip fixture already declares these three GM methods;
+ // permit its exact, loopback-only metadata shape without accepting arbitrary
+ // scripts with write/delete GM privileges. This is only a static reported
+ // metadata check, never permission to install a script or claim GM success.
+ const grants=metadata.tags.grant;
+ const getterOnly=grants.length===1&&grants[0]==='GM_getValue';
+ const isolatedRoundtrip=
+    grants.length===3&&grants[0]==='GM_getValue'&&
+    grants[1]==='GM_setValue'&&grants[2]==='GM_deleteValue'&&
+    metadata.tags.match.length===1&&
+    metadata.tags.match[0]==='http://127.0.0.1/*'&&
+    metadata.tags.noframes?.length===1&&metadata.tags.noframes[0]===''&&
+    metadata.tags['run-at']?.length===1&&
+    ['document-start','document-body','document-end','document-idle'].includes(
+      metadata.tags['run-at'][0])&&
+    metadata.tags.name?.length===1&&
+    /^UAH Isolated GM Diagnostic [0-9a-f]{8}$/.test(metadata.tags.name[0])&&
+    metadata.tags.namespace?.length===1&&
+    /^uah-isolated-gm-probe\.[0-9a-f]{32}$/.test(metadata.tags.namespace[0])&&
+    metadata.tags.version?.length===1&&metadata.tags.version[0]==='0.0.1';
+ if(!getterOnly&&!isolatedRoundtrip)
     return blocked('GM_GRANT_NOT_DECLARED');
  // A missing @run-at uses the manager default, but an explicit unsupported,
  // empty or contradictory instruction cannot be inferred from static metadata.
