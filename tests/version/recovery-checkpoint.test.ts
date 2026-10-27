@@ -283,3 +283,54 @@ test('TEST-020: a forged or stale persisted checkpoint never gains restore autho
   assert.equal((await readdir(opts.backupDirectory)).length,3);
  });
 });
+
+test('TASK-011/TEST-020/026: final checkpoint receipt rejects a file changed or replaced during staged-source recheck',async t=>{
+  const verifier=require('../../src/version/staged-candidate-recheck') as
+    typeof import('../../src/version/staged-candidate-recheck');
+  const real=verifier.verifyStagedCandidateReadOnly;
+  let calls=0;
+  let mutation:'bytes'|'inode'='bytes';
+  let currentDirectory='';
+  let affected='';
+  t.mock.method(verifier,'verifyStagedCandidateReadOnly',
+    async (...args:Parameters<typeof real>)=>{
+      const result=await real(...args);
+      calls++;
+      if(calls===2&&result.status==='CANDIDATE_RECHECKED_READ_ONLY'){
+        const entries=await readdir(currentDirectory);
+        const checkpoint=entries.find(n=>n.endsWith('.checkpoint.json'));
+        assert.ok(checkpoint,'the published checkpoint must already exist');
+        affected=join(currentDirectory,checkpoint);
+        if(mutation==='bytes'){
+          await writeFile(affected,'CORRUPTED_CHECKPOINT_AFTER_VERIFICATION');
+        }else{
+          const bytes=await readFile(affected);
+          await rename(affected,join(currentDirectory,'preserved-original-checkpoint'));
+          await writeFile(affected,bytes);
+        }
+      }
+      return result;
+    });
+  for(const scenario of ['bytes','inode'] as const){
+    mutation=scenario;
+    calls=0;
+    affected='';
+    await fixture(async opts=>{
+      currentDirectory=opts.backupDirectory;
+      const staged=await stageReviewedCandidateOnly(request,candidate,opts);
+      assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+      if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+      const result=await stageRecoveryCheckpointOnly(request,staged,opts);
+      assert.equal(calls,2,'must check both before and after checkpoint publication');
+      assert.notEqual(affected,'','inject an actual independent filesystem change');
+      assert.equal(result.status,'BLOCKED',
+        scenario+' must never receive a stale CHECKPOINT_STAGED_UNVERIFIED receipt');
+      assert.equal(result.automaticPatchAllowed,false);
+      assert.equal(result.automaticRollbackAllowed,false);
+      assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+      assert.equal(await readFile(join(opts.backupDirectory,staged.backupFileName),'utf8'),source);
+      assert.equal((await readdir(opts.backupDirectory)).some(n=>n.endsWith('.checkpoint.json')),
+        true,'leave externally changed checkpoint for privileged reconciliation');
+    });
+  }
+});
