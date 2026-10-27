@@ -31,8 +31,9 @@ function snapshotNativeSelectedPaths(input:unknown):
   if(nodeTypes.isProxy(input)||!Array.isArray(input)||
      Object.getPrototypeOf(input)!==Array.prototype)
     return {ok:false,code:'INVALID_PATH'};
-  const descriptors=Object.getOwnPropertyDescriptors(input);
-  const length:unknown=descriptors.length?.value;
+  const descriptors=Object.getOwnPropertyDescriptors(input) as
+    Record<string,PropertyDescriptor|undefined>;
+  const length:unknown=descriptors['length']?.value;
   if(typeof length!=='number'||!Number.isSafeInteger(length)||length<0)
     return {ok:false,code:'INVALID_PATH'};
   if(length>MAX_SELECTED_FILES)return {ok:false,code:'SCAN_LIMIT'};
