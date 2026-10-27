@@ -1,6 +1,6 @@
 /** TASK-003 / REQ-004: read-only userscript metadata extraction. */
 import {types as nodeTypes} from 'node:util';
-import type { ImportedScript } from '../import/import-service';
+import {MAX_SCRIPT_BYTES, type ImportedScript} from '../import/import-service';
 
 const KNOWN = new Set([
   'name','namespace','version','description','author','match','include',
@@ -52,7 +52,7 @@ export function readUserscriptSource(script: Pick<ImportedScript, 'bytes'|'textE
     const offset = Object.getOwnPropertyDescriptor(intrinsic, 'byteOffset')?.get?.call(raw) as number;
     const length = Object.getOwnPropertyDescriptor(intrinsic, 'byteLength')?.get?.call(raw) as number;
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) ||
-        offset < 0 || length < 0) return null;
+        offset < 0 || length < 0 || length > MAX_SCRIPT_BYTES) return null;
     const view = new Uint8Array(backing, offset, length);
 
     let bytes: Uint8Array = view;

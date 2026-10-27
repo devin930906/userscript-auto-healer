@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { importDroppedBytes } from '../../src/import/import-service';
+import { importDroppedBytes, MAX_SCRIPT_BYTES } from '../../src/import/import-service';
 import { isCanonicalKnownUserscriptMetadataTag, parseUserscriptMetadata, readUserscriptSource } from '../../src/analyze/metadata-parser';
 
 const source = [
@@ -102,4 +102,21 @@ test('TASK-003/TEST-004/026: canonical metadata tag validation never invokes unt
   assert.equal(isCanonicalKnownUserscriptMetadataTag('match'),true);
   assert.equal(isCanonicalKnownUserscriptMetadataTag('Match'),false);
   assert.equal(isCanonicalKnownUserscriptMetadataTag('custom'),false);
+});
+
+test('TASK-003/TEST-004/026: direct metadata parser refuses oversized byte views before decoding', () => {
+  const header=Buffer.from('// ==UserScript==\n// @name Oversized\n// ==/UserScript==\n');
+  const oversized=Buffer.alloc(MAX_SCRIPT_BYTES+1,0x20);
+  header.copy(oversized);
+  // These callers bypass importDroppedBytes. A valid userscript header must
+  // not allow the exported decoder to allocate/split over-limit source text.
+  for(const encoding of ['utf-8','gb18030-explicit'] as const){
+    const input={bytes:oversized,textEncoding:encoding};
+    assert.equal(readUserscriptSource(input),null,encoding);
+    assert.equal(parseUserscriptMetadata(input).status,'INVALID_ENCODING',encoding);
+  }
+  assert.equal(readUserscriptSource({
+    bytes:Buffer.from('// ==UserScript==\n// @name OK\n// ==/UserScript==\n'),
+    textEncoding:'utf-8'
+  })?.includes('// @name OK'),true,'ordinary metadata remains accepted');
 });
