@@ -323,7 +323,7 @@ async function prepareNativeManualExportForManager(reviewed,browserContext){
   // real recovery checkpoint before disposable Tampermonkey installation.
   // Reread and independently verify its bound source/backup/candidate
   // bytes. A checkpoint is NEVER permission to patch or roll back.
-  assert.match(exported.checkpointFileName,/\\.checkpoint\\.json$/);
+  assert.match(exported.checkpointFileName,/\.checkpoint\.json$/);
   const checkpointPath=path.join(backupDirectory,exported.checkpointFileName);
   const checkpointBytes=fs.readFileSync(checkpointPath);
   assert.equal(sha(checkpointBytes),exported.checkpointSha256);
