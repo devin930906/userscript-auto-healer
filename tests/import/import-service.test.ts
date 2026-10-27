@@ -174,6 +174,25 @@ test('TEST-001/026: reject Windows device filenames and NTFS stream aliases',()=
   assert.equal('code' in safe,false);
 });
 
+test('TASK-002/TEST-002/026: reserved Windows console device names cannot import as .user.js',async t=>{
+  const bytes=new TextEncoder().encode(script);
+  const names=['CONIN$.user.js','CONOUT$.user.js','conin$.user.js','CoNoUt$.user.js'];
+  for(const filename of names){
+    assert.deepEqual(importDroppedBytes(filename,bytes),
+      {filename,code:'NOT_USER_SCRIPT'},
+      'drag-and-drop must reject Win32 console device aliases before decoding');
+  }
+  assert.equal('code' in importDroppedBytes('console-input.user.js',bytes),false,
+    'ordinary similarly named scripts remain importable');
+  if(process.platform!=='win32')return;
+  const root=await workspace(t);
+  const native=await importApprovedPaths(names.map(name=>join(root,name)));
+  assert.deepEqual(native.scripts,[]);
+  assert.deepEqual(native.errors,names.map(filename=>({
+    filename,code:'NOT_USER_SCRIPT'
+  })), 'native selection must reject names before touching a Win32 device path');
+});
+
 test('TEST-003: nested directory skips non-scripts and avoids outside roots', async t => {
   const root = await workspace(t);
   const nested = join(root, 'nested');
