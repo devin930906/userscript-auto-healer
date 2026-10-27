@@ -499,3 +499,47 @@ test('TASK-015/TEST-024/026: health archive rejects custom array iteration witho
    'invalid history cannot produce any persistent archive');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: post-unlock same-byte replacement cannot attest archived history save',async()=>{
+ // Interpose only on the owned writer mutex RELEASE. The real save,
+ // hard-link publication and readback still execute on real Windows files.
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-post-unlock-'));
+ const nativeRmdir=fsPromises.rmdir;
+ const userData=join(home,'user-data');
+ const key=limitedScenarioHistoryKey(A,'first');
+ const dir=join(userData,'limited-health-history-v1');
+ const archive=join(dir,'health-'+key+'.json');
+ const lock=join(dir,'.health-'+key+'.lock');
+ const retained=join(dir,'retained-original-archive-for-review');
+ let replaced=false;
+ try{
+  await mkdir(userData);
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=async(...args)=>{
+   await nativeRmdir(...args);
+   if(args[0]===lock){
+    // Substitute a new inode containing EXACTLY the same canonical bytes.
+    // A byte-only post-unlock check must not claim ownership of the result.
+    const bytes=await readFile(archive);
+    await fsPromises.rename(archive,retained);
+    await writeFile(archive,bytes);
+    replaced=true;
+   }
+  };
+  const outcome=await saveLimitedHealthArchive(userData,registry.snapshot(key));
+  assert.equal(replaced,true,'must exercise the post-mutex-release window');
+  assert.equal(outcome.status,'BLOCKED',
+   'same bytes at a different inode cannot attest the file this writer published');
+  assert.deepEqual(await readFile(archive),await readFile(retained));
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,
+   'ARCHIVE_READ_UNVERIFIED','replacement remains limited historical data');
+ }finally{
+  (fsPromises as {rmdir:typeof nativeRmdir}).rmdir=nativeRmdir;
+  await rm(home,{recursive:true,force:true});
+ }
+});
