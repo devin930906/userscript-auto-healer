@@ -435,6 +435,48 @@ test('TEST-020/026: a journal changed during the second backup round cannot yiel
  });
 });
 
+test('TASK-011/TEST-020/026: an unchanged-byte replacement of inspected journal cannot retain its observation',async t=>{
+  await fixture(async opts=>{
+   const restored=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(restored.status,'RESTORED_NATIVE_ONLY');
+   if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+   const journalPath=join(opts.backupDirectory,restored.journalFileName);
+   const journalBytes=await readFile(journalPath);
+   const before=await lstat(journalPath,{bigint:true});
+   const module=require('../../src/version/recovery-source') as
+    typeof import('../../src/version/recovery-source');
+   const realVerify=module.verifyBackupRecoverySource;
+   let replaced=false;
+   // Replace AFTER the first journal descriptor read, during async backup
+   // verification; identical SHA/contents must NOT authenticate new inode.
+   t.mock.method(module,'verifyBackupRecoverySource',
+    async(input:Parameters<typeof realVerify>[0])=>{
+     const result=await realVerify(input);
+     if(!replaced){
+      replaced=true;
+      const foreign=join(opts.backupDirectory,'foreign-same-byte-intent.tmp');
+      await writeFile(foreign,journalBytes);
+      await rename(foreign,journalPath);
+     }
+     return result;
+    });
+   const observation=await inspectNativeRestoreIntentReadOnly({
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+    journalFileName:restored.journalFileName,userApproved:true
+   });
+   assert.equal(replaced,true,'real journal replacement must occur between reads');
+   const after=await lstat(journalPath,{bigint:true});
+   assert.notEqual(before.ino,after.ino,'same pathname must refer to a new inode');
+   assert.deepEqual(await readFile(journalPath),journalBytes);
+   assert.deepEqual(observation,{
+    status:'BLOCKED',reason:'UNSAFE_JOURNAL',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   });
+   assert.deepEqual(await readFile(opts.sourcePath),original);
+  });
+});
+
 test('TASK-011/TEST-020/026: intent edited during the last source fingerprint cannot yield a stale observation',async t=>{
  await fixture(async opts=>{
   const restored=await restoreVerifiedOriginalNativeOnly(opts);
