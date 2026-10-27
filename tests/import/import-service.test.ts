@@ -297,12 +297,13 @@ test('TEST-002/022: cancellation between files preserves completed results', asy
   await writeFile(one, source);
   await writeFile(two, source);
   const controller = new AbortController();
-  // Deterministic cancellation after first entry is scheduled, while keeping
-  // filesystem reads intact. The second path must never be processed.
+  // A genuine cancellation after the first confirmed progress tick must
+  // preserve the completed import and never touch the second source. The
+  // native selection boundary intentionally rejects accessor-backed arrays:
+  // cancellation must not rely on executing an untrusted array getter.
   const chosen = [one, two];
-  Object.defineProperty(chosen, '0', {configurable:true,
-    get(){controller.abort();return one;}});
-  const outcome = await importApprovedPaths(chosen, controller.signal);
+  const outcome = await importApprovedPaths(chosen, controller.signal,
+    progress=>{if(progress.processed===1)controller.abort();});
   assert.equal(outcome.canceled, true);
   assert.equal(outcome.unprocessed, 1);
   assert.deepEqual(outcome.scripts.map(x=>x.filename), ['first.user.js']);
