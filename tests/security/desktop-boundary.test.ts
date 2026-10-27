@@ -429,7 +429,9 @@ test('TASK-011: native manual export displays a persisted unverified checkpoint 
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const flow=readFileSync(join(process.cwd(),'src/repair/manual-repair-flow.ts'),'utf8');
  assert.match(flow,/stageRecoveryCheckpointOnly\(patch,staged,files\)/);
- assert.match(flow,/if\(checkpoint\.status!=='CHECKPOINT_STAGED_UNVERIFIED'\)/);
+ assert.match(flow,/if\(checkpoint\.status!=='CHECKPOINT_STAGED_UNVERIFIED'/);
+ assert.match(flow,/checkpoint\.originalSha256!==staged\.originalSha256/);
+ assert.match(flow,/checkpoint\.candidateSha256!==staged\.candidateSha256/);
  assert.match(main,/checkpointFileName:result\.checkpointFileName/);
  assert.match(ui,/checkpointFileName/);
  assert.match(html,/恢复检查点/);
