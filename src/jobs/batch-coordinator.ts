@@ -158,6 +158,13 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
  if(Reflect.ownKeys(slots).length!==opts.count+1)
    throw Error('INVALID_BATCH_CHECKPOINT');
  const jobs:MutableJob[]=[];
+ // A single-worker scheduler always takes the earliest queued ordinal
+ // and settles it before starting the next. A persisted later RUNNING or
+ // terminal outcome after an earlier nonterminal ordinal is impossible.
+ // Check the RAW disk states before restart normalization (RUNNING may
+ // otherwise become FAILED and hide a forged out-of-order completion).
+ // Concurrency=2 legitimately allows a later worker to finish first.
+ let earlierUnsettled=false;
  for(let i=0;i<opts.count;i++){
   const slot=slots[String(i)];
   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
@@ -170,6 +177,13 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
       job.attempts===0)||
      (job.state==='QUEUED'&&job.attempts===opts.maxAttempts))
     throw Error('INVALID_BATCH_CHECKPOINT');
+  if(opts.concurrency===1){
+   if(earlierUnsettled&&
+      (job.state==='RUNNING'||job.state==='SUCCEEDED'||job.state==='FAILED'))
+    throw Error('INVALID_BATCH_CHECKPOINT');
+   if(job.state==='QUEUED'||job.state==='RUNNING'||job.state==='CANCELLED')
+    earlierUnsettled=true;
+  }
   // A killed read-only job may be retried at most within the original limit.
   // A completed job is never replayed just because the process restarted.
   // Only a PROCESS RESTART turns an interrupted attempt into queued/failed.
