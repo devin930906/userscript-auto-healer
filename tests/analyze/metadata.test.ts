@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { importDroppedBytes } from '../../src/import/import-service';
-import { parseUserscriptMetadata, readUserscriptSource } from '../../src/analyze/metadata-parser';
+import { isCanonicalKnownUserscriptMetadataTag, parseUserscriptMetadata, readUserscriptSource } from '../../src/analyze/metadata-parser';
 
 const source = [
   '// ==UserScript==',
@@ -77,4 +77,29 @@ test('TASK-003/TEST-004/026: parser refuses hostile byte descriptors and fake by
   }
   assert.equal(executed,0,'no untrusted getter, proxy trap or replacement subarray method may execute');
   assert.equal(parseUserscriptMetadata({bytes:script,textEncoding:'utf-8'}).status,'OK');
+});
+
+test('TASK-003/TEST-004/026: canonical metadata tag validation never invokes untrusted non-string hooks', () => {
+  let hostileCalls=0;
+  const poisoned={
+    toLowerCase(){hostileCalls++;throw Error('METADATA_TAG_CALLER_HOOK');}
+  };
+  const proxy=new Proxy({}, {
+    get(){hostileCalls++;throw Error('METADATA_TAG_PROXY_HOOK');}
+  });
+  const revoked=Proxy.revocable({},{
+    get(){hostileCalls++;throw Error('METADATA_TAG_REVOKED_PROXY');}
+  });
+  revoked.revoke();
+  for(const untrusted of [null,undefined,0,false,[],poisoned,proxy,revoked.proxy]){
+    assert.doesNotThrow(()=>{
+      assert.equal(
+        isCanonicalKnownUserscriptMetadataTag(untrusted as string),false
+      );
+    });
+  }
+  assert.equal(hostileCalls,0,'invalid metadata keys must not invoke caller code');
+  assert.equal(isCanonicalKnownUserscriptMetadataTag('match'),true);
+  assert.equal(isCanonicalKnownUserscriptMetadataTag('Match'),false);
+  assert.equal(isCanonicalKnownUserscriptMetadataTag('custom'),false);
 });
