@@ -487,7 +487,11 @@ test('TASK-007/TEST-017/026: current isolated three-GM roundtrip fixture passes 
      '// @namespace uah-isolated-gm-probe.','// @namespace external-script.')],
    ['wrong name',fixture.source.replace(
      '// @name UAH Isolated GM Diagnostic ','// @name Unrelated Script ')],
-   ['wrong version',fixture.source.replace('// @version 0.0.1','// @version 9.9.9')]
+   ['wrong version',fixture.source.replace('// @version 0.0.1','// @version 9.9.9')],
+   ['extra known description',fixture.source.replace(
+     '// @version 0.0.1','// @version 0.0.1\\n// @description unreviewed')],
+   ['extra known homepage',fixture.source.replace(
+     '// @version 0.0.1','// @version 0.0.1\\n// @homepage https://other.example/')]
   ] as const){
    const outcome=inspect(report,parse(edited),fixture.origin+'/?mode=fixed');
    assert.equal(outcome.ok,false,timing+' / '+label+' should remain blocked');
