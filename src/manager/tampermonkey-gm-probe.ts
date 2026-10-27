@@ -270,6 +270,12 @@ export async function startIsolatedTampermonkeyGmProbe(
           'businessAction,gmDefaultMatched,gmStorageRoundtripMatched,mode,token'){
        res.writeHead(403).end();return;
      }
+     // The consented broken fixture contains no #obsolete-target. Its business
+     // action can never succeed, even if a sender knows this session's token.
+     // Reject the impossible report before it consumes the first-wins slot.
+     if(input.mode==='broken'&&input.businessAction!==false){
+       res.writeHead(403).end();return;
+     }
      const mode=input.mode as GmProbeMode;
      // First receipt wins per mode: replay or a late contradictory POST must
      // never silently rewrite an earlier captured diagnostic observation.
