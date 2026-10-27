@@ -752,6 +752,21 @@ try {
   }
   Write-Output 'PASS: post-smoke unlisted files and their DELETE-sharing denials are counted read-only'
 
+  # RED TEST-028: a newly created, post-snapshot file can be the only
+  # Restart Manager association at the exact first rename denial.
+  # A stale pre-Electron manifest alone must not report no associated process.
+  $lateRmHandle=[IO.File]::Open($lateFile,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+  try {
+    $liveRmEvidence=Get-CandidatePortableFirstDenialSummary $permanent @($permanentFile)
+    if($liveRmEvidence -notmatch 'restartManager=\[rm=ok sampled=2 total=2 affected=[1-9]' -or
+       $liveRmEvidence -notmatch 'fileAssociations=\[rmFiles=ok sampled=2 associated=1 kinds=\[exe=0 library=0 other=1\] outsideRunnerAssociated=1\]' -or
+       $liveRmEvidence.Contains($lateFile) -or $liveRmEvidence.Contains($root)) {
+      throw "TEST-028: post-snapshot candidate lock omitted from anonymous Restart Manager diagnosis: $liveRmEvidence"
+    }
+  } finally { $lateRmHandle.Dispose() }
+  Write-Output 'PASS: post-snapshot files remain visible to time-matched anonymous RM diagnosis'
+
 
   # ISSUE-215: a directory's own DELETE probe cannot distinguish an ACL or
   # sharing denial on its parent. Hold ONLY a new disposable parent open with
