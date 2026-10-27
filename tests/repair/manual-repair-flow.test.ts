@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rm,symlink,writeFile} from 'node:fs/promises';
@@ -257,5 +257,64 @@ test('TEST-023/026: missing manual export directory rejects before backing up so
    'unusable export destination cannot create a backup as a side effect');
   assert.deepEqual(await readdir(opts.exportDirectory),[]);
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
+test('TASK-010/011 · TEST-020/021/023: mutated recovery checkpoint blocks native candidate export before any .user.js publication',async()=>{
+ await fixture(async opts=>{
+  const checkpointModule=require('../../src/version/recovery-checkpoint') as
+    typeof import('../../src/version/recovery-checkpoint');
+  const inspect=checkpointModule.inspectRecoveryCheckpointReadOnly;
+  let invocations=0;
+  const replacement=mock.method(checkpointModule,'inspectRecoveryCheckpointReadOnly',
+   async (...args:Parameters<typeof inspect>)=>{
+    invocations++;
+    const checkpointFileName=args[1];
+    assert.equal(typeof checkpointFileName,'string');
+    await writeFile(join(opts.backupDirectory,checkpointFileName as string),
+      '{"forged":"checkpoint"}\\n');
+    return inspect(...args);
+   });
+  try{
+   const result=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+   assert.equal(result.status,'BLOCKED','The native export MUST recheck the persisted checkpoint');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'CHECKPOINT_BLOCKED');
+   assert.equal(invocations,1,'The checkpoint must be rechecked before producing the export');
+   assert.deepEqual(await readdir(opts.exportDirectory),[],
+     'Invalid checkpoint cannot produce manager-facing userscripts');
+   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+   assert.equal((await readdir(opts.backupDirectory)).length,3,
+     'On a failed pre-export check, recovery artifacts remain for manual review');
+  }finally{replacement.mock.restore();}
+ });
+});
+
+test('TASK-010/011 · TEST-020/021/023: a checkpoint altered during export rejects the final successful receipt',async()=>{
+ await fixture(async opts=>{
+  const checkpointModule=require('../../src/version/recovery-checkpoint') as
+    typeof import('../../src/version/recovery-checkpoint');
+  const inspect=checkpointModule.inspectRecoveryCheckpointReadOnly;
+  let invocations=0;
+  const replacement=mock.method(checkpointModule,'inspectRecoveryCheckpointReadOnly',
+   async (...args:Parameters<typeof inspect>)=>{
+    invocations++;
+    if(invocations===2){
+     const checkpointFileName=args[1];
+     assert.equal(typeof checkpointFileName,'string');
+     await writeFile(join(opts.backupDirectory,checkpointFileName as string),
+       '{"replaced":"during-export"}\\n');
+    }
+    return inspect(...args);
+   });
+  try{
+   const result=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+   assert.equal(result.status,'BLOCKED',
+     'A checkpoint changed after the first audit must not receive an export-ready receipt');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'CHECKPOINT_BLOCKED');
+   assert.equal(invocations,2,'The on-disk checkpoint must be rechecked after export');
+   assert.equal((await readdir(opts.exportDirectory)).length,2,
+     'Already-written manual exports remain for native reconciliation; never delete potential recovery files');
+   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  }finally{replacement.mock.restore();}
  });
 });
