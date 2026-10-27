@@ -13,7 +13,7 @@ import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
-import {stageRecoveryCheckpointOnly} from '../version/recovery-checkpoint';
+import {stageRecoveryCheckpointOnly,inspectRecoveryCheckpointReadOnly} from '../version/recovery-checkpoint';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
@@ -132,11 +132,32 @@ export async function prepareManualRepairExportOnly(
      checkpoint.originalSha256!==staged.originalSha256||
      checkpoint.candidateSha256!==staged.candidateSha256)
     return block('CHECKPOINT_BLOCKED');
+  // TEST-020/021/023: independently reread the persisted checkpoint and
+  // verify the selected source, staged backup and exact candidate bytes.
+  // A successful stage receipt is not a trusted authorization.
+  const checkpointBefore=await inspectRecoveryCheckpointReadOnly(
+    patch,checkpoint.checkpointFileName,files);
+  if(checkpointBefore.status!=='CHECKPOINT_RECHECKED_READ_ONLY'||
+     checkpointBefore.checkpointSha256!==checkpoint.checkpointSha256||
+     checkpointBefore.originalSha256!==staged.originalSha256||
+     checkpointBefore.candidateSha256!==staged.candidateSha256)
+    return block('CHECKPOINT_BLOCKED');
   const exported=await exportReviewedCandidateForManualInstall(
     patch,staged,{...files,exportDirectory:o.exportDirectory});
   if(exported.status!=='EXPORTED_RUNTIME_UNVERIFIED'||
      exported.candidateSha256!==staged.candidateSha256)
     return block('EXPORT_BLOCKED');
+  // The export performs more filesystem I/O. Recheck again instead of
+  // issuing a success receipt for a checkpoint replaced in the interim.
+  // On failure preserve potential recovery files for native reconciliation;
+  // never silently delete them or grant automatic patch/rollback authority.
+  const checkpointAfter=await inspectRecoveryCheckpointReadOnly(
+    patch,checkpoint.checkpointFileName,files);
+  if(checkpointAfter.status!=='CHECKPOINT_RECHECKED_READ_ONLY'||
+     checkpointAfter.checkpointSha256!==checkpoint.checkpointSha256||
+     checkpointAfter.originalSha256!==staged.originalSha256||
+     checkpointAfter.candidateSha256!==staged.candidateSha256)
+    return block('CHECKPOINT_BLOCKED');
   return Object.freeze({
     status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED' as const,
     backupFileName:staged.backupFileName,
