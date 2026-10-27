@@ -102,6 +102,9 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  const grants=metadata.tags.grant;
  const getterOnly=grants.length===1&&grants[0]==='GM_getValue';
  const isolatedRoundtrip=
+    // No extra known metadata tags are allowed in the narrowly consented
+    // three-GM fixture: description/homepage/etc. also require review.
+    Object.keys(metadata.tags).length===7&&
     grants.length===3&&grants[0]==='GM_getValue'&&
     grants[1]==='GM_setValue'&&grants[2]==='GM_deleteValue'&&
     metadata.tags.match.length===1&&
