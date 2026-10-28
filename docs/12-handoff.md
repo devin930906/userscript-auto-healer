@@ -39,7 +39,13 @@ POC-04B 另于 Ubuntu runner 以 Acorn 成功解析三处静态定位器与三�
 M0：POC-01/02，ZIP 工具链验证/POC-03C；M1：TASK-001..004；M2：TASK-005..008；M3：TASK-009..017；M4：TASK-018..020；M5：TASK-021。依赖顺序与并发边界以 docs/09-development-plan.md 实际编号为准，不盲目逐编号执行有前置未满足的任务。
 
 ## 验证命令
-暂无 package.json、lockfile、真正可运行产品功能或 npm test/build 命令，当前“不适用”。后续创建技术骨架后须把真实 test/lint/build/Windows E2E 指令和退出码更新到 07/09/本文件；未运行不能写通过。
+当前仓库已有 `package.json`、`package-lock.json`、Electron/TypeScript 应用源码与注册的 Node 回归测试；下列命令用于**实际开发检查**，不表示完整 Stable 功能或 Windows 用户环境已经验收。旧的“暂无 package.json / npm test/build”仅属于 2026-10-18 准备阶段历史快照，不再是当前可执行指引。
+
+- **Node.js 22（以 Windows Actions 锁定环境为准）**：`npm ci --ignore-scripts --no-audit --no-fund` 安装编译/单元测试所需锁定依赖；随后执行 `npm run typecheck`、`npm test`（`npm test` 会先运行 `npm run build`）。`npm run build` 也可单独调用。执行结果以相同提交 SHA 的真实命令退出码及日志为准，不得以文件存在判定通过。
+- **真实 Electron sandbox/preload smoke**：通过 `.github/workflows/app-check.yml` 的 `windows-shell-smoke` Job 在 Windows runner 安装完整 Electron 运行时、编译并启动受限测试入口；Node 单元测试无法取代这一验证。
+- **开发候选 EXE + 真 ZIP（非 Stable）**：通过 `.github/workflows/windows-candidate-packages.yml` 的 Windows Job 执行 `scripts/test-windows-portable-relocation.ps1` 与 `scripts/windows-package-candidate.ps1`；必须检查目标 SHA、全部 Job 结论、产品文件与校验日志。此工作流不授予正式 GATE、Release 或产品自动修复能力。
+
+2026-10-28 已验证样本（仅供追溯，不是未来最新 HEAD）：`main@67e97b092bf5c15b41414609aebb5fc543077c30`；[Application #40692321010](https://github.com/devin930906/userscript-auto-healer/actions/runs/40692321010) 成功，695 项 Node 测试中 694 通过、0 失败、1 条条件跳过，Electron smoke 成功；[Windows 候选 #40691143772](https://github.com/devin930906/userscript-auto-healer/actions/runs/40691143772) 成功，包含 148 文件一致性和三轮首次尝试成功的真实便携目录移动。Issue #215 的间歇性 `Win32=5` 与 Issue #440 的 Worker 偶发故障仍开放；样本绿色不代表根因已修复，全部 GATE 仍须独立验收。
 
 ## 云端限制
 GitHub 连接账户有该仓库写入权限；最新 Ubuntu 文档 CI https://github.com/devin930906/userscript-auto-healer/actions/runs/39092836797 成功。Windows runner 已完成 Chrome/CDP 和独立路径探针、真实 Violentmonkey/GM_getValue PoC（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno 临时 EXE、历史 RAR5 和**现行原生 ZIP 工具链 POC-03C** 有限定验证（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797）；但正式 ZIP 应用包、Secrets、配额和产品构建仍未验证；截至 2026-10-18 查询 main 的 protected=false，不代表可忽略将来的规则变动。网页会话不等于用户 Windows 的实际浏览器登录环境；依赖实机用户授权的 GM 测试不能只用普通 DOM/模拟测试替代。
