@@ -1588,6 +1588,37 @@ async function createMainWindow(): Promise<void> {
       "}else setTimeout(tick,30);};tick();});})()",true
     ) as boolean;
     if(!gmStopControls)throw new Error('GM_PROBE_STOP_CONTROLS_FAILED');
+    // TASK-007/TEST-017/026 RED: native stop must be reachable from the
+    // renderer during an in-progress GM fixture start, BEFORE gmProbeActive.
+    // Stage only disposable main-process AbortController state; no browser,
+    // extension or user script is started by this negative-to-positive smoke.
+    const pendingGmController=new AbortController();
+    gmStartInProgress=true;
+    gmStartAbort=pendingGmController;
+    let pendingGmStopControls=false;
+    try {
+      pendingGmStopControls=await win.webContents.executeJavaScript(
+        "(async()=>{browserConnected=true;browserBusy=true;gmProbeActive=false;"+
+        "if(typeof gmProbeStarting==='undefined'){browserBusy=false;browserConnected=false;"+
+        "browserControls();return false;}"+
+        "gmProbeStarting=true;browserControls();"+
+        "const stop=document.getElementById('gm-probe-stop');"+
+        "const result=document.getElementById('gm-probe-result');"+
+        "const allowed=!stop.disabled;if(allowed)stop.click();"+
+        "return await new Promise(resolve=>{const began=Date.now();const tick=()=>{"+
+        "if(result.textContent.includes('本机测试服务已请求关闭')||Date.now()-began>3000){"+
+        "const passed=allowed&&result.textContent.includes('本机测试服务已请求关闭');"+
+        "gmProbeStarting=false;browserBusy=false;browserConnected=false;"+
+        "browserControls();resolve(passed&&stop.disabled);"+
+        "}else setTimeout(tick,30);};tick();});})()",true
+      ) as boolean;
+    } finally {
+      gmStartInProgress=false;
+      gmStartAbort=null;
+    }
+    if(!pendingGmStopControls||!pendingGmController.signal.aborted)
+      throw new Error('GM_PROBE_PENDING_START_STOP_FAILED');
+
 
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
     const uiCancelReady=await win.webContents.executeJavaScript(

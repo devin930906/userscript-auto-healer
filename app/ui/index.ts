@@ -581,6 +581,8 @@ let chromeSelected=false;
 let profileSelected=false;
 let browserConnected=false;
 let gmProbeActive=false;
+let gmProbeStarting=false;
+let gmStopInProgress=false;
 const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
 const gmRunAtSelect=document.getElementById('gm-run-at') as HTMLSelectElement|null;
 const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
@@ -631,8 +633,10 @@ function browserControls():void{
   if(button)button.disabled=browserBusy||!gmProbeActive;
  for(const button of Object.values(gmObserveButtons))
   if(button)button.disabled=browserBusy||!gmProbeActive;
- // Stop remains available during an in-flight CDP operation to revoke consent.
- if(gmStopButton)gmStopButton.disabled=!gmProbeActive;
+ // Native stop can revoke an in-flight GM start before the fixture exists.
+ // Do not gate it behind browserAction's busy flag or an active fixture.
+ if(gmStopButton)gmStopButton.disabled=gmStopInProgress||
+   (!gmProbeStarting&&!gmProbeActive);
 }
 async function browserAction(fn:()=>Promise<void>):Promise<void>{
  if(browserBusy)return;
@@ -907,7 +911,10 @@ gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
   if(gmResult)gmResult.textContent='注入时机无效；本机测试未启动。';
   return;
  }
- const result=await window.healer.startGmProbe(runAt);
+ gmProbeStarting=true;browserControls();
+ let result:Awaited<ReturnType<typeof window.healer.startGmProbe>>;
+ try{result=await window.healer.startGmProbe(runAt);}
+ finally{gmProbeStarting=false;browserControls();}
  if(!result.ok||result.status!=='MANUAL_FIXTURE_READY_ONLY'||
     !result.installUrl||!result.brokenUrl||!result.fixedUrl||
     !result.expiresAt){
@@ -979,12 +986,17 @@ for(const mode of ['broken','fixed'] as const){
 // Do not hold browserAction's busy lock when stopping; native stop cancels
 // pending visit/DOM checks and the short-lived loopback fixture.
 gmStopButton?.addEventListener('click',()=>{
- if(!gmProbeActive)return;
+ if(gmStopInProgress||(!gmProbeActive&&!gmProbeStarting))return;
+ gmStopInProgress=true;browserControls();
  void window.healer.stopGmProbe().then(result=>{
-  clearGmDisplay(result.ok
-   ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
-   :'没有活动的本机测试服务。');
- }).catch(()=>clearGmDisplay('关闭操作受阻；请确认本机测试已结束。'))
-  .finally(()=>browserControls());
+  if(result.ok||result.status==='NO_ACTIVE_FIXTURE'){
+   clearGmDisplay(result.ok
+    ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
+    :'没有活动的本机测试服务。');
+  }else if(gmResult)gmResult.textContent=
+   '关闭请求未获确认；本机测试状态无法确认，请重新检查。';
+ }).catch(()=>{
+  if(gmResult)gmResult.textContent='关闭请求受阻；本机测试状态无法确认。';
+ }).finally(()=>{gmStopInProgress=false;browserControls();});
 });
 browserControls();
