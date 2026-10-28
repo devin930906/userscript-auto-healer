@@ -6,6 +6,7 @@
  * GM calls or business success. No existing scripts/profiles are ever edited.
  */
 import {isProxy} from 'node:util/types';
+import {performance} from 'node:perf_hooks';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {openApprovedTarget,type OpenTargetResult} from '../browser/cdp-target';
@@ -459,6 +460,16 @@ function snapshotDiagnosticOptions(value:unknown):{
  }catch{return null;}
 }
 
+/**
+ * RED: model the existing wall-clock-only manual diagnostic consent window.
+ * Tests below demonstrate why this must be made irreversible and monotonic.
+ */
+export function createManualDiagnosticConsentWindow(
+ expiresAt:number,ttlMs:number,startedAt:number
+):()=>boolean{
+ return ()=>Date.now()<expiresAt;
+}
+
 /** Requires a live owned Chrome and a real CDP runtime hint before listening.
  * This API cannot be used to attach a preexisting Chrome, spoof a manager,
  * or install a userscript without the tester's separate manual action.
@@ -485,6 +496,7 @@ export async function startApprovedTampermonkeyDiagnostic(
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!isLiveApprovedChromeSession(browser))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
+ const fixtureStartedAt=performance.now();
  const fixture=await startIsolatedTampermonkeyGmProbe(
    true,ttlMs,safeOptions.runAt??'document-idle');
  if(!fixture.ok)return {ok:false,code:fixture.code};
@@ -505,8 +517,10 @@ export async function startApprovedTampermonkeyDiagnostic(
  const sessionSignal=signal?
    AbortSignal.any([sessionCancelled.signal,signal]):
    sessionCancelled.signal;
+ const consentActive=createManualDiagnosticConsentWindow(
+   probe.expiresAt,ttlMs,fixtureStartedAt);
  const ready=()=>!stopped&&!sessionSignal.aborted&&
-   Date.now()<probe.expiresAt&&isLiveApprovedChromeSession(browser);
+   consentActive()&&isLiveApprovedChromeSession(browser);
  let stopping:Promise<void>|undefined;
  const stop=():Promise<void>=>{
    if(stopping)return stopping;
