@@ -864,6 +864,33 @@ try {
     }
   } finally { $noDeleteShare.Dispose() }
   Write-Output 'PASS: Windows delete-share omission is detected without changing source'
+  # ISSUE-215 / TEST-028: a file handle does not itself prove a blocked
+  # portable rename. Hold a real executable open with FILE_SHARE_DELETE and
+  # require a real one-attempt same-parent move to succeed. This is the positive
+  # control for the deny-sharing fixture above and for RM's non-causal file
+  # associations seen on the Windows hosted runner.
+  $shareAllowed=Join-Path $root 'delete-share-positive-source'
+  $shareAllowedMoved=Join-Path $root 'delete-share-positive-moved'
+  New-Item -ItemType Directory -Path $shareAllowed | Out-Null
+  $shareAllowedExe=Join-Path $shareAllowed 'UserscriptAutoHealer.exe'
+  Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Destination $shareAllowedExe -ErrorAction Stop
+  $shareAllowedHash=(Get-FileHash -LiteralPath $shareAllowedExe -Algorithm SHA256).Hash
+  $shareAllowedHandle=[IO.File]::Open($shareAllowedExe,[IO.FileMode]::Open,
+    [IO.FileAccess]::Read,[IO.FileShare]7)
+  try {
+    $shareAllowedEvidence=Get-CandidatePortableFileShareSummary $shareAllowed @($shareAllowedExe)
+    if($shareAllowedEvidence -cne 'scan=ok probed=1 blockedExamples=0 names= extraFiles=0') {
+      throw "TEST-028: delete-sharing handle incorrectly diagnosed as blocking: $shareAllowedEvidence"
+    }
+    $shareAllowedAttempts=Move-CandidatePortableDirectory $shareAllowed $shareAllowedMoved 1 0 @($shareAllowedExe)
+    $shareAllowedMovedExe=Join-Path $shareAllowedMoved 'UserscriptAutoHealer.exe'
+    if($shareAllowedAttempts -ne 1 -or (Test-Path -LiteralPath $shareAllowed) -or
+       -not (Test-Path -LiteralPath $shareAllowedMovedExe -PathType Leaf) -or
+       (Get-FileHash -LiteralPath $shareAllowedMovedExe -Algorithm SHA256).Hash -cne $shareAllowedHash) {
+      throw 'TEST-028: permitted DELETE-sharing move damaged or omitted candidate bytes'
+    }
+  } finally { $shareAllowedHandle.Dispose() }
+  Write-Output 'PASS: open executable with DELETE sharing permits real atomic candidate rename'
 
   # ISSUE-215 / TEST-028: files alone do not cover an empty subdirectory.
   # A surviving directory handle without FILE_SHARE_DELETE must be visible
