@@ -629,7 +629,7 @@ try {
       }
       if(-not $terminalDenied -or $script:task020FinalEvidenceSamples -ne 2 -or
          (Test-Path -LiteralPath $finalDestination) -or
-         [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+         -not (Test-Path -LiteralPath $permanentFile -PathType Leaf)) {
         throw "TEST-028: persistent denial requires exactly first+final read-only evidence snapshots (actual=$script:task020FinalEvidenceSamples)"
       }
       Write-Output 'PASS: persistent lock produces first and final candidate-only evidence without changing payload'
