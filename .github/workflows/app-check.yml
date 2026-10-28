@@ -77,13 +77,22 @@ jobs:
           $env:UAH_SMOKE_RECEIPT = Join-Path $PWD 'electron-shell-smoke.json'
           $process = Start-Process -FilePath $binary -ArgumentList @('.', '--uahtest-shell-only') -WorkingDirectory $PWD -PassThru
           try {
-            Wait-Process -Id $process.Id -Timeout 60 -ErrorAction Stop
-          } catch {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw 'Electron smoke process timed out or could not start'
+            # Wait on the original process handle. A separate PID-based wait or
+            # Stop-Process could target an unrelated process after PID reuse.
+            if (-not $process.WaitForExit(60000)) {
+              if (-not $process.HasExited) {
+                # Kill only the exact process instance started by this test.
+                $process.Kill()
+                [void]$process.WaitForExit(5000)
+              }
+              throw 'Electron smoke process timed out'
+            }
+            $process.Refresh()
+            if ($process.ExitCode -ne 0) { throw "Electron exited with code $($process.ExitCode)" }
+          } finally {
+            # Keep candidate and regular Electron smoke handle lifetimes aligned.
+            $process.Dispose()
           }
-          $process.Refresh()
-          if ($process.ExitCode -ne 0) { throw "Electron exited with code $($process.ExitCode)" }
           if (!(Test-Path $env:UAH_SMOKE_RECEIPT)) { throw 'Real renderer receipt missing' }
           $result = Get-Content -Raw $env:UAH_SMOKE_RECEIPT | ConvertFrom-Json
           if ($result.shell -ne 'development-skeleton' -or !$result.preloadIpcVerified -or !$result.rendererSandboxVerified -or $result.automaticRepairAvailable) {
