@@ -725,10 +725,25 @@ function Format-CandidatePortableRelocationFailure(
 ) {
   $utc=$observedAtUtc.ToUniversalTime().ToString(
     'yyyy-MM-ddTHH:mm:ss.fffZ',[Globalization.CultureInfo]::InvariantCulture)
-  $win32Code=$cause.HResult -band 0xFFFF
+  # A low 16-bit value is only a Win32 code for FACILITY_WIN32 HRESULTs.
+  # Do not attribute unrelated .NET facilities to Windows access denial.
+  $hResultHex=('{0:X8}' -f $cause.HResult)
+  $win32Code=if($hResultHex.StartsWith('8007',[StringComparison]::Ordinal)) {
+    [string]($cause.HResult -band 0xFFFF)
+  } else { 'unavailable' }
   return ("TASK-020 relocation attempt {0}/{1} UTC={2} type={3} HRESULT=0x{4:X8} Win32={5} sourceExists={6} destinationExists={7}" -f
     $attempt,$maxAttempts,$utc,$cause.GetType().Name,$cause.HResult,
     $win32Code,$sourceExists,$destinationExists)
+}
+
+# TASK-020 / TEST-028: only true FACILITY_WIN32 HRESULTs for access
+# denied (5), sharing violation (32), and lock violation (33) are eligible
+# for the existing bounded retry. Matching the low word alone can classify
+# unrelated IOException facilities as Windows lock conflicts.
+function Test-CandidatePortableRetryableMoveError([Exception]$cause) {
+  return (($cause -is [IO.IOException] -or
+           $cause -is [UnauthorizedAccessException]) -and
+          $cause.HResult -in @(-2147024891,-2147024864,-2147024863))
 }
 
 # ISSUE-215 / TEST-028: when a real candidate move fails, test whether
@@ -952,16 +967,13 @@ function Move-CandidatePortableDirectory(
       # rethrow the original exception. All other causes fail immediately.
       $rootError=$_.Exception
       while($rootError.InnerException) { $rootError=$rootError.InnerException }
-      $win32Code=$rootError.HResult -band 0xFFFF
       # Issue #215: a top-level PowerShell exception alone hid the actual
       # Windows failure after extracted Electron smoke. Record each attempt
       # without leaking full temp paths or changing the retry/error policy.
       # On an exhausted retry the original exception is still rethrown.
       Write-Warning -WarningAction Continue (Format-CandidatePortableRelocationFailure $attempt $maxAttempts $rootError (
         [IO.Directory]::Exists($from)) (Test-Path -LiteralPath $to) ([DateTime]::UtcNow))
-      if($rootError -isnot [System.IO.IOException] -and
-         $rootError -isnot [System.UnauthorizedAccessException]) { throw }
-      if($win32Code -ne 5 -and $win32Code -ne 32 -and $win32Code -ne 33) { throw }
+      if(-not (Test-CandidatePortableRetryableMoveError $rootError)) { throw }
       if($attempt -eq 1) {
         # Diagnostics are strictly observational. Even a successful sibling
         # control cannot bypass or shorten this move's fail-closed retries.
