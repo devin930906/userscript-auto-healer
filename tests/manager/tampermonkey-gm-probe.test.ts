@@ -816,3 +816,31 @@ test('TASK-007/TEST-017/026: expired during asynchronous listener startup refuse
  if(result.ok)await result.session.stop();
  assert.deepEqual(result,{ok:false,code:'SESSION_EXPIRED'});
 });
+
+
+test('TASK-007/TEST-017/026: clock rollback during bind cannot extend isolated GM listener TTL',async t=>{
+ let wallNow=Date.now();
+ t.mock.method(Date,'now',()=>wallNow);
+ const pending=startIsolatedTampermonkeyGmProbe(true,1000,'document-idle');
+ // The synchronous setup established a one-second consent window.
+ // Moving the SYSTEM clock backwards during async listen must not make
+ // the server stay alive for another sixty seconds.
+ wallNow-=60000;
+ const result=await pending;
+ assert.equal(result.ok,true,'test requires a listener started before real TTL elapses');
+ if(!result.ok)return;
+ const probe=result.session;
+ t.after(()=>probe.stop());
+ const live=await fetch(probe.origin+'/?mode=broken');
+ assert.equal(live.status,200,'fixture is reachable inside the actual one-second TTL');
+ await new Promise<void>(resolve=>setTimeout(resolve,1500));
+ // A refused socket is acceptable; any HTTP response proves the
+ // server is STILL bound past its original monotonic consent deadline.
+ let stillListening=false;
+ try{
+  const response=await fetch(probe.origin+'/?mode=broken');
+  stillListening=response.status>0;
+ }catch{/* closeAllConnections and server.close may refuse new connections */}
+ assert.equal(stillListening,false,
+  'wall-clock rollback must not keep consented local GM server listening after its real TTL');
+});
