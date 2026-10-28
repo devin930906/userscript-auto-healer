@@ -494,6 +494,32 @@ test('TEST-017: automatic expiry closes stalled loopback HTTP connections',async
  }
 });
 
+test('TASK-007/TEST-017/026: loopback HTTP consent stays revoked after wall-clock expiry and rollback',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const beforeExpiry=await fetch(probe.origin+'/?mode=broken');
+ assert.equal(beforeExpiry.status,200,'an authorized fixture route works initially');
+ await beforeExpiry.text();
+ let wallTime=probe.expiresAt+1;
+ t.mock.method(Date,'now',()=>wallTime);
+ const expired=await fetch(probe.origin+'/?mode=broken');
+ assert.equal(expired.status,403,'observed wall-clock expiry revokes HTTP consent');
+ await expired.text();
+ // Move the OS clock backwards while the original monotonic TTL is still live.
+ // Neither the fixture page nor the secret import endpoint may revive.
+ wallTime=probe.expiresAt-20000;
+ const rolledBack=await fetch(probe.origin+'/?mode=broken');
+ assert.equal(rolledBack.status,403,'expired listener must never serve a fixture after rollback');
+ await rolledBack.text();
+ const importAfterRollback=await fetch(probe.installUrl);
+ assert.equal(importAfterRollback.status,403,'one-use import URL must remain revoked');
+ await importAfterRollback.text();
+ assert.deepEqual(probe.receiptSnapshot(),{});
+});
+
 test('TEST-017: non-canonical route aliases cannot serve the consented fixture',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
