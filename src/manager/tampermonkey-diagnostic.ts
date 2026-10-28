@@ -461,13 +461,26 @@ function snapshotDiagnosticOptions(value:unknown):{
 }
 
 /**
- * RED: model the existing wall-clock-only manual diagnostic consent window.
- * Tests below demonstrate why this must be made irreversible and monotonic.
+ * TASK-007 / TEST-017/026: expiring consent for real owned-CDP manual GM
+ * diagnostics must never revive after a Windows clock rollback. The fixture
+ * separately enforces its server TTL; this closes the browser visit/DOM gate.
+ * Measure before asynchronous fixture startup so bind time consumes the same
+ * authorization budget rather than extending it.
  */
 export function createManualDiagnosticConsentWindow(
  expiresAt:number,ttlMs:number,startedAt:number
 ):()=>boolean{
- return ()=>Date.now()<expiresAt;
+ let revoked=false;
+ return ()=>{
+  if(revoked)return false;
+  const wallNow=Date.now();
+  const elapsed=performance.now()-startedAt;
+  if(!Number.isFinite(expiresAt)||!Number.isFinite(ttlMs)||ttlMs<=0||
+     !Number.isFinite(startedAt)||!Number.isFinite(wallNow)||
+     !Number.isFinite(elapsed)||elapsed<0||
+     wallNow>=expiresAt||elapsed>=ttlMs)revoked=true;
+  return !revoked;
+ };
 }
 
 /** Requires a live owned Chrome and a real CDP runtime hint before listening.
