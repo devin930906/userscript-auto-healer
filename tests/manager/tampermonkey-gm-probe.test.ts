@@ -637,6 +637,27 @@ test('TEST-017: installed temporary fixture stops all DOM/GM/network effects aft
 });
 
 
+test('TASK-007/TEST-017/026: invalid negative monotonic elapsed never permits GM, DOM or network',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const effects={gm:0,query:0,network:0};
+ // A corrupted/nonmonotonic clock is NOT evidence of remaining consent.
+ // A rolled-back Date.now alone cannot authorize fixture side effects.
+ runInNewContext(probe.source,{
+  Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+  performance:{timeOrigin:probe.expiresAt-2000,now:()=>-1},
+  location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+  document:{readyState:'complete',querySelector:()=>{effects.query++;return null;}},
+  GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+  fetch:()=>{effects.network++;return Promise.resolve();}
+ });
+ assert.deepEqual(effects,{gm:0,query:0,network:0},
+  'a negative performance.now must fail closed before GM reads');
+});
+
 test('TASK-007/TEST-017/026: GM fixture refuses effects when wall-clock rolls back past real expiry',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);

@@ -91,7 +91,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // A malformed/throwing Performance object cannot authorize actions.
  "  if(typeof performance==='undefined')return false;",
  "  try{const epoch=performance.timeOrigin;const elapsed=performance.now();",
- '   return !Number.isFinite(epoch)||!Number.isFinite(elapsed)||',
+ '   return !Number.isFinite(epoch)||!Number.isFinite(elapsed)||elapsed<0||',
  '    epoch+elapsed>='+expiresAt+';}',
  '  catch{return true;}',
  ' };',
