@@ -371,6 +371,36 @@ test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields 
   'genuine native imported bytes must retain normal isolated worker behavior');
 });
 
+test('TASK-013/TEST-022/026: native AST batch encoding rejects structured-clone getter hooks',async()=>{
+ const script=imported(header+'document.querySelector("#secret-encoding");');
+ let invoked=0;
+ const hostileEncoding=Object.defineProperty({},'secret',{
+  enumerable:true,get(){invoked++;throw Error('UNTRUSTED_ENCODING_CLONE_GETTER');}
+ });
+ const bad={bytes:script.bytes,
+  textEncoding:hostileEncoding as unknown as typeof script.textEncoding};
+ assert.deepEqual(await previewImportedBatchOffMain([bad]),[],
+  'invalid direct native encoding must fail before Worker structured clone');
+ assert.equal(invoked,0,'Worker startup may not evaluate untrusted encoding getters');
+});
+
+test('TASK-013/TEST-022: native AST progress cannot replace unprocessed source bytes',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#private-before-progress-${i}");`
+ ));
+ const original=scripts.map(previewImportedScriptAnalysis);
+ const progress:number[]=[];
+ const reports=await previewImportedBatchOffMain(scripts,undefined,(processed,total)=>{
+  progress.push(processed);
+  assert.equal(total,17);
+  if(processed===16) scripts[16].bytes.fill(0);
+ });
+ assert.deepEqual(progress,[16,17]);
+ assert.deepEqual(reports,original,
+  'a progress callback cannot change the source analyzed by a later worker');
+ assert.ok(reports.every(x=>x.status==='STATIC_ANALYSIS_ONLY'));
+});
+
 test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoking caller methods',async()=>{
  // The native importer caps batches at 1000. A forged direct call must not
  // allocate one fallback per untrusted slot or invoke overridden Array.map.
