@@ -44,7 +44,7 @@ try {
   } else { -1 }
   if($prSectionStart -lt 0 -or $prSectionEnd -le $prSectionStart -or
      $candidateWorkflow.Substring($prSectionStart,
-       $prSectionEnd-$prSectionStart) -notmatch "(?m)^\\s*-\\s*'tests/\\*\\*'\\s*$") {
+       $prSectionEnd-$prSectionStart) -notmatch "(?m)^\s*-\s*'tests/\*\*'\s*$") {
     throw 'TEST-028: test-only PRs must trigger Windows candidate EXE and ZIP checks'
   }
   Write-Output 'PASS: test-only PR changes trigger mandatory Windows EXE/ZIP candidate checks'
