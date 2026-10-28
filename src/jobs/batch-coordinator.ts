@@ -165,6 +165,7 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
  // otherwise become FAILED and hide a forged out-of-order completion).
  // Concurrency=2 legitimately allows a later worker to finish first.
  let earlierUnsettled=false;
+ let earlierCancelled=false;
  for(let i=0;i<opts.count;i++){
   const slot=slots[String(i)];
   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
@@ -181,6 +182,12 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
    if(earlierUnsettled&&
       (job.state==='RUNNING'||job.state==='SUCCEEDED'||job.state==='FAILED'))
     throw Error('INVALID_BATCH_CHECKPOINT');
+   // A single-lane cancellation marks every remaining QUEUED job
+   // CANCELLED synchronously. An alleged later QUEUED job is not a
+   // recoverable restart; rejecting it prevents replay after cancellation.
+   if(earlierCancelled&&job.state!=='CANCELLED')
+    throw Error('INVALID_BATCH_CHECKPOINT');
+   if(job.state==='CANCELLED')earlierCancelled=true;
    if(job.state==='QUEUED'||job.state==='RUNNING'||job.state==='CANCELLED')
     earlierUnsettled=true;
   }
