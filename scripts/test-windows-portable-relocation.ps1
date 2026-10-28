@@ -828,6 +828,26 @@ try {
     $commandProcess.Dispose()
   }
 
+  # ISSUE-215 / TEST-028 RED: a successful atomic relocation after transient
+  # Win32=5 must permit a bounded, privacy-safe Restart Manager follow-up on
+  # the moved candidate EXE. A first-denial association alone is not causal.
+  $postRoot=Join-Path $root 'post-success-rm-fixture'
+  New-Item -ItemType Directory -Path $postRoot | Out-Null
+  $postExe=Join-Path $postRoot 'UserscriptAutoHealer.exe'
+  Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Destination $postExe
+  $postHash=(Get-FileHash -LiteralPath $postExe -Algorithm SHA256).Hash
+  $postSummary=Get-CandidatePortablePostMoveExeRmSummary $postRoot
+  if($postSummary -cnotmatch '^postMove=ok rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+     $postSummary.Contains($postRoot) -or $postSummary.Contains($postExe) -or
+     (Get-FileHash -LiteralPath $postExe -Algorithm SHA256).Hash -cne $postHash) {
+    throw "TEST-028: safe post-move EXE RM observation unavailable or leaked identities: $postSummary"
+  }
+  if((Get-CandidatePortablePostMoveExeRmSummary (Join-Path $root 'missing-post-move')) -cne 'postMove=unavailable' -or
+     (Get-CandidatePortablePostMoveExeRmSummary $env:SystemRoot) -cne 'postMove=unavailable') {
+    throw 'TEST-028: post-move RM observation exceeded verified runner candidate scope'
+  }
+  Write-Output 'PASS: bounded post-move EXE RM observation preserves hashes and rejects external paths'
+
   # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
   # FILE_SHARE_DELETE still allows the old read-only probe to succeed, even
   # though Windows will refuse to rename its parent. The new diagnostic must
@@ -979,7 +999,32 @@ try {
       }
       Start-Sleep -Milliseconds 50
     }
-    $attempts=Move-CandidatePortableDirectory $temporary $moved 16 750
+    # A real retry-success must record exactly one post-success observation.
+    # Mock only its read-only helper; the Windows file lock, wait and atomic
+    # Directory.Move remain real. Unknown/unrelated processes are never killed.
+    $originalPostProbe=(Get-Item 'Function:\Get-CandidatePortablePostMoveExeRmSummary' -ErrorAction SilentlyContinue).ScriptBlock
+    $script:task020PostMoveCalls=0
+    try {
+      Set-Item 'Function:\Get-CandidatePortablePostMoveExeRmSummary' -Value {
+        param([string]$destination)
+        $script:task020PostMoveCalls++
+        if(-not (Test-Path -LiteralPath (Join-Path $destination 'payload.txt') -PathType Leaf)){
+          throw 'Post-move evidence was invoked before the actual atomic rename'
+        }
+        return 'postMove=bounded-controlled'
+      }
+      $attempts=Move-CandidatePortableDirectory $temporary $moved 16 750
+    } finally {
+      if($null -ne $originalPostProbe) {
+        Set-Item 'Function:\Get-CandidatePortablePostMoveExeRmSummary' -Value $originalPostProbe
+      } else {
+        Remove-Item 'Function:\Get-CandidatePortablePostMoveExeRmSummary' -ErrorAction SilentlyContinue
+      }
+    }
+    if($script:task020PostMoveCalls -ne 1) {
+      throw "TEST-028: retry-success must emit one post-move RM comparison, got $script:task020PostMoveCalls"
+    }
+    Remove-Variable -Name task020PostMoveCalls -Scope Script -ErrorAction SilentlyContinue
     if($attempts -lt 2 -or (Test-Path -LiteralPath $temporary) -or
         [IO.File]::ReadAllText((Join-Path $moved 'payload.txt')) -cne 'exact-content') {
       throw 'Transient lock recovery or relocated payload verification failed'
