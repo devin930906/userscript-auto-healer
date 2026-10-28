@@ -307,6 +307,28 @@ test('TEST-026: hostile worker-reply getters, proxies and array slots fail close
  assert.equal(validateIsolatedPreviewReply([Object.create({source:'leak'})],1),null);
 });
 
+test('TASK-013/TEST-022/026: forged batch AbortSignal never runs attacker hooks',async()=>{
+ const script=imported(header+'document.querySelector("#private-abort");');
+ let invoked=0;
+ // A direct caller must not turn a forged cancellation object into native
+ // abort authority, nor run its getter before deciding whether to spawn work.
+ const fake=Object.defineProperty({addEventListener:()=>{invoked++;}},
+  'aborted',{get(){invoked++;throw Error('UNTRUSTED_ABORT_GETTER');}});
+ assert.deepEqual(await previewImportedBatchOffMain([script],
+  fake as unknown as AbortSignal),[]);
+ assert.equal(invoked,0,'a rejected signal must not execute its getter');
+ const proxy=new Proxy(new AbortController().signal,{
+  get(){invoked++;throw Error('UNTRUSTED_ABORT_PROXY_GET');},
+  getPrototypeOf(){invoked++;throw Error('UNTRUSTED_ABORT_PROXY_PROTO');}
+ });
+ assert.deepEqual(await previewImportedBatchOffMain([script],proxy),[]);
+ assert.equal(invoked,0,'a Proxy signal must be rejected before traps');
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ assert.deepEqual(await previewImportedBatchOffMain([script],revoked.proxy),[]);
+ assert.equal(invoked,0);
+});
+
 test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoking caller methods',async()=>{
  // The native importer caps batches at 1000. A forged direct call must not
  // allocate one fallback per untrusted slot or invoke overridden Array.map.
