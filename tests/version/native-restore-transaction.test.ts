@@ -1187,7 +1187,8 @@ test('TASK-011/TEST-020/021/026: post-release source verification cannot bless a
      // released its path lock and finished separately verifying both backups
      // and its published intent. An unrelated editor now invalidates one
      // recovery copy without touching the correctly restored source.
-     if(result.status==='MATCHED_READ_ONLY'&&
+     if(result.status==='MATCHED_READ_ONLY'&&input!==null&&
+        typeof input==='object'&&'expectedSha256' in input&&
         input.expectedSha256===sha(original)&&++originalChecks===4){
       const names=await readdir(opts.backupDirectory);
       const backupName=target==='original'
