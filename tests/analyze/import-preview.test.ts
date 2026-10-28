@@ -647,6 +647,55 @@ test('TASK-013/TEST-022/026: isolated reply rejects Proxy arrays, rows and sites
  assert.equal(traps,0);
 });
 
+
+test('TASK-013/TEST-022/NFR-009: successful AST worker retires before next segment starts',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#retire-success-${i}");`
+ ));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ let starts=0;
+ let firstRetired=false;
+ let overlapped=false;
+ let release!:()=>void;
+ const firstTermination=new Promise<number>(resolve=>{
+  release=()=>{firstRetired=true;resolve(0);};
+ });
+ let timer:NodeJS.Timeout|undefined;
+ try{
+  workers.Worker=class extends EventEmitter{
+   private readonly ordinal:number;
+   constructor(_filename:string,opts:{workerData:Array<{
+    bytes:Uint8Array;textEncoding:typeof scripts[number]['textEncoding']
+   }>}) {
+    super();
+    this.ordinal=++starts;
+    if(this.ordinal===2&&!firstRetired)overlapped=true;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate(){return this.ordinal===1?firstTermination:Promise.resolve(0);}
+  } as unknown as typeof native;
+  timer=setTimeout(release,80);
+  const result=await previewImportedBatchOffMain(scripts);
+  assert.equal(starts,2,'all valid native preview segments should execute');
+  assert.equal(overlapped,false,
+   'next segment must not start while a successful predecessor is still alive');
+  assert.equal(firstRetired,true);
+  assert.deepEqual(result.map(x=>x.status),Array(17).fill('STATIC_ANALYSIS_ONLY'));
+  assert.equal(result.every(x=>!x.automaticPatchAllowed&&
+   !x.tampermonkeyVerified&&!x.businessVerified),true);
+ }finally{
+  release();
+  if(timer)clearTimeout(timer);
+  workers.Worker=native;
+ }
+});
+
 test('TASK-013/TEST-022/NFR-009: failed AST worker retires before next segment starts',async()=>{
  const scripts=Array.from({length:17},(_,i)=>imported(
   header+`document.querySelector("#retire-segment-${i}");`
