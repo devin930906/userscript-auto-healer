@@ -77,6 +77,33 @@ test('TEST-004/011/022: native-batch AST results run in an actual isolated Node 
    !x.businessVerified));
 });
 
+test('TASK-013/TEST-022/026: failed Worker startup reports only a bounded reason, never source',async()=>{
+ // Structured clone rejects functions, so this fails before any Worker runs.
+ // Keep the failure fixture disposable and assert fail-closed business flags.
+ const script=imported(header+'document.querySelector("#private-selector-never-log");');
+ const bad={
+  bytes:script.bytes,
+  textEncoding:(()=> 'PRIVATE_SOURCE_NEVER_LOG') as unknown as typeof script.textEncoding
+ };
+ const warnings:string[]=[];
+ const originalWarn=console.warn;
+ console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+ let actual;
+ try{
+  actual=await previewImportedBatchOffMain([bad]);
+ }finally{
+  console.warn=originalWarn;
+ }
+ assert.deepEqual(actual.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual.every(item=>!item.automaticPatchAllowed&&
+  !item.tampermonkeyVerified&&!item.businessVerified));
+ assert.deepEqual(warnings,[
+  'UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1'
+ ]);
+ assert.ok(!warnings.join(' ').includes('PRIVATE_SOURCE_NEVER_LOG'));
+ assert.ok(!warnings.join(' ').includes('private-selector-never-log'));
+});
+
 test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{
  const scripts=Array.from({length:36},(_,i)=>imported(
   header+'document.querySelector("#private-segment-'+i+'");'
