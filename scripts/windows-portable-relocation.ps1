@@ -975,6 +975,15 @@ function Move-CandidatePortableDirectory(
         $owners=Get-CandidatePortableRelocationOwnerSummary (
           Join-Path $from 'UserscriptAutoHealer.exe')
         Write-Warning -WarningAction Continue "TASK-020 final relocation denial candidate owners: $owners"
+        # Compare first-vs-terminal ownership evidence on persistent denial.
+        # Only the same bounded, read-only, candidate-local diagnostic runs;
+        # no extra rename, permission change, process stop or retry is allowed.
+        # Diagnostic failure must NEVER replace the original Move exception.
+        $finalEvidence='diagnostic=unavailable'
+        try {
+          $finalEvidence=Get-CandidatePortableFirstDenialSummary $from $candidateFiles
+        } catch { }
+        Write-Warning -WarningAction Continue ("TASK-020 final relocation denial: "+$finalEvidence)
         throw
       }
       if(-not [IO.Directory]::Exists($from) -or (Test-Path -LiteralPath $to)) {
