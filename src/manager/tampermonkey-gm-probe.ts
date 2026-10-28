@@ -80,10 +80,25 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // the disposable script before any GM, DOM or HTTP effect.
  " try{if(typeof window!=='undefined'&&window.top!==window)return;}",
  " catch{return;}",
+ // Cross-check the fixed server-issued expiry against the browser's
+ // monotonic time origin. A backward Windows clock change may make Date.now()
+ // appear live after the real consent interval has already ended. The local
+ // server has its own independent monotonic TTL, and the userscript must not
+ // revive GM/storage/DOM/fetch effects after server expiry.
+ ' const expired=()=>{',
+ '  if(Date.now()>='+expiresAt+')return true;',
+ // The existing date check is retained for old hosts lacking Performance.
+ // A malformed/throwing Performance object cannot authorize actions.
+ "  if(typeof performance==='undefined')return false;",
+ "  try{const epoch=performance.timeOrigin;const elapsed=performance.now();",
+ '   return !Number.isFinite(epoch)||!Number.isFinite(elapsed)||',
+ '    epoch+elapsed>='+expiresAt+';}',
+ '  catch{return true;}',
+ ' };',
  // A manually installed fixture may outlive its short-lived HTTP server.
  // Even if the loopback port is later reused, it must not perform GM, DOM
  // or network actions after the consent interval expires.
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
  ' if(location.origin!=='+JSON.stringify(origin)+')return;',
  " const mode=new URL(location.href).searchParams.get('mode');",
  " if(mode!=='broken'&&mode!=='fixed')return;",
@@ -98,7 +113,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // requires immediate deletion, with a read-after-delete check. Never
  // leave a new persistent test value after an apparently successful test.
  ' let gmStorageRoundtrip=false;',
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
  ' if(location.href!==expectedUrl)return;',
  " if(typeof GM_setValue==='function'&&typeof GM_getValue==='function'&&",
  "    typeof GM_deleteValue==='function'){",
@@ -120,17 +135,17 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' }',
  // A synchronous GM getter, DOM query or setter can cross the consent
  // deadline. Abort before every subsequent side effect, not only at entry.
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  // A declared document-idle mode does not independently prove that DOM
  // parsing has completed. Always defer the business assertion while loading;
  // GM reads remain at the requested injection point.
  ' const checkDomAndReport=()=>{',
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  " const selector=mode==='broken'?'#obsolete-target':'#current-target';",
  ' const target=document.querySelector(selector);',
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  ' let actionConfirmed=false;',
  ' if(target){',
@@ -139,7 +154,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
   '  if(location.href!==expectedUrl)return;',
  "  actionConfirmed=target.getAttribute('data-uah-probe-action')==='done';",
  ' }',
- ' if(Date.now()>='+expiresAt+')return;',
+ ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  ' void fetch('+JSON.stringify(origin+'/receipt')+',',
  " {method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},",
