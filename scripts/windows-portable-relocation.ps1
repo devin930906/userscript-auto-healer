@@ -918,6 +918,44 @@ function Get-CandidatePortableFirstDenialSummary(
   return "owners=[$owners] sharing=[$sharing] sibling=[$sibling] $acl restartManager=[$rm] fileAssociations=[$rmFiles]"
 }
 
+# ISSUE-215 / TEST-028: observe whether an anonymous Restart Manager
+# association to the candidate EXE still exists AFTER a successful atomic
+# rename that previously encountered a real Windows access denial.
+# This is a subsequent snapshot, NOT proof of the prior denial's cause.
+# No process paths, identities or PIDs are returned. Never stop processes.
+# Do not inspect outside verified, non-reparse runner-owned candidate paths.
+function Get-CandidatePortablePostMoveExeRmSummary([string]$destination) {
+  try {
+    if([string]::IsNullOrWhiteSpace($destination) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       -not [IO.Path]::IsPathFullyQualified($destination) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return 'postMove=unavailable'
+    }
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    $base=[IO.Path]::GetFullPath($destination).TrimEnd([char[]]@('\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) {
+      return 'postMove=unavailable'
+    }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $exe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
+    if(-not [IO.File]::Exists($exe)) { return 'postMove=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $exe
+    # One exact candidate file, one bounded native session. This separate
+    # post-success observation is deliberately not a whole-tree clear claim.
+    $rm=Get-CandidatePortableRestartManagerSummary $base @($exe)
+    if($rm -cnotmatch '^rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+       $rm.Contains("`r") -or $rm.Contains("`n")) {
+      return 'postMove=unavailable'
+    }
+    return "postMove=ok $rm"
+  } catch {
+    return 'postMove=unavailable'
+  }
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
   [int]$maxAttempts=12,[int]$delayMilliseconds=250,
@@ -966,6 +1004,16 @@ function Move-CandidatePortableDirectory(
     Assert-CandidatePortableNoReparsePath $runner $from
     try {
       [IO.Directory]::Move($from,$to)
+      if($attempt -gt 1) {
+        # Only after a real retry-success, compare EXE association at the
+        # relocated path. An unavailable probe is NOT a zero-owner receipt.
+        # The move already succeeded; any diagnostic error must not convert
+        # that success into a packaging failure or authorize process cleanup.
+        try {
+          $after=Get-CandidatePortablePostMoveExeRmSummary $to
+          Write-Warning -WarningAction Continue ("TASK-020 post-success relocation EXE comparison: "+$after)
+        } catch { }
+      }
       return $attempt
     } catch {
       # PowerShell wraps .NET method failures in MethodInvocationException.
