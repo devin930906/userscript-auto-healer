@@ -243,10 +243,11 @@ export function validateIsolatedPreviewReply(
  * worker. Cancellation revokes the pending preview without discarding imported
  * file records; a worker still running is forcibly terminated, never trusted.
  */
+type WorkerChunkOutcome={previews:ImportAnalysisPreview[];safeToContinue:boolean};
 async function previewImportedChunkOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  workerDeadlineMs=WORKER_DEADLINE_MS
-):Promise<ImportAnalysisPreview[]>{
+):Promise<WorkerChunkOutcome>{
  const selected:Script[]=[];
  const slots:(number|null)[]=[];
  const output:ImportAnalysisPreview[]=[];
@@ -271,10 +272,11 @@ async function previewImportedChunkOffMain(
    usedBytes+=size;
   }
  }
- if(selected.length===0)return output;
+ if(selected.length===0)return {previews:output,safeToContinue:true};
  if(signal?.aborted)
-  return output.map((x,i)=>slots[i]===null?x:
-    unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED'));
+  return {previews:output.map((x,i)=>slots[i]===null?x:
+    unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED')),
+   safeToContinue:true};
  // Instrument constructor+online time without changing the existing
  // per-segment 10-second or overall 120-second fail-closed deadline.
  const startedAt=performance.now();
@@ -286,9 +288,11 @@ async function previewImportedChunkOffMain(
   });
  }catch{
   reportWorkerFailure('START_FAILED',selected.length,startedAt,null);
-  return output;
+  return {previews:output,safeToContinue:true};
  }
- const result=await new Promise<ImportAnalysisPreview[]|null>(resolve=>{
+ const result=await new Promise<{
+  answer:ImportAnalysisPreview[]|null;retired:boolean
+ }>(resolve=>{
   let finished=false;
   let timer:NodeJS.Timeout|undefined;
   let onlineAt:number|null=null;
@@ -299,8 +303,25 @@ async function previewImportedChunkOffMain(
    if(reason)reportWorkerFailure(reason,selected.length,startedAt,onlineAt);
    if(timer)clearTimeout(timer);
    signal?.removeEventListener('abort',cancel);
-   if(stopWorker)void worker.terminate().catch(()=>undefined);
-   resolve(answer);
+   if(!stopWorker){resolve({answer,retired:true});return;}
+   // A failed/malformed Worker may still be alive after terminate() starts.
+   // Do not launch another segment before the old thread has retired.
+   // Keep termination within the ORIGINAL segment deadline, rather than
+   // silently increasing the AST time budget or hanging forever.
+   let termination:Promise<number>;
+   try{termination=worker.terminate();}
+   catch{resolve({answer,retired:false});return;}
+   const remaining=Math.max(1,workerDeadlineMs-(performance.now()-startedAt));
+   let retirementTimer:NodeJS.Timeout|undefined;
+   const retirementDeadline=new Promise<boolean>(settle=>{
+    retirementTimer=setTimeout(()=>settle(false),remaining);
+   });
+   void Promise.race([
+    Promise.resolve(termination).then(()=>true,()=>false),retirementDeadline
+   ]).then(retired=>{
+    if(retirementTimer)clearTimeout(retirementTimer);
+    resolve({answer,retired});
+   });
   };
   const cancel=()=>finish(null,true);
   worker.on('online',()=>{
@@ -308,7 +329,8 @@ async function previewImportedChunkOffMain(
   });
   worker.on('message',(value:unknown)=>{
    const checked=validateIsolatedPreviewReply(value,selected.length);
-   finish(checked,checked===null,checked===null?'REPLY_REJECTED':undefined);
+   // Even a valid posted reply is not proof that the thread exited.
+   finish(checked,true,checked===null?'REPLY_REJECTED':undefined);
   });
   worker.on('error',()=>finish(null,true,'WORKER_ERROR'));
   worker.on('exit',()=>finish(null,false,'EXIT_BEFORE_MESSAGE'));
@@ -316,13 +338,14 @@ async function previewImportedChunkOffMain(
   timer=setTimeout(()=>finish(null,true,'DEADLINE'),workerDeadlineMs);
   if(signal?.aborted)cancel();
  });
- return output.map((original,i)=>{
+ const previews=output.map((original,i)=>{
   const slot=slots[i];
   if(slot===null)return original;
   if(signal?.aborted)
    return unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED');
-  return result?.[slot]??original;
+  return result.answer?.[slot]??original;
  });
+ return {previews,safeToContinue:result.retired};
 }
 
 /** A forged cancellation object can run arbitrary getters/listener hooks.
@@ -360,14 +383,16 @@ export async function previewImportedBatchOffMain(
  const nativeScripts=snapshotNativeAstBatch(scripts);
  if(nativeScripts===null)return [];
  const results:ImportAnalysisPreview[]=[];
+ let safeToContinue=true;
  // Use monotonic elapsed time: wall-clock synchronization must not shorten
  // or silently extend the 120-second native AST batch budget.
  const stopAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
  for(let offset=0;offset<nativeScripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
   const segment=nativeScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
-  if(signal?.aborted||performance.now()>=stopAt){
-   const status=signal?.aborted
-    ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
+  if(signal?.aborted||performance.now()>=stopAt||!safeToContinue){
+   const status=signal?.aborted?'SKIPPED_CANCELLED' as const:
+    !safeToContinue?'ISOLATED_ANALYSIS_FAILED' as const:
+    'SKIPPED_BATCH_BUDGET' as const;
    for(const script of segment){
     const bytes=script?.bytes;
     // Preserve oversized skip status on cancellation without calling
@@ -386,8 +411,12 @@ export async function previewImportedBatchOffMain(
   // every segment has at most 10s, with a 120s total batch deadline.
   // The 16-file/1MiB copied-byte limit remains unchanged.
   const remainingMs=Math.max(1,stopAt-performance.now());
-  results.push(...await previewImportedChunkOffMain(segment,signal,
-   Math.min(WORKER_DEADLINE_MS,remainingMs)));
+  const chunk=await previewImportedChunkOffMain(segment,signal,
+   Math.min(WORKER_DEADLINE_MS,remainingMs));
+  results.push(...chunk.previews);
+  // A non-retired Worker must not overlap with the next segment. All
+  // unstarted entries remain explicit unverified failures, not AST evidence.
+  safeToContinue=chunk.safeToContinue;
   // A native import's UI may show finite, scalar-only AST progress.
   // No source bytes, file names or selective-analysis results cross this callback.
   try{onProgress?.(results.length,nativeScripts.length);}
