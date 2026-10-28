@@ -374,15 +374,21 @@ export async function runCheckpointedReadOnlyBatch(
  try{
   const initial=await saveReadOnlyBatchJournal(directory,coordinator);
   if(initial.status==='BLOCKED')return initial;
+  // The initial save persisted `current`. A cancellation can still happen
+  // before run() starts its first worker, leaving no transition callback to
+  // durably record CANCELLED. Keep the last confirmed journal state.
+  let lastPersisted=current;
   let saveFailure:BatchJournalFailure='IO_FAILURE';
   try{
    const final=await ReadOnlyBatchCoordinator.prototype.run.call(
     coordinator,async()=>{
+     const pending=ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator);
      const saved=await saveReadOnlyBatchJournal(directory,coordinator);
      if(saved.status==='BLOCKED'){
       saveFailure=saved.reason;
       throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
      }
+     lastPersisted=pending;
      // Advisory UI progress belongs only to an actually saved checkpoint.
      // No status callback can authorize repair or invalidate the batch.
      try{onDurableTransition?.(
@@ -390,6 +396,20 @@ export async function runCheckpointedReadOnlyBatch(
      catch{/* Native progress observers cannot change the journal result. */}
     },ticket
    );
+   // No callback runs when cancellation happens after the initial save but
+   // before the first dispatch. Persist that terminal change rather than
+   // issuing a falsely durable success receipt. Normal paths already saved
+   // their last transition and therefore need no extra journal write.
+   const unsavedState=final.jobs.some((job,i)=>
+    job.state!==lastPersisted.jobs[i].state||
+    job.attempts!==lastPersisted.jobs[i].attempts);
+   if(unsavedState){
+    const saved=await saveReadOnlyBatchJournal(directory,coordinator);
+    if(saved.status==='BLOCKED'){
+     saveFailure=saved.reason;
+     throw Error('BATCH_CHECKPOINT_WRITE_FAILED');
+    }
+   }
    return Object.freeze({
     status:'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED' as const,
     snapshot:final

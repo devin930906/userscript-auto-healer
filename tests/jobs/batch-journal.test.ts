@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {existsSync,mkdirSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
@@ -643,5 +643,49 @@ test('TASK-013/TEST-022/026: first checkpoint publish cannot overwrite a foreign
    (fsPromises as {rename:typeof nativeRename}).rename=nativeRename;
    (fsPromises as {link:typeof nativeLink}).link=nativeLink;
   }
+ });
+});
+
+test('TASK-013/TEST-022/026: cancel after initial checkpoint must persist terminal state without dispatch',async()=>{
+ await withJournal(async directory=>{
+  let dispatched=0;
+  const coordinator=new ReadOnlyBatchCoordinator(options,async()=>{
+   dispatched++;
+   return 'DONE' as const;
+  });
+  const originalRun=ReadOnlyBatchCoordinator.prototype.run;
+  let intercepted=0;
+  // This interception occurs only after the real initial journal write
+  // succeeded, and before run() can dispatch the first worker.
+  const patched=mock.method(ReadOnlyBatchCoordinator.prototype,'run',
+   function(this:ReadOnlyBatchCoordinator,
+    onTransition?:()=>Promise<void>,ticket?:symbol){
+    intercepted++;
+    this.cancel();
+    return originalRun.call(this,onTransition,ticket);
+   });
+  try{
+   const result=await runCheckpointedReadOnlyBatch(directory,coordinator);
+   assert.equal(intercepted,1,'cancel precisely between durable initial save and dispatch');
+   assert.equal(result.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED');
+   if(result.status!=='BATCH_SETTLED_CHECKPOINTED_UNVERIFIED')return;
+   assert.deepEqual(result.snapshot.jobs.map(job=>job.state),
+    ['CANCELLED','CANCELLED']);
+   assert.equal(dispatched,0,'no native worker runs after pre-dispatch cancellation');
+   const checkpoint=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
+   assert.deepEqual(checkpoint.jobs.map((job:{state:string})=>job.state),
+    ['CANCELLED','CANCELLED'],
+    'a success receipt must not leave QUEUED disk state after pre-dispatch cancellation');
+   const restored=await loadReadOnlyBatchJournal(directory,options,async()=>{
+    dispatched++;return 'DONE' as const;
+   });
+   assert.equal(restored.status,'CHECKPOINT_RESTORED_SCHEDULING_ONLY');
+   if(restored.status==='CHECKPOINT_RESTORED_SCHEDULING_ONLY'){
+    assert.deepEqual(restored.coordinator.snapshot().jobs.map(job=>job.state),
+     ['CANCELLED','CANCELLED']);
+    await restored.coordinator.run();
+    assert.equal(dispatched,0,'restart must never replay a cancelled read-only batch');
+   }
+  }finally{patched.mock.restore();}
  });
 });
