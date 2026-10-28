@@ -104,7 +104,7 @@ test('TASK-013/TEST-022/026: failed Worker startup reports only a bounded reason
   !item.tampermonkeyVerified&&!item.businessVerified));
  assert.equal(warnings.length,1);
  assert.match(warnings[0],
-  /^UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1 phase=PRE_ONLINE elapsedBucketMs=\\d+ onlineBucketMs=NA$/);
+  /^UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1 phase=PRE_ONLINE elapsedBucketMs=\d+ onlineBucketMs=NA$/);
  assert.ok(!warnings.join(' ').includes('PRIVATE_SOURCE_NEVER_LOG'));
  assert.ok(!warnings.join(' ').includes('private-selector-never-log'));
 });
@@ -142,7 +142,7 @@ test('TASK-013/TEST-004/022/026: online Worker error has bounded lifecycle evide
   !x.tampermonkeyVerified&&!x.businessVerified));
  assert.equal(warnings.length,1);
  assert.match(warnings[0],
-  /^UAH_AST_WORKER_UNAVAILABLE reason=WORKER_ERROR count=1 phase=POST_ONLINE elapsedBucketMs=\\d+ onlineBucketMs=\\d+$/);
+  /^UAH_AST_WORKER_UNAVAILABLE reason=WORKER_ERROR count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
  assert.ok(!warnings.join(' ').includes('PRIVATE_WORKER_EXCEPTION'));
  assert.ok(!warnings.join(' ').includes('private-lifecycle-source'));
 });
