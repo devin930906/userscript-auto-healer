@@ -122,13 +122,13 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  '  try{',
  '   writeAttempted=true;',
  "   GM_setValue(storageKey,'gm-roundtrip-ok');writeSucceeded=true;",
- "   readBack=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
+ "   if(!expired())readBack=GM_getValue(storageKey,'unset')==='gm-roundtrip-ok';",
  '  }catch{}finally{',
  // A setter can mutate before throwing; always try to remove our unique
  // disposable storage key, never use write success as the cleanup guard.
  '   if(writeAttempted){try{',
  "    GM_deleteValue(storageKey);",
- "    removed=GM_getValue(storageKey,'gm-deleted')==='gm-deleted';",
+ "    removed=!expired()&&GM_getValue(storageKey,'gm-deleted')==='gm-deleted';",
  '   }catch{removed=false;}}',
  '  }',
  '  gmStorageRoundtrip=writeSucceeded&&readBack&&removed;',
