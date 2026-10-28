@@ -31,6 +31,51 @@ function reportWorkerFailure(reason:WorkerFailureReason,count:number):void{
 const WORKER_DEADLINE_MS=10000;
 // A pathological 1000-file batch must not consume up to 63 * 10 seconds.
 const MAX_TOTAL_PREVIEW_MS=120000;
+// Read the native importer's already-copied script records without invoking
+// direct-caller Proxy traps, accessors, custom array methods or TypedArray
+// byteLength shadows. Only scalar fields and references to the original
+// bounded bytes are retained; the worker still does the isolated parsing.
+// A bad direct native call returns [] before spawning any workers or progress.
+const NATIVE_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
+ Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
+function snapshotNativeAstBatch(input:unknown):Script[]|null{
+ try{
+  if(nodeTypes.isProxy(input)||!Array.isArray(input)||
+     Object.getPrototypeOf(input)!==Array.prototype)return null;
+  const arrayFields=Object.getOwnPropertyDescriptors(input) as
+   Record<string,PropertyDescriptor|undefined>;
+  const count:unknown=arrayFields['length']?.value;
+  if(!Number.isSafeInteger(count)||(count as number)<0||
+     (count as number)>MAX_SELECTED_FILES)return null;
+  if(Reflect.ownKeys(arrayFields).length!==(count as number)+1)return null;
+  const safe:Script[]=[];
+  for(let i=0;i<(count as number);i++){
+   const slot=arrayFields[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+   const item:unknown=slot.value;
+   if(!item||typeof item!=='object'||nodeTypes.isProxy(item)||
+      Object.getPrototypeOf(item)!==Object.prototype)return null;
+   const fields=Object.getOwnPropertyDescriptors(item) as
+    Record<string,PropertyDescriptor|undefined>;
+   const byteField=fields['bytes'];
+   const encodingField=fields['textEncoding'];
+   if(!byteField||!encodingField||
+      !Object.prototype.hasOwnProperty.call(byteField,'value')||
+      !Object.prototype.hasOwnProperty.call(encodingField,'value'))
+    return null;
+   const bytes:unknown=byteField.value;
+   if(nodeTypes.isProxy(bytes)||!(bytes instanceof Uint8Array)||
+      !NATIVE_BYTE_LENGTH||
+      Object.prototype.hasOwnProperty.call(bytes,'byteLength'))return null;
+   // Intrinsic internal slot, never a caller-provided getter.
+   const length=NATIVE_BYTE_LENGTH.call(bytes) as number;
+   if(!Number.isSafeInteger(length)||length<0)return null;
+   safe.push({bytes,textEncoding:encodingField.value as Script['textEncoding']});
+  }
+  return safe;
+ }catch{return null;}
+}
+
 
 /** Treat worker messages as untrusted, even though today's worker is ours.
  * No unexpected field (in particular source, paths or selector text) may
@@ -273,17 +318,15 @@ export async function previewImportedBatchOffMain(
  // [] is the fail-closed refusal for an invalid direct native-batch request,
  // matching the existing over-capacity direct-caller rejection below.
  if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return [];
+ // Validate all direct native batch records before reading .length, .slice or
+ // any element/bytes properties. A fresh internal array cannot be redirected
+ // by an external progress callback between worker segments.
+ const nativeScripts=snapshotNativeAstBatch(scripts);
+ if(nativeScripts===null)return [];
  const results:ImportAnalysisPreview[]=[];
- // Only the native importer may create a 1000-file batch. Direct callers
- // exceeding that contract fail closed; no unbounded worker chain starts.
- if(scripts.length>MAX_SELECTED_FILES){
-  // A direct over-limit call cannot come from the validated native importer.
-  // Refuse without allocating unbounded reports or invoking caller methods.
-  return [];
- }
  const stopAt=Date.now()+MAX_TOTAL_PREVIEW_MS;
- for(let offset=0;offset<scripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
-  const segment=scripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
+ for(let offset=0;offset<nativeScripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
+  const segment=nativeScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
   if(signal?.aborted||Date.now()>=stopAt){
    const status=signal?.aborted
     ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
@@ -295,7 +338,7 @@ export async function previewImportedBatchOffMain(
        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
    }
    // Skipped positions are still accounted for in the progress denominator.
-   try{onProgress?.(results.length,scripts.length);}
+   try{onProgress?.(results.length,nativeScripts.length);}
    catch{/* advisory progress only */}
    continue;
   }
@@ -307,7 +350,7 @@ export async function previewImportedBatchOffMain(
    Math.min(WORKER_DEADLINE_MS,remainingMs)));
   // A native import's UI may show finite, scalar-only AST progress.
   // No source bytes, file names or selective-analysis results cross this callback.
-  try{onProgress?.(results.length,scripts.length);}
+  try{onProgress?.(results.length,nativeScripts.length);}
   catch{/* progress is advisory; it cannot affect isolated parsing */}
  }
  return results;

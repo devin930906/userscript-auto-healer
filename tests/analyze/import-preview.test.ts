@@ -329,6 +329,48 @@ test('TASK-013/TEST-022/026: forged batch AbortSignal never runs attacker hooks'
  assert.equal(invoked,0);
 });
 
+test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields before their JS hooks run',async()=>{
+ const script=imported(header+'document.querySelector("#never-expose-untrusted");');
+ let traps=0;
+ const attack=()=>{traps++;throw Error('UNTRUSTED_AST_BATCH_HOOK');};
+ const refuse=async(value:unknown)=>{
+  assert.deepEqual(await previewImportedBatchOffMain(
+   value as ReturnType<typeof imported>[]),[],
+   'untrusted direct native request must be rejected before worker dispatch');
+  assert.equal(traps,0,'hostile batch input must not execute any JS hooks');
+ };
+ const proxy=new Proxy([script],{
+  get:attack,getPrototypeOf:attack,ownKeys:attack
+ });
+ await refuse(proxy);
+ const revoked=Proxy.revocable([script],{});revoked.revoke();
+ await refuse(revoked.proxy);
+ const accessorSlot=[script];
+ Object.defineProperty(accessorSlot,'0',{configurable:true,enumerable:true,get:attack});
+ await refuse(accessorSlot);
+ const accessorField=Object.defineProperty({},'bytes',{
+  configurable:true,enumerable:true,get:attack
+ });
+ await refuse([accessorField]);
+ const proxiedEntry=new Proxy(script,{
+  get:attack,getPrototypeOf:attack,ownKeys:attack
+ });
+ await refuse([proxiedEntry]);
+ const proxiedBytes=new Proxy(script.bytes,{
+  get:attack,getPrototypeOf:attack,ownKeys:attack
+ });
+ await refuse([{...script,bytes:proxiedBytes}]);
+ const overriddenSlice=[script];
+ Object.defineProperty(overriddenSlice,'slice',{value:attack});
+ await refuse(overriddenSlice);
+ const overriddenLength=Uint8Array.from(script.bytes);
+ Object.defineProperty(overriddenLength,'byteLength',{get:attack});
+ await refuse([{...script,bytes:overriddenLength}]);
+ const good=await previewImportedBatchOffMain([script]);
+ assert.deepEqual(good,[previewImportedScriptAnalysis(script)],
+  'genuine native imported bytes must retain normal isolated worker behavior');
+});
+
 test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoking caller methods',async()=>{
  // The native importer caps batches at 1000. A forged direct call must not
  // allocate one fallback per untrusted slot or invoke overridden Array.map.
