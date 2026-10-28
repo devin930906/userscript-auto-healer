@@ -543,3 +543,29 @@ test('TASK-015/TEST-024/026: post-unlock same-byte replacement cannot attest arc
   await rm(home,{recursive:true,force:true});
  }
 });
+
+test('TASK-015/TEST-024/026: limited archive refuses forged or inconsistent top-level health states',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const userData=await mkdtemp(join(tmpdir(),'uah-health-status-invariant-'));
+ try{
+  const key=limitedScenarioHistoryKey(A,'status-invariant');
+  const registry=new LimitedHealthRegistry(()=>1000);
+  const genuine=registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal(genuine.status,'INDETERMINATE');
+  // A renderer/caller-created object cannot upgrade an uncertain event or
+  // claim an empty history while retaining evidence. The archive must refuse
+  // these shapes BEFORE creating a durable history file.
+  for(const status of ['RECOVERED_VERIFIED','ELEMENT_FOUND_ONLY','UNTESTED']){
+   const forged={...genuine,status} as unknown as typeof genuine;
+   const result=await saveLimitedHealthArchive(userData,forged);
+   assert.equal(result.status,'BLOCKED','forged top-level status: '+status);
+  }
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,'NOT_FOUND');
+  // The original native, unverified observation remains persistable.
+  assert.equal((await saveLimitedHealthArchive(userData,genuine)).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,
+   'ARCHIVE_READ_UNVERIFIED');
+ }finally{await rm(userData,{recursive:true,force:true});}
+});
