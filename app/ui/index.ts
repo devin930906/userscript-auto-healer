@@ -984,6 +984,7 @@ gmStopButton?.addEventListener('click',()=>{
   clearGmDisplay(result.ok
    ?'本机测试服务已请求关闭；请自行删除独立 Tampermonkey 中的临时脚本。'
    :'没有活动的本机测试服务。');
- }).catch(()=>clearGmDisplay('关闭操作受阻；请确认本机测试已结束。'));
+ }).catch(()=>clearGmDisplay('关闭操作受阻；请确认本机测试已结束。'))
+  .finally(()=>browserControls());
 });
 browserControls();
