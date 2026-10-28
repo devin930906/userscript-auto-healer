@@ -524,6 +524,29 @@ test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields 
   'genuine native imported bytes must retain normal isolated worker behavior');
 });
 
+test('TASK-013/TEST-022/026: native AST refuses shared backing memory before Worker dispatch',async()=>{
+ // A SharedArrayBuffer can be modified by another thread while a native
+ // snapshot is copied. Do not accept a torn, attacker-raced AST input.
+ const native=imported(header+'document.querySelector("#shared-race");');
+ const sharedBytes=new Uint8Array(new SharedArrayBuffer(native.bytes.byteLength));
+ sharedBytes.set(native.bytes);
+ let traps=0;
+ Object.defineProperty(sharedBytes,'buffer',{get(){
+  traps++;
+  throw Error('UNTRUSTED_SHARED_BUFFER_GETTER');
+ }});
+ const result=await previewImportedBatchOffMain([
+  {bytes:sharedBytes,textEncoding:native.textEncoding}
+ ] as ReturnType<typeof imported>[]);
+ assert.deepEqual(result,[],
+  'a direct native request with mutable shared backing must be refused');
+ assert.equal(traps,0,'the buffer check must use an intrinsic, not caller JS');
+ // Ordinary independent import snapshots retain their real isolated AST
+ // behavior; rejecting shared backing must not disable regular imports.
+ assert.deepEqual(await previewImportedBatchOffMain([native]),
+  [previewImportedScriptAnalysis(native)]);
+});
+
 test('TASK-013/TEST-022/026: oversized TypedArray prototype getter never executes during native AST skip',async()=>{
  // Eligible files are copied using native byte-length slots. Oversized
  // scripts stay un-copied to respect the 256 KiB AST processing boundary:
