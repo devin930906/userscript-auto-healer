@@ -932,8 +932,8 @@ function Get-CandidatePortablePostMoveExeRmSummary([string]$destination) {
        -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
       return 'postMove=unavailable'
     }
-    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
-    $base=[IO.Path]::GetFullPath($destination).TrimEnd([char[]]@('\\','/'))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    $base=[IO.Path]::GetFullPath($destination).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
        [StringComparison]::OrdinalIgnoreCase) -or
        -not [IO.Directory]::Exists($base)) {
