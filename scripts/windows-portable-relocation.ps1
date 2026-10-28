@@ -25,6 +25,11 @@ function Wait-CandidatePortableProcessExit(
     throw [InvalidOperationException]::new('Process wait is limited to the disposable candidate executable')
   }
   for($check=1; $check -le $maxChecks; $check++) {
+    # A lexical RUNNER_TEMP prefix is not sufficient: a junction or symlink
+    # in the candidate executable ancestry can redirect this preflight to an
+    # external image. Reuse the move's strict root-to-file reparse guard on
+    # every bounded poll. This is read-only; it never ends any process.
+    Assert-CandidatePortableNoReparsePath $runner $exact
     # CIM includes processes with this image name from other directories.
     # Exact path comparison is required; do not use name-only process counts.
     # A failed query OR a redacted/unavailable process path is not proof that
