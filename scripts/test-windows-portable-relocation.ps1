@@ -494,6 +494,38 @@ try {
   Write-Output 'PASS: candidate-only ACL metadata diagnostic is bounded, path-redacted and fail closed'
 
 
+  # ISSUE-215 / TEST-028 RED: Restart Manager samples are NOT atomic.
+  # An external EXE/file user observed in a 2-file group can exit before
+  # its per-file queries. Zero per-file matches cannot establish that the
+  # group-level outside-runner association was successfully attributed.
+  $disappearingRoot=Join-Path $root 'rm-disappearing-process'
+  New-Item -ItemType Directory -Path $disappearingRoot -ErrorAction Stop | Out-Null
+  $disappearingFiles=@(1..2 | ForEach-Object {
+    $file=Join-Path $disappearingRoot ("sample-{0}.txt" -f $_)
+    [IO.File]::WriteAllText($file,'disposable')
+    $file
+  })
+  $vanishedEvidence=& {
+    function Get-CandidatePortableRestartManagerSummary {
+      param([string]$source,[string[]]$filePaths)
+      if($filePaths.Count -eq 2) {
+        return 'rm=ok sampled=2 total=2 affected=1 imageScope=[candidateTree=0 runnerOther=0 outsideRunner=1 unknown=0]'
+      }
+      if($filePaths.Count -eq 1) {
+        return 'rm=ok sampled=1 total=1 affected=0 imageScope=[candidateTree=0 runnerOther=0 outsideRunner=0 unknown=0]'
+      }
+      throw 'Unexpected Restart Manager request'
+    }
+    Get-CandidatePortableRmFileAssociationSummary $disappearingRoot $disappearingFiles
+  }
+  $vanishedExpected='rmFiles=partial sampled=2 associated=0 kinds=[exe=0 library=0 other=0] outsideRunnerAssociated=0 unresolvedOutsideBatches=1'
+  if($vanishedEvidence -cne $vanishedExpected -or
+     $vanishedEvidence.Contains($disappearingRoot) -or
+     $vanishedEvidence.Contains($disappearingFiles[0])) {
+    throw "TEST-028: vanished external file association must remain partial: $vanishedEvidence"
+  }
+  Write-Output 'PASS: Restart Manager group-to-file snapshot drift cannot report false full attribution'
+
   # Holding the lock past the bounded retry window must fail, without
   # deleting, copying, overwriting or altering the original contents.
   $permanent=Join-Path $root 'permanently-locked'
