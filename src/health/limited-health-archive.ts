@@ -163,6 +163,8 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
   if(!snapshot||!SHA.test(snapshot.scriptHash)||
      snapshot.schema!=='uah-limited-health-v1'||
      snapshot.phase!=='UNVERIFIED_LOCAL_HISTORY'||
+     (snapshot.status!=='ELEMENT_FOUND_ONLY'&&
+      snapshot.status!=='INDETERMINATE')||
      snapshot.tampermonkeyVerified!==false||
      snapshot.businessVerified!==false||
      snapshot.automaticPatchAllowed!==false||
@@ -194,6 +196,11 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
     result[result.length-1]=row;
    else result.push(row);
   }
+  // A native archive has no VERIFIED status. A positive top-level status
+  // also cannot contradict the final observed event; a stale genuine
+  // snapshot may instead legitimately have INDETERMINATE freshness.
+  if(snapshot.status==='ELEMENT_FOUND_ONLY'&&
+     result[result.length-1]?.status!=='ELEMENT_FOUND_ONLY')return null;
   return result;
  }catch{return null;}
 }
