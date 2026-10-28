@@ -600,6 +600,7 @@ function Get-CandidatePortableRmFileAssociationSummary(
         $unresolvedOutsideBatches++
         continue
       }
+      $foundOutsideFile=$false
       foreach($file in $batch) {
         # Existing routine independently validates each exact runner-owned
         # file, classifies time-matched process images, and closes its session.
@@ -621,8 +622,16 @@ function Get-CandidatePortableRmFileAssociationSummary(
            [StringComparison]::Ordinal)) { $exeAssociated++ }
         elseif([IO.Path]::GetExtension($file) -ieq '.dll') { $libraryAssociated++ }
         else { $otherAssociated++ }
-        if($fileOutside -gt 0) { $outsideAssociated++ }
+        if($fileOutside -gt 0) {
+          $outsideAssociated++
+          $foundOutsideFile=$true
+        }
       }
+      # RM sessions are successive snapshots, not an atomic lock census.
+      # An outside-runner process can release its file between the grouped
+      # observation and the per-file queries. Do not report complete file
+      # attribution merely because all later samples became empty.
+      if(-not $foundOutsideFile) { $unresolvedOutsideBatches++ }
     }
     $state=if($unresolvedOutsideBatches -eq 0) {'rmFiles=ok'} else {'rmFiles=partial'}
     $summary="$state sampled=$sampled associated=$associated kinds=[exe=$exeAssociated library=$libraryAssociated other=$otherAssociated] outsideRunnerAssociated=$outsideAssociated"
