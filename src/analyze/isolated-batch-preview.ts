@@ -368,8 +368,10 @@ export async function previewImportedBatchOffMain(
     ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
    for(const script of segment){
     const bytes=script?.bytes;
-    results.push(bytes instanceof Uint8Array&&
-      bytes.byteLength<=MAX_ANALYSIS_BYTES
+    // Preserve oversized skip status on cancellation without calling
+    // an un-copied Uint8Array subclass's inherited byteLength getter.
+    results.push(bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH&&
+      (NATIVE_BYTE_LENGTH.call(bytes) as number)<=MAX_ANALYSIS_BYTES
        ?unavailableImportPreview(status,'NOT_CHECKED')
        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
    }
