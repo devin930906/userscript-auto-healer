@@ -877,20 +877,47 @@ try {
   $shareAllowedHash=(Get-FileHash -LiteralPath $shareAllowedExe -Algorithm SHA256).Hash
   $shareAllowedHandle=[IO.File]::Open($shareAllowedExe,[IO.FileMode]::Open,
     [IO.FileAccess]::Read,[IO.FileShare]7)
+  $shareAllowedOutcome='unobserved'
   try {
     $shareAllowedEvidence=Get-CandidatePortableFileShareSummary $shareAllowed @($shareAllowedExe)
     if($shareAllowedEvidence -cne 'scan=ok probed=1 blockedExamples=0 names= extraFiles=0') {
-      throw "TEST-028: delete-sharing handle incorrectly diagnosed as blocking: $shareAllowedEvidence"
+      throw "TEST-028: allowed DELETE sharing was not observable: $shareAllowedEvidence"
     }
-    $shareAllowedAttempts=Move-CandidatePortableDirectory $shareAllowed $shareAllowedMoved 1 0 @($shareAllowedExe)
-    $shareAllowedMovedExe=Join-Path $shareAllowedMoved 'UserscriptAutoHealer.exe'
-    if($shareAllowedAttempts -ne 1 -or (Test-Path -LiteralPath $shareAllowed) -or
-       -not (Test-Path -LiteralPath $shareAllowedMovedExe -PathType Leaf) -or
-       (Get-FileHash -LiteralPath $shareAllowedMovedExe -Algorithm SHA256).Hash -cne $shareAllowedHash) {
-      throw 'TEST-028: permitted DELETE-sharing move damaged or omitted candidate bytes'
+    # Real Windows evidence (PR #475 original run 40747633700) disproved
+    # the assumption that a successful DELETE-access probe guarantees that
+    # Directory.Move succeeds while a nested executable is still open.
+    # Preserve either legitimate OS outcome; never ignore a different error,
+    # overwrite a destination or treat a failed rename as a successful move.
+    try {
+      $actualAttempts=Move-CandidatePortableDirectory $shareAllowed $shareAllowedMoved 1 0 @($shareAllowedExe)
+      if($actualAttempts -ne 1) { throw 'Unexpected candidate move attempt count' }
+      $shareAllowedOutcome='moved'
+    } catch {
+      $cause=$_.Exception
+      while($cause.InnerException) { $cause=$cause.InnerException }
+      if(-not (Test-CandidatePortableRetryableMoveError $cause)) { throw }
+      if(-not (Test-Path -LiteralPath $shareAllowed -PathType Container) -or
+         (Test-Path -LiteralPath $shareAllowedMoved) -or
+         (Get-FileHash -LiteralPath $shareAllowedExe -Algorithm SHA256).Hash -cne $shareAllowedHash) {
+        throw 'TEST-028: denied open-file rename changed or damaged candidate source'
+      }
+      $shareAllowedOutcome='denied'
     }
   } finally { $shareAllowedHandle.Dispose() }
-  Write-Output 'PASS: open executable with DELETE sharing permits real atomic candidate rename'
+  if($shareAllowedOutcome -eq 'denied') {
+    # Once the ONLY fixture-owned handle is released, the actual candidate
+    # tree must still be movable within the existing bounded retry budget.
+    $afterReleaseAttempts=Move-CandidatePortableDirectory $shareAllowed $shareAllowedMoved 12 250 @($shareAllowedExe)
+    if($afterReleaseAttempts -lt 1) { throw 'Candidate did not move after fixture handle release' }
+  }
+  $shareAllowedMovedExe=Join-Path $shareAllowedMoved 'UserscriptAutoHealer.exe'
+  if($shareAllowedOutcome -notin @('denied','moved') -or
+     (Test-Path -LiteralPath $shareAllowed) -or
+     -not (Test-Path -LiteralPath $shareAllowedMovedExe -PathType Leaf) -or
+     (Get-FileHash -LiteralPath $shareAllowedMovedExe -Algorithm SHA256).Hash -cne $shareAllowedHash) {
+    throw 'TEST-028: DELETE-sharing fixture did not preserve exact bytes on safe relocation'
+  }
+  Write-Output "PASS: DELETE-sharing open EXE rename outcome=$shareAllowedOutcome; after handle release, candidate bytes preserved"
 
   # ISSUE-215 / TEST-028: files alone do not cover an empty subdirectory.
   # A surviving directory handle without FILE_SHARE_DELETE must be visible
