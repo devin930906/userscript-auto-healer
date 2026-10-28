@@ -147,6 +147,85 @@ test('TASK-013/TEST-004/022/026: online Worker error has bounded lifecycle evide
  assert.ok(!warnings.join(' ').includes('private-lifecycle-source'));
 });
 
+test('TASK-013/TEST-004/022/026: Worker exit before reply emits one bounded reason, never source',async()=>{
+ const script=imported(header+'document.querySelector("#private-exit-source");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const originalWorker=workers.Worker;
+ const originalWarn=console.warn;
+ const warnings:string[]=[];
+ let starts=0;
+ let actual;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){
+    super();starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('exit',1);
+    });
+   }
+   terminate(){return Promise.resolve(1);}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
+ }finally{
+  workers.Worker=originalWorker;
+  console.warn=originalWarn;
+ }
+ assert.equal(starts,1);
+ assert.deepEqual(actual?.map(x=>x.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual?.every(x=>!x.automaticPatchAllowed&&
+  !x.tampermonkeyVerified&&!x.businessVerified));
+ assert.equal(warnings.length,1);
+ assert.match(warnings[0],
+  /^UAH_AST_WORKER_UNAVAILABLE reason=EXIT_BEFORE_MESSAGE count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
+ assert.ok(!warnings.join(' ').includes('private-exit-source'));
+});
+
+test('TASK-013/TEST-004/022/026: malformed Worker message is rejected before exit without leaking source',async()=>{
+ const script=imported(header+'document.querySelector("#private-invalid-reply");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const originalWorker=workers.Worker;
+ const originalWarn=console.warn;
+ const warnings:string[]=[];
+ let starts=0;
+ let actual;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){
+    super();starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message',[{
+      ...previewImportedScriptAnalysis(script),source:'PRIVATE_WORKER_REPLY_MUST_NOT_LEAK'
+     }]);
+     this.emit('exit',0);
+    });
+   }
+   terminate(){return Promise.resolve(0);}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
+ }finally{
+  workers.Worker=originalWorker;
+  console.warn=originalWarn;
+ }
+ assert.equal(starts,1);
+ assert.deepEqual(actual?.map(x=>x.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual?.every(x=>!x.automaticPatchAllowed&&
+  !x.tampermonkeyVerified&&!x.businessVerified));
+ assert.equal(warnings.length,1,
+  'one invalid message followed by exit must not emit duplicate failure diagnostics');
+ assert.match(warnings[0],
+  /^UAH_AST_WORKER_UNAVAILABLE reason=REPLY_REJECTED count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
+ assert.ok(!warnings.join(' ').includes('PRIVATE_WORKER_REPLY_MUST_NOT_LEAK'));
+ assert.ok(!warnings.join(' ').includes('private-invalid-reply'));
+});
+
 test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{
  const scripts=Array.from({length:36},(_,i)=>imported(
   header+'document.querySelector("#private-segment-'+i+'");'
