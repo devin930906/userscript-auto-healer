@@ -646,3 +646,58 @@ test('TASK-013/TEST-022/026: isolated reply rejects Proxy arrays, rows and sites
  }
  assert.equal(traps,0);
 });
+
+test('TASK-013/TEST-022/NFR-009: failed AST worker retires before next segment starts',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#retire-segment-${i}");`
+ ));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ const warn=console.warn;
+ let starts=0;
+ let firstRetired=false;
+ let overlapped=false;
+ let release!:()=>void;
+ const firstTermination=new Promise<number>(resolve=>{
+  release=()=>{firstRetired=true;resolve(0);};
+ });
+ let timer:NodeJS.Timeout|undefined;
+ try{
+  workers.Worker=class extends EventEmitter{
+   private readonly ordinal:number;
+   constructor(_filename:string,opts:{workerData:Array<{
+    bytes:Uint8Array;textEncoding:typeof scripts[number]['textEncoding']
+   }>}) {
+    super();
+    this.ordinal=++starts;
+    if(this.ordinal===2&&!firstRetired)overlapped=true;
+    setImmediate(()=>{
+     this.emit('online');
+     if(this.ordinal===1)
+      this.emit('message',[]); // malformed/truncated first segment
+     else this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate(){return this.ordinal===1?firstTermination:Promise.resolve(0);}
+  } as unknown as typeof native;
+  console.warn=()=>{};
+  timer=setTimeout(release,80); // delayed but bounded real retirement
+  const result=await previewImportedBatchOffMain(scripts);
+  assert.equal(starts,2,'a failed isolated segment may continue after cleanup');
+  assert.equal(overlapped,false,
+   'a replacement Worker must never start while failed predecessor is terminating');
+  assert.equal(firstRetired,true);
+  assert.deepEqual(result.slice(0,16).map(x=>x.status),
+   Array(16).fill('ISOLATED_ANALYSIS_FAILED'));
+  assert.equal(result[16].status,'STATIC_ANALYSIS_ONLY');
+  assert.equal(result.every(x=>!x.automaticPatchAllowed&&
+   !x.tampermonkeyVerified&&!x.businessVerified),true);
+ }finally{
+  release();
+  if(timer)clearTimeout(timer);
+  workers.Worker=native;
+  console.warn=warn;
+ }
+});
