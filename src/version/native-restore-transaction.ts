@@ -660,6 +660,39 @@ export async function restoreVerifiedOriginalNativeOnly(
      // without changing source bytes yet.
      !await restorePathUnclaimed(lock))
    return block('RECOVERY_SAFETY_FAILED');
+  // TEST-020/021: The last source check above also awaits filesystem I/O.
+  // An independent writer can invalidate either recovery copy AFTER its
+  // previous audit while leaving the restored source and journal untouched.
+  // Do not report a safely recoverable restore without rechecking BOTH
+  // independently retained versions at the final receipt boundary.
+  if((await verifyBackupRecoverySource({
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+    backupFileName:opts.backupFileName,
+    expectedSha256:opts.expectedOriginalSha256,
+    expectedByteLength:opts.expectedOriginalByteLength,userApproved:true
+   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+   (await verifyBackupRecoverySource({
+    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
+    backupFileName:receiptDisplaced.fileName,
+    expectedSha256:opts.expectedCurrentSha256,
+    expectedByteLength:receiptDisplaced.byteLength,userApproved:true
+   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
+   return block('RECOVERY_SAFETY_FAILED');
+  // These additional read-only checks yield too. Confirm the source,
+  // published intent and same-source mutex again before issuing a receipt.
+  // Snapshots cannot prevent an editor from changing files AFTER return.
+  if((await verifyApprovedSourceFingerprint({
+    sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
+    userApproved:true
+   })).status!=='MATCHED_READ_ONLY')
+   return block('RECOVERY_SAFETY_FAILED');
+  const receiptEnd=await lstat(opts.sourcePath,{bigint:true});
+  if(!sameFile(receiptSource,receiptEnd)||receiptEnd.nlink!==1n||
+     await hasUnsafePathLink(opts.sourcePath)||
+     !await stillOwnPublishedRestoreIntent(
+      receiptJournal.path,publishedJournalIdentity,journalParentIdentity)||
+     !await restorePathUnclaimed(lock))
+   return block('RECOVERY_SAFETY_FAILED');
   return completedRestore;
  }catch{return block('RECOVERY_SAFETY_FAILED');}
 }
