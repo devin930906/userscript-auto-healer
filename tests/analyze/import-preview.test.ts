@@ -78,24 +78,29 @@ test('TEST-004/011/022: native-batch AST results run in an actual isolated Node 
 });
 
 test('TASK-013/TEST-022/026: failed Worker startup reports only a bounded reason, never source',async()=>{
- // Structured clone rejects functions, so this fails before any Worker runs.
- // Keep the failure fixture disposable and assert fail-closed business flags.
+ // Inject a constructor-only failure, keeping this diagnostic regression
+ // independent from the now-rejected invalid textEncoding direct-input case.
  const script=imported(header+'document.querySelector("#private-selector-never-log");');
- const bad={
-  bytes:script.bytes,
-  textEncoding:(()=> 'PRIVATE_SOURCE_NEVER_LOG') as unknown as typeof script.textEncoding
- };
- const warnings:string[]=[];
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const originalWorker=workers.Worker;
  const originalWarn=console.warn;
- console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+ const warnings:string[]=[];
+ let starts=0;
  let actual;
  try{
-  actual=await previewImportedBatchOffMain([bad]);
+  workers.Worker=class{
+   constructor(){starts++;throw Error('PRIVATE_SOURCE_NEVER_LOG');}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
  }finally{
+  workers.Worker=originalWorker;
   console.warn=originalWarn;
  }
- assert.deepEqual(actual.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
- assert.ok(actual.every(item=>!item.automaticPatchAllowed&&
+ assert.equal(starts,1,'a native worker startup failure was actually injected');
+ assert.deepEqual(actual?.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual?.every(item=>!item.automaticPatchAllowed&&
   !item.tampermonkeyVerified&&!item.businessVerified));
  assert.deepEqual(warnings,[
   'UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1'
