@@ -663,6 +663,39 @@ test('TASK-007/TEST-017/026: delayed DOM callback rechecks monotonic consent aft
    'a delayed DOM-ready callback cannot act after monotonic consent expiry');
 });
 
+test('TASK-007/TEST-017/026: DOM readback stops if monotonic consent expires during attribute write',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ for(const expiry of ['monotonic-expired','invalid-monotonic-clock'] as const){
+  let elapsed=1000;
+  const effects={gm:0,query:0,write:0,read:0,network:0};
+  // A backwards wall clock still reports a live session while the
+  // monotonic clock expires (or becomes invalid) inside setAttribute().
+  runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   performance:{timeOrigin:probe.expiresAt-2000,now:()=>elapsed},
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   document:{readyState:'complete',querySelector:()=>{
+    effects.query++;
+    return {
+     setAttribute:()=>{
+      effects.write++;
+      elapsed=expiry==='monotonic-expired'?2100:Number.NaN;
+     },
+     getAttribute:()=>{effects.read++;return 'done';}
+    };
+   }},
+   GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+   fetch:()=>{effects.network++;return Promise.resolve();}
+  });
+  assert.deepEqual(effects,{gm:1,query:1,write:1,read:0,network:0},
+   'post-expiry DOM readback must not run: '+expiry);
+ }
+});
+
 test('TEST-017: mid-run consent expiry prevents later GM fixture side effects',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
