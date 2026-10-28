@@ -1,7 +1,7 @@
 import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readdir,readFile,rm,symlink,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readdir,readFile,rename,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -317,4 +317,50 @@ test('TASK-010/011 · TEST-020/021/023: a checkpoint altered during export rejec
    assert.equal(await readFile(opts.sourcePath,'utf8'),source);
   }finally{replacement.mock.restore();}
  });
+});
+
+
+test('TASK-011/012 TEST-020/021/023/026: checkpoint recheck cannot bless altered manual exports',async()=>{
+ for(const alteration of ['candidate-bytes','original-bytes','candidate-replaced-same-bytes'] as const){
+  await fixture(async opts=>{
+   const checkpointModule=require('../../src/version/recovery-checkpoint') as
+     typeof import('../../src/version/recovery-checkpoint');
+   const inspect=checkpointModule.inspectRecoveryCheckpointReadOnly;
+   let invocations=0;
+   const replacement=mock.method(checkpointModule,'inspectRecoveryCheckpointReadOnly',
+    async (...args:Parameters<typeof inspect>)=>{
+     invocations++;
+     const result=await inspect(...args);
+     if(invocations===2&&result.status==='CHECKPOINT_RECHECKED_READ_ONLY'){
+      const names=await readdir(opts.exportDirectory);
+      const prefix=alteration==='original-bytes'?'UAH-Original-':'UAH-Reviewed-';
+      const exported=names.filter(name=>name.startsWith(prefix));
+      assert.equal(exported.length,1,'fixture must actually publish both exports');
+      const target=join(opts.exportDirectory,exported[0]);
+      if(alteration==='candidate-replaced-same-bytes'){
+       const bytes=await readFile(target);
+       const replacementPath=join(opts.exportDirectory,'replacement.tmp');
+       await writeFile(replacementPath,bytes);
+       await rename(replacementPath,target);
+      }else{
+       await writeFile(target,'// independent editor changed the manual .user.js\\n');
+      }
+     }
+     return result;
+    });
+   try{
+    const outcome=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+    assert.equal(invocations,2,'both independent checkpoint checks must run');
+    assert.deepEqual(outcome,{
+     status:'BLOCKED',reason:'EXPORT_BLOCKED',
+     automaticPatchAllowed:false,automaticRollbackAllowed:false,
+     tampermonkeyVerified:false,managerInstalled:false,businessVerified:false
+    },'manual export receipt must not outlive '+alteration);
+    assert.equal((await readdir(opts.exportDirectory)).length,2,
+     'never delete or silently overwrite published evidence after a failed check');
+    assert.equal(await readFile(opts.sourcePath,'utf8'),source,
+     'never touch the original selected userscript');
+   }finally{replacement.mock.restore();}
+  });
+ }
 });
