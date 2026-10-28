@@ -611,6 +611,58 @@ test('TEST-017: installed temporary fixture stops all DOM/GM/network effects aft
 });
 
 
+test('TASK-007/TEST-017/026: GM fixture refuses effects when wall-clock rolls back past real expiry',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const effects={gm:0,query:0,network:0};
+ // The page's wall time can jump backwards while the browser monotonic
+ // time origin + elapsed time still passes the fixed consent deadline.
+ runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   performance:{timeOrigin:probe.expiresAt-2000,now:()=>2100},
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   document:{readyState:'complete',querySelector:()=>{effects.query++;return null;}},
+   GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+   fetch:()=>{effects.network++;return Promise.resolve();}
+ });
+ assert.deepEqual(effects,{gm:0,query:0,network:0},
+   'a rolled-back Date.now cannot revive expired local GM/DOM effects');
+});
+
+test('TASK-007/TEST-017/026: delayed DOM callback rechecks monotonic consent after clock rollback',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-start');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ let elapsed=1000;
+ let onReady:(()=>void)|undefined;
+ const effects={gm:0,query:0,attribute:0,network:0};
+ runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   performance:{timeOrigin:probe.expiresAt-2000,now:()=>elapsed},
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   document:{readyState:'loading',
+     addEventListener:(_event:string,callback:()=>void)=>{onReady=callback;},
+     querySelector:()=>{
+       effects.query++;
+       return {setAttribute:()=>{effects.attribute++;},getAttribute:()=> 'done'};
+     }
+   },
+   GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+   fetch:()=>{effects.network++;return Promise.resolve();}
+ });
+ assert.deepEqual(effects,{gm:1,query:0,attribute:0,network:0});
+ assert.equal(typeof onReady,'function');
+ elapsed=2100;
+ onReady?.();
+ assert.deepEqual(effects,{gm:1,query:0,attribute:0,network:0},
+   'a delayed DOM-ready callback cannot act after monotonic consent expiry');
+});
+
 test('TEST-017: mid-run consent expiry prevents later GM fixture side effects',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
