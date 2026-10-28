@@ -244,6 +244,22 @@ async function previewImportedChunkOffMain(
  });
 }
 
+/** A forged cancellation object can run arbitrary getters/listener hooks.
+ * Only a native AbortSignal (with no own shadows) may affect worker lifetime.
+ * Invalid direct-caller signals are refused before reading script contents,
+ * dispatching workers or touching untrusted signal properties.
+ */
+function isNativeWorkerAbortSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(name=>
+       Object.prototype.hasOwnProperty.call(value,name)))return false;
+  const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
+
 /** Process a real native multi-file/folder import without silently omitting
  * every script beyond the first 16. Each segment remains a separately bounded
  * and validated worker. This is an unprivileged read-only preview, not the
@@ -253,6 +269,10 @@ export async function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void
 ):Promise<ImportAnalysisPreview[]>{
+ // This exported boundary accepts only trusted native cancellation handles.
+ // [] is the fail-closed refusal for an invalid direct native-batch request,
+ // matching the existing over-capacity direct-caller rejection below.
+ if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return [];
  const results:ImportAnalysisPreview[]=[];
  // Only the native importer may create a 1000-file batch. Direct callers
  // exceeding that contract fail closed; no unbounded worker chain starts.
