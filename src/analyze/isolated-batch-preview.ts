@@ -329,8 +329,9 @@ async function previewImportedChunkOffMain(
   });
   worker.on('message',(value:unknown)=>{
    const checked=validateIsolatedPreviewReply(value,selected.length);
-   // A malformed reply must retire before another segment starts.
-   finish(checked,checked===null,checked===null?'REPLY_REJECTED':undefined);
+   // A valid message can arrive before its Worker exits. Retire within the
+   // existing segment deadline before allowing another segment to start.
+   finish(checked,true,checked===null?'REPLY_REJECTED':undefined);
   });
   worker.on('error',()=>finish(null,true,'WORKER_ERROR'));
   worker.on('exit',()=>finish(null,false,'EXIT_BEFORE_MESSAGE'));
