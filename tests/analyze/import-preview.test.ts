@@ -414,6 +414,58 @@ test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields 
   'genuine native imported bytes must retain normal isolated worker behavior');
 });
 
+test('TASK-013/TEST-022/026: oversized TypedArray prototype getter never executes during native AST skip',async()=>{
+ // Eligible files are copied using native byte-length slots. Oversized
+ // scripts stay un-copied to respect the 256 KiB AST processing boundary:
+ // no inherited subclass getter may run while classifying that skip.
+ let invoked=0;
+ class HostileOversizedBytes extends Uint8Array {
+  override get byteLength():number{
+   invoked++;
+   throw Error('UNTRUSTED_OVERSIZED_BYTE_LENGTH_HOOK');
+  }
+ }
+ const bytes=new HostileOversizedBytes(256*1024+1);
+ const output=await previewImportedBatchOffMain([
+  {bytes,textEncoding:'utf-8'} as ReturnType<typeof imported>
+ ]);
+ assert.equal(invoked,0,
+  'native AST skip must not execute an inherited attacker-controlled byteLength getter');
+ assert.equal(output.length,1);
+ assert.equal(output[0].status,'SKIPPED_TOO_LARGE');
+ assert.equal(output[0].automaticPatchAllowed,false);
+ assert.equal(output[0].tampermonkeyVerified,false);
+ assert.equal(output[0].businessVerified,false);
+});
+
+test('TASK-013/TEST-022/026: cancelled AST segment never reads oversized inherited byteLength getter',async()=>{
+ let invoked=0;
+ class HostileSkippedBytes extends Uint8Array {
+  override get byteLength():number{
+   invoked++;
+   throw Error('UNTRUSTED_CANCELLED_BYTE_LENGTH_HOOK');
+  }
+ }
+ const small=imported(header+'document.querySelector("#safe-bounded");');
+ const oversized={bytes:new HostileSkippedBytes(256*1024+1),textEncoding:'utf-8'};
+ const abort=new AbortController();
+ const batch=[
+  ...Array.from({length:16},()=>small),
+  oversized as ReturnType<typeof imported>
+ ];
+ const reports=await previewImportedBatchOffMain(batch,abort.signal,
+  (processed,total)=>{
+   if(processed===16&&total===17)abort.abort();
+  });
+ assert.equal(invoked,0,
+  'later oversized native bytes must not invoke a subclass getter when cancellation skips them');
+ assert.equal(reports.length,17);
+ assert.equal(reports[16].status,'SKIPPED_TOO_LARGE');
+ assert.equal(reports[16].automaticPatchAllowed,false);
+ assert.equal(reports[16].tampermonkeyVerified,false);
+ assert.equal(reports[16].businessVerified,false);
+});
+
 test('TASK-013/TEST-022/026: native AST batch encoding rejects structured-clone getter hooks',async()=>{
  const script=imported(header+'document.querySelector("#secret-encoding");');
  let invoked=0;

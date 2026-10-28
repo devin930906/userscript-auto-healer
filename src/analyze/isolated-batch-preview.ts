@@ -252,7 +252,11 @@ async function previewImportedChunkOffMain(
  const output:ImportAnalysisPreview[]=[];
  let usedBytes=0;
  for(const script of scripts){
-  const size=script?.bytes instanceof Uint8Array?script.bytes.byteLength:Infinity;
+  // An oversized native-imported Uint8Array is intentionally not copied.
+  // Read its intrinsic slot, not a subclass prototype's arbitrary getter,
+  // before deciding that it must stay outside the isolated AST Worker.
+  const size=script?.bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH
+   ?NATIVE_BYTE_LENGTH.call(script.bytes) as number:Infinity;
   if(size>MAX_ANALYSIS_BYTES){
    slots.push(null);
    output.push(unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
@@ -364,8 +368,10 @@ export async function previewImportedBatchOffMain(
     ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
    for(const script of segment){
     const bytes=script?.bytes;
-    results.push(bytes instanceof Uint8Array&&
-      bytes.byteLength<=MAX_ANALYSIS_BYTES
+    // Preserve oversized skip status on cancellation without calling
+    // an un-copied Uint8Array subclass's inherited byteLength getter.
+    results.push(bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH&&
+      (NATIVE_BYTE_LENGTH.call(bytes) as number)<=MAX_ANALYSIS_BYTES
        ?unavailableImportPreview(status,'NOT_CHECKED')
        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
    }
