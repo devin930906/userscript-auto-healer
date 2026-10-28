@@ -24,6 +24,12 @@ on:
       - 'tsconfig.json'
       - '.github/workflows/app-check.yml'
   workflow_dispatch:
+    inputs:
+      ast_worker_diagnostic:
+        description: 'Run bounded TASK-013 Worker diagnosis instead of full checks'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -34,6 +40,7 @@ concurrency:
 
 jobs:
   boundary:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.ast_worker_diagnostic }}
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -99,3 +106,44 @@ jobs:
             throw 'Electron runtime safety receipt invalid'
           }
           Write-Output 'PASS: Actual Electron sandbox renderer + allowlisted preload IPC'
+
+  ast-worker-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic }}
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked compile-time toolchain
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile test fixtures
+        shell: pwsh
+        run: npm run build
+      - name: Diagnose intermittent isolated AST Worker (TASK-013, issue 440)
+        shell: pwsh
+        run: |
+          Write-Output "Source SHA: $env:GITHUB_SHA"
+          node --version
+          $budget = [Diagnostics.Stopwatch]::StartNew()
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            if ($budget.Elapsed.TotalSeconds -ge 120) {
+              throw 'Diagnostic budget exhausted before all 10 samples; no reliability conclusion.'
+            }
+            Write-Output "Worker diagnostic sample $attempt/10"
+            $sample = [Diagnostics.Stopwatch]::StartNew()
+            node --test --test-concurrency=1 dist/tests/analyze/import-preview.test.js
+            $testExitCode = $LASTEXITCODE
+            $sample.Stop()
+            Write-Output "Sample $attempt exit=$testExitCode elapsed_ms=$($sample.ElapsedMilliseconds)"
+            if ($testExitCode -ne 0) {
+              throw 'Worker diagnostic failed; preserve preceding reason codes and test output.'
+            }
+            if ($budget.Elapsed.TotalSeconds -ge 120) {
+              throw 'Diagnostic budget exhausted; no reliability conclusion.'
+            }
+          }
+          $budget.Stop()
+          Write-Output "Ten bounded samples passed in $($budget.ElapsedMilliseconds) ms; intermittent reliability remains unproven."
