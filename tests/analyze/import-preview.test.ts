@@ -414,6 +414,30 @@ test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields 
   'genuine native imported bytes must retain normal isolated worker behavior');
 });
 
+test('TASK-013/TEST-022/026: oversized TypedArray prototype getter never executes during native AST skip',async()=>{
+ // Eligible files are copied using native byte-length slots. Oversized
+ // scripts stay un-copied to respect the 256 KiB AST processing boundary:
+ // no inherited subclass getter may run while classifying that skip.
+ let invoked=0;
+ class HostileOversizedBytes extends Uint8Array {
+  override get byteLength():number{
+   invoked++;
+   throw Error('UNTRUSTED_OVERSIZED_BYTE_LENGTH_HOOK');
+  }
+ }
+ const bytes=new HostileOversizedBytes(256*1024+1);
+ const output=await previewImportedBatchOffMain([
+  {bytes,textEncoding:'utf-8'} as ReturnType<typeof imported>
+ ]);
+ assert.equal(invoked,0,
+  'native AST skip must not execute an inherited attacker-controlled byteLength getter');
+ assert.equal(output.length,1);
+ assert.equal(output[0].status,'SKIPPED_TOO_LARGE');
+ assert.equal(output[0].automaticPatchAllowed,false);
+ assert.equal(output[0].tampermonkeyVerified,false);
+ assert.equal(output[0].businessVerified,false);
+});
+
 test('TASK-013/TEST-022/026: native AST batch encoding rejects structured-clone getter hooks',async()=>{
  const script=imported(header+'document.querySelector("#secret-encoding");');
  let invoked=0;
