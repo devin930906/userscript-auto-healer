@@ -218,6 +218,24 @@ try {
         throw 'Junction path escaped candidate runner and modified outside source'
       }
       Write-Output 'PASS: Windows junction cannot redirect candidate relocation outside runner temp'
+      # RED TASK-020 / TEST-028: the candidate-process preflight must apply
+      # the same junction/reparse boundary as the directory move itself.
+      # A lexically runner-contained alias can point at a different executable.
+      $outsideOwnedExe=Join-Path $externalSource 'UserscriptAutoHealer.exe'
+      Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\\cmd.exe') -Destination $outsideOwnedExe -ErrorAction Stop
+      $aliasExe=Join-Path (Join-Path $junction 'source') 'UserscriptAutoHealer.exe'
+      $unsafeWaitRejected=$false
+      try {
+        Wait-CandidatePortableProcessExit $aliasExe 1 0 | Out-Null
+      } catch [System.InvalidOperationException] {
+        if($_.Exception.Message -notlike '*reparse point refused*') { throw }
+        $unsafeWaitRejected=$true
+      }
+      if(-not $unsafeWaitRejected -or
+         -not (Test-Path -LiteralPath $outsideOwnedExe -PathType Leaf)) {
+        throw 'TEST-028: candidate process preflight followed a junction to an external executable'
+      }
+      Write-Output 'PASS: candidate process wait refuses a junction to an external executable'
     } finally {
       Remove-Item -LiteralPath $junction -Force -ErrorAction Stop
     }
