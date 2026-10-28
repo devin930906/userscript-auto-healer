@@ -192,7 +192,16 @@ export async function startIsolatedTampermonkeyGmProbe(
  // Windows wall-clock rollback must not extend the server's consent TTL.
  const begunAt=performance.now();
  const expiresAt=Date.now()+ttlMs;
- const expired=()=>Date.now()>=expiresAt||performance.now()-begunAt>=ttlMs;
+ // An observed expiry revokes loopback HTTP access irreversibly. A Windows
+ // wall-clock rollback before the monotonic deadline must not reopen fixture
+ // pages, the temporary install endpoint, or self-reported receipt intake.
+ let consentRevoked=false;
+ const expired=()=>{
+   if(consentRevoked)return true;
+   if(Date.now()>=expiresAt||performance.now()-begunAt>=ttlMs)
+     consentRevoked=true;
+   return consentRevoked;
+ };
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
  let server:Server;
  server=createServer((req,res)=>{
