@@ -184,7 +184,10 @@ test('TEST-010/012/026: unverified initial navigation must not leave a newly cre
  assert.deepEqual(target,{ok:false,code:'TARGET_NOT_CONFIRMED'},
    'A stalled first navigation must stay unverified');
  assert.ok(stages.includes('TAB_CREATED'));
- assert.equal(requests,1,'A failed confirmation must NEVER reload the approved URL');
+ // Target.createTarget can be acknowledged before the initial HTTP request.
+// Zero or one request is safe when the unverified tab is closed; a second
+// request is an unauthorized replay and must always fail this assertion.
+assert.ok(requests<=1,'A failed confirmation must NEVER reload the approved URL');
  const after=await pageIds();
  assert.deepEqual([...after].filter(id=>!before.has(id)),[],
    'The specific newly created but unverified browser tab must be closed');
