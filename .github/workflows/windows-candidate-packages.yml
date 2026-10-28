@@ -6,6 +6,7 @@ on:
       - 'scripts/windows-package-candidate.ps1'
       - 'scripts/windows-portable-relocation.ps1'
       - 'scripts/test-windows-portable-relocation.ps1'
+      - 'tests/**'
       - '.github/workflows/windows-candidate-packages.yml'
       - 'app/**'
       - 'src/**'

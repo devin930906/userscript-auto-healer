@@ -33,6 +33,22 @@ try {
   # The actual packaging job still validates hashes and launches the EXE.
   $packageScript=[IO.File]::ReadAllText(
     (Join-Path $PSScriptRoot 'windows-package-candidate.ps1'))
+  # TASK-020 / TEST-028: a PR changing only registered tests can change
+  # the Windows EXE/ZIP candidate result. The candidate workflow MUST run on
+  # such PRs, rather than silently skipping its Windows-specific gate.
+  $candidateWorkflow=[IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot '../.github/workflows/windows-candidate-packages.yml'))
+  $prSectionStart=$candidateWorkflow.IndexOf('  pull_request:')
+  $prSectionEnd=if($prSectionStart -ge 0) {
+    $candidateWorkflow.IndexOf('  workflow_dispatch:',$prSectionStart)
+  } else { -1 }
+  if($prSectionStart -lt 0 -or $prSectionEnd -le $prSectionStart -or
+     $candidateWorkflow.Substring($prSectionStart,
+       $prSectionEnd-$prSectionStart) -notmatch "(?m)^\s*-\s*'tests/\*\*'\s*$") {
+    throw 'TEST-028: test-only PRs must trigger Windows candidate EXE and ZIP checks'
+  }
+  Write-Output 'PASS: test-only PR changes trigger mandatory Windows EXE/ZIP candidate checks'
+
   $verified=$packageScript.IndexOf('PASS: complete ZIP file manifest and SHA-256 round trip')
   $movedAt=$packageScript.IndexOf('Move-CandidatePortableDirectory $expanded $moved')
   $externalCwd=$packageScript.IndexOf(
