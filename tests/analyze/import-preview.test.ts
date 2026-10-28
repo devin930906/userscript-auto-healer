@@ -78,24 +78,29 @@ test('TEST-004/011/022: native-batch AST results run in an actual isolated Node 
 });
 
 test('TASK-013/TEST-022/026: failed Worker startup reports only a bounded reason, never source',async()=>{
- // Structured clone rejects functions, so this fails before any Worker runs.
- // Keep the failure fixture disposable and assert fail-closed business flags.
+ // Inject a constructor-only failure, keeping this diagnostic regression
+ // independent from the now-rejected invalid textEncoding direct-input case.
  const script=imported(header+'document.querySelector("#private-selector-never-log");');
- const bad={
-  bytes:script.bytes,
-  textEncoding:(()=> 'PRIVATE_SOURCE_NEVER_LOG') as unknown as typeof script.textEncoding
- };
- const warnings:string[]=[];
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const originalWorker=workers.Worker;
  const originalWarn=console.warn;
- console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+ const warnings:string[]=[];
+ let starts=0;
  let actual;
  try{
-  actual=await previewImportedBatchOffMain([bad]);
+  workers.Worker=class{
+   constructor(){starts++;throw Error('PRIVATE_SOURCE_NEVER_LOG');}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
  }finally{
+  workers.Worker=originalWorker;
   console.warn=originalWarn;
  }
- assert.deepEqual(actual.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
- assert.ok(actual.every(item=>!item.automaticPatchAllowed&&
+ assert.equal(starts,1,'a native worker startup failure was actually injected');
+ assert.deepEqual(actual?.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual?.every(item=>!item.automaticPatchAllowed&&
   !item.tampermonkeyVerified&&!item.businessVerified));
  assert.deepEqual(warnings,[
   'UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1'
@@ -369,6 +374,36 @@ test('TASK-013/TEST-022/026: native AST batch rejects hostile arrays and fields 
  const good=await previewImportedBatchOffMain([script]);
  assert.deepEqual(good,[previewImportedScriptAnalysis(script)],
   'genuine native imported bytes must retain normal isolated worker behavior');
+});
+
+test('TASK-013/TEST-022/026: native AST batch encoding rejects structured-clone getter hooks',async()=>{
+ const script=imported(header+'document.querySelector("#secret-encoding");');
+ let invoked=0;
+ const hostileEncoding=Object.defineProperty({},'secret',{
+  enumerable:true,get(){invoked++;throw Error('UNTRUSTED_ENCODING_CLONE_GETTER');}
+ });
+ const bad={bytes:script.bytes,
+  textEncoding:hostileEncoding as unknown as typeof script.textEncoding};
+ assert.deepEqual(await previewImportedBatchOffMain([bad]),[],
+  'invalid direct native encoding must fail before Worker structured clone');
+ assert.equal(invoked,0,'Worker startup may not evaluate untrusted encoding getters');
+});
+
+test('TASK-013/TEST-022: native AST progress cannot replace unprocessed source bytes',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#private-before-progress-${i}");`
+ ));
+ const original=scripts.map(previewImportedScriptAnalysis);
+ const progress:number[]=[];
+ const reports=await previewImportedBatchOffMain(scripts,undefined,(processed,total)=>{
+  progress.push(processed);
+  assert.equal(total,17);
+  if(processed===16) scripts[16].bytes.fill(0);
+ });
+ assert.deepEqual(progress,[16,17]);
+ assert.deepEqual(reports,original,
+  'a progress callback cannot change the source analyzed by a later worker');
+ assert.ok(reports.every(x=>x.status==='STATIC_ANALYSIS_ONLY'));
 });
 
 test('TASK-013/TEST-022/026: direct over-capacity AST call refuses before invoking caller methods',async()=>{

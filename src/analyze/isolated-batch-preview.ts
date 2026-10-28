@@ -10,7 +10,7 @@
 import {Worker} from 'node:worker_threads';
 import {types as nodeTypes} from 'node:util';
 import {join} from 'node:path';
-import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
+import {MAX_SELECTED_FILES,MAX_TOTAL_IMPORTED_BYTES,type ImportedScript} from '../import/import-service';
 import {
  MAX_ANALYSIS_BYTES,MAX_BATCH_PREVIEW_BYTES,MAX_BATCH_PREVIEW_FILES,
  previewImportedScriptAnalysis,unavailableImportPreview,
@@ -31,10 +31,10 @@ function reportWorkerFailure(reason:WorkerFailureReason,count:number):void{
 const WORKER_DEADLINE_MS=10000;
 // A pathological 1000-file batch must not consume up to 63 * 10 seconds.
 const MAX_TOTAL_PREVIEW_MS=120000;
-// Read the native importer's already-copied script records without invoking
-// direct-caller Proxy traps, accessors, custom array methods or TypedArray
-// byteLength shadows. Only scalar fields and references to the original
-// bounded bytes are retained; the worker still does the isolated parsing.
+// Authenticate the native importer's scalar fields before Worker structured
+// cloning (which can invoke getters on untrusted nested objects). Copy eligible
+// AST source bytes once, before the first await or advisory progress callback;
+// a later callback must not change the unprocessed scripts being examined.
 // A bad direct native call returns [] before spawning any workers or progress.
 const NATIVE_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
  Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
@@ -49,6 +49,7 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
      (count as number)>MAX_SELECTED_FILES)return null;
   if(Reflect.ownKeys(arrayFields).length!==(count as number)+1)return null;
   const safe:Script[]=[];
+  let copiedBytes=0;
   for(let i=0;i<(count as number);i++){
    const slot=arrayFields[String(i)];
    if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
@@ -63,6 +64,10 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
       !Object.prototype.hasOwnProperty.call(byteField,'value')||
       !Object.prototype.hasOwnProperty.call(encodingField,'value'))
     return null;
+   const encoding:unknown=encodingField.value;
+   if(encoding!=='utf-8'&&encoding!=='utf-8-bom'&&
+      encoding!=='utf-16le-bom'&&encoding!=='utf-16be-bom'&&
+      encoding!=='gb18030-explicit')return null;
    const bytes:unknown=byteField.value;
    if(nodeTypes.isProxy(bytes)||!(bytes instanceof Uint8Array)||
       !NATIVE_BYTE_LENGTH||
@@ -70,7 +75,17 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
    // Intrinsic internal slot, never a caller-provided getter.
    const length=NATIVE_BYTE_LENGTH.call(bytes) as number;
    if(!Number.isSafeInteger(length)||length<0)return null;
-   safe.push({bytes,textEncoding:encodingField.value as Script['textEncoding']});
+   // Scripts larger than the per-file AST budget are never sent to a worker.
+   // Do not copy entire oversized scripts merely to report SKIPPED_TOO_LARGE.
+   let stableBytes=bytes;
+   if(length<=MAX_ANALYSIS_BYTES){
+    // The native importer already enforces this 128 MiB total byte cap;
+    // reject forged direct calls before allocating an unbounded snapshot.
+    if(copiedBytes+length>MAX_TOTAL_IMPORTED_BYTES)return null;
+    copiedBytes+=length;
+    stableBytes=new Uint8Array(bytes);
+   }
+   safe.push({bytes:stableBytes,textEncoding:encoding});
   }
   return safe;
  }catch{return null;}
@@ -318,9 +333,9 @@ export async function previewImportedBatchOffMain(
  // [] is the fail-closed refusal for an invalid direct native-batch request,
  // matching the existing over-capacity direct-caller rejection below.
  if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return [];
- // Validate all direct native batch records before reading .length, .slice or
- // any element/bytes properties. A fresh internal array cannot be redirected
- // by an external progress callback between worker segments.
+ // Validate and snapshot direct native records before reading .length, .slice,
+ // any element/bytes properties or letting an advisory callback run.
+ // Eligible bytes have an independent bounded copy before asynchronous work.
  const nativeScripts=snapshotNativeAstBatch(scripts);
  if(nativeScripts===null)return [];
  const results:ImportAnalysisPreview[]=[];
