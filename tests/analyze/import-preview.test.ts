@@ -102,11 +102,49 @@ test('TASK-013/TEST-022/026: failed Worker startup reports only a bounded reason
  assert.deepEqual(actual?.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED']);
  assert.ok(actual?.every(item=>!item.automaticPatchAllowed&&
   !item.tampermonkeyVerified&&!item.businessVerified));
- assert.deepEqual(warnings,[
-  'UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1'
- ]);
+ assert.equal(warnings.length,1);
+ assert.match(warnings[0],
+  /^UAH_AST_WORKER_UNAVAILABLE reason=START_FAILED count=1 phase=PRE_ONLINE elapsedBucketMs=\d+ onlineBucketMs=NA$/);
  assert.ok(!warnings.join(' ').includes('PRIVATE_SOURCE_NEVER_LOG'));
  assert.ok(!warnings.join(' ').includes('private-selector-never-log'));
+});
+
+test('TASK-013/TEST-004/022/026: online Worker error has bounded lifecycle evidence, never source',async()=>{
+ const script=imported(header+'document.querySelector("#private-lifecycle-source");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const originalWorker=workers.Worker;
+ const originalWarn=console.warn;
+ const warnings:string[]=[];
+ let starts=0;
+ let actual;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){
+    super();starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('error',Error('PRIVATE_WORKER_EXCEPTION_MUST_NOT_LEAK'));
+    });
+   }
+   terminate(){return Promise.resolve(0);}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
+ }finally{
+  workers.Worker=originalWorker;
+  console.warn=originalWarn;
+ }
+ assert.equal(starts,1);
+ assert.deepEqual(actual?.map(x=>x.status),['ISOLATED_ANALYSIS_FAILED']);
+ assert.ok(actual?.every(x=>!x.automaticPatchAllowed&&
+  !x.tampermonkeyVerified&&!x.businessVerified));
+ assert.equal(warnings.length,1);
+ assert.match(warnings[0],
+  /^UAH_AST_WORKER_UNAVAILABLE reason=WORKER_ERROR count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
+ assert.ok(!warnings.join(' ').includes('PRIVATE_WORKER_EXCEPTION'));
+ assert.ok(!warnings.join(' ').includes('private-lifecycle-source'));
 });
 
 test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{

@@ -8,6 +8,7 @@
  * the active worker and stops all subsequent segments. No userscript is executed.
  */
 import {Worker} from 'node:worker_threads';
+import {performance} from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
 import {join} from 'node:path';
 import {MAX_SELECTED_FILES,MAX_TOTAL_IMPORTED_BYTES,type ImportedScript} from '../import/import-service';
@@ -24,9 +25,18 @@ type WorkerFailureReason='START_FAILED'|'REPLY_REJECTED'|
  * Never log worker errors, user source, selectors, paths, hashes or URLs.
  * Logging must not replace the caller's fail-closed result even if a hook throws.
  */
-function reportWorkerFailure(reason:WorkerFailureReason,count:number):void{
- try{console.warn(`UAH_AST_WORKER_UNAVAILABLE reason=${reason} count=${count}`);}
- catch{/* Diagnostics never alter read-only fail-closed behavior. */}
+function reportWorkerFailure(
+ reason:WorkerFailureReason,count:number,startedAt:number,onlineAt:number|null
+):void{
+ try{
+  // 'online' confirms the Worker thread began executing, not that the
+  // parser loaded or finished. Log bounded relative timings only.
+  const bucket=(ms:number)=>String(Math.min(12000,
+   Math.max(0,Math.ceil(ms/1000)*1000)));
+  const phase=onlineAt===null?'PRE_ONLINE':'POST_ONLINE';
+  const onlineBucket=onlineAt===null?'NA':bucket(onlineAt-startedAt);
+  console.warn(`UAH_AST_WORKER_UNAVAILABLE reason=${reason} count=${count} phase=${phase} elapsedBucketMs=${bucket(performance.now()-startedAt)} onlineBucketMs=${onlineBucket}`);
+ }catch{/* Diagnostics never alter read-only fail-closed behavior. */}
 }
 const WORKER_DEADLINE_MS=10000;
 // A pathological 1000-file batch must not consume up to 63 * 10 seconds.
@@ -261,6 +271,9 @@ async function previewImportedChunkOffMain(
  if(signal?.aborted)
   return output.map((x,i)=>slots[i]===null?x:
     unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED'));
+ // Instrument constructor+online time without changing the existing
+ // per-segment 10-second or overall 120-second fail-closed deadline.
+ const startedAt=performance.now();
  let worker:Worker;
  try{
   worker=new Worker(join(__dirname,'import-preview-worker.js'),{
@@ -268,23 +281,27 @@ async function previewImportedChunkOffMain(
    resourceLimits:{maxOldGenerationSizeMb:96,maxYoungGenerationSizeMb:16}
   });
  }catch{
-  reportWorkerFailure('START_FAILED',selected.length);
+  reportWorkerFailure('START_FAILED',selected.length,startedAt,null);
   return output;
  }
  const result=await new Promise<ImportAnalysisPreview[]|null>(resolve=>{
   let finished=false;
   let timer:NodeJS.Timeout|undefined;
+  let onlineAt:number|null=null;
   const finish=(answer:ImportAnalysisPreview[]|null,stopWorker:boolean,
    reason?:WorkerFailureReason)=>{
    if(finished)return;
    finished=true;
-   if(reason)reportWorkerFailure(reason,selected.length);
+   if(reason)reportWorkerFailure(reason,selected.length,startedAt,onlineAt);
    if(timer)clearTimeout(timer);
    signal?.removeEventListener('abort',cancel);
    if(stopWorker)void worker.terminate().catch(()=>undefined);
    resolve(answer);
   };
   const cancel=()=>finish(null,true);
+  worker.on('online',()=>{
+   if(!finished&&onlineAt===null)onlineAt=performance.now();
+  });
   worker.on('message',(value:unknown)=>{
    const checked=validateIsolatedPreviewReply(value,selected.length);
    finish(checked,checked===null,checked===null?'REPLY_REJECTED':undefined);
