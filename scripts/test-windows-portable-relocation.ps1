@@ -28,6 +28,37 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # TASK-020 / TEST-028: Only FACILITY_WIN32 access errors authorize the
+  # bounded move retry. An IOException from an unrelated HRESULT facility
+  # can share the low 16-bit value 5/32/33; do not label it Win32 or retry.
+  # This synthetic diagnostic test never moves or modifies any file.
+  foreach($case in @(
+    @{ code=-2146238459; hex='80130005' },
+    @{ code=-2146238432; hex='80130020' },
+    @{ code=-2146238431; hex='80130021' }
+  )) {
+    $foreign=[IO.IOException]::new('synthetic non-Win32 HRESULT',[int]$case.code)
+    $line=Format-CandidatePortableRelocationFailure 1 1 $foreign $true $false ([DateTime]::UtcNow)
+    if(-not $line.Contains(('HRESULT=0x'+$case.hex+' Win32=unavailable'))) {
+      throw ('TEST-028: unrelated HRESULT facility was misreported as Win32: '+$line)
+    }
+    if(Test-CandidatePortableRetryableMoveError $foreign) {
+      throw 'TEST-028: unrelated HRESULT facility incorrectly authorized a move retry'
+    }
+  }
+  foreach($code in @(-2147024891,-2147024864,-2147024863)) {
+    $genuine=[IO.IOException]::new('synthetic Windows access HRESULT',[int]$code)
+    if(-not (Test-CandidatePortableRetryableMoveError $genuine)) {
+      throw 'TEST-028: actual Windows 5/32/33 move conflict no longer retryable'
+    }
+  }
+  $different=[IO.IOException]::new('different Windows error',-2147024893) # 0x80070003
+  if(Test-CandidatePortableRetryableMoveError $different) {
+    throw 'TEST-028: unrelated Windows file-not-found error incorrectly retryable'
+  }
+  Write-Output 'PASS: move retry requires exact Win32 5/32/33 HRESULT facility'
+
+
   # ISSUE-215 / TEST-028: cold move the real ZIP payload before running its
   # executable, then keep both extracted and relocated Windows shell smokes.
   # The actual packaging job still validates hashes and launches the EXE.
