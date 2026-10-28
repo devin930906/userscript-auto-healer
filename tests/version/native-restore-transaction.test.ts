@@ -1170,3 +1170,54 @@ test('TASK-011/TEST-020/026: hardlinked staging inode cannot borrow restore exem
    'extra links invalidate an earlier exclusive staging identity');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/021/026: post-release source verification cannot bless a corrupted recovery backup',async t=>{
+ for(const target of ['original','displaced'] as const){
+  await fixture(async opts=>{
+   const snapshot=require('../../src/version/source-snapshot') as
+    typeof import('../../src/version/source-snapshot');
+   const verified=snapshot.verifyApprovedSourceFingerprint;
+   let originalChecks=0;
+   let corrupted=false;
+   t.mock.method(snapshot,'verifyApprovedSourceFingerprint',
+    async (input:Parameters<typeof verified>[0])=>{
+     const result=await verified(input);
+     // This is the final source-fingerprint check AFTER the native restore
+     // released its path lock and finished separately verifying both backups
+     // and its published intent. An unrelated editor now invalidates one
+     // recovery copy without touching the correctly restored source.
+     if(result.status==='MATCHED_READ_ONLY'&&input!==null&&
+        typeof input==='object'&&'expectedSha256' in input&&
+        input.expectedSha256===sha(original)&&++originalChecks===4){
+      const names=await readdir(opts.backupDirectory);
+      const backupName=target==='original'
+       ?opts.backupFileName
+       :names.find(name=>name.endsWith('.backup.user.js')&&
+          name!==opts.backupFileName);
+      assert.ok(backupName,'must have published displaced recovery backup');
+      assert.deepEqual(await readFile(opts.sourcePath),original,
+       'fault injection must occur after the actual source restore');
+      await writeFile(join(opts.backupDirectory,backupName as string),
+       Buffer.from('// altered recovery evidence after final source check\\n'));
+      corrupted=true;
+     }
+     return result;
+    });
+   const outcome=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.equal(corrupted,true,
+    'must change actual '+target+' recovery evidence at late receipt boundary');
+   assert.deepEqual(outcome,{
+    status:'BLOCKED',reason:'RECOVERY_SAFETY_FAILED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   },'a changed recovery copy cannot support a clean restore receipt');
+   assert.deepEqual(await readFile(opts.sourcePath),original,
+    'must not undo a completed manual restore or overwrite external edits');
+   const entries=await readdir(opts.backupDirectory);
+   assert.ok(entries.some(n=>n.endsWith('.journal.json')),
+    'retain published intent and recovery copies for manual reconciliation');
+  });
+  t.mock.reset();
+ }
+});
