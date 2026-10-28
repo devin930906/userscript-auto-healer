@@ -8,13 +8,15 @@
  * A boolean from a caller is NOT independent user authentication.
  */
 import {lstat} from 'node:fs/promises';
-import {basename,dirname,isAbsolute,relative} from 'node:path';
+import type {BigIntStats} from 'node:fs';
+import {basename,dirname,isAbsolute,join,relative} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
 import {stageReviewedCandidateOnly} from '../version/staged-candidate';
 import {stageRecoveryCheckpointOnly,inspectRecoveryCheckpointReadOnly} from '../version/recovery-checkpoint';
 import {hasUnsafePathLink} from '../version/path-boundary';
+import {verifyExactCandidateBytesReadOnly} from '../version/candidate-bytes';
 import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'DOM_CANDIDATE_BLOCKED'|
@@ -36,6 +38,18 @@ export type ManualRepairFlowResult=
   }&typeof noAuthority>;
 const block=(reason:Reason):ManualRepairFlowResult=>
  Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
+/** Post-checkpoint success must still name the same two exported files.
+ * A same-byte external replacement is not the publication audited by the
+ * native exporter. These are bounded snapshots, not durable OS locks. */
+const sameExport=(a:BigIntStats,b:BigIntStats):boolean=>
+ a.isFile()&&b.isFile()&&!a.isSymbolicLink()&&!b.isSymbolicLink()&&
+ a.nlink===1n&&b.nlink===1n&&
+ a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
+ a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs&&a.mode===b.mode;
+const sameExportDirectory=(a:BigIntStats,b:BigIntStats):boolean=>
+ a.isDirectory()&&b.isDirectory()&&
+ !a.isSymbolicLink()&&!b.isSymbolicLink()&&
+ a.dev===b.dev&&a.ino===b.ino;
 function plain(input:unknown,names:readonly string[]):Record<string,unknown>|null{
  // An untrusted Proxy can run code through getPrototypeOf/ownKeys traps.
  if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||
@@ -147,6 +161,22 @@ export async function prepareManualRepairExportOnly(
   if(exported.status!=='EXPORTED_RUNTIME_UNVERIFIED'||
      exported.candidateSha256!==staged.candidateSha256)
     return block('EXPORT_BLOCKED');
+  // Retain snapshots of the actual published exports before awaiting another
+  // checkpoint disk scan. That scan can yield to an independent editor.
+  const directory=o.exportDirectory as string;
+  const exportedCandidatePath=join(directory,exported.exportFileName);
+  const exportedOriginalPath=join(directory,exported.recoveryExportFileName);
+  let beforeExport:BigIntStats[];
+  try{
+    beforeExport=await Promise.all([
+      lstat(directory,{bigint:true}),lstat(exportedCandidatePath,{bigint:true}),
+      lstat(exportedOriginalPath,{bigint:true})
+    ]);
+    if(!beforeExport[0].isDirectory()||beforeExport[0].isSymbolicLink()||
+       !sameExport(beforeExport[1],beforeExport[1])||
+       !sameExport(beforeExport[2],beforeExport[2]))
+      return block('EXPORT_BLOCKED');
+  }catch{return block('EXPORT_BLOCKED');}
   // The export performs more filesystem I/O. Recheck again instead of
   // issuing a success receipt for a checkpoint replaced in the interim.
   // On failure preserve potential recovery files for native reconciliation;
@@ -158,6 +188,26 @@ export async function prepareManualRepairExportOnly(
      checkpointAfter.originalSha256!==staged.originalSha256||
      checkpointAfter.candidateSha256!==staged.candidateSha256)
     return block('CHECKPOINT_BLOCKED');
+  // A valid checkpoint cannot attest the TWO separate user-facing exports.
+  // Re-read both exact byte sequences after the checkpoint's asynchronous
+  // verification and reject even a same-byte pathname/inode replacement.
+  // This only issues a bounded, non-authoritative receipt, never install.
+  if(await verifyExactCandidateBytesReadOnly(
+       exportedCandidatePath,Buffer.from(candidate.candidateSource,'utf8'))!=='MATCH'||
+     await verifyExactCandidateBytesReadOnly(
+       exportedOriginalPath,Buffer.from(p.source as string,'utf8'))!=='MATCH')
+    return block('EXPORT_BLOCKED');
+  try{
+    const afterExport=await Promise.all([
+      lstat(directory,{bigint:true}),lstat(exportedCandidatePath,{bigint:true}),
+      lstat(exportedOriginalPath,{bigint:true})
+    ]);
+    if(!sameExportDirectory(beforeExport[0],afterExport[0])||
+       !sameExport(beforeExport[1],afterExport[1])||
+       !sameExport(beforeExport[2],afterExport[2])||
+       await hasUnsafePathLink(directory))
+      return block('EXPORT_BLOCKED');
+  }catch{return block('EXPORT_BLOCKED');}
   return Object.freeze({
     status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED' as const,
     backupFileName:staged.backupFileName,
