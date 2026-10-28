@@ -48,6 +48,8 @@ const MAX_TOTAL_PREVIEW_MS=120000;
 // A bad direct native call returns [] before spawning any workers or progress.
 const NATIVE_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
  Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
+const NATIVE_BUFFER=Object.getOwnPropertyDescriptor(
+ Object.getPrototypeOf(Uint8Array.prototype),'buffer')?.get;
 function snapshotNativeAstBatch(input:unknown):Script[]|null{
  try{
   if(nodeTypes.isProxy(input)||!Array.isArray(input)||
@@ -80,8 +82,11 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
       encoding!=='gb18030-explicit')return null;
    const bytes:unknown=byteField.value;
    if(nodeTypes.isProxy(bytes)||!(bytes instanceof Uint8Array)||
-      !NATIVE_BYTE_LENGTH||
+      !NATIVE_BYTE_LENGTH||!NATIVE_BUFFER||
       Object.prototype.hasOwnProperty.call(bytes,'byteLength'))return null;
+   // A SharedArrayBuffer can change from another thread during snapshot.
+   // Read the TypedArray internal slot, never a caller-owned .buffer getter.
+   if(nodeTypes.isSharedArrayBuffer(NATIVE_BUFFER.call(bytes)))return null;
    // Intrinsic internal slot, never a caller-provided getter.
    const length=NATIVE_BYTE_LENGTH.call(bytes) as number;
    if(!Number.isSafeInteger(length)||length<0)return null;
