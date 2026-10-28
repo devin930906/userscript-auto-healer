@@ -95,7 +95,18 @@ jobs:
               throw 'Electron smoke process timed out'
             }
             $process.Refresh()
-            if ($process.ExitCode -ne 0) { throw "Electron exited with code $($process.ExitCode)" }
+            if ($process.ExitCode -ne 0) {
+              # The smoke writes only a narrow, allowlisted error code to this
+              # disposable receipt; never print arbitrary exception text.
+              $failureReceipt = $env:UAH_SMOKE_RECEIPT + '.failure'
+              if (Test-Path -LiteralPath $failureReceipt -PathType Leaf) {
+                $failureCode = [IO.File]::ReadAllText($failureReceipt).Trim()
+                if ($failureCode -match '^[A-Z][A-Z0-9_]{4,90}$') {
+                  Write-Output "Electron smoke failure: $failureCode"
+                }
+              }
+              throw "Electron exited with code $($process.ExitCode)"
+            }
           } finally {
             # Keep candidate and regular Electron smoke handle lifetimes aligned.
             $process.Dispose()
