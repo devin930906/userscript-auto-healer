@@ -30,6 +30,33 @@ test('TASK-013/TEST-022/026: serial checkpoint cannot finish a later job before 
  assert.deepEqual(allowed.snapshot().jobs.map(x=>x.state),['QUEUED','SUCCEEDED']);
 });
 
+test('TASK-013/TEST-022/026: a cancelled serial checkpoint must not resume a later queued job',async()=>{
+ const options={count:3,concurrency:1,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
+ let dispatched=0;
+ const worker=async()=>{dispatched++;return 'DONE' as const;};
+ const coordinator=new ReadOnlyBatchCoordinator(options,worker);
+ coordinator.cancel();
+ const cancelled=coordinator.snapshot();
+ assert.deepEqual(cancelled.jobs.map(job=>job.state),
+  ['CANCELLED','CANCELLED','CANCELLED']);
+ // A legitimate cancelled durable scheduling hint stays terminal on resume.
+ const legitimate=new ReadOnlyBatchCoordinator(options,worker,cancelled);
+ await legitimate.run();
+ assert.equal(dispatched,0);
+ // Cancellation synchronously cancels EVERY still-queued job. A disk
+ // checkpoint with CANCELLED followed by QUEUED is impossible for one lane:
+ // accepting it would resume work after an already-recorded cancellation.
+ const forged={...cancelled,jobs:[
+  {...cancelled.jobs[0]},
+  {...cancelled.jobs[1],state:'QUEUED' as const},
+  {...cancelled.jobs[2]}
+ ]};
+ assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker,forged),
+  /INVALID_BATCH_CHECKPOINT/);
+ assert.equal(dispatched,0);
+});
+
 test('TEST-022: independent batch results, bounded transient retry and no automatic authority',async()=>{
  const visited:number[]=[];
  const coordinator=new ReadOnlyBatchCoordinator({count:4,maxAttempts:2},
