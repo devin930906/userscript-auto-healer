@@ -1568,6 +1568,27 @@ async function createMainWindow(): Promise<void> {
         'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
+    // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
+    // renderer controls. Only renderer state is staged; the real preload IPC
+    // reports no active fixture and never touches a user browser or script.
+    const gmStopControls=await win.webContents.executeJavaScript(
+      "(async()=>{browserConnected=true;gmProbeActive=true;browserControls();"+
+      "const stop=document.getElementById('gm-probe-stop');"+
+      "const start=document.getElementById('gm-probe-start');"+
+      "const runAt=document.getElementById('gm-run-at');"+
+      "const visit=document.getElementById('gm-probe-visit-broken');"+
+      "const observe=document.getElementById('gm-probe-observe-fixed');"+
+      "const result=document.getElementById('gm-probe-result');"+
+      "const before=!stop.disabled&&start.disabled&&runAt.disabled;stop.click();"+
+      "return await new Promise(resolve=>{const started=Date.now();const tick=()=>{"+
+      "if(result.textContent.includes('没有活动的本机测试服务')||Date.now()-started>3000){"+
+      "const passed=before&&result.textContent.includes('没有活动的本机测试服务')&&"+
+      "!start.disabled&&!runAt.disabled&&stop.disabled&&visit.disabled&&observe.disabled;"+
+      "browserConnected=false;gmProbeActive=false;browserControls();resolve(passed);"+
+      "}else setTimeout(tick,30);};tick();});})()",true
+    ) as boolean;
+    if(!gmStopControls)throw new Error('GM_PROBE_STOP_CONTROLS_FAILED');
+
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
     const uiCancelReady=await win.webContents.executeJavaScript(
       "(() => {const el=document.getElementById('scenario-cancel');"+
