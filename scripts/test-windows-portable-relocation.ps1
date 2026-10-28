@@ -602,6 +602,42 @@ try {
     }
     Write-Output "PASS: Windows lock diagnostic recorded HRESULT and Win32=$code without full paths"
 
+    # TASK-020 / TEST-028: a persistent real lock must be inspected AGAIN
+    # at the terminal denial, not only at the first denial. A first snapshot
+    # can be stale after bounded retries. Shadow only the read-only evidence
+    # collector, never the real Windows Directory.Move or the lock fixture.
+    $originalFinalProbe=(Get-Item 'Function:\Get-CandidatePortableFirstDenialSummary').ScriptBlock
+    $script:task020FinalEvidenceSamples=0
+    try {
+      Set-Item 'Function:\Get-CandidatePortableFirstDenialSummary' -Value {
+        param([string]$source,[string[]]$candidateFiles)
+        $script:task020FinalEvidenceSamples++
+        return 'diagnostic=bounded-controlled'
+      }
+      $terminalDenied=$false
+      $finalDestination=Join-Path $root 'persistent-final-evidence'
+      try {
+        Move-CandidatePortableDirectory $permanent $finalDestination 2 0 @($permanentFile) | Out-Null
+      } catch {
+        $reason=$_.Exception
+        while($reason.InnerException){$reason=$reason.InnerException}
+        $terminalDenied=(
+          ($reason -is [System.IO.IOException] -or
+           $reason -is [System.UnauthorizedAccessException]) -and
+          (($reason.HResult -band 0xFFFF) -in @(5,32,33)))
+        if(-not $terminalDenied){throw}
+      }
+      if(-not $terminalDenied -or $script:task020FinalEvidenceSamples -ne 2 -or
+         (Test-Path -LiteralPath $finalDestination) -or
+         [IO.File]::ReadAllText($permanentFile) -cne 'preserve-me') {
+        throw "TEST-028: persistent denial requires exactly first+final read-only evidence snapshots (actual=$script:task020FinalEvidenceSamples)"
+      }
+      Write-Output 'PASS: persistent lock produces first and final candidate-only evidence without changing payload'
+    } finally {
+      Set-Item 'Function:\Get-CandidatePortableFirstDenialSummary' -Value $originalFinalProbe
+      Remove-Variable -Name task020FinalEvidenceSamples -Scope Script -ErrorAction SilentlyContinue
+    }
+
     # ISSUE-215 / TEST-028: a read-only failure-evidence collector is
     # best-effort. A fault in it must not replace the real Windows rename
     # access-denied error, shorten the bound, or alter original bytes.
