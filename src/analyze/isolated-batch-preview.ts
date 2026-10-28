@@ -252,7 +252,11 @@ async function previewImportedChunkOffMain(
  const output:ImportAnalysisPreview[]=[];
  let usedBytes=0;
  for(const script of scripts){
-  const size=script?.bytes instanceof Uint8Array?script.bytes.byteLength:Infinity;
+  // An oversized native-imported Uint8Array is intentionally not copied.
+  // Read its intrinsic slot, not a subclass prototype's arbitrary getter,
+  // before deciding that it must stay outside the isolated AST Worker.
+  const size=script?.bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH
+   ?NATIVE_BYTE_LENGTH.call(script.bytes) as number:Infinity;
   if(size>MAX_ANALYSIS_BYTES){
    slots.push(null);
    output.push(unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
