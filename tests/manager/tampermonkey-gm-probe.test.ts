@@ -854,6 +854,40 @@ test('TEST-017/018: partial GM write that throws still triggers disposable-key c
 });
 
 
+test('TASK-007/TEST-017/026: GM storage expiration preserves cleanup but skips post-consent reads',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const storage=new Map<string,string>();
+ let elapsed=1000;
+ const calls={defaultRead:0,storageRead:0,write:0,delete:0,dom:0,report:0};
+ runInNewContext(probe.source,{
+  Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+  performance:{timeOrigin:probe.expiresAt-2000,now:()=>elapsed},
+  location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+  document:{readyState:'complete',querySelector:()=>{calls.dom++;return null;}},
+  GM_getValue:(key:string,fallback:string)=>{
+   if(key.startsWith('uah-gm-storage-')){
+    calls.storageRead++;return storage.get(key)??fallback;
+   }
+   calls.defaultRead++;return fallback;
+  },
+  GM_setValue:(key:string,value:string)=>{
+   calls.write++;storage.set(key,value);
+   // The synchronous manager call crosses the genuine monotonic deadline.
+   elapsed=2100;
+  },
+  GM_deleteValue:(key:string)=>{calls.delete++;storage.delete(key);},
+  fetch:()=>{calls.report++;return Promise.resolve();}
+ });
+ assert.deepEqual(calls,{
+  defaultRead:1,storageRead:0,write:1,delete:1,dom:0,report:0
+ },'only mandatory disposable-key cleanup may run after the consent deadline');
+ assert.equal(storage.size,0,'the expired GM test must never leave a test key behind');
+});
+
 // TASK-007 / TEST-017: startup asynchronously opens a TCP listener. If the
 // authorization deadline passes before bind completes, returning a usable
 // session would misrepresent the actual GM diagnostic consent window.
