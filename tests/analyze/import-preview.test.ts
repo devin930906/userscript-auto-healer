@@ -164,6 +164,37 @@ test('TEST-022/017: native batch previews 36 scripts across bounded isolated wor
    x.tampermonkeyVerified===false&&x.businessVerified===false));
 });
 
+test('TASK-013/TEST-022/NFR-009: native AST time budget ignores wall-clock jumps between worker segments',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+'document.querySelector("#clock-safe-'+i+'");'
+ ));
+ const actualNow=Date.now;
+ let jumped=false;
+ const progress:number[]=[];
+ let reports:Awaited<ReturnType<typeof previewImportedBatchOffMain>>;
+ try{
+  reports=await previewImportedBatchOffMain(scripts,undefined,
+   (processed,total)=>{
+    progress.push(processed);
+    if(processed===16&&total===17){
+     jumped=true;
+     // Simulate system/NTP clock correction only AFTER a real first
+     // isolated worker completes. This does not advance elapsed time.
+     Date.now=()=>actualNow.call(Date)+600000;
+    }
+   });
+ }finally{
+  Date.now=actualNow;
+ }
+ assert.equal(jumped,true,'fixture must observe a genuine first worker segment');
+ assert.deepEqual(progress,[16,17]);
+ assert.equal(reports.length,17);
+ assert.deepEqual(reports.map(x=>x.status),Array(17).fill('STATIC_ANALYSIS_ONLY'),
+  'a wall-clock adjustment must not exhaust the 120-second monotonic AST budget');
+ assert.ok(reports.every(x=>x.automaticPatchAllowed===false&&
+  x.businessVerified===false&&x.tampermonkeyVerified===false));
+});
+
 test('TEST-022/NFR-009: read-only native AST batch continues beyond 64 files with bounded worker segments',async()=>{
  const scripts=Array.from({length:70},(_,i)=>imported(
   header+'document.querySelector("#not-exposed-'+i+'");'
