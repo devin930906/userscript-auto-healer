@@ -18,6 +18,16 @@ import {
 } from './import-preview';
 
 type Script=Pick<ImportedScript,'bytes'|'textEncoding'>;
+type WorkerFailureReason='START_FAILED'|'REPLY_REJECTED'|
+ 'WORKER_ERROR'|'EXIT_BEFORE_MESSAGE'|'DEADLINE';
+/** Only bounded internal reason codes and segment cardinality enter logs.
+ * Never log worker errors, user source, selectors, paths, hashes or URLs.
+ * Logging must not replace the caller's fail-closed result even if a hook throws.
+ */
+function reportWorkerFailure(reason:WorkerFailureReason,count:number):void{
+ try{console.warn(`UAH_AST_WORKER_UNAVAILABLE reason=${reason} count=${count}`);}
+ catch{/* Diagnostics never alter read-only fail-closed behavior. */}
+}
 const WORKER_DEADLINE_MS=10000;
 // A pathological 1000-file batch must not consume up to 63 * 10 seconds.
 const MAX_TOTAL_PREVIEW_MS=120000;
@@ -197,13 +207,18 @@ async function previewImportedChunkOffMain(
    workerData:selected,
    resourceLimits:{maxOldGenerationSizeMb:96,maxYoungGenerationSizeMb:16}
   });
- }catch{return output;}
+ }catch{
+  reportWorkerFailure('START_FAILED',selected.length);
+  return output;
+ }
  const result=await new Promise<ImportAnalysisPreview[]|null>(resolve=>{
   let finished=false;
   let timer:NodeJS.Timeout|undefined;
-  const finish=(answer:ImportAnalysisPreview[]|null,stopWorker:boolean)=>{
+  const finish=(answer:ImportAnalysisPreview[]|null,stopWorker:boolean,
+   reason?:WorkerFailureReason)=>{
    if(finished)return;
    finished=true;
+   if(reason)reportWorkerFailure(reason,selected.length);
    if(timer)clearTimeout(timer);
    signal?.removeEventListener('abort',cancel);
    if(stopWorker)void worker.terminate().catch(()=>undefined);
@@ -212,12 +227,12 @@ async function previewImportedChunkOffMain(
   const cancel=()=>finish(null,true);
   worker.on('message',(value:unknown)=>{
    const checked=validateIsolatedPreviewReply(value,selected.length);
-   finish(checked,checked===null);
+   finish(checked,checked===null,checked===null?'REPLY_REJECTED':undefined);
   });
-  worker.on('error',()=>finish(null,true));
-  worker.on('exit',()=>finish(null,false));
+  worker.on('error',()=>finish(null,true,'WORKER_ERROR'));
+  worker.on('exit',()=>finish(null,false,'EXIT_BEFORE_MESSAGE'));
   signal?.addEventListener('abort',cancel,{once:true});
-  timer=setTimeout(()=>finish(null,true),workerDeadlineMs);
+  timer=setTimeout(()=>finish(null,true,'DEADLINE'),workerDeadlineMs);
   if(signal?.aborted)cancel();
  });
  return output.map((original,i)=>{
