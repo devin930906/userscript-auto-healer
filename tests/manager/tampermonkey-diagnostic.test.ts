@@ -3,6 +3,7 @@ import {join,win32} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
+import {performance} from 'node:perf_hooks';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
@@ -12,6 +13,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
  assessManualProbeObservations,startApprovedTampermonkeyDiagnostic,createManualModeVisitLatch,
+ createManualDiagnosticConsentWindow,
  summarizeFixtureDomEvidence,correlateManualFixtureEvidence,summarizeManualModeReceipts
 } from '../../src/manager/tampermonkey-diagnostic';
 import type {GmProbeReceipt} from '../../src/manager/tampermonkey-gm-probe';
@@ -780,4 +782,24 @@ test('TASK-007/TEST-017/026: observation cancellation rejects caller-owned Abort
    'a native active signal remains supported');
  assert.equal(guard(AbortSignal.abort()),true,
    'a native cancelled signal remains supported for cancellation');
+});
+
+
+test('TASK-007/TEST-017/026: manual diagnostic cannot revive after the wall clock crosses consent expiry',t=>{
+ let wall=Date.now();
+ t.mock.method(Date,'now',()=>wall);
+ const active=createManualDiagnosticConsentWindow(wall+1000,1000,performance.now());
+ assert.equal(active(),true,'fresh explicit consent starts active');
+ wall+=1000;
+ assert.equal(active(),false,'first observed expiry revokes consent');
+ wall-=1000;
+ assert.equal(active(),false,'rolling the clock backwards must not resurrect CDP/DOM visits');
+});
+
+test('TASK-007/TEST-017/026: manual diagnostic revokes on monotonic TTL even when wall clock goes backwards',t=>{
+ const frozenWall=Date.now();
+ t.mock.method(Date,'now',()=>frozenWall);
+ const active=createManualDiagnosticConsentWindow(
+   frozenWall+60000,1000,performance.now()-1001);
+ assert.equal(active(),false,'expired elapsed consent must deny despite a plausible wall deadline');
 });
