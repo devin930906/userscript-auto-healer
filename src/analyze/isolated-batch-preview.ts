@@ -360,10 +360,12 @@ export async function previewImportedBatchOffMain(
  const nativeScripts=snapshotNativeAstBatch(scripts);
  if(nativeScripts===null)return [];
  const results:ImportAnalysisPreview[]=[];
- const stopAt=Date.now()+MAX_TOTAL_PREVIEW_MS;
+ // Use monotonic elapsed time: wall-clock synchronization must not shorten
+ // or silently extend the 120-second native AST batch budget.
+ const stopAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
  for(let offset=0;offset<nativeScripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
   const segment=nativeScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
-  if(signal?.aborted||Date.now()>=stopAt){
+  if(signal?.aborted||performance.now()>=stopAt){
    const status=signal?.aborted
     ?'SKIPPED_CANCELLED' as const:'SKIPPED_BATCH_BUDGET' as const;
    for(const script of segment){
@@ -383,7 +385,7 @@ export async function previewImportedBatchOffMain(
   // No overlapping workers, hidden unbounded queue or user-code execution:
   // every segment has at most 10s, with a 120s total batch deadline.
   // The 16-file/1MiB copied-byte limit remains unchanged.
-  const remainingMs=Math.max(1,stopAt-Date.now());
+  const remainingMs=Math.max(1,stopAt-performance.now());
   results.push(...await previewImportedChunkOffMain(segment,signal,
    Math.min(WORKER_DEADLINE_MS,remainingMs)));
   // A native import's UI may show finite, scalar-only AST progress.
