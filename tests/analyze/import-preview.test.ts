@@ -180,7 +180,7 @@ test('TASK-013/TEST-004/022/026: Worker exit before reply emits one bounded reas
   !x.tampermonkeyVerified&&!x.businessVerified));
  assert.equal(warnings.length,1);
  assert.match(warnings[0],
-  /^UAH_AST_WORKER_UNAVAILABLE reason=EXIT_BEFORE_MESSAGE count=1 phase=POST_ONLINE elapsedBucketMs=\\d+ onlineBucketMs=\\d+$/);
+  /^UAH_AST_WORKER_UNAVAILABLE reason=EXIT_BEFORE_MESSAGE count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
  assert.ok(!warnings.join(' ').includes('private-exit-source'));
 });
 
@@ -221,7 +221,7 @@ test('TASK-013/TEST-004/022/026: malformed Worker message is rejected before exi
  assert.equal(warnings.length,1,
   'one invalid message followed by exit must not emit duplicate failure diagnostics');
  assert.match(warnings[0],
-  /^UAH_AST_WORKER_UNAVAILABLE reason=REPLY_REJECTED count=1 phase=POST_ONLINE elapsedBucketMs=\\d+ onlineBucketMs=\\d+$/);
+  /^UAH_AST_WORKER_UNAVAILABLE reason=REPLY_REJECTED count=1 phase=POST_ONLINE elapsedBucketMs=\d+ onlineBucketMs=\d+$/);
  assert.ok(!warnings.join(' ').includes('PRIVATE_WORKER_REPLY_MUST_NOT_LEAK'));
  assert.ok(!warnings.join(' ').includes('private-invalid-reply'));
 });
