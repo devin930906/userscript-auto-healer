@@ -8,6 +8,7 @@
  * attestation and must NEVER mark TEST-017/018 or any Stable GATE VERIFIED.
  */
 import {randomBytes} from 'node:crypto';
+import {performance} from 'node:perf_hooks';
 import {createServer,type Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
@@ -169,7 +170,11 @@ export async function startIsolatedTampermonkeyGmProbe(
  const installKey=randomBytes(32).toString('hex');
  const scriptId=randomBytes(16).toString('hex');
  const managerOrigin='chrome-extension://'+TAMPERMONKEY_EXTENSION_ID;
+ // The absolute expiry remains embedded in the disposable userscript, but
+ // Windows wall-clock rollback must not extend the server's consent TTL.
+ const begunAt=performance.now();
  const expiresAt=Date.now()+ttlMs;
+ const expired=()=>Date.now()>=expiresAt||performance.now()-begunAt>=ttlMs;
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
  let server:Server;
  server=createServer((req,res)=>{
@@ -177,7 +182,7 @@ export async function startIsolatedTampermonkeyGmProbe(
    res.setHeader('X-Content-Type-Options','nosniff');
    const address=server.address() as AddressInfo|null;
    const host=address?'127.0.0.1:'+address.port:'';
-   if(!address||req.headers.host!==host||Date.now()>=expiresAt){
+   if(!address||req.headers.host!==host||expired()){
      res.writeHead(403).end();return;
    }
    // HTTP absolute-form URLs can override URL's base origin. Accept only
@@ -258,7 +263,7 @@ export async function startIsolatedTampermonkeyGmProbe(
      if(disconnected||oversized||res.destroyed||res.writableEnded)return;
      // Recheck after the entire body arrives: a slow POST must not outlive
      // the consented probe interval merely because headers arrived in time.
-     if(Date.now()>=expiresAt){res.writeHead(403).end();return;}
+     if(expired()){res.writeHead(403).end();return;}
      let input:unknown;
      try{input=JSON.parse(body);}catch{res.writeHead(400).end();return;}
      if(!isObject(input)||input.token!==token||
@@ -307,7 +312,7 @@ export async function startIsolatedTampermonkeyGmProbe(
  // listen() finally returns. A stalled event loop or delayed bind must not
  // hand back an already-expired but apparently usable diagnostic session.
  // Close the owned loopback listener before refusing the stale start.
- if(Date.now()>=expiresAt){
+ if(expired()){
    await new Promise<void>(resolve=>{
      server.close(()=>resolve());
      server.closeAllConnections();
@@ -332,7 +337,10 @@ export async function startIsolatedTampermonkeyGmProbe(
  // Only the remaining authorized interval belongs to this listener: using
  // the entire original TTL would extend the bound server beyond its deadline
  // when asynchronous startup itself consumed time.
- expiryTimer=setTimeout(()=>{void stop();},Math.max(1,expiresAt-Date.now()));
+ // Independently bound by real elapsed time AND the wall-clock expiry.
+ // A backward system clock correction during async bind cannot extend it.
+ const remaining=Math.min(expiresAt-Date.now(),ttlMs-(performance.now()-begunAt));
+ expiryTimer=setTimeout(()=>{void stop();},Math.max(1,remaining));
  expiryTimer.unref();
  return {ok:true,session:{
    status:'ISOLATED_GM_TEST_READY',runAt,
