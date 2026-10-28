@@ -963,3 +963,36 @@ test('TASK-007/TEST-017/026: clock rollback during bind cannot extend isolated G
  assert.equal(stillListening,false,
   'wall-clock rollback must not keep consented local GM server listening after its real TTL');
 });
+
+test('TASK-007/TEST-017/026: first GM read is denied when route verification consumes consent',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000,'document-idle');
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ let now=probe.expiresAt-1000;
+ let hrefReads=0;
+ const calls={gm:0,storageWrite:0,storageDelete:0,dom:0,report:0};
+ const route=probe.origin+'/?mode=fixed';
+ const location={
+  origin:probe.origin,
+  get href(){
+   hrefReads++;
+   // The second URL check succeeds but a synchronous read can consume the
+   // remaining authorized interval before the first GM call.
+   if(hrefReads===2)now=probe.expiresAt+1;
+   return route;
+  }
+ };
+ runInNewContext(probe.source,{
+  Date:class extends Date{static now(){return now;}},URL,location,
+  document:{readyState:'complete',querySelector:()=>{calls.dom++;return null;}},
+  GM_getValue:(_key:string,fallback:string)=>{calls.gm++;return fallback;},
+  GM_setValue:()=>{calls.storageWrite++;},
+  GM_deleteValue:()=>{calls.storageDelete++;},
+  fetch:()=>{calls.report++;return Promise.resolve();}
+ });
+ assert.equal(hrefReads,2,'fixture must reach the last canonical route check');
+ assert.deepEqual(calls,{gm:0,storageWrite:0,storageDelete:0,dom:0,report:0},
+  'expired consent must bar the initial GM read, not merely later storage or DOM actions');
+});

@@ -105,6 +105,9 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
   // A self-reported fixture action belongs only to the exact owned test page.
   ' const expectedUrl='+JSON.stringify(origin+'/?mode=')+'+mode;',
   ' if(location.href!==expectedUrl)return;',
+  // A synchronous URL getter can consume the last milliseconds of consent.
+  // Never begin even the FIRST GM read after that route check has finished.
+  ' if(expired())return;',
  ' let gmMatched=false;',
  ' try{gmMatched=GM_getValue('+JSON.stringify('uah-gm-probe-'+token)+','+
     JSON.stringify(PROBE_DEFAULT)+')==='+JSON.stringify(PROBE_DEFAULT)+';}',
