@@ -150,7 +150,7 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' let actionConfirmed=false;',
  ' if(target){',
  "  target.setAttribute('data-uah-probe-action','done');",
- '  if(Date.now()>='+expiresAt+')return;',
+ '  if(expired())return;',
   '  if(location.href!==expectedUrl)return;',
  "  actionConfirmed=target.getAttribute('data-uah-probe-action')==='done';",
  ' }',
