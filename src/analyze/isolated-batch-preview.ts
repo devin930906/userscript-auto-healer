@@ -329,8 +329,8 @@ async function previewImportedChunkOffMain(
   });
   worker.on('message',(value:unknown)=>{
    const checked=validateIsolatedPreviewReply(value,selected.length);
-   // Even a valid posted reply is not proof that the thread exited.
-   finish(checked,true,checked===null?'REPLY_REJECTED':undefined);
+   // A malformed reply must retire before another segment starts.
+   finish(checked,checked===null,checked===null?'REPLY_REJECTED':undefined);
   });
   worker.on('error',()=>finish(null,true,'WORKER_ERROR'));
   worker.on('exit',()=>finish(null,false,'EXIT_BEFORE_MESSAGE'));
@@ -407,7 +407,7 @@ export async function previewImportedBatchOffMain(
    catch{/* advisory progress only */}
    continue;
   }
-  // No overlapping workers, hidden unbounded queue or user-code execution:
+  // No overlapping failed workers, hidden unbounded queue or source execution:
   // every segment has at most 10s, with a 120s total batch deadline.
   // The 16-file/1MiB copied-byte limit remains unchanged.
   const remainingMs=Math.max(1,stopAt-performance.now());
