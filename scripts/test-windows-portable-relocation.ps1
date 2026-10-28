@@ -865,10 +865,11 @@ try {
   } finally { $noDeleteShare.Dispose() }
   Write-Output 'PASS: Windows delete-share omission is detected without changing source'
   # ISSUE-215 / TEST-028: a file handle does not itself prove a blocked
-  # portable rename. Hold a real executable open with FILE_SHARE_DELETE and
-  # require a real one-attempt same-parent move to succeed. This is the positive
-  # control for the deny-sharing fixture above and for RM's non-causal file
-  # associations seen on the Windows hosted runner.
+  # portable rename. Hold a real executable open with FILE_SHARE_DELETE;
+  # observe the actual one-attempt same-parent move (success OR safe denial),
+  # then require byte-identical relocation after release of the test handle.
+  # This contrasts with the deny-sharing fixture above without treating an
+  # RM file association or a clean DELETE probe as proof of rename permission.
   $shareAllowed=Join-Path $root 'delete-share-positive-source'
   $shareAllowedMoved=Join-Path $root 'delete-share-positive-moved'
   New-Item -ItemType Directory -Path $shareAllowed | Out-Null
