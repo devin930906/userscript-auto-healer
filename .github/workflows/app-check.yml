@@ -35,7 +35,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: app-check-${{ github.ref }}
+  # Isolate optional diagnostic runs from required push/PR checks on the same ref.
+  group: app-check-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic && '-worker-diagnostic' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -127,6 +128,8 @@ jobs:
         run: |
           Write-Output "Source SHA: $env:GITHUB_SHA"
           node --version
+          # 120 seconds bounds starting/completing samples between checks. A
+          # stalled child is bounded by the job's separate eight-minute limit.
           $budget = [Diagnostics.Stopwatch]::StartNew()
           for ($attempt = 1; $attempt -le 10; $attempt++) {
             if ($budget.Elapsed.TotalSeconds -ge 120) {
