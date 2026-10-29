@@ -119,7 +119,12 @@ function parseJournal(text:string,sourcePath?:string):Journal|null{
    // It does NOT authenticate the journal to a source or permit any write.
    const original=STRUCTURAL_BACKUP_NAME.exec(x.originalBackupFileName as string);
    const displaced=STRUCTURAL_BACKUP_NAME.exec(x.displacedBackupFileName as string);
-   if(!original||!displaced||original[1]!==displaced[1])return null;
+   if(!original||!displaced||original[1]!==displaced[1]||
+      // Recovery evidence names must stay single native filenames. The
+      // source-independent scan must not recognize traversal-shaped backups
+      // as valid published intent before an unrelated manual source restore.
+      /[\\/\u0000-\u001f]/.test(x.originalBackupFileName as string)||
+      /[\\/\u0000-\u001f]/.test(x.displacedBackupFileName as string))return null;
   }
   return x as Journal;
  }catch{return null;}
