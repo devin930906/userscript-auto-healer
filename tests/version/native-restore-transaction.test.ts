@@ -1349,7 +1349,7 @@ test('TASK-011/TEST-020/026: path-like backup identifiers in a published native 
    originalBackupFileName:prefix+'~'+prefixHash+'.'+firstId+'.backup.user.js',
    displacedBackupFileName:prefix+'~'+prefixHash+'.'+secondId+'.backup.user.js',
    automaticPatchAllowed:false,automaticRollbackAllowed:false
-  })+'\\n';
+  })+'\n';
   // Legitimate native backup filename structure remains accepted by this
   // path-FREE journal preflight; it grants no source or restore authority.
   await writeFile(journalPath,journal('selected.user.js'));
