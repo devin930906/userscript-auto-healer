@@ -254,11 +254,7 @@ function capturesMutableDocumentAlias(node:AstNode):boolean{
  const value=node.type==='VariableDeclarator'?node.init:
    node.type==='AssignmentExpression'||node.type==='AssignmentPattern'?
      node.right:undefined;
- // A computed window/globalThis[key] read can alias the native document;
- // an indirect subsequent write then evades direct member mutation checks.
- // Reject even a read-only unknown alias until property resolution is proven.
- return isDocumentReference(value)||isDocumentPrototype(value)||
-   isDynamicGlobalDocumentAlias(value);
+ return isDocumentReference(value)||isDocumentPrototype(value);
 }
 
 /** Capture destructuring aliases of global document / Document.prototype.
@@ -314,8 +310,29 @@ function capturesDestructuredDocumentAlias(node:AstNode):boolean{
 function ambiguousDocumentBinding(source:string):boolean{
   const ast=parse(source,{ecmaVersion:'latest',sourceType:'script'}) as unknown as AstNode;
   let ambiguous=false;
+  // A computed global read can resolve to the native document. A merely
+  // unused read is not a method mutation; preserve that existing safe case.
+  // Once the value escapes into another expression, native-DOM provenance
+  // cannot be established by the phase-one AST reviewer.
+  const uncertainDocumentAliases=new Set<string>();
   function walk(node:AstNode):void{
     if(ambiguous)return;
+    const capturedValue=node.type==='VariableDeclarator'?node.init:
+      node.type==='AssignmentExpression'||node.type==='AssignmentPattern'?
+        node.right:undefined;
+    const capturedName=asNode(node.type==='VariableDeclarator'?node.id:
+      node.type==='AssignmentExpression'||node.type==='AssignmentPattern'?
+        node.left:undefined);
+    const newAlias=isDynamicGlobalDocumentAlias(capturedValue);
+    if(newAlias){
+      if(capturedName?.type!=='Identifier'||typeof capturedName.name!=='string'){
+        ambiguous=true;return;
+      }
+      uncertainDocumentAliases.add(capturedName.name);
+    }
+    if(node.type==='Identifier'&&uncertainDocumentAliases.has(node.name as string)){
+      ambiguous=true;return;
+    }
     if(node.type==='WithStatement'||capturesMutableDocumentAlias(node)||
        capturesDestructuredDocumentAlias(node)||
        (node.type==='VariableDeclarator'&&bindsDocument(node.id))||
@@ -349,6 +366,9 @@ function ambiguousDocumentBinding(source:string):boolean{
     }
     for(const [key,value] of Object.entries(node)){
       if(key==='start'||key==='end'||key==='loc'||key==='raw')continue;
+      // Capturing the unknown value itself is not its later use. Do not
+      // reclassify the declaration/assignment binding as a mutation.
+      if(newAlias&&(key==='id'||key==='left'))continue;
       if(Array.isArray(value)){
         for(const item of value){const child=asNode(item);if(child)walk(child);}
       }else{
