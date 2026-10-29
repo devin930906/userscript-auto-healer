@@ -269,3 +269,37 @@ test('TASK-007/TEST-017/026: only native registered Chrome sessions may be inspe
  }
  assert.equal(calls,0,'unregistered Chrome session accessors or Proxy traps must not execute');
 });
+
+// TASK-007 / Issue #486 / TEST-017/026: a Target.getTargets CDP reply is
+// not successful when its error key is present, even with a falsy JSON value
+// and plausible runtime targetInfos. No CDP failure may mint a runtime hint.
+test('TASK-007/TEST-017/026: CDP target-list receipt rejects explicit falsy errors and non-text data',()=>{
+ const inspect=(require('../../src/manager/tampermonkey-adapter') as {
+  readTampermonkeyCdpTargetReceipt?: (raw:unknown)=>unknown|null|undefined
+ }).readTampermonkeyCdpTargetReceipt;
+ assert.equal(typeof inspect,'function',
+  'a manager CDP response must have an independently testable bounded parser');
+ if(!inspect)return;
+ const valid={id:1,result:{targetInfos:[worker]}};
+ assert.deepEqual(inspect(JSON.stringify(valid)),[worker],
+  'valid CDP reply remains a target metadata hint only');
+ assert.equal(inspect(JSON.stringify({id:2,result:valid.result})),undefined,
+  'unrelated browser CDP events must not finish target inspection');
+ for(const error of [false,0,'',null]){
+  assert.equal(inspect(JSON.stringify({
+   id:1,error,result:valid.result
+  })),null,'an explicit CDP error must block even when its JSON value is falsy');
+ }
+ for(const raw of [
+  JSON.stringify({id:1,error:{message:'PRIVATE_EXTENSION_INFO'},result:valid.result}),
+  JSON.stringify({id:1,result:null}),
+  JSON.stringify({id:1,result:{}}),
+  JSON.stringify({id:1,result:{targetInfos:'forged'}}),
+  JSON.stringify({id:1,result:valid.result,padding:'PRIVATE'.repeat(90000)}),
+  'null','not-json',Buffer.from(JSON.stringify(valid)),
+  {toString(){throw Error('PRIVATE_CALLED_BY_PARSER');}}
+ ]){
+  assert.equal(inspect(raw),null,
+   'invalid/oversized/non-native-text receipts must not return manager hints');
+ }
+});
