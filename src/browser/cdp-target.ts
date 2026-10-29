@@ -171,6 +171,45 @@ export function readClosedTargetReceipt(raw:unknown):boolean|undefined{
   }catch{return false;}
 }
 
+/** TASK-008 / TEST-013/026: an acknowledged tab closure is not verified
+ * until a bounded, well-formed /json/list shows the specific ID absent.
+ * Never invoke an untrusted getter or Proxy when used as a direct API.
+ */
+export function isClosedTargetAbsentFromValidList(payload:unknown,targetId:unknown):boolean{
+  try{
+    if(typeof targetId!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(targetId)||
+       !Array.isArray(payload)||nodeTypes.isProxy(payload)||
+       Object.getPrototypeOf(payload)!==Array.prototype)return false;
+    const entries=Object.getOwnPropertyDescriptors(payload);
+    const size=Object.getOwnPropertyDescriptor(payload,'length')?.value;
+    if(!Number.isSafeInteger(size)||size<0||size>1000||
+       Reflect.ownKeys(entries).length!==size+1)return false;
+    const seen=new Set<string>();
+    for(let i=0;i<size;i++){
+      const slot=entries[String(i)];
+      if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return false;
+      const row:unknown=slot.value;
+      if(!row||typeof row!=='object'||Array.isArray(row)||
+         nodeTypes.isProxy(row))return false;
+      const proto=Object.getPrototypeOf(row);
+      if(proto!==Object.prototype&&proto!==null)return false;
+      const desc=Object.getOwnPropertyDescriptors(row);
+      const id=desc.id,type=desc.type,url=desc.url;
+      if(!id||!type||!url||
+         !Object.prototype.hasOwnProperty.call(id,'value')||
+         !Object.prototype.hasOwnProperty.call(type,'value')||
+         !Object.prototype.hasOwnProperty.call(url,'value')||
+         typeof id.value!=='string'||
+         !/^[a-zA-Z0-9_-]{8,128}$/.test(id.value)||
+         typeof type.value!=='string'||type.value.length>64||
+         typeof url.value!=='string'||url.value.length>8192||
+         seen.has(id.value))return false;
+      seen.add(id.value);
+    }
+    return !seen.has(targetId);
+  }catch{return false;}
+}
+
 /** Undo only the page ID minted by THIS Target.createTarget call. This
  * bounded cleanup runs even after the original navigation consent is
  * cancelled; it never replays the URL, executes script, closes other tabs
@@ -215,9 +254,7 @@ async function closeUnverifiedNewTab(
       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
         redirect:'error',signal:AbortSignal.timeout(1000)});
       const json=await readBoundedCdpJson(response);
-      if(Array.isArray(json)&&!json.some(item=>
-        item&&typeof item==='object'&&!Array.isArray(item)&&
-        (item as {id?:unknown}).id===targetId))return true;
+      if(isClosedTargetAbsentFromValidList(json,targetId))return true;
     }catch{/* bounded verification retry */}
     await delay(100);
   }
