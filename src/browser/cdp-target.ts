@@ -75,7 +75,19 @@ export function classifyMainFrameResponse(
        !result.frameTree.frame||typeof result.frameTree.frame!=='object'||
        Array.isArray(result.frameTree.frame))
       return 'MAIN_FRAME_RESPONSE_INVALID';
-    return classifyMainFrameUrl(result.frameTree.frame.url,expectedUrl);
+    // Page.getFrameTree's top frame must have its own protocol frame ID,
+    // no parent frame, and no unreachable navigation marker. Matching an
+    // approved URL alone does not certify a live top-level document.
+    // These checks cannot attest script execution or business recovery.
+    const frame=result.frameTree.frame as {
+      id?:unknown;parentId?:unknown;unreachableUrl?:unknown;url?:unknown
+    };
+    if(typeof frame.id!=='string'||
+       !/^[a-zA-Z0-9_-]{8,128}$/.test(frame.id)||
+       Object.prototype.hasOwnProperty.call(frame,'parentId')||
+       Object.prototype.hasOwnProperty.call(frame,'unreachableUrl'))
+      return 'MAIN_FRAME_RESPONSE_INVALID';
+    return classifyMainFrameUrl(frame.url,expectedUrl);
   }catch{return 'MAIN_FRAME_RESPONSE_INVALID';}
 }
 

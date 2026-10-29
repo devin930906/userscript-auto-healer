@@ -50,14 +50,15 @@ test('TASK-008/TEST-013/026: CDP rejection and malformed receipts have distinct 
     'the actual frame socket must classify command errors separately from navigation pending');
   if(!inspect)return;
   const approved='https://example.com/fixture?mode=one';
-  const good=JSON.stringify({id:1,result:{frameTree:{frame:{url:approved}}}});
+  const frameId='0123456789abcdef0123456789abcdef';
+  const good=JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId,url:approved}}}});
   const cases:[string,string|null][]=[
     [good,'MAIN_FRAME_CONFIRMED'],
-    [JSON.stringify({id:1,result:{frameTree:{frame:{url:'about:blank'}}}}),'MAIN_FRAME_ABOUT_BLANK'],
+    [JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId,url:'about:blank'}}}}),'MAIN_FRAME_ABOUT_BLANK'],
     [JSON.stringify({id:1,error:{code:-32000,message:'PRIVATE-CDP-ERROR'}}),'MAIN_FRAME_CDP_REJECTED'],
     [JSON.stringify({id:1,error:{message:'PRIVATE'},result:{frameTree:{frame:{url:approved}}}}),'MAIN_FRAME_CDP_REJECTED'],
     [JSON.stringify({id:1,result:{}}),'MAIN_FRAME_RESPONSE_INVALID'],
-    [JSON.stringify({id:1,result:{frameTree:{frame:{}}}}),'MAIN_FRAME_MISSING_URL'],
+    [JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId}}}}),'MAIN_FRAME_MISSING_URL'],
     ['PRIVATE-not-json','MAIN_FRAME_RESPONSE_INVALID'],
     [JSON.stringify({id:1,result:{frameTree:{frame:{url:approved}}},padding:'PRIVATE'.repeat(6000)}),'MAIN_FRAME_RESPONSE_INVALID'],
     [JSON.stringify({id:2,result:{frameTree:{frame:{url:approved}}}}),null]
@@ -133,7 +134,7 @@ test('TASK-008/TEST-013/026: main-frame receipt refuses all present falsy CDP er
   assert.equal(typeof classify,'function');
   if(!classify)return;
   const url='https://example.com/fixture?mode=one';
-  const frameTree={frame:{url}};
+  const frameTree={frame:{id:'0123456789abcdef0123456789abcdef',url}};
   assert.equal(classify(JSON.stringify({id:1,result:{frameTree}}),url),
     'MAIN_FRAME_CONFIRMED','ordinary result must remain supported');
   for(const error of [false,0,'',null]){
