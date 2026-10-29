@@ -504,3 +504,53 @@ test('TASK-009/TEST-014/019/026: DOM-only candidates reject undeclared privilege
   assert.equal(candidate.tampermonkeyVerified,false);
   assert.equal(candidate.businessRecoveredVerified,false);
 });
+
+
+test('TASK-009/TEST-014/019/026: DOM-only candidates require an explicit minimal grant allowlist',()=>{
+  // The previous seven-item blocklist misses writable GM APIs and future
+  // manager privileges. DOM counts cannot attest any of these side effects.
+  const rejectedGrants=[
+    ['GM_setValue'],['GM.setValue'],
+    ['GM_deleteValue'],['GM.deleteValue'],
+    ['GM_setClipboard'],['GM.setClipboard'],
+    ['GM_notification'],['GM.notification'],
+    ['GM_registerMenuCommand'],['GM.unregisterMenuCommand'],
+    ['GM_addStyle'],['GM_addElement'],
+    ['GM_getResourceURL'],['GM_getTab'],['GM_saveTab'],
+    ['GM_info'],['GM_futureUnknown'],
+    ['GM_getValue','GM_setValue'],['none','GM_getValue'],
+    ['GM_getValue','GM_getValue']
+  ];
+  for(const grants of rejectedGrants){
+    const text=source.replace('// @grant none',
+      grants.map(grant=>'// @grant '+grant).join(String.fromCharCode(10)));
+    const request={...patch,source:text,
+      expectedSourceSha256:createHash('sha256').update(text).digest('hex'),
+      callOffset:text.indexOf('document.querySelector')};
+    const linked={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(request,linked,series(),true);
+    assert.equal(result.status,'BLOCKED',grants.join(','));
+    assert.equal(result.automaticPatchAllowed,false,grants.join(','));
+    assert.equal('candidateSource' in result,false,grants.join(','));
+  }
+  const unspecified=source.replace('// @grant none'+String.fromCharCode(10),'');
+  const unspecifiedRequest={...patch,source:unspecified,
+    expectedSourceSha256:createHash('sha256').update(unspecified).digest('hex'),
+    callOffset:unspecified.indexOf('document.querySelector')};
+  assert.equal(proposeFromReadOnlyDomDiagnostic(unspecifiedRequest,
+    {...scenario,scriptSha256:unspecifiedRequest.expectedSourceSha256},
+    series(),true).status,'BLOCKED','unspecified manager sandbox defaults');
+
+  for(const grant of ['none','GM_getValue']){
+    const text=source.replace('// @grant none','// @grant '+grant);
+    const request={...patch,source:text,
+      expectedSourceSha256:createHash('sha256').update(text).digest('hex'),
+      callOffset:text.indexOf('document.querySelector')};
+    const result=proposeFromReadOnlyDomDiagnostic(request,
+      {...scenario,scriptSha256:request.expectedSourceSha256},series(),true);
+    assert.equal(result.status,'CANDIDATE_ONLY',grant);
+    assert.equal(result.automaticPatchAllowed,false,grant);
+    assert.equal(result.tampermonkeyVerified,false,grant);
+    assert.equal(result.businessRecoveredVerified,false,grant);
+  }
+});
