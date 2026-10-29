@@ -254,7 +254,11 @@ function capturesMutableDocumentAlias(node:AstNode):boolean{
  const value=node.type==='VariableDeclarator'?node.init:
    node.type==='AssignmentExpression'||node.type==='AssignmentPattern'?
      node.right:undefined;
- return isDocumentReference(value)||isDocumentPrototype(value);
+ // A computed window/globalThis[key] read can alias the native document;
+ // an indirect subsequent write then evades direct member mutation checks.
+ // Reject even a read-only unknown alias until property resolution is proven.
+ return isDocumentReference(value)||isDocumentPrototype(value)||
+   isDynamicGlobalDocumentAlias(value);
 }
 
 /** Capture destructuring aliases of global document / Document.prototype.
