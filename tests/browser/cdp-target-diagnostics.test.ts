@@ -7,6 +7,7 @@ import { strict as assert } from 'node:assert';
 const moduleUnderTest = require('../../src/browser/cdp-target') as {
   classifyMainFrameUrl?: (actual:unknown, expected:string)=>string;
   classifyMainFrameResponse?: (raw:string,expected:string)=>string|null;
+  classifyMainFramePendingPhase?: (phase:unknown)=>string;
   readCreatedTargetReceipt?: (raw:unknown)=>string|null|undefined;
   readClosedTargetReceipt?: (raw:unknown)=>boolean|undefined;
   isClosedTargetAbsentFromValidList?: (payload:unknown,targetId:unknown)=>boolean
@@ -238,4 +239,27 @@ test('TASK-008/TEST-013/026: cleanup refuses malformed or ambiguous CDP target l
   assert.equal(check(proxy,mine),false);
   assert.equal(proxyCalls,0,'untrusted Proxy traps must not execute');
   assert.equal(check([], 'bad'),false);
+});
+
+
+test('TASK-008/TEST-013/026: pending WebSocket connect and pending Page.getFrameTree receipt are distinct',()=>{
+  const classify=moduleUnderTest.classifyMainFramePendingPhase;
+  assert.equal(typeof classify,'function',
+    'actual CDP main-frame handshake must expose fixed, privacy-safe pending phase diagnostics');
+  if(!classify)return;
+  assert.equal(classify('CONNECTING'),'MAIN_FRAME_SOCKET_PENDING',
+    'a socket that did not open is not a missing frame command receipt');
+  assert.equal(classify('AWAITING_RECEIPT'),'MAIN_FRAME_RECEIPT_PENDING',
+    'a socket with a sent Page.getFrameTree command is not a connect timeout');
+  for(const unknown of [null,undefined,false,0,'PRIVATE_URL',
+      {privateUrl:'https://example.com/path?token=SECRET'}]){
+    assert.equal(classify(unknown),'MAIN_FRAME_PENDING',
+      'unrecognized phases preserve the conservative generic pending category');
+  }
+  for(const phase of ['CONNECTING','AWAITING_RECEIPT']){
+    const label=classify(phase);
+    assert.match(label,/^MAIN_FRAME_[A-Z_]+$/);
+    assert.equal(label.includes('PRIVATE'),false);
+    assert.equal(label.includes('example.com'),false);
+  }
 });
