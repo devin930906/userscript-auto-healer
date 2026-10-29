@@ -359,6 +359,43 @@ test('TASK-011/TEST-020/021/026: stranded native restore path mutex blocks clean
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-011/TEST-020/021/026: malformed source-parent recovery residue cannot yield a false-clean inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-malformed-source-residue-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);await writeFile(sourcePath,original);
+  const inspect=()=>inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  // A different source's well-formed cooperative lock is not an interrupted
+  // staging file for the selected source. Preserve this positive control.
+  const unrelatedLock=join(home,'.uah-restore-path-'+'f'.repeat(64));
+  await mkdir(unrelatedLock);
+  const clean=await inspect();
+  assert.deepEqual([clean.status,'inspected' in clean?clean.inspected:null],
+   ['RESTORE_INTENT_INVENTORY_READ_ONLY',0]);
+  for(const damagedName of [
+   '.uah-restore-'+randomUUID()+'.pending.corrupt',
+   '.uah-restore-'+randomUUID()+'.journal.json.partial',
+   '.UAH-RESTORE-'+randomUUID()+'.pending'
+  ]){
+   const residue=join(home,damagedName);
+   await writeFile(residue,'incomplete source-parent restore evidence');
+   const observed=await inspect();
+   assert.deepEqual([observed.status,'reason' in observed?observed.reason:null],
+    ['BLOCKED','RECOVERY_REVIEW_REQUIRED'],
+    'malformed source-parent restore artifact needs manual review: '+damagedName);
+   assert.equal(await readFile(residue,'utf8'),
+    'incomplete source-parent restore evidence','inspection must never delete evidence');
+   assert.deepEqual(await readFile(sourcePath),original,
+    'source script must remain byte-identical');
+   await rm(residue);
+  }
+  assert.deepEqual(await readdir(backupDirectory),[]);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-011/TEST-020/021/026: source-parent staging residue cannot be a clean zero-intent recovery inventory',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-intent-source-staging-'));
  try{
