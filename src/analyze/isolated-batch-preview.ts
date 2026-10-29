@@ -349,6 +349,11 @@ async function previewImportedChunkOffMain(
   if(slot===null)return original;
   if(signal?.aborted)
    return unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED');
+  // An otherwise valid reply is not a completed isolated segment while its
+  // Worker remains live. Refuse success if retirement threw or timed out;
+  // the caller already stops all subsequent segments in this condition.
+  if(!result.retired)
+   return unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED');
   return result.answer?.[slot]??original;
  });
  return {previews,safeToContinue:result.retired};
