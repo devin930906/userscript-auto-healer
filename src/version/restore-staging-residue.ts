@@ -54,11 +54,24 @@ export async function hasInterruptedRestoreStaging(
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
   if(!RESTORE_PENDING.test(entry.name)){
-   // Preserve corrupt or renamed native recovery evidence: never report
-   // the directory clean merely because its staging filename is malformed.
-   if(RESERVED_RESTORE_PREFIX.test(entry.name)&&
-      !PUBLISHED_JOURNAL.test(entry.name)&&
-      !RESTORE_PATH_MUTEX.test(entry.name))pending=true;
+   // A canonical NAME alone is not recovery evidence. The published intent
+   // must be a single-link regular file; a source-path mutex must be a
+   // directory. A masquerading directory, hard link or symlink requires
+   // explicit native review BEFORE any restore can change the source.
+   const published=PUBLISHED_JOURNAL.test(entry.name);
+   const lock=RESTORE_PATH_MUTEX.test(entry.name);
+   if(published||lock){
+    try{
+     const current=await lstat(join(directory,entry.name),{bigint:true});
+     if(current.isSymbolicLink()||
+        (published?(!current.isFile()||current.nlink!==1n):
+         !current.isDirectory()))pending=true;
+    }catch{pending=true;}
+   }else if(RESERVED_RESTORE_PREFIX.test(entry.name)){
+    // Preserve corrupt or renamed native recovery evidence even if the
+    // malformed name would otherwise evade the pending UUID parser.
+    pending=true;
+   }
    continue;
   }
   if(entry.name!==verifiedOwnPendingName||!verifiedOwnPendingIdentity){
