@@ -63,6 +63,12 @@ Status/remaining blockers:
 - [x] Existing source, TASK identifiers, PR history and open Issues preserved; no reset or migration-by-reimplementation.
 - [x] An explicit Issue/PR ↔ TASK handoff convention documented.
 - [ ] Review this governance-only PR and merge if checks and permissions allow.
-- [ ] Incrementally update `AGENTS.md`, `docs/09-development-plan.md`, `docs/10-traceability.md`, `docs/12-handoff.md`, and `docs/14-stable-work-register.md` with verified mappings when those files next change; do not bulk rewrite historical evidence.
+- [x] On this governance branch, incrementally align `AGENTS.md`, `docs/09-development-plan.md`, `docs/10-traceability.md`, `docs/12-handoff.md`, and `docs/14-stable-work-register.md` with real Issue ↔ TASK mappings. These updates remain **pending integration** until this PR is merged.
 - [ ] Reconcile all remaining TASK and GATE coverage against actual HEAD, including any issue-tracking gaps. Do not infer there are only three remaining tasks.
 - [ ] Verify CI and real Windows/Tampermonkey acceptance; until independently proven, no Stable product or public Release.
+
+## 2026-10-29 migration task-registration update
+
+Four bounded, verified-existing TASK workstreams now have newly opened GitHub Issues: [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) TASK-007, [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) TASK-009, [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) TASK-010 and [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) TASK-011. Existing independent unresolved defects [#480](https://github.com/devin930906/userscript-auto-healer/issues/480) TASK-008, [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) TASK-013 and [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) TASK-020 remain OPEN. As of this dated snapshot, seven known actionable Issues are registered; this is **not** the full Stable work inventory.
+
+`AGENTS.md`, `docs/09-development-plan.md`, `docs/10-traceability.md`, `docs/12-handoff.md` and `docs/14-stable-work-register.md` now carry the matching dated governance reference. Existing TASK-001..006 stages are not re-opened; TASK-012/014/015/016/017/018/019/021 still have planned work, but no extra historical or speculative Issues are fabricated. Read `docs/09-development-plan.md` for the full 21-task index. The source code, release contract, old CI evidence and original fixed TASK/REQ/TEST/GATE tables are unmodified.

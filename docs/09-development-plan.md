@@ -359,3 +359,37 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 原有检查点在首次发布字节校验后仍执行异步候选完整性复核，期间外部进程改写 checkpoint JSON、或同名同字节替换 inode，可让原先的 `CHECKPOINT_STAGED_UNVERIFIED` 回执失去现时依据。仅在原有 TASK-011 准许的无自动写入检查点范围内补齐后验：发布 inode 须绑定原 pending inode；在最后候选复核后，重新验证 checkpoint 字节、inode、mtime/ctime、nlink、目录与链接安全。
 - 测试提交 `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca` 的 RED [#40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095)：643 总计，641 pass/1 fail/1 skip，旧实现因外部内容修改仍成功而失败。实现提交 `74eb05cf6c971e13a212b87ede93fdcb15d596e9` 的 GREEN [#40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319)：643 总计，642 pass/0 fail/1 skip，Windows Electron smoke 成功。
 - 保留 TASK-011 真正跨崩溃事务与可信恢复、TASK-007/010 管理器验收、TASK-018..021 和 GATE-001..011 现有剩余工作；不重新计为完整 TASK-011，也不提升自动补丁或回滚权限。
+
+## 2026-10-29 新版（4）→（7）开发任务与 GitHub Issues 执行索引
+
+> 本节是 `main@e3169fc982c9703e26710eb335b36a41f0812454` 的迁移时点快照，不改写上述原有 21 条固定字段 TASK 表格、阶段计划、历史验证或用户已批准的范围。查询最新状态时先重新读取 GitHub，不能以本快照代替实时事实。权威 Issue 机制见 `docs/15-issue-driven-stable-bridge.md`。
+
+| 正式 TASK 编号 | 对原有记录的阶段判断（非全部 TEST/GATE 验收） | 当前 GitHub Issue 或后续处理 |
+| --- | --- | --- |
+| `TASK-001` | 阶段成果已整合 | 无需追溯补建 Issue；新回归关联原 TASK 与新证据 |
+| `TASK-002` | 阶段成果已整合 | 无需追溯补建 Issue；新回归另行记录 |
+| `TASK-003` | 静态分析阶段已整合 | 无需追溯补建 Issue；产品级其它验证另按 GATE |
+| `TASK-004` | 场景契约阶段已整合 | 无需追溯补建 Issue；真实业务断言仍依赖后续 TASK |
+| `TASK-005` | Chrome/CDP 阶段已整合 | 无需追溯补建 Issue；用户环境矩阵未自动通过 |
+| `TASK-006` | DOM/SPA 阶段已整合 | 无需追溯补建 Issue；真实集成未自动通过 |
+| `TASK-007` | 产品级验收待完成 | [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) |
+| `TASK-008` | 集成未完成；间歇故障 | [#480](https://github.com/devin930906/userscript-auto-healer/issues/480) |
+| `TASK-009` | 修复/自动应用闭环未完成 | [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) |
+| `TASK-010` | 可信验收门控未闭环 | [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) |
+| `TASK-011` | 安全事务及回滚未闭环 | [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) |
+| `TASK-012` | 产品级导出/管理器版本同步待验收 | 尚未单独建 Issue；正式计划保留 |
+| `TASK-013` | 持久批处理未完成；间歇故障 | [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) |
+| `TASK-014` | 可选 AI 阶段代码已整合，完整验收待办 | 尚未单独建 Issue；正式计划保留 |
+| `TASK-015` | 健康监控阶段代码已整合，完整验收待办 | 尚未单独建 Issue；正式计划保留 |
+| `TASK-016` | 共享兼容层阶段代码已整合，真实回归待办 | 尚未单独建 Issue；正式计划保留 |
+| `TASK-017` | UI 阶段代码已整合，完整旅程待办 | 尚未单独建 Issue；正式计划保留 |
+| `TASK-018` | 整体安全/业务集成验收待执行 | 尚未单独建 Issue；按现有依赖进入 |
+| `TASK-019` | 开发候选 EXE 已存在，正式安装验收待办 | 尚未单独建 Issue；按现有依赖进入 |
+| `TASK-020` | 开发候选 ZIP 已存在；间歇重定位故障 | [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) |
+| `TASK-021` | 全部 Stable GATE / 正式发布验收待执行 | 尚未单独建 Issue；正式发布需独立授权 |
+
+- **编号与粒度**：TASK 编号永久沿用既有正式任务序列；Issue #N 是 GitHub 实际单独编号，不能强制一对一。历史已实现 TASK 不补建无意义 Issue；同一 TASK 可以有多个分阶段 PR，Issue 要求与 PR 的代码变更分开验收。
+- **近期执行链**：#486 / TASK-007 的真实 Tampermonkey 支持与业务证据；#480 / TASK-008 的独立 Chrome 间歇失败；#487 / TASK-009 修复候选到可信诊断链；#488 / TASK-010 真实业务门控；#489 / TASK-011 原子备份/恢复；#440 / TASK-013 AST Worker 失败；#215 / TASK-020 便携目录重命名失败。此处不是强制线性顺序，必须以原正式任务依赖与现时风险选择能执行的工作。
+- **尚未建 Issue 的已批准任务**：TASK-012/014/015/016/017/018/019/021 保持正式计划中的实际待办与各自完成条件；进入可执行阶段时先查重、再按实际需要建立精确 Issue，不因当前未建 Issue 将其误报为完成或取消。
+- **每轮工作**：读取当前 main/分支/PR/Issue/CI；以 TASK、REQ/NFR、TEST/GATE 及 Issue 目标确认范围；完成真正代码修改与测试后经适用 PR 审核合并；仅当 Issue 全部验收满足时关闭或使用 GitHub 默认分支适用的自动关闭语句。将剩余阻断交还 12/14，本工程不通过大量 Issue、提交和 PR 数量计算完成度。
+- **Stable 交付仍受阻**：用户真实 Tampermonkey 产品级业务修复/回滚、全量支持矩阵、Windows 正式双包和 GATE-001..011 未取得完整最终证据；单一 PR 或一次 CI 绿灯不能转为 Stable 发布通过。

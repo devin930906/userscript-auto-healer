@@ -270,3 +270,23 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 
 ## （7）2026-10-27 TASK-011 原生检查点最后回执复核增量
 本工作表前面历史 TASK 状态属于旧 SHA 快照；当前新增既有 TASK-011 / REQ-020/021 / TEST-020/026 真实回归补丁，非单独新 TASK。RED `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca` 的 [Windows #40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095) 为 643 tests / 641 pass / 1 fail / 1 skip（外部修改后旧检查点回执仍成功）；GREEN `74eb05cf6c971e13a212b87ede93fdcb15d596e9` 的 [Windows #40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319) 为 643 / 642 pass / 0 fail / 1 skip。修复为最后候选 I/O 后再次绑定检查点原 inode、字节和路径身份；无自动应用/回滚权限。TASK-011 仍未完成原子事务、断电恢复、可信用户业务与全量 TEST/GATE；最终集成状态以 PR/main 最新 SHA 为准。
+
+## 2026-10-29 新版（7）Issue 驱动剩余任务对账快照
+
+> 对照当前可读 `main@e3169fc982c9703e26710eb335b36a41f0812454`、Open Issue 搜索和 PR #481..484；此前表格与分期证明属于其各自 SHA 的历史记录。本节只建立治理追踪，不补写不存在的自动修复、Windows 结果或 Stable GATE。所有下轮操作先刷新仓库事实。项目阶段成果已有大量 PR，不能把 PR 数量视作完成功能数量。
+
+| 尚待验收工作线 | 当前 Issue 跟踪 | 仍需的真实证据 |
+| --- | --- | --- |
+| `TASK-007` 真实 Tampermonkey | [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) | 可信身份/用户授权、支持矩阵、真实产品业务正反验收 |
+| `TASK-008` 故障诊断 | [#480](https://github.com/devin930906/userscript-auto-healer/issues/480) | Windows 主框架间歇失败根因、重现与完整回归；PR #481..484 阶段诊断/修复不足以关闭 |
+| `TASK-009` 修复候选 | [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) | 经实际诊断绑定的保守候选、自动应用前置依赖和真实负例 |
+| `TASK-010` 验收/门控 | [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) | 真实管理器业务前后验收、拒绝未知和恢复证据 |
+| `TASK-011` 原子备份回滚 | [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) | 源身份、崩溃/竞态、持久事务和真实可恢复证明 |
+| `TASK-013` 批处理 | [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) | AST Worker 间歇失败定位/回归；另有完整批处理恢复和可靠性缺口 |
+| `TASK-020` 便携 ZIP | [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) | Electron smoke 后原子重命名 Win32=5 根因、真实 Windows 双包与发行验证 |
+
+**正式计划中未因无 Issue 消失的工作**：`TASK-012` 导出与扩展版本状态；`TASK-014` 可选 AI 完整安全/产品验收；`TASK-015` 健康监控；`TASK-016` 多脚本共享兼容；`TASK-017` 完整 GUI；`TASK-018` 安全及端到端回归；`TASK-019` Windows 安装版正式验证；`TASK-021` Stable 发布验收。需在达到实际执行条件时查重再建精准 Issue；已有 `TASK-001..006` 阶段代码不重复开发。此处的 Issue 清单并非全部尚未通过 TEST/GATE 清单。
+
+**11 项 GATE 与发行的保守判断**：`docs/08-release.md` 的 `GATE-001..011` 仍是逐项判据；截至该次审计没有充分证据证明全部正式通过，不能因为候选 Windows EXE+ZIP、某次 715 项回归通过、PR 合并或 Issue 关闭就认定 Stable 可发布。失效用户脚本真实修复、安全应用与回滚、完整 Tampermonkey 支持矩阵以及同一最终 SHA 的正式双包验收仍须独立完成。
+
+**续接规则**：优先处置可靠复现的安全/CI 阻断和现有 Open PR；再按已批准依赖处理 #486/#487/#488/#489 所在实际可执行子范围。对 #480/#440/#215 的偶发失败不能靠重复运行同一提交直到一次通过来关闭。每项变更关联 TASK、REQ/NFR、TEST/GATE、Issue/PR、目标 SHA 与真实 CI；只有对应完成条件实际满足才关闭 Issue 或判定 TASK 阶段完成。下一次检查应核实 PR #485 是否已经合并以及所有新 Issue 的最新状态；不凭本快照执行重大写入。

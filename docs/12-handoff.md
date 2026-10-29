@@ -287,3 +287,26 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 在 `fix/task011-checkpoint-final-receipt` 上实现既有 TASK-011 / TEST-020/026 的原生检查点安全增量：发布后仍等待源/备份/候选复核期间，检查点被独立修改或同名同字节文件替换，不再获得陈旧的“已暂存”成功回执；源码与独立备份不被本项修改。
 - TDD RED `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca`、[Windows #40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095) 643 tests（641 pass/1 预期新失败/1 skip）；GREEN `74eb05cf6c971e13a212b87ede93fdcb15d596e9`、[Windows #40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319) 643 tests（642 pass/0 fail/1 skip），Electron shell smoke success。
 - 此项没有实现自动脚本应用、真实 Tampermonkey 业务、原子断电回滚或正式 Stable GATE；本次 PR/合并后的 main 最新 SHA 与 Checks 必须重新核查。优先续接 TASK-007/010/011 可信业务和恢复链路及其全部必要 TEST，再推进 TASK-018..021。
+
+## 2026-10-29 新版（7）持续开发正式交接（Issue 驱动迁移）
+
+> 本节是旧版（4）+（7）到新版（7）的**增量治理交接**，不是重新执行开发前期准备。迁移审计基准 `main@e3169fc982c9703e26710eb335b36a41f0812454`；治理变更位于分支 `docs/issue-driven-stable-governance-20261029`，应先查询 PR #485 合并状态，再以最新主干 SHA、Open Issues、Open PR、真实 CI/GATE 证据恢复开发。前文 TASK-001 起点及旧主干 SHA 是当时真实历史，不得覆盖已经发生的阶段开发。
+
+**交接权威与连续性**：原始用户需求、REQ/NFR、ADR、RISK、TEST、GATE、TASK 编号保持不变；原有 09 的 21 条任务仍是开发计划；`docs/15-issue-driven-stable-bridge.md` 仅补充新 Issue/PR 工作流，不能推翻原安全/发布约束。`AGENTS.md` 与 `docs/10-traceability.md` 有最新对应规则，`docs/14-stable-work-register.md` 保存剩余工作实证，不得从头重启 TASK-001、重复历史 PR 或先执行未批准的增强功能。
+
+**现有关键 Open Issues（2026-10-29 UTC 查询）**：
+- [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) TASK-007：真实 Tampermonkey 可信支持矩阵/产品级验收；
+- [#480](https://github.com/devin930906/userscript-auto-healer/issues/480) TASK-008：主框架确认偶发失败；
+- [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) TASK-009：可信诊断联动的保守修复候选与安全应用；
+- [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) TASK-010：完整业务验收门控；
+- [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) TASK-011：真实原子备份、恢复与回滚；
+- [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) TASK-013：孤立 AST Worker 间歇失败；
+- [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) TASK-020：便携目录重命名偶发 Win32=5。
+
+**不得遗漏计划内无专属 Issue 的工作**：TASK-012/014/015/016/017/018/019/021 仍按 `docs/09-development-plan.md` 的依赖、完成条件和 `docs/14-stable-work-register.md` 的剩余工作管理，待真正接近实施时查重并按需创建 Issue。TASK-001..006 的阶段合并结果不重复开发，也不意味着相应所有 GATE 通过。
+
+**下次直接使用新版（7）的步骤**：读取最新主干 SHA、当前有效 Open PR（先处理可复用者）、Open/Closed Issues、09/10/11/12/14/15、对应 TEST/GATE 和当前 Actions；根据依赖、故障风险及现有验证选择一个能实际推进的 TASK+Issue；不反复做完整（4）。PR 提供代码变更、审查与真实测试，只有完整满足 Issue 验收才关闭 Issue；`Refs #N` 不会自动关闭，`Fixes #N` 仅在真正全部解决且默认分支自动关闭语义适用时使用。每轮写入前重新检查当前分支 SHA，防止并发覆盖。
+
+**准入/发布状态**：历史（4）阶段为有条件准入，正式（7）开发已在进行；本迁移不需要先重新准入。当前验证并不覆盖真实用户 Chrome/Tampermonkey 所有组合、可信自动修复/回滚、发行级 EXE/ZIP 与全部 GATE-001..011，不应宣称已有 Stable 版本。任何对已安装用户脚本/Profile 的操作、正式 Release、仓库规则/Secrets 更改仍需各自的实际授权和验证。
+
+**迁移交接收据**：该分支首先由 PR #485 提出文档治理迁移；后续同 PR 追加 09/10/12/14/AGENTS 与现有 Issues 映射。合并前只能称“已提交待审”，不能称 main 已采用新版规则；合并后仍须读取真实合并 SHA、Docs Integrity CI 结论并按照实际结果更新迁移状态。已完成的软件进度不因治理迁移重置。
