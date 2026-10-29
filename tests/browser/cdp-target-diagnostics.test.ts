@@ -215,7 +215,9 @@ test('TASK-008/TEST-013/026: cleanup refuses malformed or ambiguous CDP target l
   for(const bad of [
     null,undefined,{},false,
     [null],['not a target'],[{}],[{id:9}],[{id:''}],[{id:'bad'}],
-    [{id:another},{id:another}],
+    [{id:another}],
+    [{id:another,type:'page',url:'about:blank'},
+     {id:another,type:'page',url:'about:blank'}],
     [{id:another},'private string'],
     Array.from({length:1001},()=>({id:another}))
   ]){
