@@ -160,3 +160,35 @@ test('TASK-008/TEST-008/013/026: create-target receipt refuses all present falsy
   assert.equal(read(JSON.stringify({id:99,error:null,result:{targetId}})),
     undefined,'unrelated CDP ids are ignored');
 });
+
+
+// TASK-008 / REQ-013 / TEST-013/026: matching a URL is insufficient if
+// Page.getFrameTree lacks a real root frame identity, actually describes a
+// child frame, or reports a failed navigation through unreachableUrl. The
+// owned-browser socket is not permission to treat any frame URL as the main
+// approved document. Reject only; never expose frame IDs or private URLs.
+test('TASK-008/TEST-013/026: CDP cannot confirm a child or unreachable frame as the main document',()=>{
+  const classify=moduleUnderTest.classifyMainFrameResponse;
+  assert.equal(typeof classify,'function');
+  if(!classify)return;
+  const url='https://example.com/fixture?mode=one';
+  const frameId='0123456789abcdef0123456789abcdef';
+  const response=(frame:Record<string,unknown>)=>JSON.stringify({
+    id:1,result:{frameTree:{frame}}
+  });
+  assert.equal(classify(response({id:frameId,url}),url),'MAIN_FRAME_CONFIRMED',
+    'a real root frame with an identity is still a valid read-only signal');
+  for(const frame of [
+    {url},
+    {id:'',url},
+    {id:frameId,url,parentId:'different-parent'},
+    {id:frameId,url,parentId:null},
+    {id:frameId,url,unreachableUrl:'https://example.com/private'},
+    {id:frameId,url,unreachableUrl:''}
+  ]){
+    assert.equal(classify(response(frame),url),'MAIN_FRAME_RESPONSE_INVALID',
+      'an absent/child/error frame cannot establish verified main navigation');
+  }
+  const childOnly=response({id:'child-frame-id-001',parentId:frameId,url});
+  assert.notEqual(classify(childOnly,url),'MAIN_FRAME_CONFIRMED');
+});
