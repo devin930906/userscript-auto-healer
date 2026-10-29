@@ -468,3 +468,39 @@ test('TASK-009/TEST-019/026: a mutating DOM sample getter cannot change scope af
  assert.equal('candidateSource' in result,false);
  assert.equal(reads,0,'never read caller-owned getter before or after DOM validation');
 });
+
+
+test('TASK-009/TEST-014/019/026: DOM-only candidates reject undeclared privileged GM network or page-context authority',()=>{
+  // @connect and @require were already blocked, but a userscript may
+  // request network/browser authority directly through @grant even without
+  // either metadata field. Read-only DOM counts do not attest these effects.
+  for(const grant of [
+    'GM_xmlhttpRequest','GM.xmlHttpRequest',
+    'GM_download','GM.download',
+    'GM_openInTab','GM.openInTab',
+    'unsafeWindow'
+  ]){
+    const privileged=source.replace('// @grant none','// @grant '+grant);
+    const request={...patch,source:privileged,
+      expectedSourceSha256:createHash('sha256').update(privileged).digest('hex'),
+      callOffset:privileged.indexOf('document.querySelector')};
+    const observed={...scenario,scriptSha256:request.expectedSourceSha256};
+    const candidate=proposeFromReadOnlyDomDiagnostic(request,observed,series(),true);
+    assert.equal(candidate.status,'BLOCKED',grant);
+    assert.equal(candidate.automaticPatchAllowed,false,grant);
+    assert.equal('candidateSource' in candidate,false,grant);
+  }
+  // Preserve a narrow read-only, non-authoritative AST review for an
+  // otherwise simple userscript with only GM storage read access.
+  const readOnly=source.replace('// @grant none','// @grant GM_getValue');
+  const request={...patch,source:readOnly,
+    expectedSourceSha256:createHash('sha256').update(readOnly).digest('hex'),
+    callOffset:readOnly.indexOf('document.querySelector')};
+  const candidate=proposeFromReadOnlyDomDiagnostic(
+    request,{...scenario,scriptSha256:request.expectedSourceSha256},
+    series(),true);
+  assert.equal(candidate.status,'CANDIDATE_ONLY');
+  assert.equal(candidate.automaticPatchAllowed,false);
+  assert.equal(candidate.tampermonkeyVerified,false);
+  assert.equal(candidate.businessRecoveredVerified,false);
+});
