@@ -17,10 +17,12 @@ import {stageReviewedCandidateOnly} from '../version/staged-candidate';
 import {stageRecoveryCheckpointOnly,inspectRecoveryCheckpointReadOnly} from '../version/recovery-checkpoint';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {verifyExactCandidateBytesReadOnly} from '../version/candidate-bytes';
+import {verifyApprovedSourceFingerprint} from '../version/source-snapshot';
 import {exportReviewedCandidateForManualInstall,insideProtectedBackup} from '../export/manual-candidate-export';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'DOM_CANDIDATE_BLOCKED'|
- 'PATCH_REVIEW_BLOCKED'|'STAGE_BLOCKED'|'CHECKPOINT_BLOCKED'|'EXPORT_BLOCKED';
+ 'PATCH_REVIEW_BLOCKED'|'STAGE_BLOCKED'|'CHECKPOINT_BLOCKED'|'EXPORT_BLOCKED'|
+ 'SOURCE_CHANGED';
 const noAuthority={
   automaticPatchAllowed:false as const,
   automaticRollbackAllowed:false as const,
@@ -208,6 +210,19 @@ export async function prepareManualRepairExportOnly(
        await hasUnsafePathLink(directory))
       return block('EXPORT_BLOCKED');
   }catch{return block('EXPORT_BLOCKED');}
+  // The second checkpoint inspection and both published export verifications
+  // await I/O. An independent editor may change the original selected script
+  // after those checks, leaving the candidate/recovery pair tied to stale
+  // source bytes. Observe the live original once more before issuing the
+  // final manual-export receipt. This is read-only and non-authoritative:
+  // a future write still needs a transaction lock and trusted consent.
+  const finalSource=await verifyApprovedSourceFingerprint({
+    sourcePath:o.sourcePath as string,
+    expectedSha256:staged.originalSha256,userApproved:true
+  });
+  if(finalSource.status!=='MATCHED_READ_ONLY'||
+     finalSource.sha256!==staged.originalSha256)
+    return block('SOURCE_CHANGED');
   return Object.freeze({
     status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED' as const,
     backupFileName:staged.backupFileName,
