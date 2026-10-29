@@ -113,10 +113,19 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
     const dir=await opendir(options.backupDirectory);
     for await(const entry of dir){
       if(++entries>MAX_DIRECTORY_ENTRIES)return deny('TOO_MANY_ENTRIES');
+      // A damaged or differently cased checkpoint in this source-bound
+      // namespace is recovery evidence, not an unrelated file. Otherwise a
+      // truncated/renamed checkpoint silently turns into a clean zero count.
+      // Do not reject ordinary backup or staged-candidate files sharing this
+      // source prefix: only the reserved checkpoint marker is relevant.
+      const sourceBound=entry.name.toLowerCase().startsWith(prefix.toLowerCase());
+      const checkpointMarked=entry.name.toLowerCase().includes('.checkpoint');
       if(entry.name.startsWith(prefix)&&
          namePattern.test(entry.name.slice(prefix.length))){
         matches.push(entry.name);
         if(matches.length>MAX_CHECKPOINTS)return deny('TOO_MANY_ENTRIES');
+      }else if(sourceBound&&checkpointMarked){
+        return deny('UNSAFE_CHECKPOINT');
       }
     }
     matches.sort();
