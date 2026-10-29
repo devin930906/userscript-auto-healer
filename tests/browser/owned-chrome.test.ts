@@ -545,3 +545,64 @@ test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful
     Object.defineProperty({},'code',{get(){throw Error('PRIVATE_DETAILS');}})
   ])assert.equal(classify(bad),'FETCH_FAILED');
 });
+
+
+test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot prematurely expire an owned Chrome bootstrap',async t=>{
+  // Synthetic, strictly owned launch fixture: no user Chrome, filesystem,
+  // network endpoint, profile or script is touched. This isolates deadline
+  // arithmetic from the independent intermittent real Chrome startup bug.
+  const { EventEmitter }=require('node:events') as typeof import('node:events');
+  const childProcesses=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const port=12023;
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',port);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41234,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const actualNow=Date.now;
+  let jumped=false,requests=0;
+  let session:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(childProcesses,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41234,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>true);
+    t.mock.method(Date,'now',()=>actualNow()+(jumped?60000:0));
+    t.mock.method(globalThis,'fetch',async(input:Parameters<typeof fetch>[0])=>{
+      assert.equal(input,'http://127.0.0.1:'+port+'/json/version');
+      requests++;
+      if(requests===1){
+        jumped=true;
+        throw Object.assign(new Error('synthetic refused probe'),{code:'ECONNREFUSED'});
+      }
+      return new Response(JSON.stringify({
+        Browser:'Chrome/155.0.1.1',
+        webSocketDebuggerUrl:'ws://127.0.0.1:'+port+'/devtools/browser/abcdefgh-1234'
+      }));
+    });
+    session=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.equal(jumped,true,'fixture must advance the wall clock after probe one');
+    assert.ok(requests>=2,'the authorized bootstrap must retry after a refused probe');
+    assert.equal(session.ok,true,JSON.stringify(session));
+    if(session.ok)assert.equal(session.websocketHandshakeVerified,true);
+  }finally{
+    if(session?.ok)session.stop();
+    t.mock.reset();
+  }
+});
