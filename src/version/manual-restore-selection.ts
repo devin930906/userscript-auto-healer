@@ -71,6 +71,14 @@ export async function prepareManualOriginalRestoreSelection(
    userApproved:true
   })).status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
    return deny('BACKUP_UNVERIFIED');
+  // The final independent backup read is asynchronous. An external editor
+  // may change the source after the previous source fingerprint matched.
+  // Do not expose a stale current-source SHA as an eligible native consent
+  // selection. This is still only a bounded, read-only UI preflight:
+  // the actual transaction revalidates both files under its own lock.
+  if((await verifyApprovedSourceFingerprint({
+   sourcePath:selectedSource,expectedSha256:sourceSha,userApproved:true
+  })).status!=='MATCHED_READ_ONLY')return deny('SOURCE_UNVERIFIED');
   return Object.freeze({
    status:'AWAITING_NATIVE_RESTORE_CONSENT' as const,
    sourcePath:selectedSource,backupDirectory,backupFileName:name,
