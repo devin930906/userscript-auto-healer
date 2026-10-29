@@ -9,6 +9,7 @@ import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
+import {hasStructurallyValidNativeRestoreJournalReadOnly} from './restore-intent-inspection';
 
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const RESTORE_PENDING=new RegExp('^\\.uah-restore-'+UUID+'\\.pending$');
@@ -66,6 +67,9 @@ export async function hasInterruptedRestoreStaging(
      if(current.isSymbolicLink()||
         (published?(!current.isFile()||current.nlink!==1n):
          !current.isDirectory()))pending=true;
+     else if(published&&
+       !await hasStructurallyValidNativeRestoreJournalReadOnly(
+        join(directory,entry.name)))pending=true;
     }catch{pending=true;}
    }else if(RESERVED_RESTORE_PREFIX.test(entry.name)){
     // Preserve corrupt or renamed native recovery evidence even if the

@@ -36,6 +36,7 @@ const SHA=/^[a-f0-9]{64}$/;
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const JOURNAL_NAME=new RegExp('^\\.uah-restore-'+UUID+'\\.journal\\.json$');
 const BACKUP_NAME=new RegExp('^'+UUID+'\\.backup\\.user\\.js$');
+const STRUCTURAL_BACKUP_NAME=new RegExp('^(.+~[a-f0-9]{24})\\.('+UUID+')\\.backup\\.user\\.js$');
 const MAX_JOURNAL_BYTES=4096;
 type Input={
  sourcePath:string;backupDirectory:string;journalFileName:string;
@@ -83,7 +84,7 @@ function parse(input:unknown):Input|null{
     typeof x.userApproved!=='boolean')return null;
  return x as Input;
 }
-function parseJournal(text:string,sourcePath:string):Journal|null{
+function parseJournal(text:string,sourcePath?:string):Journal|null{
  try{
   // Accept only the exact bounded serialization produced by the existing
   // native restore writer. This also rejects duplicate or unexpected keys.
@@ -95,8 +96,9 @@ function parseJournal(text:string,sourcePath:string):Journal|null{
   if(!x||text!==JSON.stringify(parsed)+'\n'||x.schema!==1||
      x.state!=='RESTORE_INTENT_UNVERIFIED'||
      x.automaticPatchAllowed!==false||x.automaticRollbackAllowed!==false||
-     typeof x.sourcePathSha256!=='string'||
-     x.sourcePathSha256!==createHash('sha256').update(sourcePath).digest('hex')||
+     typeof x.sourcePathSha256!=='string'||!SHA.test(x.sourcePathSha256)||
+     (sourcePath!==undefined&&
+      x.sourcePathSha256!==createHash('sha256').update(sourcePath).digest('hex'))||
      typeof x.originalSha256!=='string'||!SHA.test(x.originalSha256)||
      typeof x.displacedSha256!=='string'||!SHA.test(x.displacedSha256)||
      x.originalSha256===x.displacedSha256||
@@ -106,10 +108,18 @@ function parseJournal(text:string,sourcePath:string):Journal|null{
    return null;
   // Both names MUST be bound to the same selected native source path,
   // regardless of identical script names or bytes in another directory.
-  const prefix=backupPrefix(sourcePath)+'.';
-  for(const n of [x.originalBackupFileName,x.displacedBackupFileName]){
-   if(!n.startsWith(prefix)||!BACKUP_NAME.test(n.slice(prefix.length)))
-    return null;
+  if(sourcePath!==undefined){
+   const prefix=backupPrefix(sourcePath)+'.';
+   for(const n of [x.originalBackupFileName,x.displacedBackupFileName]){
+    if(!n.startsWith(prefix)||!BACKUP_NAME.test(n.slice(prefix.length)))
+     return null;
+   }
+  }else{
+   // Path-free preflight checks canonical bytes and one shared naming prefix.
+   // It does NOT authenticate the journal to a source or permit any write.
+   const original=STRUCTURAL_BACKUP_NAME.exec(x.originalBackupFileName as string);
+   const displaced=STRUCTURAL_BACKUP_NAME.exec(x.displacedBackupFileName as string);
+   if(!original||!displaced||original[1]!==displaced[1])return null;
   }
   return x as Journal;
  }catch{return null;}
@@ -142,6 +152,17 @@ async function readJournal(path:string):Promise<string|null>{
   }finally{await h.close();}
  }catch{return null;}
 }
+/** Validate only the exact published native journal wire format using the
+ * existing bounded, descriptor-verified, single-link reader and parser.
+ * This cannot attest source ownership, business recovery or write authority.
+ */
+export async function hasStructurallyValidNativeRestoreJournalReadOnly(
+ path:string
+):Promise<boolean>{
+ const content=await readJournal(path);
+ return content!==null&&parseJournal(content)!==null;
+}
+
 /** Recheck both independent backups with the existing bounded, no-link
  * descriptor verifier. A successful earlier read is not a durable receipt:
  * an external editor can invalidate either backup while source or journal

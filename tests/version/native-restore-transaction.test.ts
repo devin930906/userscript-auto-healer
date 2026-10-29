@@ -1127,8 +1127,20 @@ test('TASK-011/TEST-020/026: published recovery namespace rejects malformed inod
  try{
   const journal=join(root,'.uah-restore-'+randomUUID()+'.journal.json');
   await writeFile(journal,'published journal bytes');
+  assert.equal(await hasInterruptedRestoreStaging(root),true,
+   'a canonical filename and single-link inode do not authenticate malformed journal bytes');
+  const prefix='fixture~'+'a'.repeat(24);
+  const validJournal=JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:'d'.repeat(64),
+   originalSha256:'a'.repeat(64),displacedSha256:'b'.repeat(64),
+   originalBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
+   displacedBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\n';
+  await writeFile(journal,validJournal);
   assert.equal(await hasInterruptedRestoreStaging(root),false,
-   'a canonical regular single-link journal can be retained for manual inspection');
+   'a valid, bounded, canonical native restore journal remains recognizable');
   const otherLink=join(root,'foreign-hardlink');
   await link(journal,otherLink);
   assert.equal(await hasInterruptedRestoreStaging(root),true,
@@ -1148,6 +1160,23 @@ test('TASK-011/TEST-020/026: published recovery namespace rejects malformed inod
   assert.equal(await hasInterruptedRestoreStaging(root),true,
    'a regular file cannot masquerade as the restore mutex directory');
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/026: corrupted published journal stops native source replacement',async()=>{
+ await fixture(async opts=>{
+  const corrupted=join(opts.backupDirectory,
+   '.uah-restore-'+randomUUID()+'.journal.json');
+  await writeFile(corrupted,'{ "schema": 1, "state": "RESTORE_INTENT_UNVERIFIED" }');
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(result.status,'BLOCKED',
+   'malformed single-link published recovery intent is not a clean namespace');
+  assert.equal(result.status==='BLOCKED'?result.reason:'','RECOVERY_REVIEW_REQUIRED');
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'corrupted intent must block before any source replacement');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'failed preflight must preserve unknown journal and all existing backups');
+ });
 });
 
 test('TASK-011/TEST-020/026: forged published-journal directory blocks manual source replacement',async()=>{
