@@ -41,6 +41,11 @@ const isProductOriginal=variant==='product-original'||
  variant==='product-id-original'||variant==='product-all-original';
 const isProductCandidate=variant==='product-candidate'||
  variant==='product-id-candidate'||variant==='product-all-candidate';
+// Review-only DOM repair is intentionally eligible for ONE read-only GM grant.
+// GM_setValue remains tested separately in baseline and native-gm cases;
+// never expand the production candidate grant whitelist to accommodate CI.
+const productReadOnlyGm=isProductOriginal||isProductCandidate;
+const expectedRoundtrip=productReadOnlyGm?'false':'true';
 if(isProductOriginal||isProductCandidate)
   assert.ok(isIdProduct||isAllProduct?runAt==='document-idle':
     ['document-start','document-idle'].includes(runAt),
@@ -55,7 +60,7 @@ let source=[
  '// @version 0.0.1',
  '// @match https://example.com/*',
  '// @grant GM_getValue',
- '// @grant GM_setValue',
+ ...(productReadOnlyGm?[]:['// @grant GM_setValue']),
  '// @run-at '+runAt,
  // Match the production disposable GM probe's explicit top-frame-only scope.
  '// @noframes',
@@ -64,12 +69,14 @@ let source=[
  'let gmDefault=false;let gmRoundtrip=false;',
  'try { gmDefault=typeof GM_getValue==="function"&&',
  'GM_getValue("__uah_ci_missing_key__","ci-default")==="ci-default";',
- ' if(gmDefault&&typeof GM_setValue==="function"){',
- '  GM_setValue("__uah_ci_storage_roundtrip__","ci-write-readback");',
- '  gmRoundtrip=GM_getValue("__uah_ci_storage_roundtrip__","not-written")==="ci-write-readback";',
- ' }',
+ ...(productReadOnlyGm?[]:[
+  ' if(gmDefault&&typeof GM_setValue==="function"){',
+  '  GM_setValue("__uah_ci_storage_roundtrip__","ci-write-readback");',
+  '  gmRoundtrip=GM_getValue("__uah_ci_storage_roundtrip__","not-written")==="ci-write-readback";',
+  ' }'
+ ]),
  ' }catch(e){}',
- 'const gm=gmDefault&&gmRoundtrip;',
+ 'const gm=gmDefault'+(productReadOnlyGm?'':'&&gmRoundtrip')+';',
  'const report=()=>{',
  ' if(!document.documentElement)throw Error("Missing fixture root");',
  ' document.documentElement.dataset.uahCiInjected="yes";',
@@ -87,6 +94,12 @@ let source=[
  'if(document.readyState==="complete")report();',
  'else window.addEventListener("load",report,{once:true});'
 ].join('\n');
+if(productReadOnlyGm){
+ const grants=source.split('// ==/UserScript==')[0].match(/^\/\/ @grant /gm)||[];
+ assert.equal(grants.length,1,'A review-only DOM product fixture must have one GM grant');
+ assert.ok(!source.includes('GM_setValue'),
+   'No writable GM API or storage side effect may enter the review-only product source');
+}
 // Only a disposable selector source is ever handed to the application's
 // existing AST planner. Neither the real user's scripts nor site data are read.
 if(isProductOriginal||isProductCandidate){
@@ -719,7 +732,7 @@ async function main(){
     injected:broken.injected,gm:broken.gm,gmDefault:broken.gmDefault,
     gmRoundtrip:broken.gmRoundtrip,business:broken.business,action:broken.action
   },{
-    injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',
+    injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:expectedRoundtrip,
     business:'missing-target',action:null
   });
   const fixedPage=await context.newPage();
@@ -743,8 +756,8 @@ async function main(){
     injected:fixed.injected,gm:fixed.gm,gmDefault:fixed.gmDefault,
     gmRoundtrip:fixed.gmRoundtrip,business:fixed.business,action:fixed.action
   },isProductOriginal
-    ?{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'missing-target',action:null}
-    :{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',business:'recovered',action:'done'});
+    ?{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:expectedRoundtrip,business:'missing-target',action:null}
+    :{injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:expectedRoundtrip,business:'recovered',action:'done'});
   // TASK-007 / TEST-017/026: a matching-origin child frame is not an
   // independent user-approved top-level script target. A genuine extension
   // is present here; the browser must exercise the actual manager policy.
@@ -775,7 +788,9 @@ async function main(){
   assert.deepEqual(childEvidence,{injected:null,gm:null,action:null},
     'A disposable matching-origin iframe must not execute this top-frame-only diagnostic script');
   console.log('PASS: vendor-hosted unpacked Tampermonkey '+runAt+
-    ' fixture variant '+variant+' GM_getValue default + GM_setValue/readback and expected business assertions.');
+    ' fixture variant '+variant+' GM_getValue default + '+
+    (productReadOnlyGm?'read-only no-storage-write grant':'GM_setValue/readback')+
+    ' and expected synthetic business assertions.');
   if(isProductOriginal){
     assert.ok(nativeExport,'Original manager control must use the native recovery export');
     assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
@@ -859,7 +874,7 @@ async function main(){
     assert.deepEqual({injected:restored.injected,gm:restored.gm,
      gmDefault:restored.gmDefault,gmRoundtrip:restored.gmRoundtrip,
      business:restored.business,action:restored.action},{
-      injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:'true',
+      injected:'yes',gm:'true',gmDefault:'true',gmRoundtrip:expectedRoundtrip,
       business:'missing-target',action:null
      },'After explicit in-manager recovery, a fresh target-present page must execute the ORIGINAL broken script');
     assert.deepEqual(fs.readFileSync(nativeExport.sourcePath),nativeExport.originalBytes,
