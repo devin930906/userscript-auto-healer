@@ -282,6 +282,43 @@ test('TASK-011/TEST-020/026: in-place journal mutation after final per-item rech
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-011/TEST-020/021/026: malformed reserved restore evidence cannot masquerade as an empty recovery inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-malformed-restore-evidence-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const inspect=()=>inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  await writeFile(join(backupDirectory,'ordinary-notes.txt'),'other user notes');
+  const clean=await inspect();
+  assert.equal(clean.status,'RESTORE_INTENT_INVENTORY_READ_ONLY',
+   'unrelated files must not be mistaken for recovery evidence');
+  if(clean.status==='RESTORE_INTENT_INVENTORY_READ_ONLY')
+   assert.equal(clean.inspected,0);
+
+  for(const damagedName of [
+   '.uah-restore-'+randomUUID()+'.pending.corrupt',
+   '.uah-restore-'+randomUUID()+'.journal.json.partial',
+   '.UAH-RESTORE-'+randomUUID()+'.pending'
+  ]){
+   const file=join(backupDirectory,damagedName);
+   await writeFile(file,'incomplete native recovery evidence');
+   const seen=await inspect();
+   assert.deepEqual([seen.status,'reason' in seen?seen.reason:null],
+    ['BLOCKED','RECOVERY_REVIEW_REQUIRED'],
+    'damaged reserved restore artifacts require manual review: '+damagedName);
+   assert.deepEqual(await readFile(file,'utf8'),'incomplete native recovery evidence',
+    'a read-only inventory must preserve the ambiguous recovery artifact');
+   await rm(file);
+  }
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.deepEqual(await readdir(backupDirectory),['ordinary-notes.txt']);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-011/TEST-020/021/026: interrupted restore journal pending must not look like an empty clean inventory',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-interrupted-journal-'));
  try{
