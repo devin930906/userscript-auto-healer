@@ -10,7 +10,13 @@ import {lstat,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 
-const RESTORE_PENDING=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/;
+const UUID='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const RESTORE_PENDING=new RegExp('^\\.uah-restore-'+UUID+'\\.pending$');
+const PUBLISHED_JOURNAL=new RegExp('^\\.uah-restore-'+UUID+'\\.journal\\.json$');
+// Valid published restore journals and canonical source path mutexes remain
+// legal. Every other name under this native namespace needs manual review.
+const RESTORE_PATH_MUTEX=/^\.uah-restore-path-[0-9a-f]{64}$/;
+const RESERVED_RESTORE_PREFIX=/^\.uah-restore-/i;
 const MAX_ENTRIES=1024;
 /** Only a separately captured native inode can exempt this transaction's
  * own staging file. The filename alone is NOT evidence of ownership.
@@ -47,7 +53,14 @@ export async function hasInterruptedRestoreStaging(
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
-  if(!RESTORE_PENDING.test(entry.name))continue;
+  if(!RESTORE_PENDING.test(entry.name)){
+   // Preserve corrupt or renamed native recovery evidence: never report
+   // the directory clean merely because its staging filename is malformed.
+   if(RESERVED_RESTORE_PREFIX.test(entry.name)&&
+      !PUBLISHED_JOURNAL.test(entry.name)&&
+      !RESTORE_PATH_MUTEX.test(entry.name))pending=true;
+   continue;
+  }
   if(entry.name!==verifiedOwnPendingName||!verifiedOwnPendingIdentity){
    pending=true;continue;
   }
