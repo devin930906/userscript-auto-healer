@@ -1295,3 +1295,41 @@ test('TASK-011/TEST-020/021/026: post-release source verification cannot bless a
   t.mock.reset();
  }
 });
+
+
+test('TASK-011/TEST-020/021/026: published journal rewritten after structural preflight requires manual recovery review',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-journal-rewrite-race-'));
+ try{
+  const journal=join(root,'.uah-restore-'+randomUUID()+'.journal.json');
+  const prefix='fixture~'+'a'.repeat(24);
+  const canonical=JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:'d'.repeat(64),
+   originalSha256:'a'.repeat(64),displacedSha256:'b'.repeat(64),
+   originalBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
+   displacedBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\n';
+  await writeFile(journal,canonical);
+  const inspection=require('../../src/version/restore-intent-inspection') as
+   typeof import('../../src/version/restore-intent-inspection');
+  const verify=inspection.hasStructurallyValidNativeRestoreJournalReadOnly;
+  let tampered=false;
+  t.mock.method(inspection,'hasStructurallyValidNativeRestoreJournalReadOnly',
+   async (path:string)=>{
+    const valid=await verify(path);
+    if(valid&&!tampered){
+     tampered=true;
+     // In-place file mutation changes journal bytes, not the directory
+     // namespace. The earlier valid result must not survive to the scan receipt.
+     await writeFile(path,'{"unexpected":true}\n');
+    }
+    return valid;
+   });
+  const interrupted=await hasInterruptedRestoreStaging(root);
+  assert.equal(tampered,true,'the injection must follow a real valid parse');
+  assert.equal(interrupted,true,
+   'published journal rewritten after structural preflight requires manual recovery review');
+  assert.equal(await readFile(journal,'utf8'),'{"unexpected":true}\n');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

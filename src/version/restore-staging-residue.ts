@@ -51,6 +51,9 @@ export async function hasInterruptedRestoreStaging(
  if(!before.isDirectory()||before.isSymbolicLink())
   throw new Error('invalid restore directory');
  let entries=0,pending=false,ownedSeen=false;
+ // A structurally valid journal can be edited in place without changing its
+ // parent directory timestamp. Keep its inode/metadata for a final recheck.
+ const publishedChecks:Array<{path:string;identity:BigIntStats}>=[];
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
@@ -67,9 +70,12 @@ export async function hasInterruptedRestoreStaging(
      if(current.isSymbolicLink()||
         (published?(!current.isFile()||current.nlink!==1n):
          !current.isDirectory()))pending=true;
-     else if(published&&
-       !await hasStructurallyValidNativeRestoreJournalReadOnly(
-        join(directory,entry.name)))pending=true;
+     else if(published){
+      const path=join(directory,entry.name);
+      if(!await hasStructurallyValidNativeRestoreJournalReadOnly(path))
+       pending=true;
+      else publishedChecks.push({path,identity:current});
+     }
     }catch{pending=true;}
    }else if(RESERVED_RESTORE_PREFIX.test(entry.name)){
     // Preserve corrupt or renamed native recovery evidence even if the
@@ -100,6 +106,34 @@ export async function hasInterruptedRestoreStaging(
     if(!sameOwnedPending(current,verifiedOwnPendingIdentity))pending=true;
    }catch{pending=true;}
   }
+ }
+ // A valid published intent can become corrupt AFTER its first read.
+ // Recheck the same single-link inode, metadata and exact bounded wire
+ // format before declaring the recovery namespace free of crash residue.
+ // This is a read-only snapshot, not an exclusive cross-process lock.
+ for(const {path,identity} of publishedChecks){
+  try{
+   if(await hasUnsafePathLink(path)){pending=true;continue;}
+   const current=await lstat(path,{bigint:true});
+   if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1n||
+      current.dev!==identity.dev||current.ino!==identity.ino||
+      current.size!==identity.size||current.mtimeNs!==identity.mtimeNs||
+      current.ctimeNs!==identity.ctimeNs||current.mode!==identity.mode||
+      !await hasStructurallyValidNativeRestoreJournalReadOnly(path))
+    pending=true;
+  }catch{pending=true;}
+ }
+ // A different journal can be rewritten while another is being reread.
+ // Check all captured identities again at the aggregate boundary.
+ for(const {path,identity} of publishedChecks){
+  try{
+   const current=await lstat(path,{bigint:true});
+   if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1n||
+      current.dev!==identity.dev||current.ino!==identity.ino||
+      current.size!==identity.size||current.mtimeNs!==identity.mtimeNs||
+      current.ctimeNs!==identity.ctimeNs||current.mode!==identity.mode)
+    pending=true;
+  }catch{pending=true;}
  }
  const after=await lstat(directory,{bigint:true});
  if(!after.isDirectory()||after.isSymbolicLink()||
