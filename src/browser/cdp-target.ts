@@ -18,6 +18,8 @@ export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'TARGET_ID_MISMATCH'|'MAIN_FRAME_PENDING'|'MAIN_FRAME_CONFIRMED'|
   'MAIN_FRAME_ABOUT_BLANK'|'MAIN_FRAME_MISSING_URL'|
   'MAIN_FRAME_INVALID_URL'|'MAIN_FRAME_URL_MISMATCH'|
+  'MAIN_FRAME_CDP_REJECTED'|'MAIN_FRAME_RESPONSE_INVALID'|
+  'MAIN_FRAME_TRANSPORT_FAILED'|
   'UNVERIFIED_TAB_CLOSED'|'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED';
 function validTarget(raw:string):boolean {
   if(raw.length>4096||raw.trim()!==raw)return false;
@@ -46,6 +48,34 @@ export function classifyMainFrameUrl(actual:unknown,expected:string):TargetNavig
     return found.href===approved.href?
       'MAIN_FRAME_CONFIRMED':'MAIN_FRAME_URL_MISMATCH';
   }catch{return 'MAIN_FRAME_INVALID_URL';}
+}
+
+/** Classify a bounded CDP Page.getFrameTree message without leaking error
+ * text, URL, source or arbitrary page data. null means an unrelated message
+ * ID and is not a navigation receipt. All errors remain fail-closed.
+ */
+export function classifyMainFrameResponse(
+  raw:unknown, expectedUrl:string
+):TargetNavigationStage|null{
+  if(typeof raw!=='string'||raw.length>16384)return 'MAIN_FRAME_RESPONSE_INVALID';
+  try{
+    const parsed:unknown=JSON.parse(raw);
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+      return 'MAIN_FRAME_RESPONSE_INVALID';
+    const receipt=parsed as {id?:unknown;error?:unknown;
+      result?:{frameTree?:{frame?:{url?:unknown}}}};
+    if(receipt.id!==1)return null;
+    if(receipt.error!==undefined&&receipt.error!==null)
+      return 'MAIN_FRAME_CDP_REJECTED';
+    const result=receipt.result;
+    if(!result||typeof result!=='object'||Array.isArray(result)||
+       !result.frameTree||typeof result.frameTree!=='object'||
+       Array.isArray(result.frameTree)||
+       !result.frameTree.frame||typeof result.frameTree.frame!=='object'||
+       Array.isArray(result.frameTree.frame))
+      return 'MAIN_FRAME_RESPONSE_INVALID';
+    return classifyMainFrameUrl(result.frameTree.frame.url,expectedUrl);
+  }catch{return 'MAIN_FRAME_RESPONSE_INVALID';}
 }
 
 /** Do not send Target.createTarget after cancellation or a stopped session.
@@ -181,25 +211,17 @@ async function confirmsMainFrameNavigation(
       socket.addEventListener('open',()=>{
         if(done||signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
         try{socket?.send(JSON.stringify({id:1,method:'Page.getFrameTree'}));}
-        catch{finish('MAIN_FRAME_PENDING');}
+        catch{finish('MAIN_FRAME_TRANSPORT_FAILED');}
       });
       socket.addEventListener('message',event=>{
         if(done||signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
-        try{
-          const raw=String(event.data);
-          if(raw.length>16384){finish('MAIN_FRAME_PENDING');return;}
-          const response=JSON.parse(raw) as {
-            id?:unknown;result?:{frameTree?:{frame?:{url?:unknown}}};error?:unknown
-          };
-          if(response.id!==1)return;
-          const actual=response.result?.frameTree?.frame?.url;
-          finish(response.error?'MAIN_FRAME_PENDING':
-            classifyMainFrameUrl(actual,expectedUrl));
-        }catch{finish('MAIN_FRAME_PENDING');}
+        // Never emit the CDP payload; only an allowlisted fixed stage.
+        const receipt=classifyMainFrameResponse(event.data,expectedUrl);
+        if(receipt!==null)finish(receipt);
       });
-      socket.addEventListener('error',()=>finish('MAIN_FRAME_PENDING'));
-      socket.addEventListener('close',()=>finish('MAIN_FRAME_PENDING'));
-    }catch{finish('MAIN_FRAME_PENDING');}
+      socket.addEventListener('error',()=>finish('MAIN_FRAME_TRANSPORT_FAILED'));
+      socket.addEventListener('close',()=>finish('MAIN_FRAME_TRANSPORT_FAILED'));
+    }catch{finish('MAIN_FRAME_TRANSPORT_FAILED');}
   });
 }
 
