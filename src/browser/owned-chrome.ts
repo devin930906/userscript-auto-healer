@@ -4,6 +4,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
 import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket } from './cdp-session';
 
@@ -158,9 +159,11 @@ export async function launchApprovedIsolatedChrome(
   };
   const pid=child.pid;
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
-  const began=Date.now();
+  // Deadline uses monotonic process time: OS clock corrections must not
+  // prematurely cut off (or extend) the 20-second consented CDP bootstrap.
+  const began=performance.now();
   try{
-    while(Date.now()-began<20000){
+    while(performance.now()-began<20000){
       if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
       let phase:'FETCH'|'PROCESS'='FETCH';
