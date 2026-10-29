@@ -263,7 +263,7 @@ test('TASK-011/TEST-020/026: damaged source-bound checkpoint name must not appea
    if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
    const original=join(options.backupDirectory,made.checkpointFileName);
    const changedName=made.checkpointFileName.replace(
-     /\\.checkpoint\\.json$/,'.checkpoint.json.partial');
+     /\.checkpoint\.json$/,'.checkpoint.json.partial');
    assert.notEqual(changedName,made.checkpointFileName);
    const damaged=join(options.backupDirectory,changedName);
    const bytes=await readFile(original);
