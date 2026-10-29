@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
+  readTampermonkeyCdpTargetReceipt,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 
 const id='1234567890abcdef';
@@ -268,4 +269,32 @@ test('TASK-007/TEST-017/026: only native registered Chrome sessions may be inspe
    {ok:false,code:'UNVERIFIED_BROWSER'});
  }
  assert.equal(calls,0,'unregistered Chrome session accessors or Proxy traps must not execute');
+});
+
+// TASK-007 / Issue #486 / TEST-017/026: a Target.getTargets CDP reply is
+// not successful when its error key is present, even with a falsy JSON value
+// and plausible runtime targetInfos. No CDP failure may mint a runtime hint.
+test('TASK-007/TEST-017/026: CDP target-list receipt rejects explicit falsy errors and non-text data',()=>{
+ const valid={id:1,result:{targetInfos:[worker]}};
+ assert.deepEqual(readTampermonkeyCdpTargetReceipt(JSON.stringify(valid)),[worker],
+  'valid CDP reply remains a target metadata hint only');
+ assert.equal(readTampermonkeyCdpTargetReceipt(JSON.stringify({id:2,result:valid.result})),undefined,
+  'unrelated browser CDP events must not finish target inspection');
+ for(const error of [false,0,'',null]){
+  assert.equal(readTampermonkeyCdpTargetReceipt(JSON.stringify({
+   id:1,error,result:valid.result
+  })),null,'an explicit CDP error must block even when its JSON value is falsy');
+ }
+ for(const raw of [
+  JSON.stringify({id:1,error:{message:'PRIVATE_EXTENSION_INFO'},result:valid.result}),
+  JSON.stringify({id:1,result:null}),
+  JSON.stringify({id:1,result:{}}),
+  JSON.stringify({id:1,result:{targetInfos:'forged'}}),
+  JSON.stringify({id:1,result:valid.result,padding:'PRIVATE'.repeat(90000)}),
+  'null','not-json',Buffer.from(JSON.stringify(valid)),
+  {toString(){throw Error('PRIVATE_CALLED_BY_PARSER');}}
+ ]){
+  assert.equal(readTampermonkeyCdpTargetReceipt(raw),null,
+   'invalid/oversized/non-native-text receipts must not return manager hints');
+ }
 });
