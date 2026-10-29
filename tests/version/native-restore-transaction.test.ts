@@ -1137,7 +1137,7 @@ test('TASK-011/TEST-020/026: published recovery namespace rejects malformed inod
    originalBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
    displacedBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
    automaticPatchAllowed:false,automaticRollbackAllowed:false
-  })+'\\n';
+  })+'\n';
   await writeFile(journal,validJournal);
   assert.equal(await hasInterruptedRestoreStaging(root),false,
    'a valid, bounded, canonical native restore journal remains recognizable');
