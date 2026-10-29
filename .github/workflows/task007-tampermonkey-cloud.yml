@@ -9,6 +9,16 @@ on:
       - 'src/manager/tampermonkey-gm-probe.ts'
       - '.github/workflows/task007-tampermonkey-cloud.yml'
   workflow_dispatch:
+    inputs:
+      matrix_case:
+        description: 'Select a single approved diagnostic case, or preserve the full 16-case matrix'
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - native-gm-document-idle
+          - product-candidate-document-idle
 
 permissions:
   contents: read
@@ -77,61 +87,11 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include:
-          - run_at: document-start
-            variant: baseline
-          - run_at: document-body
-            variant: baseline
-          - run_at: document-end
-            variant: baseline
-          - run_at: document-idle
-            variant: baseline
-          # Real application AST planner creates a review-only candidate.
-          # Two independent managers assert the stale original does not work
-          # and the exact audited candidate restores a disposable fixture.
-          - run_at: document-idle
-            variant: product-original
-          - run_at: document-idle
-            variant: product-candidate
-          # TASK-007 / TEST-017/018: Unlike the native GM-only fixture,
-          # these two jobs run actual application-generated AST original and
-          # audited candidate under document-start in separate disposable
-          # manager Profiles, checking failed selector vs restored DOM action.
-          # Only review evidence is produced; no script is auto-installed
-          # into user Chrome and no repair/rollback permissions are granted.
-          - run_at: document-start
-            variant: product-original
-          - run_at: document-start
-            variant: product-candidate
-          # TASK-007/009/012 / TEST-017/018/019/023: validate the newly
-          # integrated getElementById ID-to-ID review-only candidate inside
-          # actual vendor-hosted Tampermonkey. Independent Profiles install
-          # native exported original vs verified candidate; candidate Profile
-          # also explicitly reinstalls the independent recovery export.
-          - run_at: document-idle
-            variant: product-id-original
-          - run_at: document-idle
-            variant: product-id-candidate
-          # TASK-007/009/012: exercise querySelectorAll's NodeList[0] lookup
-          # using the same native import, AST audit and real manager manual
-          # install/recovery chain as the selector and ID variants.
-          - run_at: document-idle
-            variant: product-all-original
-          - run_at: document-idle
-            variant: product-all-candidate
-          # End-to-end manager installation of the actual native product fixture.
-          # Unlike the AST-only PoC, this is the source served by production code.
-          # Native product-generated GM diagnostic in every supported timing
-          # mode; unlike baseline, these use production fixture generation.
-          # Every entry has its own disposable Profile and manager install.
-          - run_at: document-start
-            variant: native-gm
-          - run_at: document-body
-            variant: native-gm
-          - run_at: document-end
-            variant: native-gm
-          - run_at: document-idle
-            variant: native-gm
+        # A manual focused dispatch runs one authorized isolated case only.
+        # Pull requests and the default manual dispatch retain the exact
+        # original 16-case regression matrix; the signing source is still
+        # downloaded/verified once and the selected runner rechecks its CRX.
+        include: ${{ fromJSON(inputs.matrix_case == 'native-gm-document-idle' && '[{"run_at":"document-idle","variant":"native-gm"}]' || inputs.matrix_case == 'product-candidate-document-idle' && '[{"run_at":"document-idle","variant":"product-candidate"}]' || '[{"run_at":"document-start","variant":"baseline"},{"run_at":"document-body","variant":"baseline"},{"run_at":"document-end","variant":"baseline"},{"run_at":"document-idle","variant":"baseline"},{"run_at":"document-idle","variant":"product-original"},{"run_at":"document-idle","variant":"product-candidate"},{"run_at":"document-start","variant":"product-original"},{"run_at":"document-start","variant":"product-candidate"},{"run_at":"document-idle","variant":"product-id-original"},{"run_at":"document-idle","variant":"product-id-candidate"},{"run_at":"document-idle","variant":"product-all-original"},{"run_at":"document-idle","variant":"product-all-candidate"},{"run_at":"document-start","variant":"native-gm"},{"run_at":"document-body","variant":"native-gm"},{"run_at":"document-end","variant":"native-gm"},{"run_at":"document-idle","variant":"native-gm"}]') }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
