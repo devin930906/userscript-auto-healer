@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {lstat,mkdir,mkdtemp,readdir,readFile,rm,utimes,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,mkdtemp,readdir,readFile,rename,rm,utimes,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -250,4 +250,34 @@ test('TEST-020/026: untrusted Proxy claims never execute traps before checkpoint
     assert.equal(await readFile(options.sourcePath,'utf8'),source);
     assert.deepEqual(await readdir(options.backupDirectory),[]);
   });
+});
+
+test('TASK-011/TEST-020/026: damaged source-bound checkpoint name must not appear as clean zero',async()=>{
+ await fixture(async options=>{
+   const staged=await stageReviewedCandidateOnly(
+     request,proposeLiteralSelectorPatch(request),options);
+   assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+   if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const made=await stageRecoveryCheckpointOnly(request,staged,options);
+   assert.equal(made.status,'CHECKPOINT_STAGED_UNVERIFIED');
+   if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+   const original=join(options.backupDirectory,made.checkpointFileName);
+   const changedName=made.checkpointFileName.replace(
+     /\.checkpoint\.json$/,'.checkpoint.json.partial');
+   assert.notEqual(changedName,made.checkpointFileName);
+   const damaged=join(options.backupDirectory,changedName);
+   const bytes=await readFile(original);
+   await rename(original,damaged);
+   // A foreign filename and a legitimate backup may coexist in this folder.
+   // They must not justify ignoring our damaged checkpoint namespace.
+   await writeFile(join(options.backupDirectory,'other.checkpoint.json'),'unrelated');
+   const inventory=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+   assert.deepEqual(inventory,{
+     status:'BLOCKED',reason:'UNSAFE_CHECKPOINT',
+     automaticPatchAllowed:false,automaticRollbackAllowed:false,
+     tampermonkeyVerified:false,businessVerified:false
+   },'renamed or truncated checkpoint cannot silently become an empty inventory');
+   assert.deepEqual(await readFile(damaged),bytes,'do not alter damaged recovery bytes');
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
 });
