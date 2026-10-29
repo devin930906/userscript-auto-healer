@@ -10,6 +10,13 @@ import {join,parse,resolve,sep} from 'node:path';
 export async function hasUnsafePathLink(path:string):Promise<boolean>{
   // Refuse ambiguous lexical aliases instead of normalizing a consented path.
   if(path!==resolve(path))return true;
+  // A Win32 extended (\\\\?\\) or device (\\\\.\\) namespace can point to the
+  // same selected file under a second absolute spelling. The prior component
+  // walk starts AFTER parse(path).root and therefore never inspected these
+  // roots. Refuse before lstat or creating source-path-derived recovery locks.
+  if(process.platform==='win32'&&
+     (path.startsWith(String.fromCharCode(92,92,63,92))||
+      path.startsWith(String.fromCharCode(92,92,46,92))))return true;
   const root=parse(path).root;
   let current=root;
   for(const component of path.slice(root.length).split(sep).filter(Boolean)){
