@@ -148,3 +148,35 @@ test('TASK-011/TEST-020/026: changed backup during final source recheck cannot r
   }finally{intercepted.mock.restore();}
  });
 });
+
+test('TASK-011 TEST-020/021/026: external source edit after final backup verification must block native restore consent',async()=>{
+ await fixture(async({source,backupFile})=>{
+  const recovery=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const verify=recovery.verifyBackupRecoverySource;
+  const independentEdit=Buffer.from('// ==UserScript==\\n// @name Changed After Last Backup Read\\n// ==/UserScript==\\n');
+  let completedBackupChecks=0;
+  const intercepted=mock.method(recovery,'verifyBackupRecoverySource',
+   async(...args:Parameters<typeof verify>)=>{
+    const result=await verify(...args);
+    if(result.status==='RECOVERY_SOURCE_VERIFIED_READ_ONLY'&&
+       ++completedBackupChecks===2){
+     // This edit lands at the final selection boundary: both previous
+     // source fingerprints matched, both backup checks succeeded, and the
+     // original has changed while the second asynchronous backup check ran.
+     await writeFile(source,independentEdit);
+    }
+    return result;
+   });
+  try{
+   const outcome=await prepareManualOriginalRestoreSelection(source,backupFile);
+   assert.equal(completedBackupChecks,2,'fixture must reach the SECOND, final backup check');
+   assert.deepEqual(outcome,{status:'BLOCKED',reason:'SOURCE_UNVERIFIED'},
+    'native UI must not request consent based on a stale selected-source SHA');
+   assert.deepEqual(await readFile(source),independentEdit,
+    'preflight must preserve independently edited original bytes');
+   assert.deepEqual(await readFile(backupFile),original,
+    'preflight must not touch independently verified recovery backup');
+  }finally{intercepted.mock.restore();}
+ });
+});
