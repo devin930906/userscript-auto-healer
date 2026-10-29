@@ -35,7 +35,492 @@ const deny=(reason:Reason):RestoreIntentObservation=>
 const SHA=/^[a-f0-9]{64}$/;
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const JOURNAL_NAME=new RegExp('^\\.uah-restore-'+UUID+'\\.journal\\.json$');
-const BACKUP_NAME=new RegExp('^'+UUID+'\\.backup\\.user\\.js$');
+const BACKUP_NAME=new RegExp('^'+UUID+'\\.backup\\.user\\.js
+const MAX_JOURNAL_BYTES=4096;
+type Input={
+ sourcePath:string;backupDirectory:string;journalFileName:string;
+ userApproved:boolean
+};
+type Journal={
+ schema:number;state:string;sourcePathSha256:string;
+ originalSha256:string;displacedSha256:string;
+ originalBackupFileName:string;displacedBackupFileName:string;
+ automaticPatchAllowed:boolean;automaticRollbackAllowed:boolean
+};
+function sameFile(a:BigIntStats,b:BigIntStats):boolean{
+ return a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
+  a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
+}
+function sameDir(a:BigIntStats,b:BigIntStats):boolean{
+ return a.dev===b.dev&&a.ino===b.ino;
+}
+function plain(input:unknown,names:readonly string[]):Record<string,unknown>|null{
+ try{
+  if(!input||typeof input!=='object'||Array.isArray(input)||
+     nodeTypes.isProxy(input))return null;
+  const prototype=Object.getPrototypeOf(input);
+  if(prototype!==Object.prototype&&prototype!==null)return null;
+  const d=Object.getOwnPropertyDescriptors(input);
+  const keys=Reflect.ownKeys(d);
+  if(keys.length!==names.length||keys.some(k=>typeof k!=='string')||
+     names.some(k=>!Object.prototype.hasOwnProperty.call(d,k)||
+      !Object.prototype.hasOwnProperty.call(d[k],'value')))return null;
+  const out:Record<string,unknown>=Object.create(null);
+  for(const name of names)out[name]=d[name].value;
+  return out;
+ }catch{return null;}
+}
+function validPath(p:unknown):p is string{
+ return typeof p==='string'&&p.length>0&&p.length<=4096&&
+  !p.includes('\0')&&isAbsolute(p)&&resolve(p)===p;
+}
+function parse(input:unknown):Input|null{
+ const x=plain(input,['sourcePath','backupDirectory','journalFileName','userApproved']);
+ if(!x||!validPath(x.sourcePath)||!validPath(x.backupDirectory)||
+    typeof x.journalFileName!=='string'||
+    !JOURNAL_NAME.test(x.journalFileName)||
+    !/^[^\\/\u0000-\u001f]+\.user\.js$/i.test(basename(x.sourcePath))||
+    typeof x.userApproved!=='boolean')return null;
+ return x as Input;
+}
+function parseJournal(text:string,sourcePath?:string):Journal|null{
+ try{
+  // Accept only the exact bounded serialization produced by the existing
+  // native restore writer. This also rejects duplicate or unexpected keys.
+  const parsed:unknown=JSON.parse(text);
+  const names=['schema','state','sourcePathSha256','originalSha256',
+   'displacedSha256','originalBackupFileName','displacedBackupFileName',
+   'automaticPatchAllowed','automaticRollbackAllowed'];
+  const x=plain(parsed,names);
+  if(!x||text!==JSON.stringify(parsed)+'\n'||x.schema!==1||
+     x.state!=='RESTORE_INTENT_UNVERIFIED'||
+     x.automaticPatchAllowed!==false||x.automaticRollbackAllowed!==false||
+     typeof x.sourcePathSha256!=='string'||!SHA.test(x.sourcePathSha256)||
+     (sourcePath!==undefined&&
+      x.sourcePathSha256!==createHash('sha256').update(sourcePath).digest('hex'))||
+     typeof x.originalSha256!=='string'||!SHA.test(x.originalSha256)||
+     typeof x.displacedSha256!=='string'||!SHA.test(x.displacedSha256)||
+     x.originalSha256===x.displacedSha256||
+     typeof x.originalBackupFileName!=='string'||
+     typeof x.displacedBackupFileName!=='string'||
+     x.originalBackupFileName===x.displacedBackupFileName)
+   return null;
+  // Both names MUST be bound to the same selected native source path,
+  // regardless of identical script names or bytes in another directory.
+  if(sourcePath!==undefined){
+   const prefix=backupPrefix(sourcePath)+'.';
+   for(const n of [x.originalBackupFileName,x.displacedBackupFileName]){
+    if(!n.startsWith(prefix)||!BACKUP_NAME.test(n.slice(prefix.length)))
+     return null;
+   }
+  }else{
+   // Path-free crash-residue preflight can validate canonical journal bytes
+   // and a shared native backup naming prefix, but cannot attest source
+   // ownership or authorize recovery. Full path binding remains mandatory
+   // in inspectNativeRestoreIntentReadOnly().
+   const original=STRUCTURAL_BACKUP_NAME.exec(x.originalBackupFileName as string);
+   const displaced=STRUCTURAL_BACKUP_NAME.exec(x.displacedBackupFileName as string);
+   if(!original||!displaced||original[1]!==displaced[1])return null;
+  }
+  return x as Journal;
+ }catch{return null;}
+}
+/** Bounded descriptor read with no symlink/hardlink and stable path identity. */
+async function readJournal(path:string):Promise<string|null>{
+ try{
+  if(await hasUnsafePathLink(path))return null;
+  const before=await lstat(path,{bigint:true});
+  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||
+     before.size<=0n||before.size>BigInt(MAX_JOURNAL_BYTES))return null;
+  const h=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try{
+   const opened=await h.stat({bigint:true});
+   if(!opened.isFile()||opened.nlink!==1n||!sameFile(before,opened))
+    return null;
+   const buffer=Buffer.alloc(MAX_JOURNAL_BYTES+1);
+   let count=0;
+   while(true){
+    const {bytesRead}=await h.read(buffer,count,buffer.length-count,null);
+    if(!bytesRead)break;
+    count+=bytesRead;
+    if(count>MAX_JOURNAL_BYTES)return null;
+   }
+   const after=await h.stat({bigint:true});
+   const byPath=await lstat(path,{bigint:true});
+   if(!sameFile(before,after)||!sameFile(after,byPath)||
+      byPath.nlink!==1n||await hasUnsafePathLink(path))return null;
+   return buffer.subarray(0,count).toString('utf8');
+  }finally{await h.close();}
+ }catch{return null;}
+}
+/** Native crash-residue scan only: safely reject corrupt published intent
+ * bytes without user source paths or any business/rollback authority. The
+ * existing descriptor reader enforces bounds, no symlink/hardlink and stable
+ * file identity; the parser enforces exact serialized fields and flags.
+ * This does NOT authenticate a journal to a particular source or user.
+ */
+export async function hasStructurallyValidNativeRestoreJournalReadOnly(
+ path:string
+):Promise<boolean>{
+ const text=await readJournal(path);
+ return text!==null&&parseJournal(text)!==null;
+}
+
+/** Recheck both independent backups with the existing bounded, no-link
+ * descriptor verifier. A successful earlier read is not a durable receipt:
+ * an external editor can invalidate either backup while source or journal
+ * identity is being examined. This remains an observational snapshot only.
+ */
+async function backupsVerified(x:Input,j:Journal):Promise<boolean>{
+ for(const [name,sha] of [
+  [j.originalBackupFileName,j.originalSha256],
+  [j.displacedBackupFileName,j.displacedSha256]
+ ] as const){
+  const file=join(x.backupDirectory,name);
+  if(await hasUnsafePathLink(file))return false;
+  const st=await lstat(file,{bigint:true});
+  if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1n||
+     st.size<=0n||st.size>BigInt(MAX_SCRIPT_BYTES))return false;
+  const checked=await verifyBackupRecoverySource({
+   sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
+   backupFileName:name,expectedSha256:sha,
+   expectedByteLength:Number(st.size),userApproved:true
+  });
+  if(checked.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')return false;
+ }
+ return true;
+}
+/** Read-only: classify observed source bytes as old or restored, or refuse.
+ * No finding permits any automatic retry, rename, manager action or rollback.
+ */
+export async function inspectNativeRestoreIntentReadOnly(
+ untrusted:unknown
+):Promise<RestoreIntentObservation>{
+ const x=parse(untrusted);
+ if(!x)return deny('INVALID_REQUEST');
+ if(!x.userApproved)return deny('NOT_AUTHORIZED');
+ try{
+  if(await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('UNSAFE_PATH');
+  const sourceStart=await lstat(x.sourcePath,{bigint:true});
+  const dirStart=await lstat(x.backupDirectory,{bigint:true});
+  if(!sourceStart.isFile()||sourceStart.isSymbolicLink()||
+     sourceStart.nlink!==1n||sourceStart.size<=0n||
+     sourceStart.size>BigInt(MAX_SCRIPT_BYTES)||
+     !dirStart.isDirectory()||dirStart.isSymbolicLink())return deny('UNSAFE_PATH');
+  const journalPath=join(x.backupDirectory,x.journalFileName);
+  // The bounded reader verifies its own descriptor, but subsequent asynchronous
+  // backup/source checks can observe a different journal inode with identical
+  // bytes. Bind the complete observation to one published file identity.
+  let journalBefore:BigIntStats;
+  try{journalBefore=await lstat(journalPath,{bigint:true});}
+  catch{return deny('UNSAFE_JOURNAL');}
+  if(!journalBefore.isFile()||journalBefore.isSymbolicLink()||
+     journalBefore.nlink!==1n)return deny('UNSAFE_JOURNAL');
+  const contents=await readJournal(journalPath);
+  if(contents===null)return deny('UNSAFE_JOURNAL');
+  const j=parseJournal(contents,x.sourcePath);
+  if(!j)return deny('UNSAFE_JOURNAL');
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  const original=await verifyApprovedSourceFingerprint({
+   sourcePath:x.sourcePath,expectedSha256:j.originalSha256,userApproved:true
+  });
+  let sourceState:'ORIGINAL_PRESENT'|'DISPLACED_PRESENT'|null=
+   original.status==='MATCHED_READ_ONLY'?'ORIGINAL_PRESENT':null;
+  if(!sourceState){
+   const displaced=await verifyApprovedSourceFingerprint({
+    sourcePath:x.sourcePath,expectedSha256:j.displacedSha256,userApproved:true
+   });
+   if(displaced.status==='MATCHED_READ_ONLY')sourceState='DISPLACED_PRESENT';
+  }
+  if(!sourceState)return deny('SOURCE_DIVERGED');
+  const sourceEnd=await lstat(x.sourcePath,{bigint:true});
+  const dirEnd=await lstat(x.backupDirectory,{bigint:true});
+  if(!sameFile(sourceStart,sourceEnd)||sourceEnd.nlink!==1n||
+     !sameDir(dirStart,dirEnd)||await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
+  // Recheck the exact journal after the filesystem operations. Any external
+  // mutation requires a new inspection. It never yields write authority.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Verify the two backups AGAIN after the asynchronous source/journal reads.
+  // Without this, an external writer can modify one after its first check
+  // and the user sees a false reconciled/verified status.
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  // The second backup round has asynchronous reads. A separate process may
+  // replace or rewrite the previously verified intent *during* that round.
+  // Re-read the exact bounded journal before returning any observation;
+  // matching backup bytes cannot authenticate a stale/replaced intent.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // The final independent backup reads suspend execution. An external
+  // editor can replace the selected source AFTER our earlier fingerprint
+  // and sourceStart/sourceEnd identity check, but BEFORE this observation
+  // is returned. Recheck the exact previously observed version and source
+  // inode after those awaits; never issue a stale recovery observation.
+  // This is still a bounded read-only snapshot, not an exclusive file lock
+  // or permission to restore automatically.
+  const finalSource=await verifyApprovedSourceFingerprint({
+   sourcePath:x.sourcePath,
+   expectedSha256:sourceState==='ORIGINAL_PRESENT'
+    ?j.originalSha256:j.displacedSha256,
+   userApproved:true
+  });
+  if(finalSource.status!=='MATCHED_READ_ONLY')return deny('SOURCE_DIVERGED');
+  const lastSource=await lstat(x.sourcePath,{bigint:true});
+  const lastDir=await lstat(x.backupDirectory,{bigint:true});
+  if(!sameFile(sourceStart,lastSource)||lastSource.nlink!==1n||
+     !sameDir(dirStart,lastDir)||await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
+  // The final source fingerprint itself awaits filesystem I/O. An external
+  // editor can modify the already-verified intent DURING that last read.
+  // Refuse stale recovery observations by checking the exact bounded
+  // journal once more after the final source verification. This remains a
+  // read-only, bounded observation, not an atomic cross-process lock.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Matching content is not enough: replacement by a new same-byte inode
+  // must not receive the original journal's read-only observation.
+  let journalAfter:BigIntStats;
+  try{journalAfter=await lstat(journalPath,{bigint:true});}
+  catch{return deny('UNSAFE_JOURNAL');}
+  if(!journalAfter.isFile()||journalAfter.isSymbolicLink()||
+     journalAfter.nlink!==1n||!sameFile(journalBefore,journalAfter)||
+     journalBefore.mode!==journalAfter.mode)return deny('UNSAFE_JOURNAL');
+  return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
+   sourceState,originalSha256:j.originalSha256,
+   displacedSha256:j.displacedSha256,...noAuthority});
+ }catch{return deny('IO_FAILURE');}
+}
+);
+const STRUCTURAL_BACKUP_NAME=new RegExp('^(.+~[a-f0-9]{24})\\.('+UUID+')\\.backup\\.user\\.js
+const MAX_JOURNAL_BYTES=4096;
+type Input={
+ sourcePath:string;backupDirectory:string;journalFileName:string;
+ userApproved:boolean
+};
+type Journal={
+ schema:number;state:string;sourcePathSha256:string;
+ originalSha256:string;displacedSha256:string;
+ originalBackupFileName:string;displacedBackupFileName:string;
+ automaticPatchAllowed:boolean;automaticRollbackAllowed:boolean
+};
+function sameFile(a:BigIntStats,b:BigIntStats):boolean{
+ return a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
+  a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
+}
+function sameDir(a:BigIntStats,b:BigIntStats):boolean{
+ return a.dev===b.dev&&a.ino===b.ino;
+}
+function plain(input:unknown,names:readonly string[]):Record<string,unknown>|null{
+ try{
+  if(!input||typeof input!=='object'||Array.isArray(input)||
+     nodeTypes.isProxy(input))return null;
+  const prototype=Object.getPrototypeOf(input);
+  if(prototype!==Object.prototype&&prototype!==null)return null;
+  const d=Object.getOwnPropertyDescriptors(input);
+  const keys=Reflect.ownKeys(d);
+  if(keys.length!==names.length||keys.some(k=>typeof k!=='string')||
+     names.some(k=>!Object.prototype.hasOwnProperty.call(d,k)||
+      !Object.prototype.hasOwnProperty.call(d[k],'value')))return null;
+  const out:Record<string,unknown>=Object.create(null);
+  for(const name of names)out[name]=d[name].value;
+  return out;
+ }catch{return null;}
+}
+function validPath(p:unknown):p is string{
+ return typeof p==='string'&&p.length>0&&p.length<=4096&&
+  !p.includes('\0')&&isAbsolute(p)&&resolve(p)===p;
+}
+function parse(input:unknown):Input|null{
+ const x=plain(input,['sourcePath','backupDirectory','journalFileName','userApproved']);
+ if(!x||!validPath(x.sourcePath)||!validPath(x.backupDirectory)||
+    typeof x.journalFileName!=='string'||
+    !JOURNAL_NAME.test(x.journalFileName)||
+    !/^[^\\/\u0000-\u001f]+\.user\.js$/i.test(basename(x.sourcePath))||
+    typeof x.userApproved!=='boolean')return null;
+ return x as Input;
+}
+function parseJournal(text:string,sourcePath:string):Journal|null{
+ try{
+  // Accept only the exact bounded serialization produced by the existing
+  // native restore writer. This also rejects duplicate or unexpected keys.
+  const parsed:unknown=JSON.parse(text);
+  const names=['schema','state','sourcePathSha256','originalSha256',
+   'displacedSha256','originalBackupFileName','displacedBackupFileName',
+   'automaticPatchAllowed','automaticRollbackAllowed'];
+  const x=plain(parsed,names);
+  if(!x||text!==JSON.stringify(parsed)+'\n'||x.schema!==1||
+     x.state!=='RESTORE_INTENT_UNVERIFIED'||
+     x.automaticPatchAllowed!==false||x.automaticRollbackAllowed!==false||
+     typeof x.sourcePathSha256!=='string'||
+     x.sourcePathSha256!==createHash('sha256').update(sourcePath).digest('hex')||
+     typeof x.originalSha256!=='string'||!SHA.test(x.originalSha256)||
+     typeof x.displacedSha256!=='string'||!SHA.test(x.displacedSha256)||
+     x.originalSha256===x.displacedSha256||
+     typeof x.originalBackupFileName!=='string'||
+     typeof x.displacedBackupFileName!=='string'||
+     x.originalBackupFileName===x.displacedBackupFileName)
+   return null;
+  // Both names MUST be bound to the same selected native source path,
+  // regardless of identical script names or bytes in another directory.
+  const prefix=backupPrefix(sourcePath)+'.';
+  for(const n of [x.originalBackupFileName,x.displacedBackupFileName]){
+   if(!n.startsWith(prefix)||!BACKUP_NAME.test(n.slice(prefix.length)))
+    return null;
+  }
+  return x as Journal;
+ }catch{return null;}
+}
+/** Bounded descriptor read with no symlink/hardlink and stable path identity. */
+async function readJournal(path:string):Promise<string|null>{
+ try{
+  if(await hasUnsafePathLink(path))return null;
+  const before=await lstat(path,{bigint:true});
+  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||
+     before.size<=0n||before.size>BigInt(MAX_JOURNAL_BYTES))return null;
+  const h=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try{
+   const opened=await h.stat({bigint:true});
+   if(!opened.isFile()||opened.nlink!==1n||!sameFile(before,opened))
+    return null;
+   const buffer=Buffer.alloc(MAX_JOURNAL_BYTES+1);
+   let count=0;
+   while(true){
+    const {bytesRead}=await h.read(buffer,count,buffer.length-count,null);
+    if(!bytesRead)break;
+    count+=bytesRead;
+    if(count>MAX_JOURNAL_BYTES)return null;
+   }
+   const after=await h.stat({bigint:true});
+   const byPath=await lstat(path,{bigint:true});
+   if(!sameFile(before,after)||!sameFile(after,byPath)||
+      byPath.nlink!==1n||await hasUnsafePathLink(path))return null;
+   return buffer.subarray(0,count).toString('utf8');
+  }finally{await h.close();}
+ }catch{return null;}
+}
+/** Recheck both independent backups with the existing bounded, no-link
+ * descriptor verifier. A successful earlier read is not a durable receipt:
+ * an external editor can invalidate either backup while source or journal
+ * identity is being examined. This remains an observational snapshot only.
+ */
+async function backupsVerified(x:Input,j:Journal):Promise<boolean>{
+ for(const [name,sha] of [
+  [j.originalBackupFileName,j.originalSha256],
+  [j.displacedBackupFileName,j.displacedSha256]
+ ] as const){
+  const file=join(x.backupDirectory,name);
+  if(await hasUnsafePathLink(file))return false;
+  const st=await lstat(file,{bigint:true});
+  if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1n||
+     st.size<=0n||st.size>BigInt(MAX_SCRIPT_BYTES))return false;
+  const checked=await verifyBackupRecoverySource({
+   sourcePath:x.sourcePath,backupDirectory:x.backupDirectory,
+   backupFileName:name,expectedSha256:sha,
+   expectedByteLength:Number(st.size),userApproved:true
+  });
+  if(checked.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')return false;
+ }
+ return true;
+}
+/** Read-only: classify observed source bytes as old or restored, or refuse.
+ * No finding permits any automatic retry, rename, manager action or rollback.
+ */
+export async function inspectNativeRestoreIntentReadOnly(
+ untrusted:unknown
+):Promise<RestoreIntentObservation>{
+ const x=parse(untrusted);
+ if(!x)return deny('INVALID_REQUEST');
+ if(!x.userApproved)return deny('NOT_AUTHORIZED');
+ try{
+  if(await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('UNSAFE_PATH');
+  const sourceStart=await lstat(x.sourcePath,{bigint:true});
+  const dirStart=await lstat(x.backupDirectory,{bigint:true});
+  if(!sourceStart.isFile()||sourceStart.isSymbolicLink()||
+     sourceStart.nlink!==1n||sourceStart.size<=0n||
+     sourceStart.size>BigInt(MAX_SCRIPT_BYTES)||
+     !dirStart.isDirectory()||dirStart.isSymbolicLink())return deny('UNSAFE_PATH');
+  const journalPath=join(x.backupDirectory,x.journalFileName);
+  // The bounded reader verifies its own descriptor, but subsequent asynchronous
+  // backup/source checks can observe a different journal inode with identical
+  // bytes. Bind the complete observation to one published file identity.
+  let journalBefore:BigIntStats;
+  try{journalBefore=await lstat(journalPath,{bigint:true});}
+  catch{return deny('UNSAFE_JOURNAL');}
+  if(!journalBefore.isFile()||journalBefore.isSymbolicLink()||
+     journalBefore.nlink!==1n)return deny('UNSAFE_JOURNAL');
+  const contents=await readJournal(journalPath);
+  if(contents===null)return deny('UNSAFE_JOURNAL');
+  const j=parseJournal(contents,x.sourcePath);
+  if(!j)return deny('UNSAFE_JOURNAL');
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  const original=await verifyApprovedSourceFingerprint({
+   sourcePath:x.sourcePath,expectedSha256:j.originalSha256,userApproved:true
+  });
+  let sourceState:'ORIGINAL_PRESENT'|'DISPLACED_PRESENT'|null=
+   original.status==='MATCHED_READ_ONLY'?'ORIGINAL_PRESENT':null;
+  if(!sourceState){
+   const displaced=await verifyApprovedSourceFingerprint({
+    sourcePath:x.sourcePath,expectedSha256:j.displacedSha256,userApproved:true
+   });
+   if(displaced.status==='MATCHED_READ_ONLY')sourceState='DISPLACED_PRESENT';
+  }
+  if(!sourceState)return deny('SOURCE_DIVERGED');
+  const sourceEnd=await lstat(x.sourcePath,{bigint:true});
+  const dirEnd=await lstat(x.backupDirectory,{bigint:true});
+  if(!sameFile(sourceStart,sourceEnd)||sourceEnd.nlink!==1n||
+     !sameDir(dirStart,dirEnd)||await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
+  // Recheck the exact journal after the filesystem operations. Any external
+  // mutation requires a new inspection. It never yields write authority.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Verify the two backups AGAIN after the asynchronous source/journal reads.
+  // Without this, an external writer can modify one after its first check
+  // and the user sees a false reconciled/verified status.
+  if(!await backupsVerified(x,j))return deny('BACKUP_UNVERIFIED');
+  // The second backup round has asynchronous reads. A separate process may
+  // replace or rewrite the previously verified intent *during* that round.
+  // Re-read the exact bounded journal before returning any observation;
+  // matching backup bytes cannot authenticate a stale/replaced intent.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // The final independent backup reads suspend execution. An external
+  // editor can replace the selected source AFTER our earlier fingerprint
+  // and sourceStart/sourceEnd identity check, but BEFORE this observation
+  // is returned. Recheck the exact previously observed version and source
+  // inode after those awaits; never issue a stale recovery observation.
+  // This is still a bounded read-only snapshot, not an exclusive file lock
+  // or permission to restore automatically.
+  const finalSource=await verifyApprovedSourceFingerprint({
+   sourcePath:x.sourcePath,
+   expectedSha256:sourceState==='ORIGINAL_PRESENT'
+    ?j.originalSha256:j.displacedSha256,
+   userApproved:true
+  });
+  if(finalSource.status!=='MATCHED_READ_ONLY')return deny('SOURCE_DIVERGED');
+  const lastSource=await lstat(x.sourcePath,{bigint:true});
+  const lastDir=await lstat(x.backupDirectory,{bigint:true});
+  if(!sameFile(sourceStart,lastSource)||lastSource.nlink!==1n||
+     !sameDir(dirStart,lastDir)||await hasUnsafePathLink(x.sourcePath)||
+     await hasUnsafePathLink(x.backupDirectory))return deny('SOURCE_DIVERGED');
+  // The final source fingerprint itself awaits filesystem I/O. An external
+  // editor can modify the already-verified intent DURING that last read.
+  // Refuse stale recovery observations by checking the exact bounded
+  // journal once more after the final source verification. This remains a
+  // read-only, bounded observation, not an atomic cross-process lock.
+  if(await readJournal(journalPath)!==contents)return deny('UNSAFE_JOURNAL');
+  // Matching content is not enough: replacement by a new same-byte inode
+  // must not receive the original journal's read-only observation.
+  let journalAfter:BigIntStats;
+  try{journalAfter=await lstat(journalPath,{bigint:true});}
+  catch{return deny('UNSAFE_JOURNAL');}
+  if(!journalAfter.isFile()||journalAfter.isSymbolicLink()||
+     journalAfter.nlink!==1n||!sameFile(journalBefore,journalAfter)||
+     journalBefore.mode!==journalAfter.mode)return deny('UNSAFE_JOURNAL');
+  return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
+   sourceState,originalSha256:j.originalSha256,
+   displacedSha256:j.displacedSha256,...noAuthority});
+ }catch{return deny('IO_FAILURE');}
+}
+);
 const MAX_JOURNAL_BYTES=4096;
 type Input={
  sourcePath:string;backupDirectory:string;journalFileName:string;
