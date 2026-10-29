@@ -90,6 +90,28 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     gmApiVerified:false,businessVerified:false};
  }catch{return invalidTargets();}
 }
+/** Content-blind Target.getTargets decoder. Only a matching, error-free
+ * CDP success message with a native JSON array of target metadata may reach
+ * the runtime hint parser. Any present error field (even false, 0, null or
+ * an empty string) invalidates the receipt. It cannot attest extension
+ * authenticity, installation, GM APIs or business behavior.
+ * An unrelated CDP event ID is ignored; malformed/binary data fails closed.
+ */
+export function readTampermonkeyCdpTargetReceipt(raw:unknown):unknown|null|undefined{
+ if(typeof raw!=='string'||raw.length>256*1024)return null;
+ try{
+  const parsed:unknown=JSON.parse(raw);
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return null;
+  const reply=parsed as {id?:unknown;error?:unknown;result?:unknown};
+  if(reply.id!==1)return undefined;
+  if(Object.prototype.hasOwnProperty.call(reply,'error'))return null;
+  const result=reply.result;
+  if(!result||typeof result!=='object'||Array.isArray(result))return null;
+  const targets=(result as {targetInfos?:unknown}).targetInfos;
+  return Array.isArray(targets)?targets:null;
+ }catch{return null;}
+}
+
 async function readBoundedTargets(websocketUrl:string,signal?:AbortSignal):Promise<unknown|null>{
  return new Promise(resolve=>{
   let socket:WebSocket|undefined,settled=false;
@@ -113,12 +135,9 @@ async function readBoundedTargets(websocketUrl:string,signal?:AbortSignal):Promi
     catch{finish(null);}
    });
    socket.addEventListener('message',event=>{
-    if(typeof event.data!=='string'||event.data.length>256*1024){finish(null);return;}
-    try{
-     const reply=JSON.parse(event.data) as {id?:unknown;result?:{targetInfos?:unknown};error?:unknown};
-     if(reply.id!==1)return;
-     finish(!reply.error?reply.result?.targetInfos??null:null);
-    }catch{finish(null);}
+    if(settled)return;
+    const targets=readTampermonkeyCdpTargetReceipt(event.data);
+    if(targets!==undefined)finish(targets);
    });
    socket.addEventListener('error',()=>finish(null));
    socket.addEventListener('close',()=>finish(null));
