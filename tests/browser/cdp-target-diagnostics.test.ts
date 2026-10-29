@@ -8,7 +8,8 @@ const moduleUnderTest = require('../../src/browser/cdp-target') as {
   classifyMainFrameUrl?: (actual:unknown, expected:string)=>string;
   classifyMainFrameResponse?: (raw:string,expected:string)=>string|null;
   readCreatedTargetReceipt?: (raw:unknown)=>string|null|undefined;
-  readClosedTargetReceipt?: (raw:unknown)=>boolean|undefined
+  readClosedTargetReceipt?: (raw:unknown)=>boolean|undefined;
+  isClosedTargetAbsentFromValidList?: (payload:unknown,targetId:unknown)=>boolean
 };
 
 test('TEST-013/026: main-frame evidence distinguishes provisional, mismatched and confirmed URLs',()=>{
@@ -192,4 +193,47 @@ test('TASK-008/TEST-013/026: CDP cannot confirm a child or unreachable frame as 
   }
   const childOnly=response({id:'child-frame-id-001',parentId:frameId,url});
   assert.notEqual(classify(childOnly,url),'MAIN_FRAME_CONFIRMED');
+});
+
+
+// TASK-008 / TEST-013/026: an acknowledged Target.closeTarget is insufficient
+// to report UNVERIFIED_TAB_CLOSED until a well-formed, bounded /json/list
+// proves this exact freshly created ID is absent. Previously a JSON array
+// with invalid members (or duplicate target IDs) was accepted as 'absent'.
+test('TASK-008/TEST-013/026: cleanup refuses malformed or ambiguous CDP target lists',()=>{
+  const check=moduleUnderTest.isClosedTargetAbsentFromValidList;
+  assert.equal(typeof check,'function',
+    'the actual tab-close path needs strict, read-only target-list validation');
+  if(!check)return;
+  const mine='0123456789abcdef0123456789abcdef';
+  const another='fedcba9876543210fedcba9876543210';
+  assert.equal(check([],mine),true,'an actually empty target list is unambiguous');
+  assert.equal(check([{id:another,type:'page',url:'about:blank'}],mine),true,
+    'well-formed unrelated targets must not block acknowledged cleanup');
+  assert.equal(check([{id:mine,type:'page',url:'about:blank'}],mine),false,
+    'a still-open created tab cannot be reported as closed');
+  for(const bad of [
+    null,undefined,{},false,
+    [null],['not a target'],[{}],[{id:9}],[{id:''}],[{id:'bad'}],
+    [{id:another},{id:another}],
+    [{id:another},'private string'],
+    Array.from({length:1001},()=>({id:another}))
+  ]){
+    assert.equal(check(bad,mine),false,
+      'malformed, duplicate or oversized lists are not proof of cleanup');
+  }
+  let getterCalls=0;
+  const accessor=Object.defineProperty({},'id',{
+    get(){getterCalls++;throw Error('PRIVATE_SOURCE_WAS_EVALUATED');}
+  });
+  assert.equal(check([accessor],mine),false,
+    'an accessor cannot be read as remote CDP identity');
+  assert.equal(getterCalls,0,'untrusted accessors must not execute');
+  let proxyCalls=0;
+  const proxy=new Proxy([{id:another}],{
+    get(){proxyCalls++;throw Error('PRIVATE_PROXY_WAS_EVALUATED');}
+  });
+  assert.equal(check(proxy,mine),false);
+  assert.equal(proxyCalls,0,'untrusted Proxy traps must not execute');
+  assert.equal(check([], 'not-a-valid-CDP-id'),false);
 });
