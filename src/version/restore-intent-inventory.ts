@@ -109,7 +109,15 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
    // An fsynced but unpublished journal is crash evidence, not a clean zero.
    if(UNPUBLISHED_RESTORE_INTENT.test(entry.name))
     return block('RECOVERY_REVIEW_REQUIRED');
-   if(!JOURNAL.test(entry.name))continue;
+   // A truncated, renamed or differently cased native restore artifact
+   // still belongs to our reserved recovery namespace. Never mistake it
+   // for unrelated user data and return a falsely clean zero-intent count.
+   // Observation only: preserve the unknown bytes for manual recovery.
+   if(!JOURNAL.test(entry.name)){
+    if(entry.name.toLowerCase().startsWith('.uah-restore-'))
+     return block('RECOVERY_REVIEW_REQUIRED');
+    continue;
+   }
    if(++inspected>MAX_RESTORE_INTENTS)return block('SCAN_LIMIT');
    // Dirent is only a hint; inspector verifies type, source binding,
    // independent backup bytes and journal inode on every observation.
