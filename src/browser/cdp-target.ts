@@ -140,6 +140,25 @@ async function requestNewTab(
 }
 
 
+/** Read only native text for Target.closeTarget. A present CDP error field
+ * is never an acknowledgement, even when its JSON value is falsy and the
+ * result also says success. Ignore unrelated event IDs without promoting
+ * malformed/binary/oversized data into a verified cleanup receipt.
+ */
+export function readClosedTargetReceipt(raw:unknown):boolean|undefined{
+  if(typeof raw!=='string'||raw.length>16384)return false;
+  try{
+    const parsed:unknown=JSON.parse(raw);
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return false;
+    const receipt=parsed as {id?:unknown;error?:unknown;result?:unknown};
+    if(receipt.id!==3)return undefined;
+    if(Object.prototype.hasOwnProperty.call(receipt,'error'))return false;
+    const result=receipt.result;
+    return !!result&&typeof result==='object'&&!Array.isArray(result)&&
+      (result as {success?:unknown}).success===true;
+  }catch{return false;}
+}
+
 /** Undo only the page ID minted by THIS Target.createTarget call. This
  * bounded cleanup runs even after the original navigation consent is
  * cancelled; it never replays the URL, executes script, closes other tabs
@@ -168,14 +187,8 @@ async function closeUnverifiedNewTab(
       });
       socket.addEventListener('message',event=>{
         if(done)return;
-        try{
-          const raw=String(event.data);
-          if(raw.length>16384){finish(false);return;}
-          const data=JSON.parse(raw) as {id?:unknown;result?:{success?:unknown};
-            error?:unknown};
-          if(data.id!==3)return;
-          finish(!data.error&&data.result?.success===true);
-        }catch{finish(false);}
+        const acknowledged=readClosedTargetReceipt(event.data);
+        if(acknowledged!==undefined)finish(acknowledged);
       });
       socket.addEventListener('error',()=>finish(false));
       socket.addEventListener('close',()=>finish(false));
