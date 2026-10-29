@@ -523,7 +523,7 @@ test('TASK-009/TEST-014/019/026: DOM-only candidates require an explicit minimal
   ];
   for(const grants of rejectedGrants){
     const text=source.replace('// @grant none',
-      grants.map(grant=>'// @grant '+grant).join('\\n'));
+      grants.map(grant=>'// @grant '+grant).join(String.fromCharCode(10)));
     const request={...patch,source:text,
       expectedSourceSha256:createHash('sha256').update(text).digest('hex'),
       callOffset:text.indexOf('document.querySelector')};
@@ -533,7 +533,7 @@ test('TASK-009/TEST-014/019/026: DOM-only candidates require an explicit minimal
     assert.equal(result.automaticPatchAllowed,false,grants.join(','));
     assert.equal('candidateSource' in result,false,grants.join(','));
   }
-  const unspecified=source.replace('// @grant none\\n','');
+  const unspecified=source.replace('// @grant none'+String.fromCharCode(10),'');
   const unspecifiedRequest={...patch,source:unspecified,
     expectedSourceSha256:createHash('sha256').update(unspecified).digest('hex'),
     callOffset:unspecified.indexOf('document.querySelector')};
