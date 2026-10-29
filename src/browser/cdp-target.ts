@@ -66,7 +66,7 @@ export function classifyMainFrameResponse(
     const receipt=parsed as {id?:unknown;error?:unknown;
       result?:{frameTree?:{frame?:{url?:unknown}}}};
     if(receipt.id!==1)return null;
-    if(receipt.error!==undefined&&receipt.error!==null)
+    if(Object.prototype.hasOwnProperty.call(receipt,'error'))
       return 'MAIN_FRAME_CDP_REJECTED';
     const result=receipt.result;
     if(!result||typeof result!=='object'||Array.isArray(result)||
@@ -90,7 +90,7 @@ export function readCreatedTargetReceipt(raw:unknown):string|null|undefined{
     if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return null;
     const data=parsed as {id?:unknown;result?:{targetId?:unknown};error?:unknown};
     if(data.id!==2)return undefined;
-    if(data.error!==undefined&&data.error!==null)return null;
+    if(Object.prototype.hasOwnProperty.call(data,'error'))return null;
     const result=data.result;
     if(!result||typeof result!=='object'||Array.isArray(result))return null;
     const id=result.targetId;
