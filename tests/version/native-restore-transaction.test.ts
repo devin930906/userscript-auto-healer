@@ -1122,6 +1122,51 @@ test('TASK-011/TEST-020/021/026: manual restore refuses backup relocated into th
 });
 
 
+test('TASK-011/TEST-020/026: published recovery namespace rejects malformed inode kinds',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-residue-types-'));
+ try{
+  const journal=join(root,'.uah-restore-'+randomUUID()+'.journal.json');
+  await writeFile(journal,'published journal bytes');
+  assert.equal(await hasInterruptedRestoreStaging(root),false,
+   'a canonical regular single-link journal can be retained for manual inspection');
+  const otherLink=join(root,'foreign-hardlink');
+  await link(journal,otherLink);
+  assert.equal(await hasInterruptedRestoreStaging(root),true,
+   'a hardlinked published journal is not independently owned recovery evidence');
+  await rm(journal);
+  await rm(otherLink);
+  await mkdir(journal);
+  assert.equal(await hasInterruptedRestoreStaging(root),true,
+   'a directory with an otherwise valid journal name must trigger manual review');
+  await rm(journal,{recursive:true});
+  const mutex=join(root,'.uah-restore-path-'+'a'.repeat(64));
+  await mkdir(mutex);
+  assert.equal(await hasInterruptedRestoreStaging(root),false,
+   'a genuine canonical native restore mutex directory stays recognizable');
+  await rm(mutex,{recursive:true});
+  await writeFile(mutex,'forged mutex file');
+  assert.equal(await hasInterruptedRestoreStaging(root),true,
+   'a regular file cannot masquerade as the restore mutex directory');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/026: forged published-journal directory blocks manual source replacement',async()=>{
+ await fixture(async opts=>{
+  const unexpected=join(opts.backupDirectory,
+   '.uah-restore-'+randomUUID()+'.journal.json');
+  await mkdir(unexpected);
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.deepEqual(result.status,'BLOCKED',
+   'unknown recovery namespace must stop before modifying the selected source');
+  assert.equal(result.status==='BLOCKED'?result.reason:'','RECOVERY_REVIEW_REQUIRED');
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'a malformed journal must never trigger original-file mutation');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'blocked preflight must not publish another backup or recovery intent');
+ });
+});
+
 test('TASK-011/TEST-020/026: string-only pending exception must not suppress unknown crash evidence',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-restore-pending-ownership-'));
  try{
