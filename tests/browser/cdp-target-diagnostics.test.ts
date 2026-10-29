@@ -6,7 +6,8 @@ import { strict as assert } from 'node:assert';
 // never attest navigation, run JavaScript, or echo a page URL.
 const moduleUnderTest = require('../../src/browser/cdp-target') as {
   classifyMainFrameUrl?: (actual:unknown, expected:string)=>string;
-  classifyMainFrameResponse?: (raw:string,expected:string)=>string|null
+  classifyMainFrameResponse?: (raw:string,expected:string)=>string|null;
+  readCreatedTargetReceipt?: (raw:unknown)=>string|null|undefined
 };
 
 test('TEST-013/026: main-frame evidence distinguishes provisional, mismatched and confirmed URLs',()=>{
@@ -68,5 +69,28 @@ test('TASK-008/TEST-013/026: CDP rejection and malformed receipts have distinct 
       assert.equal(stage.includes('PRIVATE'),false);
       assert.equal(stage.includes('example.com'),false);
     }
+  }
+});
+
+test('TASK-005/TEST-008/026: created-tab CDP replies are bounded and fail closed',()=>{
+  const inspect=moduleUnderTest.readCreatedTargetReceipt;
+  assert.equal(typeof inspect,'function',
+    'Target.createTarget must use a bounded native string-only receipt parser');
+  if(!inspect)return;
+  const id='0123456789abcdef0123456789abcdef';
+  const safe=JSON.stringify({id:2,result:{targetId:id}});
+  assert.equal(inspect(safe),id);
+  assert.equal(inspect(JSON.stringify({id:17,result:{targetId:id}})),undefined,
+    'unrelated CDP events do not terminate a valid in-flight command');
+  for(const raw of [
+    '{"id":2,"result":{"targetId":"BAD"}}',
+    JSON.stringify({id:2,error:{message:'PRIVATE_SECRET'},result:{targetId:id}}),
+    JSON.stringify({id:2,result:{targetId:id},padding:'PRIVATE'.repeat(6000)}),
+    '{"id":2,"result":{"targetId":',
+    null,[],{toString(){throw Error('PRIVATE_EXECUTED');}}
+  ]){
+    const result=inspect(raw);
+    assert.equal(result,null,'invalid, oversized or non-string replies must fail closed');
+    assert.equal(String(result).includes('PRIVATE'),false);
   }
 });

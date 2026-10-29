@@ -78,6 +78,25 @@ export function classifyMainFrameResponse(
   }catch{return 'MAIN_FRAME_RESPONSE_INVALID';}
 }
 
+/** Parse only the bounded JSON text for this owned Chrome command.
+ * undefined is an unrelated CDP message id; null is an invalid/failed
+ * command receipt. No error text or page data may be returned.
+ */
+export function readCreatedTargetReceipt(raw:unknown):string|null|undefined{
+  if(typeof raw!=='string'||raw.length>16384)return null;
+  try{
+    const parsed:unknown=JSON.parse(raw);
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return null;
+    const data=parsed as {id?:unknown;result?:{targetId?:unknown};error?:unknown};
+    if(data.id!==2)return undefined;
+    if(data.error!==undefined&&data.error!==null)return null;
+    const result=data.result;
+    if(!result||typeof result!=='object'||Array.isArray(result))return null;
+    const id=result.targetId;
+    return typeof id==='string'&&/^[a-zA-Z0-9_-]{8,128}$/.test(id)?id:null;
+  }catch{return null;}
+}
+
 /** Do not send Target.createTarget after cancellation or a stopped session.
  * Closing the socket cannot undo a command already accepted by Chrome; any
  * cancelled in-flight result remains unverified and is never retained.
@@ -108,15 +127,10 @@ async function requestNewTab(
       });
       ws.addEventListener('message',event=>{
         if(finished||signal?.aborted){finish(null);return;}
-        try{
-          const data=JSON.parse(String(event.data)) as {
-            id?:number;result?:{targetId?:unknown};error?:unknown
-          };
-          if(data.id!==2)return;
-          const id=data.result?.targetId;
-          finish(!data.error&&typeof id==='string'&&
-            /^[a-zA-Z0-9_-]{8,128}$/.test(id)?id:null);
-        }catch{finish(null);}
+        // Reject oversized, binary or malformed replies before JSON.parse.
+        // Only a valid Target.createTarget receipt can mint the tab identity.
+        const id=readCreatedTargetReceipt(event.data);
+        if(id!==undefined)finish(id);
       });
       ws.addEventListener('error',()=>finish(null));
       ws.addEventListener('close',()=>finish(null));
