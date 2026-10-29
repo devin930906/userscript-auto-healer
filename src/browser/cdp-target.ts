@@ -16,6 +16,8 @@ export type OpenTargetResult =
 export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'LIST_TRANSPORT_FAILED'|'LIST_INVALID'|'LIST_NOT_MATCHED'|
   'TARGET_ID_MISMATCH'|'MAIN_FRAME_PENDING'|'MAIN_FRAME_CONFIRMED'|
+  'MAIN_FRAME_ABOUT_BLANK'|'MAIN_FRAME_MISSING_URL'|
+  'MAIN_FRAME_INVALID_URL'|'MAIN_FRAME_URL_MISMATCH'|
   'UNVERIFIED_TAB_CLOSED'|'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED';
 function validTarget(raw:string):boolean {
   if(raw.length>4096||raw.trim()!==raw)return false;
@@ -25,6 +27,27 @@ function validTarget(raw:string):boolean {
       !url.username&&!url.password&&!url.hash;
   }catch{return false;}
 }
+/** Content-blind classification of the read-only Page.getFrameTree receipt.
+ * Only fixed labels leave this boundary; raw URLs never enter diagnostics.
+ * This is evidence for diagnosis, not proof of script or business readiness.
+ */
+export function classifyMainFrameUrl(actual:unknown,expected:string):TargetNavigationStage{
+  if(actual==='about:blank')return 'MAIN_FRAME_ABOUT_BLANK';
+  if(typeof actual!=='string'||actual.length===0)return 'MAIN_FRAME_MISSING_URL';
+  if(actual.length>4096||typeof expected!=='string'||expected.length>4096)
+    return 'MAIN_FRAME_INVALID_URL';
+  try{
+    const found=new URL(actual),approved=new URL(expected);
+    if(!['http:','https:'].includes(found.protocol)||
+      found.username||found.password||found.hash||
+      !['http:','https:'].includes(approved.protocol)||
+      approved.username||approved.password||approved.hash)
+      return 'MAIN_FRAME_INVALID_URL';
+    return found.href===approved.href?
+      'MAIN_FRAME_CONFIRMED':'MAIN_FRAME_URL_MISMATCH';
+  }catch{return 'MAIN_FRAME_INVALID_URL';}
+}
+
 /** Do not send Target.createTarget after cancellation or a stopped session.
  * Closing the socket cannot undo a command already accepted by Chrome; any
  * cancelled in-flight result remains unverified and is never retained.
@@ -138,48 +161,45 @@ async function closeUnverifiedNewTab(
  */
 async function confirmsMainFrameNavigation(
   wsUrl:string,expectedUrl:string,signal?:AbortSignal
-):Promise<boolean>{
-  if(signal?.aborted)return false;
+):Promise<TargetNavigationStage>{
+  if(signal?.aborted)return 'MAIN_FRAME_PENDING';
   return new Promise(resolve=>{
     let socket:WebSocket|undefined,done=false;
-    const finish=(confirmed:boolean)=>{
+    const finish=(stage:TargetNavigationStage)=>{
       if(done)return;
       done=true;clearTimeout(timer);
       signal?.removeEventListener('abort',onAbort);
       try{socket?.close();}catch{/* socket may still be connecting */}
-      resolve(confirmed&&!signal?.aborted);
+      resolve(signal?.aborted?'MAIN_FRAME_PENDING':stage);
     };
-    const onAbort=()=>finish(false);
-    const timer=setTimeout(()=>finish(false),1500);
+    const onAbort=()=>finish('MAIN_FRAME_PENDING');
+    const timer=setTimeout(()=>finish('MAIN_FRAME_PENDING'),1500);
     signal?.addEventListener('abort',onAbort,{once:true});
-    if(signal?.aborted){finish(false);return;}
+    if(signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
     try{
       socket=new WebSocket(wsUrl);
       socket.addEventListener('open',()=>{
-        if(done||signal?.aborted){finish(false);return;}
+        if(done||signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
         try{socket?.send(JSON.stringify({id:1,method:'Page.getFrameTree'}));}
-        catch{finish(false);}
+        catch{finish('MAIN_FRAME_PENDING');}
       });
       socket.addEventListener('message',event=>{
-        if(done||signal?.aborted){finish(false);return;}
+        if(done||signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
         try{
           const raw=String(event.data);
-          if(raw.length>16384){finish(false);return;}
+          if(raw.length>16384){finish('MAIN_FRAME_PENDING');return;}
           const response=JSON.parse(raw) as {
             id?:unknown;result?:{frameTree?:{frame?:{url?:unknown}}};error?:unknown
           };
           if(response.id!==1)return;
           const actual=response.result?.frameTree?.frame?.url;
-          // Match canonical URL semantics used by inspectCdpTargetList:
-          // Chrome may normalize host casing or default ports. Do not accept
-          // same-origin but different-path navigation as target readiness.
-          finish(!response.error&&typeof actual==='string'&&
-            actual.length<=4096&&new URL(actual).href===new URL(expectedUrl).href);
-        }catch{finish(false);}
+          finish(response.error?'MAIN_FRAME_PENDING':
+            classifyMainFrameUrl(actual,expectedUrl));
+        }catch{finish('MAIN_FRAME_PENDING');}
       });
-      socket.addEventListener('error',()=>finish(false));
-      socket.addEventListener('close',()=>finish(false));
-    }catch{finish(false);}
+      socket.addEventListener('error',()=>finish('MAIN_FRAME_PENDING'));
+      socket.addEventListener('close',()=>finish('MAIN_FRAME_PENDING'));
+    }catch{finish('MAIN_FRAME_PENDING');}
   });
 }
 
@@ -259,8 +279,11 @@ export async function openApprovedTarget(
       if(!Array.isArray(json))stage('LIST_INVALID');
       else if(!inspected.ok)stage('LIST_NOT_MATCHED');
       else if(inspected.targetId!==created)stage('TARGET_ID_MISMATCH');
-      else if(await confirmsMainFrameNavigation(inspected.websocketUrl,targetUrl,signal)) {
-        stage('MAIN_FRAME_CONFIRMED');
+      else {
+        const frameStage=await confirmsMainFrameNavigation(
+          inspected.websocketUrl,targetUrl,signal);
+        stage(frameStage);
+        if(frameStage==='MAIN_FRAME_CONFIRMED'){
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
@@ -273,7 +296,8 @@ export async function openApprovedTarget(
         verified=true;
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
-      }else stage('MAIN_FRAME_PENDING');
+        }
+      }
     }catch{
       stage('LIST_TRANSPORT_FAILED');
       /* navigation is still pending; cancellation checked below */
