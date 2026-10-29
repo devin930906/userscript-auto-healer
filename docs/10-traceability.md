@@ -58,3 +58,21 @@ GATE-001..011 的证据和阻断等级以 docs/08-release.md 为权威；表内�
 
 ## 覆盖缺口
 Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_getValue（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）、Inno Setup 临时安装器与历史真实 RAR5 格式已有开发前技术 PoC 证据（不是现行 ZIP 产品验收）；仍缺首选 Tampermonkey 与正式 Chrome/便携版的支持矩阵、真实损坏脚本修复/业务回归、现行 ZIP 应用完整性及便携测试、真实产品 EXE/ZIP 安装直启和应用 LICENSE 定案。原始用户输入中的各项核心功能已进入 REQ-001..026，双 Windows 包为 REQ-027/028；仍须逐字复查 00 与需求编号以确定完整覆盖。
+
+## 2026-10-29 GitHub Issues ↔ TASK ↔ 验证证据增量追踪
+
+> 保持以上 REQ-001..028 的 28 行权威映射与现有 NFR、GATE 定义不变。本节只为已确认的活跃 GitHub Issues 增加外部追踪层；`TASK-001..021` 是正式开发计划编号，GitHub `#N` 为另一套独立序列。历史记录以仓库真实提交、CI 与验收证据为准。
+
+| GitHub Issue | 正式 TASK | 已知关联需求 / 验证 | 现存缺口和规则 |
+| --- | --- | --- | --- |
+| [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) | `TASK-007` | REQ-017/018；TEST-017/018；GATE-004/005 | 真实 Tampermonkey 可信身份、明确支持矩阵及真实业务产品级验收未闭环 |
+| [#480](https://github.com/devin930906/userscript-auto-healer/issues/480) | `TASK-008` | REQ-013；TEST-013 | Windows 自管 Chrome 主框架间歇确认失败；有失败日志，根因仍未证实 |
+| [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) | `TASK-009` | REQ-014/019；TEST-014/019 | 候选到可信诊断与真实安全应用仍需完整测试 |
+| [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) | `TASK-010` | REQ-018/021；TEST-018/021 | 可信管理器/业务验收与拒绝未知的产品集成待完成 |
+| [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) | `TASK-011` | REQ-020/021；TEST-020/021/026 | 原子备份/恢复、故障注入和完整真实回滚仍需验证 |
+| [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) | `TASK-013` | REQ-022；NFR-009；TEST-004/011/022 | 孤立 AST Worker 在 Windows Candidate 中的间歇故障；根因待查 |
+| [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) | `TASK-020` | REQ-028；TEST-028；GATE-009/011 | 便携目录在 Electron smoke 后的 Win32=5 间歇拒绝；不能以候选绿色验证消除风险 |
+
+- 本表不是所有 Stable 缺口的总数：`TASK-012/014/015/016/017/018/019/021` 在开发计划/工作登记中保留实际剩余工作，目前没有专属 Open Issue；其正式验证要求不能因无 Issue 而遗漏。阶段性完成的 `TASK-001..006` 不反向生成历史 Issue。
+- 每个后续 PR 记录受影响 TASK、Issue（如有）、REQ/NFR、TEST/GATE、代码 SHA、验证运行及合并状态。只有真实运行/人工验收能够使对应要求状态进展；PR 已合并或 Issue 已关闭本身都不构成 TEST/GATE 成功证明。
+- 新增/修改 Issue 时先查重，并按实际变更更新本节及 `docs/09-development-plan.md`、`docs/12-handoff.md`、`docs/14-stable-work-register.md`；保留原始 28 行追踪表和正式 TASK 编号，不以额外 Issue 取代需求或测试。见 `docs/15-issue-driven-stable-bridge.md`。

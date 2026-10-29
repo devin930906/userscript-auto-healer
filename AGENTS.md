@@ -35,3 +35,14 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 
 ## 正式发行格式决定
 2026-10-18 用户明确将原便携 RAR 改为 **ZIP**，以 I-010 与 ADR-004 为现行决策。正式产物为 EXE 安装版 + ZIP 便携版；历史 RAR PoC 可追溯但不属于当前 Stable 发布门槛。REQ-028/TEST-028/TASK-020/GATE-009/011 编号不变。
+
+## 新版（4）→（7）Issue 驱动开发迁移与持续执行（2026-10-29）
+
+- 本仓库已从旧版（4）的有条件准入进入持续（7）开发；新版（4）不要求重新初始化、重新批准已经确认的需求、重启 TASK-001、重新编号历史 TASK，或把已合并 PR 反向变成虚假的新 Issues。迁移基准与事实快照见 `docs/15-issue-driven-stable-bridge.md`。
+- `docs/09-development-plan.md` 的 TASK-001..021 是正式工程任务编号；GitHub `#N` 是 Issues/PR 独立编号，二者不可互换。开发前核对 `TASK ↔ REQ/NFR ↔ TEST/GATE ↔ Issue ↔ PR/commit ↔ CI`，与 `docs/10-traceability.md`、`docs/14-stable-work-register.md` 一致；原有工程文档及 ADR 仍为产品、质量和授权权威。
+- 优先续接已有 Open PR 和相应 Issue；无可用 PR 时选择依赖已满足的已批准 TASK；必要时先检查重复、创建范围明确且可验收的 Issue。远期/未定事项保留正式计划，不以 Issue 数量代替覆盖程度。Issue 未创建不使已批准 TASK 自动失效；该 TASK 执行前按实际规则建立/关联追踪。
+- 已核验的当前关键 Issues：TASK-007→#486、TASK-008→#480、TASK-009→#487、TASK-010→#488、TASK-011→#489、TASK-013→#440、TASK-020→#215。其他 TASK 以正式任务表和当前仓库实况为准，切勿误判其已完成或无待办。
+- 每个代码 PR 记录 TASK、对应 Issue（如有）、相关 REQ/NFR、TEST/GATE、目标 SHA、真实测试证据、剩余阻断及准确目标分支；无需代码变更的验收工作不强造 PR。仅当整个 Issue 的验收已满足且 GitHub 自动关闭条件适用时，使用 `Fixes #N` / `Closes #N`；否则使用 `Refs #N` 并保留 Open。已合并 PR 不自动等于任务完成、Stage 通过或 Stable 发布。
+- 已确认的 Issue #215/#440/#480 均属独立间歇性故障，必须保留失败证据；单次绿色重跑不等于根因修复。开发过程中新增故障先查重复；保留原有安全边界，不提高超时/跳过测试/伪造管理器证据以让 CI 变绿。
+- 每次开发会话结束同步核验最新 main SHA、Issues/PR、实际提交与 Checks，并**按影响范围**更新 09/10/12/14 及其权威证据；不重新覆盖历史记录。原有 `docs/11-readiness.md` 与 `docs/13-predevelopment-admission.md` 的准入结论是当时的历史阶段结论，不是最新代码的 Stable 质量认证。
+- 本治理迁移仅调整任务关联与交接，不自动授予产品代码开发之外的权限、真实用户 Chrome/Tampermonkey 操作、仓库保护更改、正式 EXE/ZIP Release 或 GATE 通过。后续每次必须检查当前有效工具与仓库权限。
