@@ -123,3 +123,40 @@ test('TASK-008/TEST-013/026: close-target acknowledgement rejects falsy errors a
       'invalid, oversized or non-text close receipts may never confirm cleanup');
   }
 });
+
+
+// TASK-008 / Issue #480 / TEST-013/026: an explicit CDP error key is
+// failure even when its JSON value is falsy. Page.getFrameTree is a
+// read-only navigation hint and can never be elevated from an error receipt.
+test('TASK-008/TEST-013/026: main-frame receipt refuses all present falsy CDP errors',()=>{
+  const classify=moduleUnderTest.classifyMainFrameResponse;
+  assert.equal(typeof classify,'function');
+  if(!classify)return;
+  const url='https://example.com/fixture?mode=one';
+  const frameTree={frame:{url}};
+  assert.equal(classify(JSON.stringify({id:1,result:{frameTree}}),url),
+    'MAIN_FRAME_CONFIRMED','ordinary result must remain supported');
+  for(const error of [false,0,'',null]){
+    const raw=JSON.stringify({id:1,error,result:{frameTree}});
+    assert.equal(classify(raw,url),'MAIN_FRAME_CDP_REJECTED',
+      'a present CDP error can never confirm the main frame');
+  }
+  assert.equal(classify(JSON.stringify({id:4,error:null,result:{frameTree}}),url),
+    null,'unrelated CDP ids must still be ignored');
+});
+
+// TASK-008 / TEST-008/013/026: createTarget cannot mint a verified target
+// ID from an error response even when error is a falsy JSON value.
+test('TASK-008/TEST-008/013/026: create-target receipt refuses all present falsy CDP errors',()=>{
+  const read=moduleUnderTest.readCreatedTargetReceipt;
+  assert.equal(typeof read,'function');
+  if(!read)return;
+  const targetId='0123456789abcdef0123456789abcdef';
+  assert.equal(read(JSON.stringify({id:2,result:{targetId}})),targetId);
+  for(const error of [false,0,'',null]){
+    assert.equal(read(JSON.stringify({id:2,error,result:{targetId}})),null,
+      'CDP command errors cannot create approved target identities');
+  }
+  assert.equal(read(JSON.stringify({id:99,error:null,result:{targetId}})),
+    undefined,'unrelated CDP ids are ignored');
+});
