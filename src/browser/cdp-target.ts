@@ -181,7 +181,7 @@ export function isClosedTargetAbsentFromValidList(payload:unknown,targetId:unkno
        !Array.isArray(payload)||nodeTypes.isProxy(payload)||
        Object.getPrototypeOf(payload)!==Array.prototype)return false;
     const entries=Object.getOwnPropertyDescriptors(payload);
-    const size=entries.length?.value;
+    const size=Object.getOwnPropertyDescriptor(payload,'length')?.value;
     if(!Number.isSafeInteger(size)||size<0||size>1000||
        Reflect.ownKeys(entries).length!==size+1)return false;
     const seen=new Set<string>();
