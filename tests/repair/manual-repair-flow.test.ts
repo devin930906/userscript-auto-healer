@@ -364,3 +364,42 @@ test('TASK-011/012 TEST-020/021/023/026: checkpoint recheck cannot bless altered
   });
  }
 });
+
+// TASK-011/012 #489 / TEST-020/021/023: a verified checkpoint and
+// two valid manual export files do not make an externally changed source
+// safe to report as a currently backed-up original. This is a deterministic
+// external-editor interleaving after the final checkpoint verification.
+test('TASK-011/012 TEST-020/021/023: source edited during final manual export checks cannot receive a ready receipt',async()=>{
+ await fixture(async opts=>{
+  const candidateModule=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const verify=candidateModule.verifyExactCandidateBytesReadOnly;
+  let edited=false;
+  const interception=mock.method(candidateModule,'verifyExactCandidateBytesReadOnly',
+   async (...args:Parameters<typeof verify>)=>{
+    const result=await verify(...args);
+    if(!edited&&result==='MATCH'&&typeof args[0]==='string'&&
+       dirname(args[0])===opts.exportDirectory){
+     // External edit lands after the last persisted checkpoint inspection,
+     // when the first published export has already matched its expected bytes.
+     edited=true;
+     await writeFile(opts.sourcePath,source+'// changed by independent editor\\n');
+    }
+    return result;
+   });
+  try{
+   const response=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+   assert.equal(edited,true,'fixture must mutate the genuine source AFTER export publication');
+   assert.deepEqual(response,{
+    status:'BLOCKED',reason:'SOURCE_CHANGED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,managerInstalled:false,businessVerified:false
+   },'export-ready would misrepresent a backup of the current selected source');
+   assert.equal(await readFile(opts.sourcePath,'utf8'),
+    source+'// changed by independent editor\\n',
+    'the product must not overwrite or revert an external edit');
+   assert.equal((await readdir(opts.exportDirectory)).length,2,
+    'do not remove published manual/recovery files on stale-source rejection');
+  }finally{interception.mock.restore();}
+ });
+});
