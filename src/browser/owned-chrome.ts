@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
-import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket } from './cdp-session';
+import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
 
 
 /** Reject oversized or invalid CDP JSON based on bytes actually streamed.
@@ -63,7 +63,10 @@ export type ManagedLaunchResult =
       readonly stop:()=>void};
 export type ChromeStartupStage='FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
   'FETCH_RESET'|'CHILD_RUNNING_NO_CDP'|'HTTP_REJECTED'|'BODY_REJECTED'|
-  'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR';
+  'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR'|
+  'CDP_TIMEOUT_LISTENER_PID_MATCH'|'CDP_TIMEOUT_LISTENER_UNAVAILABLE'|
+  'CDP_TIMEOUT_LISTENER_PID_MISMATCH'|'CDP_TIMEOUT_LISTENER_AMBIGUOUS'|
+  'CDP_TIMEOUT_PROBE_INCONCLUSIVE';
 
 /** Only fixed, redacted transport labels. Never serialize an underlying
  * fetch/undici error, socket address, Chrome profile, process or user script.
@@ -90,6 +93,21 @@ export function classifyCdpStartupTransportFailure(error:unknown):
  if(typeof DOMException!=='undefined'&&error instanceof DOMException&&
     error.name==='TimeoutError')return 'FETCH_TIMEOUT';
  return 'FETCH_FAILED';
+}
+/** A timeout is not proof of a Chrome/port conflict. Keep the actual Windows
+ * listener observation separate from CDP version/owner/WebSocket verification.
+ * These fixed labels contain no PID, port, profile, URL or OS-error text.
+ * LISTENER_UNAVAILABLE may also mean the OS probe failed; it does not by
+ * itself prove that no listening socket exists.
+ */
+export function classifyCdpTimeoutListener(result:ListenerOwnerResult):ChromeStartupStage {
+  if(result.ok)return 'CDP_TIMEOUT_LISTENER_PID_MATCH';
+  switch(result.code){
+    case 'LISTENER_UNAVAILABLE':return 'CDP_TIMEOUT_LISTENER_UNAVAILABLE';
+    case 'LISTENER_PID_MISMATCH':return 'CDP_TIMEOUT_LISTENER_PID_MISMATCH';
+    case 'LISTENER_AMBIGUOUS':return 'CDP_TIMEOUT_LISTENER_AMBIGUOUS';
+    default:return 'CDP_TIMEOUT_PROBE_INCONCLUSIVE';
+  }
 }
 export interface ChromeLaunchOptions {
   /** Explicit user approval to launch THIS isolated Chrome, not general script consent. */
@@ -220,8 +238,20 @@ export async function launchApprovedIsolatedChrome(
     }
     // A child can stay alive without ever exposing the required owned
     // listener. Record only that boundary, not process/profile/port data.
-    if(!exited&&!errored&&child.exitCode===null&&!child.killed)
+    if(!exited&&!errored&&child.exitCode===null&&!child.killed){
       emitStage('CHILD_RUNNING_NO_CDP');
+      // CI disposable Chrome only. A bounded OS-owned PID check diagnoses
+      // which boundary timed out; it does NOT relax the 20s deadline, retry
+      // a partly initialized profile, or grant a CDP ownership receipt.
+      if(options.testHeadless===true&&process.env.GITHUB_ACTIONS==='true'){
+        let stage:ChromeStartupStage='CDP_TIMEOUT_PROBE_INCONCLUSIVE';
+        try{
+          stage=classifyCdpTimeoutListener(
+            await verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid));
+        }catch{/* Never publish OS error text or change the failure result. */}
+        emitStage(stage);
+      }
+    }
     return {ok:false,code:'CDP_TIMEOUT'};
   }finally{
     if(!retained)stopOwnChild(child);

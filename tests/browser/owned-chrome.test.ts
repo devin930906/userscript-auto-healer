@@ -525,6 +525,29 @@ test('TEST-006/007/008/009: signed Chrome from an independent application path',
 // A failing Windows runner must identify the transport class without leaking
 // OS errors, profile locations, URLs, ports, or private Chrome output.
 import * as ownedChromeDiagnostics from '../../src/browser/owned-chrome';
+test('TASK-005/TEST-006/008/009: timeout listener status is bounded and has no PID leakage',()=>{
+  const classify=(ownedChromeDiagnostics as unknown as {
+    classifyCdpTimeoutListener?: (v:unknown)=>string
+  }).classifyCdpTimeoutListener;
+  assert.equal(typeof classify,'function','timeout diagnosis must exist');
+  if(!classify)return;
+  const cases=[
+    [{ok:true,status:'LISTENER_PID_MATCH_ONLY',pid:987654,executableVerified:false},
+      'CDP_TIMEOUT_LISTENER_PID_MATCH'],
+    [{ok:false,code:'LISTENER_UNAVAILABLE'},'CDP_TIMEOUT_LISTENER_UNAVAILABLE'],
+    [{ok:false,code:'LISTENER_PID_MISMATCH'},'CDP_TIMEOUT_LISTENER_PID_MISMATCH'],
+    [{ok:false,code:'LISTENER_AMBIGUOUS'},'CDP_TIMEOUT_LISTENER_AMBIGUOUS'],
+    [{ok:false,code:'UNSUPPORTED_PLATFORM'},'CDP_TIMEOUT_PROBE_INCONCLUSIVE'],
+    [{ok:false,code:'INVALID_ARGUMENTS'},'CDP_TIMEOUT_PROBE_INCONCLUSIVE']
+  ] as const;
+  for(const [probe,expected] of cases){
+    const stage=classify(probe);
+    assert.equal(stage,expected);
+    assert.match(stage,/^CDP_TIMEOUT_[A-Z_]+$/);
+    assert.equal(stage.includes('987654'),false,'never emit process identity');
+  }
+});
+
 test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful and non-secret',()=>{
   const classify=(ownedChromeDiagnostics as unknown as {
     classifyCdpStartupTransportFailure?: (e:unknown)=>string
