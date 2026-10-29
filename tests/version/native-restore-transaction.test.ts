@@ -1333,3 +1333,35 @@ test('TASK-011/TEST-020/021/026: published journal rewritten after structural pr
   assert.equal(await readFile(journal,'utf8'),'{"unexpected":true}\n');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/026: path-like backup identifiers in a published native restore journal require manual review',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-journal-traversal-'));
+ try{
+  const journalPath=join(root,'.uah-restore-'+randomUUID()+'.journal.json');
+  const prefixHash='a'.repeat(24);
+  const firstId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const secondId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const journal=(prefix:string)=>JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:'1'.repeat(64),
+   originalSha256:'2'.repeat(64),displacedSha256:'3'.repeat(64),
+   originalBackupFileName:prefix+'~'+prefixHash+'.'+firstId+'.backup.user.js',
+   displacedBackupFileName:prefix+'~'+prefixHash+'.'+secondId+'.backup.user.js',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\\n';
+  // Legitimate native backup filename structure remains accepted by this
+  // path-FREE journal preflight; it grants no source or restore authority.
+  await writeFile(journalPath,journal('selected.user.js'));
+  assert.equal(await hasInterruptedRestoreStaging(root),false);
+  // Both slash styles must be disallowed IN serialized filenames. Even if
+  // the path-free preflight never joins these strings to a directory, allowing
+  // traversal-shaped names as a recognized published intent makes a corrupt
+  // recovery namespace falsely look clean before native source replacement.
+  for(const badPrefix of ['../escape','..\\\\escape','nested/escape','nested\\\\escape']){
+   await writeFile(journalPath,journal(badPrefix));
+   assert.equal(await hasInterruptedRestoreStaging(root),true,
+     'a published restore intent containing path components requires manual review');
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
