@@ -20,6 +20,7 @@ export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'MAIN_FRAME_ABOUT_BLANK'|'MAIN_FRAME_MISSING_URL'|
   'MAIN_FRAME_INVALID_URL'|'MAIN_FRAME_URL_MISMATCH'|
   'MAIN_FRAME_CDP_REJECTED'|'MAIN_FRAME_RESPONSE_INVALID'|
+  'MAIN_FRAME_SOCKET_PENDING'|'MAIN_FRAME_RECEIPT_PENDING'|
   'MAIN_FRAME_TRANSPORT_FAILED'|
   'UNVERIFIED_TAB_CLOSED'|'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED';
 function validTarget(raw:string):boolean {
@@ -34,6 +35,18 @@ function validTarget(raw:string):boolean {
  * Only fixed labels leave this boundary; raw URLs never enter diagnostics.
  * This is evidence for diagnosis, not proof of script or business readiness.
  */
+/** Fixed native-only diagnostic for the read-only Page.getFrameTree wait.
+ * CONNECTING means the page socket never opened; AWAITING_RECEIPT means
+ * the WebSocket opened and the command was sent but no bounded answer arrived.
+ * No URL, process identity, body or frame ID can escape this boundary.
+ * These stages never confirm navigation, authorize a retry or grant script access.
+ */
+export function classifyMainFramePendingPhase(phase:unknown):TargetNavigationStage{
+  if(phase==='CONNECTING')return 'MAIN_FRAME_SOCKET_PENDING';
+  if(phase==='AWAITING_RECEIPT')return 'MAIN_FRAME_RECEIPT_PENDING';
+  return 'MAIN_FRAME_PENDING';
+}
+
 export function classifyMainFrameUrl(actual:unknown,expected:string):TargetNavigationStage{
   if(actual==='about:blank')return 'MAIN_FRAME_ABOUT_BLANK';
   if(typeof actual!=='string'||actual.length===0)return 'MAIN_FRAME_MISSING_URL';
@@ -272,6 +285,7 @@ async function confirmsMainFrameNavigation(
   if(signal?.aborted)return 'MAIN_FRAME_PENDING';
   return new Promise(resolve=>{
     let socket:WebSocket|undefined,done=false;
+    let pendingPhase:'CONNECTING'|'AWAITING_RECEIPT'='CONNECTING';
     const finish=(stage:TargetNavigationStage)=>{
       if(done)return;
       done=true;clearTimeout(timer);
@@ -280,14 +294,17 @@ async function confirmsMainFrameNavigation(
       resolve(signal?.aborted?'MAIN_FRAME_PENDING':stage);
     };
     const onAbort=()=>finish('MAIN_FRAME_PENDING');
-    const timer=setTimeout(()=>finish('MAIN_FRAME_PENDING'),1500);
+    const timer=setTimeout(()=>finish(classifyMainFramePendingPhase(pendingPhase)),1500);
     signal?.addEventListener('abort',onAbort,{once:true});
     if(signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
     try{
       socket=new WebSocket(wsUrl);
       socket.addEventListener('open',()=>{
         if(done||signal?.aborted){finish('MAIN_FRAME_PENDING');return;}
-        try{socket?.send(JSON.stringify({id:1,method:'Page.getFrameTree'}));}
+        try{
+          socket?.send(JSON.stringify({id:1,method:'Page.getFrameTree'}));
+          pendingPhase='AWAITING_RECEIPT';
+        }
         catch{finish('MAIN_FRAME_TRANSPORT_FAILED');}
       });
       socket.addEventListener('message',event=>{
