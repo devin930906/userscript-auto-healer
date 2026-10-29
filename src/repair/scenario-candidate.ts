@@ -41,6 +41,15 @@ const blocked=(reason:DiagnosticCandidateBlockCode):DiagnosticCandidateResult=>O
 });
 const SHA=/^[a-f0-9]{64}$/;
 const ID=/^[A-Za-z0-9_-]{1,64}$/;
+// A DOM-only trace does not observe privileged manager network, file-download,
+// new-tab or page-context operations. Without a trusted manager execution
+// record, even a human-review candidate must not imply these effects were
+// scoped by the observed selector counts. Keep ordinary/GM read-only review.
+const UNVERIFIED_DOM_GRANTS=new Set([
+ 'GM_xmlhttpRequest','GM.xmlHttpRequest',
+ 'GM_download','GM.download',
+ 'GM_openInTab','GM.openInTab','unsafeWindow'
+]);
 
 /** Candidate approval must not re-read mutable caller-owned DOM data after
  * triage. Take a bounded, own-data-only copy once, rejecting Proxy traps,
@@ -185,6 +194,8 @@ function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
      metadata.tags.icon64!==undefined||
      metadata.tags.updateurl!==undefined||
      metadata.tags.downloadurl!==undefined||
+     (metadata.tags.grant!==undefined&&
+      metadata.tags.grant.some(grant=>UNVERIFIED_DOM_GRANTS.has(grant)))||
      !Array.isArray(metadata.tags.match)||
      metadata.tags.match.length===0)return false;
   // A single page proves nothing about a userscript's OTHER @match
