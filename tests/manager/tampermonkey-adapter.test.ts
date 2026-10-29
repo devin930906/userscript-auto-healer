@@ -7,7 +7,6 @@ import {tmpdir} from 'node:os';
 import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
-  readTampermonkeyCdpTargetReceipt,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 
 const id='1234567890abcdef';
@@ -275,13 +274,19 @@ test('TASK-007/TEST-017/026: only native registered Chrome sessions may be inspe
 // not successful when its error key is present, even with a falsy JSON value
 // and plausible runtime targetInfos. No CDP failure may mint a runtime hint.
 test('TASK-007/TEST-017/026: CDP target-list receipt rejects explicit falsy errors and non-text data',()=>{
+ const inspect=(require('../../src/manager/tampermonkey-adapter') as {
+  readTampermonkeyCdpTargetReceipt?: (raw:unknown)=>unknown|null|undefined
+ }).readTampermonkeyCdpTargetReceipt;
+ assert.equal(typeof inspect,'function',
+  'a manager CDP response must have an independently testable bounded parser');
+ if(!inspect)return;
  const valid={id:1,result:{targetInfos:[worker]}};
- assert.deepEqual(readTampermonkeyCdpTargetReceipt(JSON.stringify(valid)),[worker],
+ assert.deepEqual(inspect(JSON.stringify(valid)),[worker],
   'valid CDP reply remains a target metadata hint only');
- assert.equal(readTampermonkeyCdpTargetReceipt(JSON.stringify({id:2,result:valid.result})),undefined,
+ assert.equal(inspect(JSON.stringify({id:2,result:valid.result})),undefined,
   'unrelated browser CDP events must not finish target inspection');
  for(const error of [false,0,'',null]){
-  assert.equal(readTampermonkeyCdpTargetReceipt(JSON.stringify({
+  assert.equal(inspect(JSON.stringify({
    id:1,error,result:valid.result
   })),null,'an explicit CDP error must block even when its JSON value is falsy');
  }
@@ -294,7 +299,7 @@ test('TASK-007/TEST-017/026: CDP target-list receipt rejects explicit falsy erro
   'null','not-json',Buffer.from(JSON.stringify(valid)),
   {toString(){throw Error('PRIVATE_CALLED_BY_PARSER');}}
  ]){
-  assert.equal(readTampermonkeyCdpTargetReceipt(raw),null,
+  assert.equal(inspect(raw),null,
    'invalid/oversized/non-native-text receipts must not return manager hints');
  }
 });
