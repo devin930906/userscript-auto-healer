@@ -7,7 +7,8 @@ import { strict as assert } from 'node:assert';
 const moduleUnderTest = require('../../src/browser/cdp-target') as {
   classifyMainFrameUrl?: (actual:unknown, expected:string)=>string;
   classifyMainFrameResponse?: (raw:string,expected:string)=>string|null;
-  readCreatedTargetReceipt?: (raw:unknown)=>string|null|undefined
+  readCreatedTargetReceipt?: (raw:unknown)=>string|null|undefined;
+  readClosedTargetReceipt?: (raw:unknown)=>boolean|undefined
 };
 
 test('TEST-013/026: main-frame evidence distinguishes provisional, mismatched and confirmed URLs',()=>{
@@ -92,5 +93,33 @@ test('TASK-005/TEST-008/026: created-tab CDP replies are bounded and fail closed
     const result=inspect(raw);
     assert.equal(result,null,'invalid, oversized or non-string replies must fail closed');
     assert.equal(String(result).includes('PRIVATE'),false);
+  }
+});
+
+// ISSUE-480 / TASK-008 / TEST-013/026: a matching close-target CDP reply
+// carrying ANY error field must not be reported as acknowledged cleanup.
+// In particular, falsy but present JSON errors are still errors.
+test('TASK-008/TEST-013/026: close-target acknowledgement rejects falsy errors and forged binary receipts',()=>{
+  const inspect=moduleUnderTest.readClosedTargetReceipt;
+  assert.equal(typeof inspect,'function',
+    'actual cleanup must use a bounded native-text close-target receipt parser');
+  if(!inspect)return;
+  assert.equal(inspect(JSON.stringify({id:3,result:{success:true}})),true);
+  assert.equal(inspect(JSON.stringify({id:17,result:{success:true}})),undefined,
+    'unrelated CDP message IDs must not prematurely terminate cleanup');
+  for(const error of [false,0,'',null]){
+    assert.equal(inspect(JSON.stringify({id:3,error,result:{success:true}})),false,
+      'an explicit error field cannot be mistaken for an acknowledged tab closure');
+  }
+  for(const raw of [
+    JSON.stringify({id:3,result:{success:false}}),
+    JSON.stringify({id:3,result:{success:'true'}}),
+    JSON.stringify({id:3,result:{success:true},padding:'PRIVATE'.repeat(6000)}),
+    '{not-json',
+    Buffer.from(JSON.stringify({id:3,result:{success:true}})),
+    {toString(){throw Error('PRIVATE_EXFILTRATION');}}
+  ]){
+    assert.equal(inspect(raw),false,
+      'invalid, oversized or non-text close receipts may never confirm cleanup');
   }
 });
