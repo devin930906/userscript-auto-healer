@@ -371,6 +371,17 @@ test('TASK-011/012 TEST-020/021/023/026: checkpoint recheck cannot bless altered
 // external-editor interleaving after the final checkpoint verification.
 test('TASK-011/012 TEST-020/021/023: source edited during final manual export checks cannot receive a ready receipt',async()=>{
  await fixture(async opts=>{
+  const checkpointModule=require('../../src/version/recovery-checkpoint') as
+   typeof import('../../src/version/recovery-checkpoint');
+  const inspect=checkpointModule.inspectRecoveryCheckpointReadOnly;
+  let completedCheckpointRechecks=0;
+  const checkpointInterception=mock.method(checkpointModule,'inspectRecoveryCheckpointReadOnly',
+   async (...args:Parameters<typeof inspect>)=>{
+    const outcome=await inspect(...args);
+    if(outcome.status==='CHECKPOINT_RECHECKED_READ_ONLY')
+     completedCheckpointRechecks++;
+    return outcome;
+   });
   const candidateModule=require('../../src/version/candidate-bytes') as
    typeof import('../../src/version/candidate-bytes');
   const verify=candidateModule.verifyExactCandidateBytesReadOnly;
@@ -378,7 +389,8 @@ test('TASK-011/012 TEST-020/021/023: source edited during final manual export ch
   const interception=mock.method(candidateModule,'verifyExactCandidateBytesReadOnly',
    async (...args:Parameters<typeof verify>)=>{
     const result=await verify(...args);
-    if(!edited&&result==='MATCH'&&typeof args[0]==='string'&&
+    if(!edited&&completedCheckpointRechecks===2&&result==='MATCH'&&
+       typeof args[0]==='string'&&
        dirname(args[0])===opts.exportDirectory){
      // External edit lands after the last persisted checkpoint inspection,
      // when the first published export has already matched its expected bytes.
@@ -389,7 +401,8 @@ test('TASK-011/012 TEST-020/021/023: source edited during final manual export ch
    });
   try{
    const response=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
-   assert.equal(edited,true,'fixture must mutate the genuine source AFTER export publication');
+   assert.equal(completedCheckpointRechecks,2,'two real checkpoint inspections must finish');
+   assert.equal(edited,true,'fixture must mutate genuine source AFTER final checkpoint inspection');
    assert.deepEqual(response,{
     status:'BLOCKED',reason:'SOURCE_CHANGED',
     automaticPatchAllowed:false,automaticRollbackAllowed:false,
@@ -400,6 +413,6 @@ test('TASK-011/012 TEST-020/021/023: source edited during final manual export ch
     'the product must not overwrite or revert an external edit');
    assert.equal((await readdir(opts.exportDirectory)).length,2,
     'do not remove published manual/recovery files on stale-source rejection');
-  }finally{interception.mock.restore();}
+  }finally{interception.mock.restore();checkpointInterception.mock.restore();}
  });
 });
