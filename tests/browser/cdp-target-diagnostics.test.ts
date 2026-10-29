@@ -50,14 +50,15 @@ test('TASK-008/TEST-013/026: CDP rejection and malformed receipts have distinct 
     'the actual frame socket must classify command errors separately from navigation pending');
   if(!inspect)return;
   const approved='https://example.com/fixture?mode=one';
-  const good=JSON.stringify({id:1,result:{frameTree:{frame:{url:approved}}}});
+  const frameId='0123456789abcdef0123456789abcdef';
+  const good=JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId,url:approved}}}});
   const cases:[string,string|null][]=[
     [good,'MAIN_FRAME_CONFIRMED'],
-    [JSON.stringify({id:1,result:{frameTree:{frame:{url:'about:blank'}}}}),'MAIN_FRAME_ABOUT_BLANK'],
+    [JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId,url:'about:blank'}}}}),'MAIN_FRAME_ABOUT_BLANK'],
     [JSON.stringify({id:1,error:{code:-32000,message:'PRIVATE-CDP-ERROR'}}),'MAIN_FRAME_CDP_REJECTED'],
     [JSON.stringify({id:1,error:{message:'PRIVATE'},result:{frameTree:{frame:{url:approved}}}}),'MAIN_FRAME_CDP_REJECTED'],
     [JSON.stringify({id:1,result:{}}),'MAIN_FRAME_RESPONSE_INVALID'],
-    [JSON.stringify({id:1,result:{frameTree:{frame:{}}}}),'MAIN_FRAME_MISSING_URL'],
+    [JSON.stringify({id:1,result:{frameTree:{frame:{id:frameId}}}}),'MAIN_FRAME_MISSING_URL'],
     ['PRIVATE-not-json','MAIN_FRAME_RESPONSE_INVALID'],
     [JSON.stringify({id:1,result:{frameTree:{frame:{url:approved}}},padding:'PRIVATE'.repeat(6000)}),'MAIN_FRAME_RESPONSE_INVALID'],
     [JSON.stringify({id:2,result:{frameTree:{frame:{url:approved}}}}),null]
@@ -133,7 +134,7 @@ test('TASK-008/TEST-013/026: main-frame receipt refuses all present falsy CDP er
   assert.equal(typeof classify,'function');
   if(!classify)return;
   const url='https://example.com/fixture?mode=one';
-  const frameTree={frame:{url}};
+  const frameTree={frame:{id:'0123456789abcdef0123456789abcdef',url}};
   assert.equal(classify(JSON.stringify({id:1,result:{frameTree}}),url),
     'MAIN_FRAME_CONFIRMED','ordinary result must remain supported');
   for(const error of [false,0,'',null]){
@@ -159,4 +160,36 @@ test('TASK-008/TEST-008/013/026: create-target receipt refuses all present falsy
   }
   assert.equal(read(JSON.stringify({id:99,error:null,result:{targetId}})),
     undefined,'unrelated CDP ids are ignored');
+});
+
+
+// TASK-008 / REQ-013 / TEST-013/026: matching a URL is insufficient if
+// Page.getFrameTree lacks a real root frame identity, actually describes a
+// child frame, or reports a failed navigation through unreachableUrl. The
+// owned-browser socket is not permission to treat any frame URL as the main
+// approved document. Reject only; never expose frame IDs or private URLs.
+test('TASK-008/TEST-013/026: CDP cannot confirm a child or unreachable frame as the main document',()=>{
+  const classify=moduleUnderTest.classifyMainFrameResponse;
+  assert.equal(typeof classify,'function');
+  if(!classify)return;
+  const url='https://example.com/fixture?mode=one';
+  const frameId='0123456789abcdef0123456789abcdef';
+  const response=(frame:Record<string,unknown>)=>JSON.stringify({
+    id:1,result:{frameTree:{frame}}
+  });
+  assert.equal(classify(response({id:frameId,url}),url),'MAIN_FRAME_CONFIRMED',
+    'a real root frame with an identity is still a valid read-only signal');
+  for(const frame of [
+    {url},
+    {id:'',url},
+    {id:frameId,url,parentId:'different-parent'},
+    {id:frameId,url,parentId:null},
+    {id:frameId,url,unreachableUrl:'https://example.com/private'},
+    {id:frameId,url,unreachableUrl:''}
+  ]){
+    assert.equal(classify(response(frame),url),'MAIN_FRAME_RESPONSE_INVALID',
+      'an absent/child/error frame cannot establish verified main navigation');
+  }
+  const childOnly=response({id:'child-frame-id-001',parentId:frameId,url});
+  assert.notEqual(classify(childOnly,url),'MAIN_FRAME_CONFIRMED');
 });
