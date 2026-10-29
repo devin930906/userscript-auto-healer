@@ -22,6 +22,20 @@ test('TEST-020/026: Windows trailing dot/space ancestor aliases are rejected',as
   await writeFile(source,bytes);
   assert.equal(await hasUnsafePathLink(source),false,
    'unambiguous native-selected path remains eligible');
+
+  // TASK-011 / TEST-020/026: the Windows \\?\\ namespace is a second
+  // spelling for the same existing file. String-derived backup identities
+  // and restore-path mutexes must never treat it as another authorized file.
+  // Construct the native prefix explicitly to avoid path-literal escaping.
+  const namespaced=String.fromCharCode(92,92,63,92)+source;
+  assert.equal(await hasUnsafePathLink(namespaced),true,
+   'Win32 extended namespace alias must be refused before native file access');
+  // The device namespace is equally unsafe, whether or not its filesystem
+  // resolution is accepted by a particular Windows runner.
+  const device=String.fromCharCode(92,92,46,92)+source;
+  assert.equal(await hasUnsafePathLink(device),true,
+   'Win32 device namespace must be rejected lexically');
+
   for(const alias of ['selected.','selected ']){
    const unsafe=join(root,alias,'safe.user.js');
    assert.equal(await hasUnsafePathLink(unsafe),true,
