@@ -237,5 +237,5 @@ test('TASK-008/TEST-013/026: cleanup refuses malformed or ambiguous CDP target l
   });
   assert.equal(check(proxy,mine),false);
   assert.equal(proxyCalls,0,'untrusted Proxy traps must not execute');
-  assert.equal(check([], 'not-a-valid-CDP-id'),false);
+  assert.equal(check([], 'bad'),false);
 });
