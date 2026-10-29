@@ -76,7 +76,7 @@ let source=[
   ' }'
  ]),
  ' }catch(e){}',
- 'const gm=gmDefault'+(productReadOnlyGm?'':'&&gmRoundtrip')+';
+ 'const gm=gmDefault'+(productReadOnlyGm?'':'&&gmRoundtrip')+';',
  'const report=()=>{',
  ' if(!document.documentElement)throw Error("Missing fixture root");',
  ' document.documentElement.dataset.uahCiInjected="yes";',
