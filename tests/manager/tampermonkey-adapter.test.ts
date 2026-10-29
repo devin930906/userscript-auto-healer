@@ -303,3 +303,25 @@ test('TASK-007/TEST-017/026: CDP target-list receipt rejects explicit falsy erro
    'invalid/oversized/non-native-text receipts must not return manager hints');
  }
 });
+
+// TASK-007 / Issue #486: only a bare Target.getTargets response envelope
+// is eligible for a runtime hint. A message with extra protocol fields or
+// extra result properties cannot be treated as an ordinary successful reply.
+test('TASK-007/TEST-017/026: mixed or extended CDP envelopes fail closed',()=>{
+ const {readTampermonkeyCdpTargetReceipt:read}=
+  require('../../src/manager/tampermonkey-adapter') as typeof import('../../src/manager/tampermonkey-adapter');
+ const targetInfos=[worker];
+ assert.deepEqual(read(JSON.stringify({id:1,result:{targetInfos}})),targetInfos);
+ for(const raw of [
+  {id:1,result:{targetInfos},method:'Target.targetCreated'},
+  {id:1,result:{targetInfos},sessionId:'not-a-browser-root-reply'},
+  {id:1,result:{targetInfos},padding:'unexpected'},
+  {id:1,result:{targetInfos,unexpected:true}}
+ ]){
+  assert.equal(read(JSON.stringify(raw)),null,
+   'an extended response envelope must not become an ordinary target hint');
+ }
+ assert.equal(read(JSON.stringify({
+  id:2,result:{targetInfos},method:'Target.targetCreated'
+ })),undefined,'other command IDs remain unrelated, not fatal errors');
+});
