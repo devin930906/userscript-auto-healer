@@ -773,3 +773,39 @@ test('TASK-013/TEST-022/NFR-009: failed AST worker retires before next segment s
   console.warn=warn;
  }
 });
+
+test('TASK-013/TEST-022/NFR-009: valid AST reply with failed Worker retirement must not certify that segment',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#private-retirement-failure-${i}");`
+ ));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ let starts=0;
+ let results:Awaited<ReturnType<typeof previewImportedBatchOffMain>>;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(_filename:string,opts:{workerData:typeof scripts}){
+    super();
+    starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate():Promise<number>{
+    throw Error('TEST_ONLY_UNRETIRED_WORKER');
+   }
+  } as unknown as typeof native;
+  results=await previewImportedBatchOffMain(scripts);
+ }finally{
+  workers.Worker=native;
+ }
+ assert.equal(starts,1,'do not start a second segment after retirement fails');
+ assert.deepEqual(results.map(x=>x.status),Array(17).fill('ISOLATED_ANALYSIS_FAILED'),
+  'a valid message cannot certify a segment if its isolated worker did not retire');
+ assert.ok(results.every(x=>x.metadataStatus==='NOT_CHECKED'&&
+  !x.automaticPatchAllowed&&!x.businessVerified&&!x.tampermonkeyVerified));
+ assert.equal(JSON.stringify(results).includes('private-retirement-failure'),false);
+});
