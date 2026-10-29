@@ -757,3 +757,31 @@ test('TASK-009/TEST-019/026: destructured native-document references cannot bypa
   assert.equal(result.automaticPatchAllowed,false);
  }
 });
+
+
+test('TASK-009/TEST-019/026: dynamic global document aliases cannot disguise selector monkey-patching',()=>{
+ const hostile=[
+  "const key='document'; const alias=window[key]; alias.querySelector=()=>null;",
+  "const alias=globalThis[selectorHost]; Object.defineProperty(alias,'querySelector',{value:()=>null});",
+  "const alias=window['doc'+'ument']; Reflect.set(alias,'querySelector',()=>null);",
+  "let alias; alias=window[key]; alias['querySelector']=()=>null;",
+  "function f(alias=globalThis[key]){alias.querySelector=()=>null;} f();"
+ ];
+ for(const mutation of hostile){
+  const script=meta+mutation+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'BLOCKED',mutation);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // A fixed unrelated key does not resolve to the native document and must
+ // remain eligible for local review without granting actual patch authority.
+ const safe=meta+"const alias=window['unrelated']; alias.querySelector=()=>null;\ndocument.querySelector('#old');";
+ const result=proposeLiteralSelectorPatch(request(safe,{
+  callOffset:safe.lastIndexOf("document.querySelector('#old')")
+ }));
+ assert.equal(result.status,'CANDIDATE_ONLY');
+ assert.equal(result.automaticPatchAllowed,false);
+});
