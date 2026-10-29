@@ -105,8 +105,16 @@ export function readTampermonkeyCdpTargetReceipt(raw:unknown):unknown|null|undef
   const reply=parsed as {id?:unknown;error?:unknown;result?:unknown};
   if(reply.id!==1)return undefined;
   if(Object.prototype.hasOwnProperty.call(reply,'error'))return null;
+  // The browser-root Target.getTargets reply has only id and result.
+  // Extra event/session envelope fields are not an ordinary success receipt.
+  const envelopeKeys=Object.keys(reply);
+  if(envelopeKeys.length!==2||
+     !Object.prototype.hasOwnProperty.call(reply,'result'))return null;
   const result=reply.result;
   if(!result||typeof result!=='object'||Array.isArray(result))return null;
+  // Do not let a mixed or extended result mint a manager presence hint.
+  const resultKeys=Object.keys(result);
+  if(resultKeys.length!==1||resultKeys[0]!=='targetInfos')return null;
   const targets=(result as {targetInfos?:unknown}).targetInfos;
   return Array.isArray(targets)?targets:null;
  }catch{return null;}
