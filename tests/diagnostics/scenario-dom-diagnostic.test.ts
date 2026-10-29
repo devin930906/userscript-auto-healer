@@ -392,8 +392,27 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  t.after(()=>probe.session.stop());
  const url=probe.session.origin+'/?mode=fixed';
  const navigationStages:string[]=[];
- const tab=await openApprovedTarget(opened,url,true,undefined,
-  stage=>{if(navigationStages.length<96)navigationStages.push(stage);});
+ // Issue #480 / TEST-013: simulate an OS wall-clock jump *after* Chrome
+ // accepts the target, without changing Chrome deadlines or running scripts.
+ // Date.now is restored before subsequent scenario assertions, even on error.
+ // A navigation budget based on wall time incorrectly ends before the first
+ // main-frame receipt; monotonic elapsed time must survive this fixture.
+ const originalNow=Date.now;
+ let wallClockReads=0,clockShiftArmed=false;
+ let tab:Awaited<ReturnType<typeof openApprovedTarget>>;
+ try{
+  tab=await openApprovedTarget(opened,url,true,undefined,stage=>{
+   if(stage==='TAB_CREATED'&&!clockShiftArmed){
+    clockShiftArmed=true;
+    Date.now=()=>{
+     wallClockReads++;
+     return originalNow()+(wallClockReads>1?60000:0);
+    };
+   }
+   if(navigationStages.length<96)navigationStages.push(stage);
+  });
+ }finally{Date.now=originalNow;}
+ assert.equal(clockShiftArmed,true,'the owned Chrome target clock fixture must be exercised');
  if(!tab.ok){
   const counts:Record<string,number>={};
   for(const stage of navigationStages)counts[stage]=(counts[stage]??0)+1;
