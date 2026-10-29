@@ -2,6 +2,7 @@
  * This cannot prove login, userscript injection, GM APIs or business behavior.
  */
 import { setTimeout as delay } from 'node:timers/promises';
+import {performance} from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
 import type { ManagedLaunchResult } from './owned-chrome';
 import { readBoundedCdpJson, isLiveApprovedChromeSession } from './owned-chrome';
@@ -301,8 +302,10 @@ export async function openApprovedTarget(
     // Cancellation after the tab's creation still requires best-effort
     // cleanup. The finally block never replays the approved navigation.
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-    const began=Date.now();
-  while(Date.now()-began<9000){
+    // The nine-second target confirmation budget must survive wall-clock shifts.
+    // Monotonic time preserves the original limit and conservative failure.
+    const began=performance.now();
+  while(performance.now()-began<9000){
     if(signal?.aborted)return {ok:false,code:'CANCELLED'};
     try{
       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
