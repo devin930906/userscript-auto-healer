@@ -345,24 +345,21 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
-  // A Windows path may address the same source through differently cased
-  // ancestor directories, even with the correct script filename. Since
-  // existing, unreconciled recovery journals bind the original exact
-  // source-path bytes, these aliases MUST NOT bypass earlier restore intents.
-  // Compare each native component's actual name, not realpath's complete
-  // output: its volume prefix / older parent spellings need not be textually
-  // identical on Windows. Never rewrite a selected path or migrate journals.
-  // The path mutex is cooperative; this remains a bounded pre-write snapshot.
+  // Recovery journals bind the exact original source-path bytes. Windows
+  // resolves differently cased parent directory names to the same native
+  // source, so the old journal can be bypassed even with a canonical script
+  // filename. Check the source AND its directly selected parent before any
+  // backups, intent publication or overwrite.
+  //
+  // Do NOT demand that the entire realpath string match: Windows can rewrite
+  // older temp/environment ancestors and drive prefix for otherwise valid
+  // native selections. More distant ancestor aliases remain a separately
+  // unresolved provenance risk requiring a compatible identity design.
   if(process.platform==='win32'){
    try{
-    let component=opts.sourcePath;
-    let depth=0;
-    while(dirname(component)!==component){
-     if(++depth>64||
-        basename(await realpath(component))!==basename(component))
-      return block('UNSAFE_PATH');
-     component=dirname(component);
-    }
+    if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
+       basename(await realpath(parent))!==basename(parent))
+     return block('UNSAFE_PATH');
    }catch{return block('UNSAFE_PATH');}
   }
   // A published intent from an earlier attempt remains unreconciled even
