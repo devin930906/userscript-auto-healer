@@ -89,6 +89,56 @@ test('TEST-007/008: never launch without approval or with bad config',async()=>{
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:true}),
     {ok:false,code:process.platform==='win32'?'PREFLIGHT_FAILED':'PREFLIGHT_FAILED'});
 });
+test('TASK-005/TEST-006/007/009/026: Chrome launch consent options never evaluate accessors or Proxy traps',async()=>{
+  const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
+  type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
+  let accessors=0,proxyTraps=0;
+  const consentGetter=Object.defineProperty({},'userApproved',{
+    enumerable:true,get(){accessors++;return true;}
+  });
+  const inheritedConsent=Object.create({userApproved:true}) as unknown;
+  const signalGetter=Object.defineProperty({userApproved:true},'signal',{
+    enumerable:true,get(){accessors++;throw Error('PRIVATE_CALLBACK_RAN');}
+  });
+  const callbackGetter=Object.defineProperty({userApproved:true},'onStartupStage',{
+    enumerable:true,get(){accessors++;return ()=>{};}
+  });
+  const proxy=new Proxy({userApproved:true},{
+    get(){proxyTraps++;return true;},
+    ownKeys(){proxyTraps++;return ['userApproved'];},
+    getOwnPropertyDescriptor(){proxyTraps++;throw Error('PRIVATE_PROXY_RAN');}
+  });
+  const revoked=Proxy.revocable({userApproved:true},{});
+  revoked.revoke();
+  for(const candidate of [consentGetter,inheritedConsent,signalGetter,
+      callbackGetter,proxy,revoked.proxy]){
+    assert.deepEqual(await launchApprovedIsolatedChrome(impossible,candidate as Options),
+      {ok:false,code:'NOT_AUTHORIZED'},
+      'untrusted launch options must fail before Chrome preflight or any side effects');
+  }
+  assert.equal(accessors,0,'consent parsing must never invoke an accessor');
+  assert.equal(proxyTraps,0,'consent parsing must never invoke Proxy traps');
+});
+
+test('TASK-005/TEST-007/009: malformed launch signal cannot impersonate an AbortSignal',async()=>{
+  const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
+  type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
+  let abortedReads=0;
+  const signal=Object.defineProperty({},'aborted',{
+    get(){abortedReads++;return false;}
+  });
+  assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{
+    userApproved:true,signal
+  } as unknown as Options),{ok:false,code:'NOT_AUTHORIZED'});
+  assert.equal(abortedReads,0);
+  const controller=new AbortController();
+  controller.abort();
+  assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{
+    userApproved:true,signal:controller.signal
+  }),{ok:false,code:'ABORTED'},
+    'a genuinely aborted native signal must retain its cancellation semantics');
+});
+
 test('TEST-006: executable masquerading as Chrome cannot be launched',async t=>{
   if(process.platform!=='win32')return;
   const root=await mkdtemp(join(tmpdir(),'uah-fake-executable-'));
