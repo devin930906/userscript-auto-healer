@@ -629,3 +629,66 @@ test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot 
     t.mock.reset();
   }
 });
+
+
+test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake cannot register an owned browser',async t=>{
+  // This synthetic child never starts a real Chrome, touches a user Profile,
+  // or performs network I/O. Consent is revoked *after* the earlier abort
+  // check, while the asynchronous browser handshake is still in progress.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const childProcesses=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12024);
+  const controller=new AbortController();
+  const child=Object.assign(new EventEmitter(),{
+    pid:41235,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let handshakeObserved=false;
+  let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(childProcesses,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41235,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      handshakeObserved=true;
+      controller.abort();
+      return true;
+    });
+    t.mock.method(globalThis,'fetch',async()=>
+      new Response(JSON.stringify({
+        Browser:'Chrome/155.0.1.1',
+        webSocketDebuggerUrl:'ws://127.0.0.1:12024/devtools/browser/abcdefgh-1234'
+      }))
+    );
+    result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal
+    });
+    assert.equal(handshakeObserved,true,
+      'the abort must occur in the authenticated handshake, not before launch');
+    assert.deepEqual(result,{ok:false,code:'ABORTED'},
+      'a completed handshake cannot reinstate revoked user consent');
+    assert.equal(child.killed,true,
+      'only the synthetic child owned by this launch is cleaned up');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    if(result?.ok)result.stop();
+    t.mock.reset();
+  }
+});
