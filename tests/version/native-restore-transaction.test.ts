@@ -1413,3 +1413,42 @@ test('TASK-011/TEST-020: another source may restore with a shared recovery store
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/021/026: a competing same-source intent published after the initial scan blocks final overwrite',async t=>{
+ await fixture(async opts=>{
+  const residue=require('../../src/version/restore-staging-residue') as
+    typeof import('../../src/version/restore-staging-residue');
+  const scan=residue.hasInterruptedRestoreStaging;
+  let injected=false;
+  t.mock.method(residue,'hasInterruptedRestoreStaging',
+   async (...args:Parameters<typeof scan>)=>{
+    const result=await scan(...args);
+    // The SECOND backup-store scan occurs after our transaction publishes
+    // its own journal, just before an irreversible source rename.
+    if(!injected&&args[0]===opts.backupDirectory&&
+       (await readdir(opts.backupDirectory)).filter(n=>n.endsWith('.journal.json')).length===1){
+      const ownName=(await readdir(opts.backupDirectory))
+        .find(n=>n.endsWith('.journal.json')) as string;
+      const prior=await readFile(join(opts.backupDirectory,ownName));
+      const competing=join(opts.backupDirectory,
+        '.uah-restore-'+randomUUID()+'.journal.json');
+      await writeFile(competing,prior);
+      injected=true;
+    }
+    return result;
+   });
+  const receipt=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(injected,true,'inject only after the owned journal was published');
+  assert.deepEqual(receipt,{
+   status:'BLOCKED',reason:'RECOVERY_REVIEW_REQUIRED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+    'a late competing journal must deny the irreversible native rename');
+  assert.equal((await readdir(opts.backupDirectory))
+    .filter(n=>n.endsWith('.journal.json')).length,2,
+    'retain both conflicting native recovery intents for manual review');
+ });
+});
