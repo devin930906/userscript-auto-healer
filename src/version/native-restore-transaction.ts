@@ -360,6 +360,16 @@ export async function restoreVerifiedOriginalNativeOnly(
     if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
        basename(await realpath(parent))!==basename(parent))
      return block('UNSAFE_PATH');
+    // Even when the selected script and its direct parent use the exact
+    // on-disk casing, a higher ancestor alias changes the raw-path journal
+    // commitment. Walk each existing grandparent up to (not including) the
+    // drive/share root; reject alternate spellings before publishing a new
+    // backup or intent. This is a snapshot, not durable identity/locking.
+    for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
+        ancestor=dirname(ancestor)){
+     if(basename(await realpath(ancestor))!==basename(ancestor))
+      return block('UNSAFE_PATH');
+    }
    }catch{return block('UNSAFE_PATH');}
   }
   // A published intent from an earlier attempt remains unreconciled even
