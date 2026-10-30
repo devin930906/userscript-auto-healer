@@ -8,7 +8,7 @@ import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
 import {chmod,link,lstat,mkdtemp,mkdir,readFile,readdir,rename,rm,stat,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {basename,dirname,join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly,stillOwnNativeRestorePathLock,removeOwnedNativeRestorePending,removeOwnedPublishedJournalPending} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
@@ -756,21 +756,6 @@ test('TASK-011/TEST-020/021/026: Windows grandparent-case alias cannot bypass a 
   await mkdir(inner,{recursive:true});
   await mkdir(backupDirectory);
   await writeFile(sourcePath,original);
-  // Temporary Windows CI diagnosis: emit only mismatch flags by depth.
-  // Never log user paths, directory basenames, hashes or script text.
-  if(process.platform==='win32'){
-   const levels:Array<{depth:number;exact:boolean;fold:boolean;count:number}>=[];
-   let depth=0;
-   for(let ancestor=dirname(dirname(sourcePath));dirname(ancestor)!==ancestor;
-       ancestor=dirname(ancestor)){
-    const names=await readdir(dirname(ancestor));
-    const expected=basename(ancestor);
-    levels.push({depth:depth++,exact:names.includes(expected),
-     fold:names.some(name=>name.toLowerCase()===expected.toLowerCase()),
-     count:names.length});
-   }
-   console.log('TASK011_WINDOWS_ANCESTOR_DIAG='+JSON.stringify(levels));
-  }
   const firstBackup=await createVerifiedBackupOnly({
    sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
   });

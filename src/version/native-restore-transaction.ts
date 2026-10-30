@@ -360,17 +360,21 @@ export async function restoreVerifiedOriginalNativeOnly(
     if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
        basename(await realpath(parent))!==basename(parent))
      return block('UNSAFE_PATH');
-    // The selected script and direct parent may have exact basenames while
-    // a grandparent uses another case spelling of the same Windows folder.
-    // realpath() may rewrite *legitimate* earlier temp/environment ancestors
-    // into 8.3 or another native representation. Inspect the actual directory
-    // entry name at EACH parent instead: only an exact on-disk spelling may
-    // inherit the earlier raw-path restore journal commitment. This remains
-    // a bounded path snapshot, never an exclusive handle-based lock.
+    // The script and direct parent may match their exact names while a
+    // grandparent differs ONLY in letter case. A published journal hashes the
+    // original path string, so that alternate spelling would evade an
+    // unresolved restore intent. Compare higher ancestor names with their
+    // native directory entries, but reject only a PROVEN case-only alias:
+    // Windows runner temp/virtual paths can use a completely different name
+    // (e.g. short-name mapping) that cannot be attested from listing alone.
+    // Other path aliases remain outside this bounded case-only safeguard.
     for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
         ancestor=dirname(ancestor)){
+     const expectedName=basename(ancestor);
      const names=await readdir(dirname(ancestor));
-     if(!names.includes(basename(ancestor)))return block('UNSAFE_PATH');
+     if(!names.includes(expectedName)&&
+        names.some(name=>name.toLowerCase()===expectedName.toLowerCase()))
+      return block('UNSAFE_PATH');
     }
    }catch{return block('UNSAFE_PATH');}
   }
