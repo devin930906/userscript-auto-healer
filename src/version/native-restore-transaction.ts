@@ -16,7 +16,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {types as nodeTypes} from 'node:util';
-import {link,lstat,mkdir,open,realpath,rename,rmdir,unlink} from 'node:fs/promises';
+import {link,lstat,mkdir,open,readdir,realpath,rename,rmdir,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -360,15 +360,17 @@ export async function restoreVerifiedOriginalNativeOnly(
     if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
        basename(await realpath(parent))!==basename(parent))
      return block('UNSAFE_PATH');
-    // Even when the selected script and its direct parent use the exact
-    // on-disk casing, a higher ancestor alias changes the raw-path journal
-    // commitment. Walk each existing grandparent up to (not including) the
-    // drive/share root; reject alternate spellings before publishing a new
-    // backup or intent. This is a snapshot, not durable identity/locking.
+    // The selected script and direct parent may have exact basenames while
+    // a grandparent uses another case spelling of the same Windows folder.
+    // realpath() may rewrite *legitimate* earlier temp/environment ancestors
+    // into 8.3 or another native representation. Inspect the actual directory
+    // entry name at EACH parent instead: only an exact on-disk spelling may
+    // inherit the earlier raw-path restore journal commitment. This remains
+    // a bounded path snapshot, never an exclusive handle-based lock.
     for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
         ancestor=dirname(ancestor)){
-     if(basename(await realpath(ancestor))!==basename(ancestor))
-      return block('UNSAFE_PATH');
+     const names=await readdir(dirname(ancestor));
+     if(!names.includes(basename(ancestor)))return block('UNSAFE_PATH');
     }
    }catch{return block('UNSAFE_PATH');}
   }
