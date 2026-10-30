@@ -5,6 +5,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
+import {types as nodeTypes} from 'node:util';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
 import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
 
@@ -72,19 +73,53 @@ export type ChromeStartupStage='FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
  * fetch/undici error, socket address, Chrome profile, process or user script.
  * Ignore arbitrary getters, prototype chains and hostile Proxy failures.
  */
+/** Map only known transport codes to fixed diagnostic labels; never serialize
+ * Error.message, endpoint, profile details or a nested rejection payload.
+ */
+function transportCodeLabel(code:unknown):
+ 'FETCH_REFUSED'|'FETCH_TIMEOUT'|'FETCH_RESET'|undefined {
+ if(code==='ECONNREFUSED')return 'FETCH_REFUSED';
+ if(code==='ECONNRESET'||code==='EPIPE')return 'FETCH_RESET';
+ if(code==='ETIMEDOUT'||code==='UND_ERR_CONNECT_TIMEOUT'||
+    code==='UND_ERR_HEADERS_TIMEOUT')return 'FETCH_TIMEOUT';
+ return undefined;
+}
 export function classifyCdpStartupTransportFailure(error:unknown):
  'FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|'FETCH_RESET' {
  let current:unknown=error;
  for(let depth=0;depth<3;depth++){
-  if(!current||typeof current!=='object')break;
+  if(!current||typeof current!=='object'||nodeTypes.isProxy(current))
+    return 'FETCH_FAILED';
   let desc:PropertyDescriptorMap;
   try{desc=Object.getOwnPropertyDescriptors(current);}
   catch{return 'FETCH_FAILED';}
-  const code=desc.code?.value;
-  if(code==='ECONNREFUSED')return 'FETCH_REFUSED';
-  if(code==='ECONNRESET'||code==='EPIPE')return 'FETCH_RESET';
-  if(code==='ETIMEDOUT'||code==='UND_ERR_CONNECT_TIMEOUT'||
-     code==='UND_ERR_HEADERS_TIMEOUT')return 'FETCH_TIMEOUT';
+  // Node/undici can wrap multiple socket failures in a native AggregateError.
+  // Only a small, fully inspectable, unanimous set is specific enough for a
+  // redacted label. Mixed, sparse, foreign or hostile reports are UNKNOWN.
+  if(current instanceof AggregateError){
+    try{
+      const reasons:unknown=desc.errors?.value;
+      if(nodeTypes.isProxy(reasons)||!Array.isArray(reasons)||
+         Object.getPrototypeOf(reasons)!==Array.prototype||
+         reasons.length<1||reasons.length>8)return 'FETCH_FAILED';
+      let unanimous:'FETCH_REFUSED'|'FETCH_TIMEOUT'|'FETCH_RESET'|undefined;
+      for(let i=0;i<reasons.length;i++){
+        const entry=Object.getOwnPropertyDescriptor(reasons,String(i));
+        const reason:unknown=entry?.value;
+        if(!entry||!Object.prototype.hasOwnProperty.call(entry,'value')||
+           !reason||typeof reason!=='object'||nodeTypes.isProxy(reason))
+          return 'FETCH_FAILED';
+        const result=transportCodeLabel(
+          Object.getOwnPropertyDescriptors(reason).code?.value);
+        if(!result||(unanimous!==undefined&&unanimous!==result))
+          return 'FETCH_FAILED';
+        unanimous=result;
+      }
+      return unanimous??'FETCH_FAILED';
+    }catch{return 'FETCH_FAILED';}
+  }
+  const label=transportCodeLabel(desc.code?.value);
+  if(label)return label;
   if(desc.name?.value==='TimeoutError')return 'FETCH_TIMEOUT';
   current=desc.cause?.value;
  }
