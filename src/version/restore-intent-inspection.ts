@@ -243,7 +243,19 @@ export async function hasPriorPublishedRestoreIntentForSource(
   const directory=await opendir(backupDirectory);
   for await(const entry of directory){
    if(++entries>1024)return true;
-   if(!JOURNAL_NAME.test(entry.name))continue;
+   if(!JOURNAL_NAME.test(entry.name)){
+    // Invalid or differently cased native recovery evidence must not
+    // disappear from this source's pre-rename review, even when no valid
+    // published journal happens to match the exact canonical name.
+    if(!entry.name.toLowerCase().startsWith('.uah-restore-'))continue;
+    // A valid cooperative lock for an independent source is not a journal.
+    // A same-shaped fake file or link is still unsafe recovery evidence.
+    if(/^[.]uah-restore-path-[a-f0-9]{64}$/.test(entry.name)){
+     const lock=await lstat(join(backupDirectory,entry.name),{bigint:true});
+     if(lock.isDirectory()&&!lock.isSymbolicLink())continue;
+    }
+    return true;
+   }
    if(++journals>32)return true;
    const path=join(backupDirectory,entry.name);
    const before=await lstat(path,{bigint:true});

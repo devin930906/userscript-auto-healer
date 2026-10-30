@@ -10,6 +10,7 @@ import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
+import {hasPriorPublishedRestoreIntentForSource} from '../../src/version/restore-intent-inspection';
 const original=Buffer.from('// ==UserScript==\n// @name old\n// ==/UserScript==\n');
 const updated=Buffer.from('// ==UserScript==\n// @name new\n// ==/UserScript==\n');
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
@@ -455,5 +456,35 @@ test('TASK-011/TEST-020/021/026: shared native recovery directory counts only th
   }
   assert.deepEqual((await readdir(backupDirectory)).sort(),before,
    'read-only scope inspection must not modify either journal or backup');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+
+test('TASK-011/TEST-020/021/026: malformed reserved journal name is never a clean prior-intent preflight',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-prior-reserved-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  await writeFile(join(backupDirectory,'ordinary-notes.txt'),'unrelated');
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
+   'ordinary unrelated files do not block a fresh native restore');
+  const foreignMutex=join(backupDirectory,'.uah-restore-path-'+'f'.repeat(64));
+  await mkdir(foreignMutex);
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
+   'a structurally valid unrelated native path mutex is not a journal');
+
+  // A Windows case-only rename or interrupted publication must not hide
+  // a reserved recovery artifact from the *native pre-rename* guard.
+  const corrupt='.UAH-RESTORE-'+randomUUID()+'.JOURNAL.JSON';
+  const recoveryPath=join(backupDirectory,corrupt);
+  const marker='unreconciled journal, not a valid published record';
+  await writeFile(recoveryPath,marker);
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),true,
+   'unrecognized reserved restore evidence must require manual reconciliation');
+  assert.deepEqual(await readFile(sourcePath),original);
+  assert.equal(await readFile(recoveryPath,'utf8'),marker,
+   'a fail-closed preflight must never delete questionable recovery evidence');
  }finally{await rm(home,{recursive:true,force:true});}
 });
