@@ -376,7 +376,10 @@ export async function startIsolatedTampermonkeyGmProbe(
    origin,source:produceFixtureSource(origin,token,scriptId,expiresAt,runAt),
    installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
    // An ended or expired consent window cannot expose cached live receipts.
-   receiptSnapshot:()=>Object.freeze(consentRevoked?{}:{...receipts}),
+   // A delayed shutdown timer is not a live consent lease. Reading the
+    // cached diagnostic summary must perform the SAME irreversible deadline
+    // check as the HTTP listener, including after a wall-clock rollback.
+    receiptSnapshot:()=>Object.freeze(expired()?{}:{...receipts}),
    stop
  }};
 }
