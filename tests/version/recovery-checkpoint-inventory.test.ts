@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {lstat,mkdir,mkdtemp,readdir,readFile,rename,rm,utimes,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
 import {stageReviewedCandidateOnly} from '../../src/version/staged-candidate';
 import {stageRecoveryCheckpointOnly} from '../../src/version/recovery-checkpoint';
@@ -280,4 +280,22 @@ test('TASK-011/TEST-020/026: damaged source-bound checkpoint name must not appea
    assert.deepEqual(await readFile(damaged),bytes,'do not alter damaged recovery bytes');
    assert.equal(await readFile(options.sourcePath,'utf8'),source);
  });
+});
+
+
+test('TASK-011/TEST-020/026: source-parent recovery directory must not produce a clean zero-checkpoint inventory',async()=>{
+  await fixture(async options=>{
+    // A native backup must be independent of its original source parent.
+    // A zero-count scan of the original directory misstates recoverability.
+    const observed=await inspectRecoveryCheckpointInventoryReadOnly(request,{
+      ...options,backupDirectory:dirname(options.sourcePath)
+    });
+    assert.deepEqual(observed,{
+      status:'BLOCKED',reason:'UNSAFE_PATH',
+      automaticPatchAllowed:false,automaticRollbackAllowed:false,
+      tampermonkeyVerified:false,businessVerified:false
+    });
+    assert.equal(await readFile(options.sourcePath,'utf8'),source);
+    assert.deepEqual(await readdir(options.backupDirectory),[]);
+  });
 });
