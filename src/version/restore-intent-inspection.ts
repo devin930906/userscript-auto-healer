@@ -179,7 +179,8 @@ export async function classifyNativeRestoreJournalScopeReadOnly(
  if(!validPath(sourcePath)||!validPath(journalPath)||
     !JOURNAL_NAME.test(basename(journalPath)))return 'INVALID';
  const contents=await readJournal(journalPath);
- const journal=contents===null?null:parseJournal(contents);
+ if(contents===null)return 'INVALID';
+ const journal=parseJournal(contents);
  if(!journal)return 'INVALID';
  const expected=createHash('sha256').update(sourcePath).digest('hex');
  if(journal.sourcePathSha256!==expected)return 'OTHER_SOURCE';
