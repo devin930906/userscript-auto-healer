@@ -828,3 +828,41 @@ test('TASK-009/TEST-019/026: dynamic global document aliases cannot disguise sel
  assert.equal(result.status,'CANDIDATE_ONLY');
  assert.equal(result.automaticPatchAllowed,false);
 });
+
+
+test('TASK-009/TEST-019/026: top and parent browser aliases must not disguise document selector mutations',()=>{
+  // In the top-level frame both top and parent refer to its Window; in
+  // embedded frames their document identity cannot be trusted offline.
+  const unsafe=[
+    "top.document.querySelector=()=>null;",
+    "parent['document']['querySelector']=()=>null;",
+    "const alias=top.document; alias.querySelector=()=>null;",
+    "const {document: alias}=parent; alias.querySelector=()=>null;",
+    "const key='document'; const alias=parent[key]; alias.querySelector=()=>null;",
+    "top.Document.prototype.querySelector=()=>null;",
+    "Object.defineProperty(parent,'document',{value:{querySelector:()=>null}});",
+    "Object.assign(top,{document:{querySelector:()=>null}});",
+    "Reflect.set(parent,'document',{querySelector:()=>null});"
+  ];
+  for(const mutation of unsafe){
+    const script=meta+mutation+"document.querySelector('#old');";
+    const outcome=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    }));
+    assert.equal(outcome.status,'BLOCKED',mutation);
+    assert.equal(outcome.automaticPatchAllowed,false);
+  }
+  // Static changes to unrelated browser properties remain reviewable only.
+  for(const harmless of [
+    "top.document.title='ok';",
+    "Object.defineProperty(parent,'unrelated',{value:1});",
+    "Reflect.set(top,'unrelated',true);"
+  ]){
+    const script=meta+harmless+"document.querySelector('#old');";
+    const outcome=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf('document.querySelector(')
+    }));
+    assert.equal(outcome.status,'CANDIDATE_ONLY',harmless);
+    assert.equal(outcome.automaticPatchAllowed,false);
+  }
+});
