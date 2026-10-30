@@ -335,3 +335,53 @@ test('TASK-011/TEST-020/026: recovered inventory refuses backup directory identi
   assert.deepEqual((await readdir(root)).sort(),before);
  });
 });
+
+
+test('TASK-011/TEST-020/026: malformed source-bound backup evidence cannot be hidden by inventory',async()=>{
+ const uuid='00000000-0000-4000-8000-000000000001';
+ const cases=[
+  (prefix:string)=>prefix+'.'+uuid+'.backup.user.js.partial',
+  (prefix:string)=>prefix+'.invalid-id.backup.user.js',
+  (prefix:string)=>prefix+'.'+uuid+'.BACKUP.USER.JS',
+  (prefix:string)=>prefix+'.orphan.backup.tmp'
+ ];
+ for(const name of cases){
+  await withFixture(async(source,backupDirectory)=>{
+   const malformedName=name(backupPrefix(source));
+   const malformedPath=join(backupDirectory,malformedName);
+   await writeFile(malformedPath,fixtureBytes);
+   const unrelated=join(backupDirectory,'unrelated-document.txt');
+   await writeFile(unrelated,'unrelated');
+   const before=(await readdir(backupDirectory)).sort();
+   const result=await inspectBackupInventoryReadOnly({
+    sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.equal(result.status,'BLOCKED',
+    'Must not report a clean inventory for source-bound malformed recovery evidence: '+malformedName);
+   if(result.status==='BLOCKED')assert.equal(result.reason,'UNSAFE_BACKUP');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.deepEqual((await readdir(backupDirectory)).sort(),before,
+    'Inventory never deletes or rewrites a malformed recovery candidate');
+   assert.deepEqual(await readFile(malformedPath),fixtureBytes);
+   assert.deepEqual(await readFile(source),fixtureBytes);
+  });
+ }
+});
+
+test('TASK-011/TEST-020: unrelated and other-feature source artifacts remain outside backup inventory',async()=>{
+ await withFixture(async(source,backupDirectory)=>{
+  const prefix=backupPrefix(source);
+  for(const suffix of ['.draft.txt','.recovery-notes.txt',
+    '.00000000-0000-4000-8000-000000000001.checkpoint.json',
+    '.00000000-0000-4000-8000-000000000001.candidate.user.js']){
+   await writeFile(join(backupDirectory,prefix+suffix),'not a backup');
+  }
+  const result=await inspectBackupInventoryReadOnly({
+   sourcePath:source,backupDirectory,userApproved:true
+  });
+  assert.equal(result.status,'OBSERVED_BACKUP_CANDIDATES_READ_ONLY',JSON.stringify(result));
+  if(result.status==='OBSERVED_BACKUP_CANDIDATES_READ_ONLY')
+   assert.deepEqual(result.candidates,[]);
+ });
+});
