@@ -30,6 +30,36 @@ test('TASK-013/TEST-022/026: serial checkpoint cannot finish a later job before 
  assert.deepEqual(allowed.snapshot().jobs.map(x=>x.state),['QUEUED','SUCCEEDED']);
 });
 
+test('TASK-013/TEST-022/026: parallel cancelled checkpoint cannot replay any queued job',async()=>{
+ const options={count:3,concurrency:2,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
+ let dispatched=0;
+ const worker=async()=>{dispatched++;return 'DONE' as const;};
+ const baseline=new ReadOnlyBatchCoordinator(options,worker).snapshot();
+ // Cancellation is batch-wide: it synchronously marks ALL queued jobs
+ // CANCELLED, even if two jobs are already running in separate lanes.
+ // A persisted CANCELLED with a still QUEUED job is not a possible state.
+ const invalid={...baseline,jobs:[
+  {ordinal:0,state:'RUNNING' as const,attempts:1},
+  {ordinal:1,state:'CANCELLED' as const,attempts:0},
+  {ordinal:2,state:'QUEUED' as const,attempts:0}
+ ]};
+ assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker,invalid),
+  /INVALID_BATCH_CHECKPOINT/,
+  'untrusted parallel checkpoint must not redispatch after cancellation');
+ assert.equal(dispatched,0);
+ // Genuine cancellation may coexist with an in-flight RUNNING job until
+ // its abort settles; do not reject that legitimate partial transition.
+ const valid={...baseline,jobs:[
+  {ordinal:0,state:'RUNNING' as const,attempts:1},
+  {ordinal:1,state:'RUNNING' as const,attempts:1},
+  {ordinal:2,state:'CANCELLED' as const,attempts:0}
+ ]};
+ const accepted=new ReadOnlyBatchCoordinator(options,worker,valid);
+ assert.deepEqual(accepted.snapshot().jobs.map(j=>j.state),
+  ['QUEUED','QUEUED','CANCELLED']);
+});
+
 test('TASK-013/TEST-022/026: a cancelled serial checkpoint must not resume a later queued job',async()=>{
  const options={count:3,concurrency:1,maxAttempts:2,
   jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
