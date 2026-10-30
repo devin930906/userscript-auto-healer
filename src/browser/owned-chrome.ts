@@ -177,18 +177,63 @@ export function isLiveApprovedChromeSession(
 function stopOwnChild(child:ChildProcess):void {
   if(child.pid && child.exitCode===null && !child.killed)child.kill();
 }
+/** TASK-005 / TEST-006/007/009/026: snapshot native consent without running
+ * caller-defined getters, inherited authorization or Proxy reflection traps.
+ * No browser preflight, executable inspection or filesystem side effect may
+ * occur until these options pass this fail-closed boundary.
+ */
+function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
+ try{
+  if(!raw||typeof raw!=='object'||nodeTypes.isProxy(raw))return null;
+  const prototype=Object.getPrototypeOf(raw);
+  if(prototype!==Object.prototype&&prototype!==null)return null;
+  const desc=Object.getOwnPropertyDescriptors(raw);
+  const allowed=new Set(['userApproved','signal','testHeadless',
+    'onStartupStage','onUnexpectedExit']);
+  for(const key of Reflect.ownKeys(desc)){
+   if(typeof key!=='string'||!allowed.has(key)||
+      !Object.prototype.hasOwnProperty.call(desc[key],'value'))return null;
+  }
+  if(desc.userApproved?.value!==true)return null;
+  const signal:unknown=desc.signal?.value;
+  if(signal!==undefined){
+   if(!signal||typeof signal!=='object'||nodeTypes.isProxy(signal)||
+      Object.getPrototypeOf(signal)!==AbortSignal.prototype||
+      ['aborted','addEventListener','removeEventListener'].some(key=>
+        Object.prototype.hasOwnProperty.call(signal,key)))return null;
+   const getter=Object.getOwnPropertyDescriptor(
+     AbortSignal.prototype,'aborted')?.get;
+   if(typeof getter!=='function'||typeof getter.call(signal)!=='boolean')
+     return null;
+  }
+  const headless:unknown=desc.testHeadless?.value;
+  if(headless!==undefined&&typeof headless!=='boolean')return null;
+  const startup:unknown=desc.onStartupStage?.value;
+  const unexpected:unknown=desc.onUnexpectedExit?.value;
+  if((startup!==undefined&&
+      (typeof startup!=='function'||nodeTypes.isProxy(startup)))||
+     (unexpected!==undefined&&
+      (typeof unexpected!=='function'||nodeTypes.isProxy(unexpected))))
+    return null;
+  return {userApproved:true,signal:signal as AbortSignal|undefined,
+    testHeadless:headless as boolean|undefined,
+    onStartupStage:startup as ChromeLaunchOptions['onStartupStage'],
+    onUnexpectedExit:unexpected as ChromeLaunchOptions['onUnexpectedExit']};
+ }catch{return null;}
+}
 /** Never attach to an unowned endpoint, create an unknown Profile or stop another PID. */
 export async function launchApprovedIsolatedChrome(
   input:unknown,options:ChromeLaunchOptions
 ):Promise<ManagedLaunchResult> {
-  if(options?.userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
-  if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
+  const checked=checkedChromeLaunchOptions(options);
+  if(!checked)return {ok:false,code:'NOT_AUTHORIZED'};
+  if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   const preflight=await preflightChrome(input);
   if(!preflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const binary=await inspectWindowsChromeBinary(preflight.config);
   if(!binary.ok)return {ok:false,code:'BINARY_NOT_VERIFIED'};
-  if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
-  if(options.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
+  if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  if(checked.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
     return {ok:false,code:'NOT_AUTHORIZED'};
   const cfg=preflight.config;
   const argv=[
@@ -197,7 +242,7 @@ export async function launchApprovedIsolatedChrome(
     '--remote-debugging-port='+cfg.remoteDebuggingPort,
     '--user-data-dir='+cfg.userDataDir,'about:blank'
   ];
-  if(options.testHeadless===true)argv.unshift('--headless=new');
+  if(checked.testHeadless===true)argv.unshift('--headless=new');
   let child:ChildProcess;
   try{
     child=spawn(cfg.executablePath,argv,{shell:false,windowsHide:true,stdio:'ignore'});
@@ -207,7 +252,7 @@ export async function launchApprovedIsolatedChrome(
   child.once('exit',()=>{exited=true;});
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
   const emitStage=(stage:ChromeStartupStage):void=>{
-    try{options.onStartupStage?.(stage);}
+    try{checked.onStartupStage?.(stage);}
     catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
   };
   const pid=child.pid;
@@ -217,7 +262,7 @@ export async function launchApprovedIsolatedChrome(
   const began=performance.now();
   try{
     while(performance.now()-began<20000){
-      if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
+      if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
       let phase:'FETCH'|'PROCESS'='FETCH';
       try{
@@ -236,12 +281,12 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'VERSION_MISMATCH'};
               const owner=await verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid);
               if(!owner.ok)return {ok:false,code:'OWNER_MISMATCH'};
-              if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
+              if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version);
               // Consent may be revoked during the asynchronous handshake.
               // A successful transport proof must never reactivate a cancelled launch.
-              if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
+              if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
               if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               if(errored||exited||child.killed||child.exitCode!==null)
                 return {ok:false,code:'LAUNCH_FAILED'};
@@ -257,7 +302,7 @@ export async function launchApprovedIsolatedChrome(
               // ownership before exit, and must not invoke this callback.
               const onUnexpectedExit=()=>{
                 if(!liveSessions.delete(verified))return;
-                try{options.onUnexpectedExit?.();}
+                try{checked.onUnexpectedExit?.();}
                 catch{/* Lifecycle cleanup must not crash the main process. */}
               };
               child.once('exit',onUnexpectedExit);
@@ -281,7 +326,7 @@ export async function launchApprovedIsolatedChrome(
       // CI disposable Chrome only. A bounded OS-owned PID check diagnoses
       // which boundary timed out; it does NOT relax the 20s deadline, retry
       // a partly initialized profile, or grant a CDP ownership receipt.
-      if(options.testHeadless===true&&process.env.GITHUB_ACTIONS==='true'){
+      if(checked.testHeadless===true&&process.env.GITHUB_ACTIONS==='true'){
         let stage:ChromeStartupStage='CDP_TIMEOUT_PROBE_INCONCLUSIVE';
         try{
           stage=classifyCdpTimeoutListener(
