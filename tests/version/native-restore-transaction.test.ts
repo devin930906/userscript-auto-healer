@@ -1365,3 +1365,51 @@ test('TASK-011/TEST-020/026: path-like backup identifiers in a published native 
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/021/026: an earlier published same-source restore intent blocks another overwrite',async()=>{
+ await fixture(async opts=>{
+  const first=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(first.status,'RESTORED_NATIVE_ONLY',JSON.stringify(first));
+  if(first.status!=='RESTORED_NATIVE_ONLY')return;
+  // The published journal remains RESTORE_INTENT_UNVERIFIED even when an
+  // original is present. Rewriting the source must not silently let a new
+  // native restore bypass the earlier recovery record.
+  await writeFile(opts.sourcePath,changed);
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const second=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.deepEqual(second,{
+   status:'BLOCKED',reason:'RECOVERY_REVIEW_REQUIRED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  });
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'No new backup, journal or replacement is allowed before reconciliation');
+ });
+});
+test('TASK-011/TEST-020: another source may restore with a shared recovery store',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-shared-restore-intent-'));
+ try{
+  const backupDirectory=join(root,'recoveries');
+  await mkdir(backupDirectory);
+  for(const name of ['first.user.js','second.user.js']){
+   const sourcePath=join(root,name);
+   await writeFile(sourcePath,original);
+   const copy=await createVerifiedBackupOnly({
+    sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+   });
+   assert.equal(copy.status,'BACKUP_ONLY');
+   if(copy.status!=='BACKUP_ONLY')return;
+   await writeFile(sourcePath,changed);
+   const restored=await restoreVerifiedOriginalNativeOnly({
+    sourcePath,backupDirectory,backupFileName:copy.backupFileName,
+    expectedCurrentSha256:sha(changed),expectedOriginalSha256:sha(original),
+    expectedOriginalByteLength:original.length,userApproved:true,
+    manualRestoreApproved:true
+   });
+   assert.equal(restored.status,'RESTORED_NATIVE_ONLY',JSON.stringify(restored));
+   assert.deepEqual(await readFile(sourcePath),original);
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
