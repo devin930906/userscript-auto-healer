@@ -166,6 +166,10 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
  // Concurrency=2 legitimately allows a later worker to finish first.
  let earlierUnsettled=false;
  let earlierCancelled=false;
+ // Cancellation is batch-wide at every concurrency: cancel() immediately
+ // changes ALL still-queued jobs to CANCELLED. A disk hint containing both
+ // states cannot be the result of a genuine scheduler transition.
+ let anyQueued=false,anyCancelled=false;
  for(let i=0;i<opts.count;i++){
   const slot=slots[String(i)];
   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
@@ -178,6 +182,8 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
       job.attempts===0)||
      (job.state==='QUEUED'&&job.attempts===opts.maxAttempts))
     throw Error('INVALID_BATCH_CHECKPOINT');
+  if(job.state==='QUEUED')anyQueued=true;
+  if(job.state==='CANCELLED')anyCancelled=true;
   if(opts.concurrency===1){
    if(earlierUnsettled&&
       (job.state==='RUNNING'||job.state==='SUCCEEDED'||job.state==='FAILED'))
@@ -201,6 +207,9 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
     :job.state as BatchJobState;
   jobs.push({ordinal:i,state,attempts:job.attempts});
  }
+ // Inspect the persisted RAW states before normalizing interrupted RUNNING
+ // attempts. Accept RUNNING alongside CANCELLED during abort settlement.
+ if(anyQueued&&anyCancelled)throw Error('INVALID_BATCH_CHECKPOINT');
  return jobs;
  }catch{throw Error('INVALID_BATCH_CHECKPOINT');}
 }
