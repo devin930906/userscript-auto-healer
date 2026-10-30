@@ -4,6 +4,7 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
 import { openApprovedTarget } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
@@ -41,6 +42,59 @@ async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
   ]);
   return 'state='+state+' endpointMarker='+endpoint;
 }
+
+/** TASK-005 / TEST-006/008/009/026: diagnostic-only marker transitions.
+ * Never retain profile paths, marker contents, ports, process IDs, errors or
+ * untrusted strings. The caller observes only its own disposable CI profile.
+ * Recording is monotonic, rounded down to whole seconds and capped to 12
+ * transitions; no record is permission to relaunch Chrome or accept a CDP.
+ */
+function createBoundedChromeBootstrapTimeline(){
+  const transitions:string[]=[];
+  let last='';
+  return {
+    observe(elapsedMs:number,marker:unknown):void{
+      if(!Number.isFinite(elapsedMs)||elapsedMs<0||typeof marker!=='string')
+        return;
+      const match=/^state=([01]) endpointMarker=([01])$/.exec(marker);
+      if(!match)return;
+      const next=match[1]+match[2];
+      if(next===last)return;
+      last=next;
+      if(transitions.length>=12)return;
+      const second=Math.min(31,Math.floor(elapsedMs/1000));
+      transitions.push('t'+second+':'+next);
+    },
+    summary():string{
+      return transitions.length>0?transitions.join(','):'NONE';
+    }
+  };
+}
+test('TASK-005/TEST-006/008/009/026: profile readiness evidence is bounded, monotonic and content-blind',()=>{
+  const timeline=createBoundedChromeBootstrapTimeline();
+  timeline.observe(0,'state=0 endpointMarker=0');
+  timeline.observe(250,'state=0 endpointMarker=0');
+  timeline.observe(1750,'state=1 endpointMarker=0');
+  timeline.observe(20750,'state=1 endpointMarker=1');
+  timeline.observe(25000,'state=0 endpointMarker=1');
+  assert.equal(timeline.summary(),'t0:00,t1:10,t20:11,t25:01');
+  const before=timeline.summary();
+  for(const [time,marker] of [
+    [Infinity,'state=1 endpointMarker=0'],
+    [-1,'state=1 endpointMarker=0'],
+    [500,'state=1 endpointMarker=1 private-profile-path'],
+    [500,'PRIVATE_CHROME_CONTENT'],
+    [2000,'state=99 endpointMarker=0']
+  ] as const)timeline.observe(time,marker);
+  assert.equal(timeline.summary(),before);
+  const hostile=createBoundedChromeBootstrapTimeline();
+  for(let i=0;i<100;i++)
+    hostile.observe(i*1000,
+      i%2===0?'state=0 endpointMarker=0':'state=1 endpointMarker=0');
+  assert.equal(hostile.summary().split(',').length,12);
+  assert.ok(hostile.summary().length<=100);
+  assert.ok(!hostile.summary().includes('PRIVATE'));
+});
 
 /** A bounded CI-only recovery for Chrome that has not even touched its
  * disposable test profile. Never retry PID, version, WebSocket or permission
@@ -182,7 +236,31 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   const launchOptions={userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
     onStartupStage:(stage:string)=>{startupStages.push(stage);}};
-  let result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+  // This is TEST-ONLY observation of the independently owned disposable
+  // directory: polling never edits Chrome, changes the launch deadline, reads
+  // marker contents, queries the user profile or retries a touched browser.
+  let timeline=createBoundedChromeBootstrapTimeline();
+  const launchWithBoundedMarkers=async()=>{
+    const started=performance.now();
+    let sampling=false;
+    const poll=async()=>{
+      if(sampling)return;
+      sampling=true;
+      try{
+        timeline.observe(performance.now()-started,
+          await redactedChromeBootstrapMarkers(profile));
+      }finally{sampling=false;}
+    };
+    await poll();
+    const interval=setInterval(()=>{void poll();},750);
+    try{return await launchApprovedIsolatedChrome(configForTest,launchOptions);}
+    finally{
+      clearInterval(interval);
+      timeline.observe(performance.now()-started,
+        await redactedChromeBootstrapMarkers(profile));
+    }
+  };
+  let result=await launchWithBoundedMarkers();
   if(!result.ok){
     const markers=await redactedChromeBootstrapMarkers(profile);
     if(mayRetryUntouchedChromeBootstrap(result,markers,0,
@@ -195,7 +273,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       const secondPrepared=await prepareApprovedIsolatedProfile(configForTest,true);
       assert.equal(secondPrepared.ok,true,JSON.stringify(secondPrepared));
       startupStages.length=0;
-      result=await launchApprovedIsolatedChrome(configForTest,launchOptions);
+      timeline=createBoundedChromeBootstrapTimeline();
+      result=await launchWithBoundedMarkers();
     }
   }
   // Print only fixed stage labels and their counts on failure: no Chrome PID,
@@ -205,6 +284,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     for(const stage of startupStages)counts[stage]=(counts[stage]??0)+1;
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
     t.diagnostic('CDP_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
+    t.diagnostic('CDP_BOOTSTRAP_TIMELINE='+timeline.summary());
   }
   assert.equal(result.ok,true,JSON.stringify(result));
   const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
