@@ -38,7 +38,7 @@ function cdpPlainTargetRows(payload:unknown):Record<string,unknown>[]|null{
      !Array.isArray(payload)||Object.getPrototypeOf(payload)!==Array.prototype)
     return null;
   const d=Object.getOwnPropertyDescriptors(payload);
-  const size=d.length?.value;
+  const size=Object.getOwnPropertyDescriptor(payload,'length')?.value;
   if(!Number.isSafeInteger(size)||size<0||size>1000||
      Reflect.ownKeys(d).length!==size+1)return null;
   const rows:Record<string,unknown>[]=[];
