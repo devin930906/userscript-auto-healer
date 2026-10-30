@@ -224,7 +224,7 @@ export async function hasPriorPublishedRestoreIntentForSource(
     return true;
    const bytes=await readJournal(path);
    const intent=bytes===null?null:parseJournal(bytes);
-   if(!intent)return true;
+   if(!intent||bytes===null)return true;
    // The source path digest is an identity filter, never authentication.
    // Preserve this earlier journal and BOTH recovery versions for manual
    // inspection instead of publishing a new overwrite on top of them.
