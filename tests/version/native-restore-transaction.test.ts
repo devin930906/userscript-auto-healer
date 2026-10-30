@@ -745,6 +745,62 @@ test('TASK-011/TEST-020/026: replaced pending inode after last byte check must n
  });
 });
 
+test('TASK-011/TEST-020/021/026: Windows grandparent-case alias cannot bypass a published restore intent',
+ {skip:process.platform!=='win32'},async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-restore-grandparent-case-'));
+ try{
+  const outer=join(home,'CanonicalOuter');
+  const inner=join(outer,'ExactInner');
+  const sourcePath=join(inner,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(inner,{recursive:true});
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const firstBackup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(firstBackup.status,'BACKUP_ONLY',JSON.stringify(firstBackup));
+  if(firstBackup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,changed);
+  const request={
+   sourcePath,backupDirectory,backupFileName:firstBackup.backupFileName,
+   expectedCurrentSha256:sha(changed),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,
+   userApproved:true,manualRestoreApproved:true
+  };
+  const first=await restoreVerifiedOriginalNativeOnly(request);
+  assert.equal(first.status,'RESTORED_NATIVE_ONLY',JSON.stringify(first));
+  if(first.status!=='RESTORED_NATIVE_ONLY')return;
+
+  // Only the grandparent changes spelling. Both the directly selected
+  // parent and script basename stay canonical, so the existing two checks
+  // accept it, while the old journal's raw path commitment no longer matches.
+  const alias=join(home,'canonicalouter','ExactInner','selected.user.js');
+  assert.notEqual(alias,sourcePath);
+  assert.equal(dirname(alias).split(/[\\/]/).at(-1),'ExactInner');
+  assert.equal(await readFile(alias).then(x=>x.toString()),
+   original.toString(),'Windows fixture must address the same native file');
+  const secondBackup=await createVerifiedBackupOnly({
+   sourcePath:alias,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(secondBackup.status,'BACKUP_ONLY',JSON.stringify(secondBackup));
+  if(secondBackup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,changed);
+  const before=(await readdir(backupDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly({
+   ...request,sourcePath:alias,backupFileName:secondBackup.backupFileName
+  });
+  assert.equal(result.status,'BLOCKED',
+   'a changed grandparent casing must not bypass an unreconciled intent');
+  if(result.status==='BLOCKED')
+   assert.ok(['UNSAFE_PATH','RECOVERY_REVIEW_REQUIRED'].includes(result.reason));
+  assert.deepEqual(await readFile(sourcePath),changed,
+   'the previously restored native user script must not be replaced again');
+  assert.deepEqual((await readdir(backupDirectory)).sort(),before,
+   'rejected ancestor alias must not publish another recovery record');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-011/TEST-020/021/026: Windows parent-case alias cannot evade an unreconciled same-file recovery journal',
  {skip:process.platform!=='win32'},async()=>{
  await fixture(async opts=>{

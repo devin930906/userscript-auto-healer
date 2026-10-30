@@ -16,7 +16,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {types as nodeTypes} from 'node:util';
-import {link,lstat,mkdir,open,realpath,rename,rmdir,unlink} from 'node:fs/promises';
+import {link,lstat,mkdir,open,readdir,realpath,rename,rmdir,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -360,6 +360,22 @@ export async function restoreVerifiedOriginalNativeOnly(
     if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
        basename(await realpath(parent))!==basename(parent))
      return block('UNSAFE_PATH');
+    // The script and direct parent may match their exact names while a
+    // grandparent differs ONLY in letter case. A published journal hashes the
+    // original path string, so that alternate spelling would evade an
+    // unresolved restore intent. Compare higher ancestor names with their
+    // native directory entries, but reject only a PROVEN case-only alias:
+    // Windows runner temp/virtual paths can use a completely different name
+    // (e.g. short-name mapping) that cannot be attested from listing alone.
+    // Other path aliases remain outside this bounded case-only safeguard.
+    for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
+        ancestor=dirname(ancestor)){
+     const expectedName=basename(ancestor);
+     const names=await readdir(dirname(ancestor));
+     if(!names.includes(expectedName)&&
+        names.some(name=>name.toLowerCase()===expectedName.toLowerCase()))
+      return block('UNSAFE_PATH');
+    }
    }catch{return block('UNSAFE_PATH');}
   }
   // A published intent from an earlier attempt remains unreconciled even
