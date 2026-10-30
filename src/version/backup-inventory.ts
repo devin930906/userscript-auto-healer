@@ -119,6 +119,14 @@ export async function inspectBackupInventoryReadOnly(
         UUID_V4.test(entry.name.slice(prefix.length))){
        names.push(entry.name);
        if(names.length>MAX_CANDIDATES)return blocked('TOO_MANY_ENTRIES');
+     }else if(entry.name.toLowerCase().startsWith(prefix.toLowerCase())&&
+       /\.backup(?:\.|$)/i.test(entry.name.slice(prefix.length))){
+       // A malformed, truncated or differently cased backup belonging to
+       // THIS source is interrupted recovery evidence, not an empty clean
+       // inventory. Do not touch the file; require native manual review.
+       // Other features' checkpoints/candidates and unrelated names remain
+       // outside this backup-only namespace.
+       return blocked('UNSAFE_BACKUP');
      }
    }
    names.sort();
