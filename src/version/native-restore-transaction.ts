@@ -345,25 +345,25 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
-  // Windows normally resolves distinct case spellings to the same native
-  // file. Recovery journals and existing backup identities were serialized
-  // with the originally approved SOURCE PATH spelling, not the file inode.
-  // A later differently cased spelling could therefore evade an unreconciled
-  // published intent after the shared path mutex is released. Require the
-  // filesystem's actual canonical spelling BEFORE any backup, staging or
-  // source replacement; preserve all existing journals for manual review.
-  // This does not turn the cooperative mutex into an OS-enforced file lock.
+  // A Windows path may address the same source through differently cased
+  // ancestor directories, even with the correct script filename. Since
+  // existing, unreconciled recovery journals bind the original exact
+  // source-path bytes, these aliases MUST NOT bypass earlier restore intents.
+  // Compare each native component's actual name, not realpath's complete
+  // output: its volume prefix / older parent spellings need not be textually
+  // identical on Windows. Never rewrite a selected path or migrate journals.
+  // The path mutex is cooperative; this remains a bounded pre-write snapshot.
   if(process.platform==='win32'){
-   let canonical:string;
-   try{canonical=await realpath(opts.sourcePath);}
-   catch{return block('UNSAFE_PATH');}
-   // Windows runners may supply an approved parent path via a legitimate
-   // historical 8.3 / environment spelling. Do not invalidate every valid
-   // native restore because realpath rewrites a parent component; the selected
-   // source FILE NAME must nevertheless match the directory entry's casing.
-   // Ancestor aliases remain a separately tracked unresolved provenance risk.
-   if(basename(canonical)!==basename(opts.sourcePath))
-    return block('UNSAFE_PATH');
+   try{
+    let component=opts.sourcePath;
+    let depth=0;
+    while(dirname(component)!==component){
+     if(++depth>64||
+        basename(await realpath(component))!==basename(component))
+      return block('UNSAFE_PATH');
+     component=dirname(component);
+    }
+   }catch{return block('UNSAFE_PATH');}
   }
   // A published intent from an earlier attempt remains unreconciled even
   // when its JSON is structurally sound. The source-path lock is held, so
