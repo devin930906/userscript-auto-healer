@@ -2,16 +2,67 @@
  * This is not an authentication check. Do not attach until listener PID,
  * executable, profile and self-launched process identity are also verified.
  */
+import {types as nodeTypes} from 'node:util';
+
+/** Native CDP structure inspection must not execute untrusted object
+ * accessors or Proxy traps when called through the exported unknown-input API.
+ * Genuine JSON.parse records have only own data properties, normal prototypes
+ * and no symbol keys. This is structural evidence, never endpoint ownership.
+ */
+function cdpPlainRecord(value:unknown):Record<string,unknown>|null{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Array.isArray(value))return null;
+  const proto=Object.getPrototypeOf(value);
+  if(proto!==Object.prototype&&proto!==null)return null;
+  const descriptors=Object.getOwnPropertyDescriptors(value);
+  const keys=Reflect.ownKeys(descriptors);
+  if(keys.length>64||keys.some(k=>typeof k!=='string'))return null;
+  const copy:Record<string,unknown>=Object.create(null);
+  for(const key of keys){
+   const d=descriptors[key as string];
+   if(!d||!Object.prototype.hasOwnProperty.call(d,'value'))return null;
+   copy[key as string]=d.value;
+  }
+  return copy;
+ }catch{return null;}
+}
+
+/** Accept only a dense native array of bounded CDP JSON records. In
+ * particular Array.isArray() on a revoked Proxy may throw, so Proxy detection
+ * comes first. Descriptors prevent array-index accessor execution.
+ */
+function cdpPlainTargetRows(payload:unknown):Record<string,unknown>[]|null{
+ try{
+  if(!payload||typeof payload!=='object'||nodeTypes.isProxy(payload)||
+     !Array.isArray(payload)||Object.getPrototypeOf(payload)!==Array.prototype)
+    return null;
+  const d=Object.getOwnPropertyDescriptors(payload);
+  const size=d.length?.value;
+  if(!Number.isSafeInteger(size)||size<0||size>1000||
+     Reflect.ownKeys(d).length!==size+1)return null;
+  const rows:Record<string,unknown>[]=[];
+  for(let i=0;i<size;i++){
+   const slot=d[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+   const parsed=cdpPlainRecord(slot.value);
+   if(!parsed)return null;
+   rows.push(parsed);
+  }
+  return rows;
+ }catch{return null;}
+}
+
 export type CdpEnvelope =
   | {readonly ok:true; readonly status:'STRUCTURE_ONLY'; readonly browser:string;
      readonly websocketUrl:string;readonly path:string;readonly owned:false}
   | {readonly ok:false;readonly code:'INVALID_SHAPE'|'UNEXPECTED_BROWSER'|
       'UNSAFE_WEBSOCKET'|'INVALID_DEBUGGER_PATH'};
 export function inspectCdpVersion(payload:unknown,expectedPort:number):CdpEnvelope {
-  if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535 ||
-     !payload || typeof payload!=='object' || Array.isArray(payload))
+  if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535)
     return {ok:false,code:'INVALID_SHAPE'};
-  const data=payload as Record<string,unknown>;
+  const data=cdpPlainRecord(payload);
+  if(!data)return {ok:false,code:'INVALID_SHAPE'};
   if(typeof data.Browser!=='string' || !/^(?:HeadlessChrome|Chrome)\/\d+(?:\.\d+){1,4}$/.test(data.Browser))
     return {ok:false,code:'UNEXPECTED_BROWSER'};
   if(typeof data.webSocketDebuggerUrl!=='string')return {ok:false,code:'INVALID_SHAPE'};
@@ -53,13 +104,10 @@ export function inspectCdpTargetList(
   if(!['http:','https:'].includes(wanted.protocol) || !wanted.hostname ||
      wanted.username || wanted.password)
     return {ok:false,code:'INVALID_TARGET_INPUT'};
-  if(!Array.isArray(payload) || payload.length>1000)
-    return {ok:false,code:'INVALID_TARGET_LIST'};
+  const targets=cdpPlainTargetRows(payload);
+  if(!targets)return {ok:false,code:'INVALID_TARGET_LIST'};
   const matches: Array<{id:string;websocketUrl:string}> = [];
-  for(const candidate of payload) {
-    if(!candidate || typeof candidate!=='object'||Array.isArray(candidate))
-      return {ok:false,code:'INVALID_TARGET_LIST'};
-    const target=candidate as Record<string,unknown>;
+  for(const target of targets) {
     if(target.type!=='page'||typeof target.url!=='string')continue;
     let actual:URL;
     try {actual=new URL(target.url);}
