@@ -570,6 +570,44 @@ test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful
 });
 
 
+
+test('TASK-005/TEST-006/008/009: bundled native fetch refusals remain redacted and distinguishable',()=>{
+  const classify=(ownedChromeDiagnostics as unknown as {
+    classifyCdpStartupTransportFailure:(error:unknown)=>string
+  }).classifyCdpStartupTransportFailure;
+  const reason=(code:string)=>Object.assign(new Error('PRIVATE_LOCAL_ENDPOINT'),{code});
+  const wrapped=(codes:string[])=>({
+    cause:new AggregateError(codes.map(reason),'PRIVATE_ENDPOINT_AND_PROFILE')
+  });
+  assert.equal(classify(wrapped(['ECONNREFUSED','ECONNREFUSED'])),'FETCH_REFUSED',
+    'uniform native AggregateError refusals must not lose the diagnostic category');
+  assert.equal(classify(wrapped(['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'])),'FETCH_TIMEOUT');
+  assert.equal(classify(wrapped(['ECONNREFUSED','ETIMEDOUT'])),'FETCH_FAILED',
+    'mixed failures must not be misrepresented as one proven cause');
+  assert.equal(classify(wrapped([])),'FETCH_FAILED');
+  assert.equal(classify(wrapped(Array.from({length:9},()=> 'ECONNREFUSED'))),
+    'FETCH_FAILED','oversized aggregate evidence remains inconclusive');
+});
+
+test('TASK-005/TEST-006/008/009/026: diagnostic classifier never executes Proxy traps',()=>{
+  const classify=(ownedChromeDiagnostics as unknown as {
+    classifyCdpStartupTransportFailure:(error:unknown)=>string
+  }).classifyCdpStartupTransportFailure;
+  let traps=0;
+  const poisoned=new Proxy({code:'ECONNREFUSED'},{
+    ownKeys(){traps++;return ['code'];},
+    getOwnPropertyDescriptor(){traps++;return {
+      configurable:true,enumerable:true,writable:true,value:'ECONNREFUSED'
+    };}
+  });
+  assert.equal(classify({cause:poisoned}),'FETCH_FAILED');
+  assert.equal(traps,0,'classification cannot invoke proxy reflection traps');
+  const revoked=Proxy.revocable({code:'ETIMEDOUT'},{});
+  revoked.revoke();
+  assert.equal(classify({cause:revoked.proxy}),'FETCH_FAILED');
+});
+
+
 test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot prematurely expire an owned Chrome bootstrap',async t=>{
   // Synthetic, strictly owned launch fixture: no user Chrome, filesystem,
   // network endpoint, profile or script is touched. This isolates deadline
