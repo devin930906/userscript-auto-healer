@@ -16,7 +16,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {types as nodeTypes} from 'node:util';
-import {link,lstat,mkdir,open,rename,rmdir,unlink} from 'node:fs/promises';
+import {link,lstat,mkdir,open,realpath,rename,rmdir,unlink} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -345,6 +345,20 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
+  // Windows normally resolves distinct case spellings to the same native
+  // file. Recovery journals and existing backup identities were serialized
+  // with the originally approved SOURCE PATH spelling, not the file inode.
+  // A later differently cased spelling could therefore evade an unreconciled
+  // published intent after the shared path mutex is released. Require the
+  // filesystem's actual canonical spelling BEFORE any backup, staging or
+  // source replacement; preserve all existing journals for manual review.
+  // This does not turn the cooperative mutex into an OS-enforced file lock.
+  if(process.platform==='win32'){
+   let canonical:string;
+   try{canonical=await realpath(opts.sourcePath);}
+   catch{return block('UNSAFE_PATH');}
+   if(canonical!==opts.sourcePath)return block('UNSAFE_PATH');
+  }
   // A published intent from an earlier attempt remains unreconciled even
   // when its JSON is structurally sound. The source-path lock is held, so
   // another cooperating restore cannot publish a conflicting journal
