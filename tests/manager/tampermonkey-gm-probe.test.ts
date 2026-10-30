@@ -1067,3 +1067,34 @@ test('TASK-007/TEST-017/018/026: revoked GM probe snapshot must not expose accep
    'Repeated stop must never revive a stale report');
  }finally{await probe.stop();}
 });
+
+
+test('TASK-007/TEST-017/018/026: expired receipt snapshot revokes cached fixture evidence even before timer fires',async t=>{
+ const result=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(result.ok,true);
+ if(!result.ok)return;
+ const probe=result.session;
+ t.after(()=>probe.stop());
+ const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+ assert.ok(token);
+ const response=await fetch(probe.origin+'/receipt',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
+   gmStorageRoundtripMatched:true,businessAction:false})
+ });
+ assert.equal(response.status,204);
+ assert.equal(probe.receiptSnapshot().broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
+ // An event-loop stall can delay setTimeout after the actual consent expiry.
+ // A synchronous snapshot MUST independently check its own deadline, not
+ // return now-expired cached diagnostic data until some later HTTP request.
+ let wallNow=Date.now();
+ t.mock.method(Date,'now',()=>wallNow);
+ wallNow=probe.expiresAt+1;
+ assert.deepEqual(probe.receiptSnapshot(),{},
+  'expired consent cannot expose previously accepted fixture receipts');
+ // Once expiration is observed, rolling the wall clock back is NOT consent.
+ wallNow=probe.expiresAt-1000;
+ assert.deepEqual(probe.receiptSnapshot(),{},
+  'expired snapshot must irreversibly revoke the fixture session');
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,403);
+});
