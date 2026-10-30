@@ -12,7 +12,7 @@ import {lstat,opendir} from 'node:fs/promises';
 import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 import {hasInterruptedRestoreStaging} from './restore-staging-residue';
-import {inspectNativeRestoreIntentReadOnly} from './restore-intent-inspection';
+import {inspectNativeRestoreIntentReadOnly,classifyNativeRestoreJournalScopeReadOnly} from './restore-intent-inspection';
 
 const JOURNAL=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.journal\.json$/;
 const UNPUBLISHED_RESTORE_INTENT=/^\.uah-restore-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/;
@@ -98,7 +98,10 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
    return block('UNSAFE_PATH');
   if(await nativeRestorePathLockPresent(x.sourcePath))
    return block('RECOVERY_REVIEW_REQUIRED');
-  let visited=0,inspected=0,originalPresent=0,displacedPresent=0,rejected=0;
+  let visited=0,journalEntries=0,inspected=0,originalPresent=0,displacedPresent=0,rejected=0;
+  // Shared recovery stores may contain valid intents for independent scripts.
+  // They still count toward the bounded namespace scan and are revalidated.
+  const foreign:Array<{name:string;identity:BigIntStats}>=[];
   const observations:Array<{
    journalFileName:string;
    result:Awaited<ReturnType<typeof inspectNativeRestoreIntentReadOnly>>
@@ -118,7 +121,24 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      return block('RECOVERY_REVIEW_REQUIRED');
     continue;
    }
-   if(++inspected>MAX_RESTORE_INTENTS)return block('SCAN_LIMIT');
+   if(++journalEntries>MAX_RESTORE_INTENTS)return block('SCAN_LIMIT');
+   const journalPath=join(x.backupDirectory,entry.name);
+   // Bind the foreign-source classification to one actual, single-link inode.
+   // A same-name replacement while reading cannot disappear from our audit.
+   const initial=await lstat(journalPath,{bigint:true});
+   const scope=await classifyNativeRestoreJournalScopeReadOnly(
+    journalPath,x.sourcePath);
+   const classified=await lstat(journalPath,{bigint:true});
+   if(!initial.isFile()||initial.isSymbolicLink()||initial.nlink!==1n||
+      initial.dev!==classified.dev||initial.ino!==classified.ino||
+      initial.size!==classified.size||initial.mtimeNs!==classified.mtimeNs||
+      initial.ctimeNs!==classified.ctimeNs||initial.mode!==classified.mode)
+    return block('UNSAFE_PATH');
+   if(scope==='OTHER_SOURCE'){
+    foreign.push({name:entry.name,identity:classified});
+    continue;
+   }
+   inspected++;
    // Dirent is only a hint; inspector verifies type, source binding,
    // independent backup bytes and journal inode on every observation.
    const observation=await inspectNativeRestoreIntentReadOnly({
@@ -158,6 +178,22 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      return block('UNSAFE_PATH');
    }
    auditedJournals.push({name:prior.journalFileName,file:before});
+  }
+  // Foreign journals are only ignored for the selected script's COUNTS.
+  // A foreign record becoming malformed or changing ownership during this
+  // scan revokes the entire aggregate. No foreign script bytes are inspected.
+  for(const item of foreign){
+   const path=join(x.backupDirectory,item.name);
+   if(await classifyNativeRestoreJournalScopeReadOnly(path,x.sourcePath)!==
+      'OTHER_SOURCE')return block('UNSAFE_PATH');
+   const current=await lstat(path,{bigint:true});
+   if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1n||
+      current.dev!==item.identity.dev||current.ino!==item.identity.ino||
+      current.size!==item.identity.size||
+      current.mtimeNs!==item.identity.mtimeNs||
+      current.ctimeNs!==item.identity.ctimeNs||
+      current.mode!==item.identity.mode)return block('UNSAFE_PATH');
+   auditedJournals.push({name:item.name,file:current});
   }
   const srcAfter=await lstat(x.sourcePath,{bigint:true});
   const dirAfter=await lstat(x.backupDirectory,{bigint:true});
