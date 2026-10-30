@@ -168,6 +168,25 @@ export async function hasStructurallyValidNativeRestoreJournalReadOnly(
  return content!==null&&parseJournal(content)!==null;
 }
 
+/** Recheck a published journal's exact source ownership without exposing its
+ * stored digest or names. A structurally valid foreign journal is not a
+ * rejected restore for the selected script. This is never write authority.
+ * Invalid/redirected records remain subject to the inventory's rejection.
+ */
+export async function classifyNativeRestoreJournalScopeReadOnly(
+ journalPath:string,sourcePath:string
+):Promise<'SELECTED_SOURCE'|'OTHER_SOURCE'|'INVALID'>{
+ if(!validPath(sourcePath)||!validPath(journalPath)||
+    !JOURNAL_NAME.test(basename(journalPath)))return 'INVALID';
+ const contents=await readJournal(journalPath);
+ if(contents===null)return 'INVALID';
+ const journal=parseJournal(contents);
+ if(!journal)return 'INVALID';
+ const expected=createHash('sha256').update(sourcePath).digest('hex');
+ if(journal.sourcePathSha256!==expected)return 'OTHER_SOURCE';
+ return parseJournal(contents,sourcePath)?'SELECTED_SOURCE':'INVALID';
+}
+
 /** Recheck both independent backups with the existing bounded, no-link
  * descriptor verifier. A successful earlier read is not a durable receipt:
  * an external editor can invalidate either backup while source or journal

@@ -415,3 +415,45 @@ test('TASK-011/TEST-020/021/026: source-parent staging residue cannot be a clean
   assert.equal(await readFile(pending,'utf8'),'unresolved source staging');
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/021/026: shared native recovery directory counts only the selected source',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-intent-shared-recovery-'));
+ try{
+  const backupDirectory=join(home,'recoveries');
+  await mkdir(backupDirectory);
+  const sources=[join(home,'selected.user.js'),join(home,'other.user.js')];
+  for(const sourcePath of sources){
+   await writeFile(sourcePath,original);
+   const backup=await createVerifiedBackupOnly({
+    sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+   });
+   assert.equal(backup.status,'BACKUP_ONLY');
+   if(backup.status!=='BACKUP_ONLY')return;
+   await writeFile(sourcePath,updated);
+   const restored=await restoreVerifiedOriginalNativeOnly({
+    sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+    expectedCurrentSha256:sha(updated),expectedOriginalSha256:sha(original),
+    expectedOriginalByteLength:original.length,userApproved:true,
+    manualRestoreApproved:true
+   });
+   assert.equal(restored.status,'RESTORED_NATIVE_ONLY',
+    'different scripts must retain independent recovery intents in one store');
+  }
+  const before=(await readdir(backupDirectory)).sort();
+  for(const sourcePath of sources){
+   const result=await inspectNativeRestoreIntentInventoryReadOnly({
+    sourcePath,backupDirectory,userApproved:true
+   });
+   assert.equal(result.status,'RESTORE_INTENT_INVENTORY_READ_ONLY');
+   if(result.status==='RESTORE_INTENT_INVENTORY_READ_ONLY')
+    assert.deepEqual(
+     [result.inspected,result.originalPresent,result.displacedPresent,result.rejected],
+     [1,1,0,0],
+     'a valid foreign-script journal must not be misreported as a rejected current-script recovery');
+   assert.deepEqual(await readFile(sourcePath),original);
+  }
+  assert.deepEqual((await readdir(backupDirectory)).sort(),before,
+   'read-only scope inspection must not modify either journal or backup');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
