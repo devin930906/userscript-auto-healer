@@ -470,6 +470,10 @@ test('TASK-011/TEST-020/021/026: malformed reserved journal name is never a clea
   await writeFile(join(backupDirectory,'ordinary-notes.txt'),'unrelated');
   assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
    'ordinary unrelated files do not block a fresh native restore');
+  const foreignMutex=join(backupDirectory,'.uah-restore-path-'+'f'.repeat(64));
+  await mkdir(foreignMutex);
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
+   'a structurally valid unrelated native path mutex is not a journal');
 
   // A Windows case-only rename or interrupted publication must not hide
   // a reserved recovery artifact from the *native pre-rename* guard.
