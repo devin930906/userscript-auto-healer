@@ -25,6 +25,7 @@ import {createVerifiedBackupOnly} from './verified-backup';
 import {verifyExactCandidateBytesReadOnly} from './candidate-bytes';
 import {hasUnsafePathLink} from './path-boundary';
 import {hasInterruptedRestoreStaging} from './restore-staging-residue';
+import {hasPriorPublishedRestoreIntentForSource} from './restore-intent-inspection';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
  'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'SOURCE_LOCKED'|
@@ -344,6 +345,13 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
+  // A published intent from an earlier attempt remains unreconciled even
+  // when its JSON is structurally sound. The source-path lock is held, so
+  // another cooperating restore cannot publish a conflicting journal
+  // while we check this exact source's recovery namespace.
+  if(await hasPriorPublishedRestoreIntentForSource(
+    opts.sourcePath,opts.backupDirectory))
+   return block('RECOVERY_REVIEW_REQUIRED');
   const sourceInput={
    sourcePath:opts.sourcePath,
    expectedSha256:opts.expectedCurrentSha256,userApproved:true

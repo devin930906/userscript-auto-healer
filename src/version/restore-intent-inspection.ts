@@ -10,7 +10,7 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
-import {lstat,open} from 'node:fs/promises';
+import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join,resolve} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -192,6 +192,63 @@ async function backupsVerified(x:Input,j:Journal):Promise<boolean>{
  }
  return true;
 }
+
+/** TASK-011 / TEST-020/021/026: before a NEW native source replacement,
+ * conservatively detect a still-published previous recovery intent bound to
+ * that exact native-selected source path. A structurally valid intent is
+ * RESTORE_INTENT_UNVERIFIED, NOT proof that the user reconciled it.
+ *
+ * Independent sources may share the same recovery directory; only a
+ * source-hash match blocks them. Unknown or changing recovery evidence fails
+ * closed. Read-only snapshots do not constitute OS-exclusive locks.
+ */
+export async function hasPriorPublishedRestoreIntentForSource(
+ sourcePath:string,backupDirectory:string
+):Promise<boolean>{
+ try{
+  if(await hasUnsafePathLink(sourcePath)||
+     await hasUnsafePathLink(backupDirectory))return true;
+  const start=await lstat(backupDirectory,{bigint:true});
+  if(!start.isDirectory()||start.isSymbolicLink())return true;
+  const expected=createHash('sha256').update(sourcePath).digest('hex');
+  const independent:Array<{path:string;identity:BigIntStats;bytes:string}>=[];
+  let entries=0,journals=0;
+  const directory=await opendir(backupDirectory);
+  for await(const entry of directory){
+   if(++entries>1024)return true;
+   if(!JOURNAL_NAME.test(entry.name))continue;
+   if(++journals>32)return true;
+   const path=join(backupDirectory,entry.name);
+   const before=await lstat(path,{bigint:true});
+   if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n)
+    return true;
+   const bytes=await readJournal(path);
+   const intent=bytes===null?null:parseJournal(bytes);
+   if(!intent)return true;
+   // The source path digest is an identity filter, never authentication.
+   // Preserve this earlier journal and BOTH recovery versions for manual
+   // inspection instead of publishing a new overwrite on top of them.
+   if(intent.sourcePathSha256===expected)return true;
+   independent.push({path,identity:before,bytes});
+  }
+  const end=await lstat(backupDirectory,{bigint:true});
+  if(!end.isDirectory()||end.isSymbolicLink()||
+     !sameDir(start,end)||start.mtimeNs!==end.mtimeNs||
+     start.ctimeNs!==end.ctimeNs||
+     await hasUnsafePathLink(backupDirectory))return true;
+  // A different source's journal can be replaced or edited during the
+  // scan without a parent directory timestamp change. Do not accept a
+  // stale "no matching journal" decision in that case.
+  for(const entry of independent){
+   const now=await lstat(entry.path,{bigint:true});
+   if(!now.isFile()||now.isSymbolicLink()||now.nlink!==1n||
+      !sameFile(entry.identity,now)||
+      await readJournal(entry.path)!==entry.bytes)return true;
+  }
+  return false;
+ }catch{return true;}
+}
+
 /** Read-only: classify observed source bytes as old or restored, or refuse.
  * No finding permits any automatic retry, rename, manager action or rollback.
  */
