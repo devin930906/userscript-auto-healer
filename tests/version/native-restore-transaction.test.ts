@@ -745,6 +745,40 @@ test('TASK-011/TEST-020/026: replaced pending inode after last byte check must n
  });
 });
 
+test('TASK-011/TEST-020/021/026: Windows parent-case alias cannot evade an unreconciled same-file recovery journal',
+ {skip:process.platform!=='win32'},async()=>{
+ await fixture(async opts=>{
+  const first=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(first.status,'RESTORED_NATIVE_ONLY',JSON.stringify(first));
+  if(first.status!=='RESTORED_NATIVE_ONLY')return;
+  // Keep source basename unchanged. A different spelling of an ancestor
+  // names the same Windows file but changes the legacy raw-path journal hash.
+  const alternate=join(dirname(opts.sourcePath).toUpperCase(),
+   opts.sourcePath.slice(dirname(opts.sourcePath).length+1));
+  assert.equal(alternate.slice(-'selected.user.js'.length),'selected.user.js');
+  assert.notEqual(alternate,opts.sourcePath);
+  const secondBackup=await createVerifiedBackupOnly({
+   sourcePath:alternate,backupDirectory:opts.backupDirectory,
+   expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(secondBackup.status,'BACKUP_ONLY',JSON.stringify(secondBackup));
+  if(secondBackup.status!=='BACKUP_ONLY')return;
+  await writeFile(opts.sourcePath,changed);
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const second=await restoreVerifiedOriginalNativeOnly({
+   ...opts,sourcePath:alternate,backupFileName:secondBackup.backupFileName
+  });
+  assert.equal(second.status,'BLOCKED',
+   'an ancestor-case alias must not bypass the older, unresolved recovery intent');
+  if(second.status==='BLOCKED')
+   assert.ok(['UNSAFE_PATH','RECOVERY_REVIEW_REQUIRED'].includes(second.reason));
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'never overwrite the same native user file under a parent-case alias');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'blocked alias cannot publish more recovery or displaced files');
+ });
+});
+
 test('TASK-011/TEST-020/021/026: Windows case-alias cannot bypass a previously published restore intent',
  {skip:process.platform!=='win32'},async()=>{
  await fixture(async opts=>{

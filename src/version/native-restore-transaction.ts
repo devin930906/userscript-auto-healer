@@ -345,25 +345,22 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(signal?.aborted)return block('CANCELLED');
   if(!owner.isDirectory()||owner.isSymbolicLink())
    return block('SOURCE_LOCKED');
-  // Windows normally resolves distinct case spellings to the same native
-  // file. Recovery journals and existing backup identities were serialized
-  // with the originally approved SOURCE PATH spelling, not the file inode.
-  // A later differently cased spelling could therefore evade an unreconciled
-  // published intent after the shared path mutex is released. Require the
-  // filesystem's actual canonical spelling BEFORE any backup, staging or
-  // source replacement; preserve all existing journals for manual review.
-  // This does not turn the cooperative mutex into an OS-enforced file lock.
+  // Recovery journals bind the exact original source-path bytes. Windows
+  // resolves differently cased parent directory names to the same native
+  // source, so the old journal can be bypassed even with a canonical script
+  // filename. Check the source AND its directly selected parent before any
+  // backups, intent publication or overwrite.
+  //
+  // Do NOT demand that the entire realpath string match: Windows can rewrite
+  // older temp/environment ancestors and drive prefix for otherwise valid
+  // native selections. More distant ancestor aliases remain a separately
+  // unresolved provenance risk requiring a compatible identity design.
   if(process.platform==='win32'){
-   let canonical:string;
-   try{canonical=await realpath(opts.sourcePath);}
-   catch{return block('UNSAFE_PATH');}
-   // Windows runners may supply an approved parent path via a legitimate
-   // historical 8.3 / environment spelling. Do not invalidate every valid
-   // native restore because realpath rewrites a parent component; the selected
-   // source FILE NAME must nevertheless match the directory entry's casing.
-   // Ancestor aliases remain a separately tracked unresolved provenance risk.
-   if(basename(canonical)!==basename(opts.sourcePath))
-    return block('UNSAFE_PATH');
+   try{
+    if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
+       basename(await realpath(parent))!==basename(parent))
+     return block('UNSAFE_PATH');
+   }catch{return block('UNSAFE_PATH');}
   }
   // A published intent from an earlier attempt remains unreconciled even
   // when its JSON is structurally sound. The source-path lock is held, so
