@@ -357,7 +357,13 @@ export async function restoreVerifiedOriginalNativeOnly(
    let canonical:string;
    try{canonical=await realpath(opts.sourcePath);}
    catch{return block('UNSAFE_PATH');}
-   if(canonical!==opts.sourcePath)return block('UNSAFE_PATH');
+   // Windows runners may supply an approved parent path via a legitimate
+   // historical 8.3 / environment spelling. Do not invalidate every valid
+   // native restore because realpath rewrites a parent component; the selected
+   // source FILE NAME must nevertheless match the directory entry's casing.
+   // Ancestor aliases remain a separately tracked unresolved provenance risk.
+   if(basename(canonical)!==basename(opts.sourcePath))
+    return block('UNSAFE_PATH');
   }
   // A published intent from an earlier attempt remains unreconciled even
   // when its JSON is structurally sound. The source-path lock is held, so
