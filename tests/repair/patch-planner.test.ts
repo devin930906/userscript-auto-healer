@@ -667,6 +667,49 @@ test('TASK-009/TEST-019/026: prototype aliases cannot disguise a mutated native 
   }
 });
 
+test('TASK-009/TEST-019/026: browser self aliases cannot disguise rewritten native document selectors',()=>{
+ // In a browser, self === window: all these mutate the same document/DOM
+ // method that the offline planner assumes is native at its patch site.
+ const mutations=[
+  "self.document.querySelector=()=>null;",
+  "self['document']['querySelector']=()=>null;",
+  "self.document['querySelectorAll']=()=>[];",
+  "self.document.getElementById=()=>null;",
+  "const alias=self.document; alias.querySelector=()=>null;",
+  "const {document: alias}=self; alias.querySelector=()=>null;",
+  "const alias=self['document']; Reflect.set(alias,'querySelector',()=>null);",
+  "const key='document'; const alias=self[key]; alias.querySelector=()=>null;",
+  "self.Document.prototype.querySelector=()=>null;",
+  "const proto=self.Document.prototype; Reflect.set(proto,'querySelector',()=>null);",
+  "Object.defineProperty(self,'document',{value:{querySelector:()=>null}});",
+  "Object.assign(self,{document:{querySelector:()=>null}});",
+  "Reflect.set(self,'document',{querySelector:()=>null});",
+  "self[dynamicKey]={querySelector:()=>null};"
+ ];
+ for(const mutation of mutations){
+  const script=meta+mutation+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'BLOCKED',mutation);
+  assert.equal(result.automaticPatchAllowed,false,mutation);
+  assert.equal('candidateSource' in result,false,mutation);
+ }
+ for(const harmless of [
+  "const unrelated=self['unrelated']; unrelated.querySelector=()=>null;",
+  "Object.defineProperty(self,'unrelated',{value:{}});",
+  "Reflect.set(self,'unrelated',{});",
+  "const {unrelated}=self; void unrelated;"
+ ]){
+  const script=meta+harmless+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'CANDIDATE_ONLY',harmless);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});
+
 test('TASK-009/TEST-014/019: querySelectorAll NodeList[0] retains indexing and review-only identity',()=>{
  const script=meta+
   'const untouched = "#old";\n'+
