@@ -85,7 +85,7 @@ function bindsDocument(pattern:unknown):boolean{
  * also ambiguous: their property key might be a selector method at runtime.
  * These checks intentionally apply across the entire source, as phase-one
  * proposals cannot prove execution order or alias/side-effect boundaries. */
-/** A direct write through window/globalThis/self.document may rebind the actual
+/** A direct write through window/globalThis/self/top/parent.document may rebind the actual
  * browser document or override its native selector methods. Treat literal
  * global document aliases as the same untrusted target, including ['document'].
  * Dynamic aliases remain unsupported by the offline planner's scope model. */
@@ -95,7 +95,7 @@ function isGlobalDocumentMember(target:unknown):boolean{
   const host=asNode(member.object);
   if(host?.type!=='Identifier'||
      (host.name!=='window'&&host.name!=='globalThis'&&
-      host.name!=='self'))return false;
+      host.name!=='self'&&host.name!=='top'&&host.name!=='parent'))return false;
   const property=asNode(member.property);
   return member.computed===true?
     property?.type==='Literal'&&property.value==='document':
@@ -145,7 +145,7 @@ function isDocumentPrototype(target:unknown):boolean{
     return true;
   const host=asNode(ctor.object);
   return host?.type==='Identifier'&&
-    (host.name==='window'||host.name==='globalThis'||host.name==='self')&&
+    (host.name==='window'||host.name==='globalThis'||host.name==='self'||host.name==='top'||host.name==='parent')&&
     hasMemberName(ctor,'Document');
 }
 
@@ -160,7 +160,7 @@ function isDynamicGlobalDocumentAlias(target:unknown):boolean{
  const host=asNode(node.object);
  if(host?.type!=='Identifier'||
     (host.name!=='window'&&host.name!=='globalThis'&&
-      host.name!=='self'))return false;
+      host.name!=='self'&&host.name!=='top'&&host.name!=='parent'))return false;
  const property=asNode(node.property);
  return property?.type!=='Literal'||typeof property.value!=='string';
 }
@@ -216,7 +216,7 @@ function mayReflectivelyMutateDocument(node:AstNode):boolean{
  const documentPrototype=isDocumentPrototype(argument);
  const globalHost=argument?.type==='Identifier'&&
    (argument.name==='window'||argument.name==='globalThis'||
-    argument.name==='self');
+    argument.name==='self'||argument.name==='top'||argument.name==='parent');
  if(!firstIsDocument&&!aliasedDocument&&!documentPrototype&&!globalHost)return false;
  const callee=asNode(node.callee);
  if(callee?.type!=='MemberExpression')return false;
@@ -273,7 +273,7 @@ function isDocumentConstructorReference(target:unknown):boolean{
   return true;
  const host=asNode(node.object);
  return host?.type==='Identifier'&&
-   (host.name==='window'||host.name==='globalThis'||host.name==='self')&&
+   (host.name==='window'||host.name==='globalThis'||host.name==='self'||host.name==='top'||host.name==='parent')&&
    hasMemberName(node,'Document');
 }
 function capturesDestructuredDocumentAlias(node:AstNode):boolean{
@@ -287,7 +287,7 @@ function capturesDestructuredDocumentAlias(node:AstNode):boolean{
     isDocumentReference(item)||isDocumentPrototype(item));
  if(pattern.type!=='ObjectPattern')return false;
  const fromGlobal=value.type==='Identifier'&&
-   (value.name==='window'||value.name==='globalThis'||value.name==='self');
+   (value.name==='window'||value.name==='globalThis'||value.name==='self'||value.name==='top'||value.name==='parent');
  const fromConstructor=isDocumentConstructorReference(value);
  if(!fromGlobal&&!fromConstructor)return false;
  if(!Array.isArray(pattern.properties))return true;
