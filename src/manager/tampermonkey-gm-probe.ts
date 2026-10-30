@@ -354,6 +354,8 @@ export async function startIsolatedTampermonkeyGmProbe(
  let stopping:Promise<void>|undefined;
  const stop=():Promise<void>=>{
    if(stopping)return stopping;
+   // Explicit shutdown revokes consent before any in-flight receipt can finish.
+   consentRevoked=true;
    clearTimeout(expiryTimer);
    stopping=new Promise<void>(resolve=>{
      server.close(()=>resolve());
@@ -373,7 +375,8 @@ export async function startIsolatedTampermonkeyGmProbe(
    status:'ISOLATED_GM_TEST_READY',runAt,
    origin,source:produceFixtureSource(origin,token,scriptId,expiresAt,runAt),
    installUrl:origin+'/install.user.js?key='+installKey,expiresAt,
-   receiptSnapshot:()=>Object.freeze({...receipts}),
+   // An ended or expired consent window cannot expose cached live receipts.
+   receiptSnapshot:()=>Object.freeze(consentRevoked?{}:{...receipts}),
    stop
  }};
 }
