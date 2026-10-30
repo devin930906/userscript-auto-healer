@@ -745,6 +745,39 @@ test('TASK-011/TEST-020/026: replaced pending inode after last byte check must n
  });
 });
 
+test('TASK-011/TEST-020/021/026: Windows case-alias cannot bypass a previously published restore intent',
+ {skip:process.platform!=='win32'},async()=>{
+ await fixture(async opts=>{
+  const first=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(first.status,'RESTORED_NATIVE_ONLY',JSON.stringify(first));
+  if(first.status!=='RESTORED_NATIVE_ONLY')return;
+  // Recoveries retain a journal bound to the original path spelling. On
+  // case-insensitive Windows filesystems a new spelling names the same file.
+  // Even a second independently verified backup must not bypass that journal.
+  const alternate=opts.sourcePath.toUpperCase();
+  assert.notEqual(alternate,opts.sourcePath);
+  const secondBackup=await createVerifiedBackupOnly({
+   sourcePath:alternate,backupDirectory:opts.backupDirectory,
+   expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(secondBackup.status,'BACKUP_ONLY',JSON.stringify(secondBackup));
+  if(secondBackup.status!=='BACKUP_ONLY')return;
+  await writeFile(opts.sourcePath,changed);
+  const before=(await readdir(opts.backupDirectory)).sort();
+  const second=await restoreVerifiedOriginalNativeOnly({
+   ...opts,sourcePath:alternate,backupFileName:secondBackup.backupFileName
+  });
+  assert.equal(second.status,'BLOCKED',
+   'a canonical-path alias must never permit the second source replacement');
+  if(second.status==='BLOCKED')
+   assert.ok(['UNSAFE_PATH','RECOVERY_REVIEW_REQUIRED'].includes(second.reason),
+    'alias denial must be a path or previous-intent refusal');
+  assert.deepEqual(await readFile(opts.sourcePath),changed);
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),before,
+   'the blocked second restore must not create displaced backups or journals');
+ });
+});
+
 test('TASK-011/TEST-020/026: Windows case aliases must share a native restore path lock',
  {skip:process.platform!=='win32'},async()=>{
  await fixture(async opts=>{
