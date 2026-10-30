@@ -204,6 +204,9 @@ export async function launchApprovedIsolatedChrome(
               if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version);
+              // Consent may be revoked during the asynchronous handshake.
+              // A successful transport proof must never reactivate a cancelled launch.
+              if(options.signal?.aborted)return {ok:false,code:'ABORTED'};
               if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               if(errored||exited||child.killed||child.exitCode!==null)
                 return {ok:false,code:'LAUNCH_FAILED'};
