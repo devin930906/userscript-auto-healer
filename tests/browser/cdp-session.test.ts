@@ -87,6 +87,59 @@ test('TEST-009: deny cross-origin, malformed, ambiguous or spoofed target endpoi
 });
 
 
+test('TASK-005/TEST-009/026: version structure inspector rejects accessors, inherited evidence and revoked Proxies',()=>{
+  let getters=0,traps=0;
+  const accessors=Object.defineProperty({},'Browser',{
+    enumerable:true,get(){getters++;return envelope.Browser;}
+  });
+  Object.defineProperty(accessors,'webSocketDebuggerUrl',{
+    enumerable:true,value:envelope.webSocketDebuggerUrl
+  });
+  const inherited=Object.create(envelope);
+  const proxied=new Proxy({...envelope},{
+    get(){traps++;return envelope.Browser;},
+    ownKeys(){traps++;throw Error('PRIVATE_PROXY');}
+  });
+  const revoked=Proxy.revocable({...envelope},{});revoked.revoke();
+  for(const input of [accessors,inherited,proxied,revoked.proxy]){
+    assert.doesNotThrow(()=>{
+      assert.deepEqual(inspectCdpVersion(input,9223),
+        {ok:false,code:'INVALID_SHAPE'});
+    });
+  }
+  assert.equal(getters,0,'an input accessor must not run');
+  assert.equal(traps,0,'Proxy traps must not run');
+});
+
+test('TASK-005/TEST-009/026: target inventory refuses accessor or Proxy spoofing without executing traps',()=>{
+  let getters=0,traps=0;
+  const byGetter=Object.defineProperty({...testPage},'type',{
+    enumerable:true,get(){getters++;return 'page';}
+  });
+  const inherited=Object.create(testPage);
+  const wrapped=new Proxy({...testPage},{
+    get(){traps++;throw Error('PRIVATE_PROXY');},
+    getOwnPropertyDescriptor(){traps++;throw Error('PRIVATE_PROXY');}
+  });
+  const revoked=Proxy.revocable({...testPage},{});revoked.revoke();
+  const arrayProxy=new Proxy([testPage],{
+    get(){traps++;throw Error('PRIVATE_ARRAY_PROXY');},
+    getOwnPropertyDescriptor(){traps++;throw Error('PRIVATE_ARRAY_PROXY');}
+  });
+  const revokedArray=Proxy.revocable([testPage],{});revokedArray.revoke();
+  for(const list of [[byGetter],[inherited],[wrapped],[revoked.proxy],
+      arrayProxy,revokedArray.proxy]){
+    assert.doesNotThrow(()=>{
+      assert.deepEqual(inspectCdpTargetList(list,9223,testPage.url),
+        {ok:false,code:'INVALID_TARGET_LIST'});
+    });
+  }
+  assert.equal(getters,0);
+  assert.equal(traps,0);
+  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url).ok,true,
+    'native JSON-shaped data remains valid');
+});
+
 import { createServer } from 'node:net';
 import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
 test('TEST-009/026: netstat lookup is absolute and cannot search the working directory',()=>{
