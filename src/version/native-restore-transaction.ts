@@ -508,6 +508,15 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(await hasInterruptedRestoreStaging(parent,basename(pending),finalPending)||
      await hasInterruptedRestoreStaging(opts.backupDirectory))
    return block('RECOVERY_REVIEW_REQUIRED');
+  // The first scan ran before our own intent was published. An external
+  // process can publish another valid same-source journal during awaited I/O.
+  // Exempt ONLY this transaction's captured published inode; never approve
+  // an unreviewed competing intent before the irreversible source rename.
+  if(!publishedJournalIdentity||
+     await hasPriorPublishedRestoreIntentForSource(
+      opts.sourcePath,opts.backupDirectory,
+      {fileName:journalFileName,identity:publishedJournalIdentity}))
+   return block('RECOVERY_REVIEW_REQUIRED');
   // Even a same-byte external journal inode replacement cannot authorize
   // the irreversible source rename.
   if(!publishedJournalIdentity||

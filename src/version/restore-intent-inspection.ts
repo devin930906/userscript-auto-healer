@@ -199,11 +199,15 @@ async function backupsVerified(x:Input,j:Journal):Promise<boolean>{
  * RESTORE_INTENT_UNVERIFIED, NOT proof that the user reconciled it.
  *
  * Independent sources may share the same recovery directory; only a
- * source-hash match blocks them. Unknown or changing recovery evidence fails
- * closed. Read-only snapshots do not constitute OS-exclusive locks.
+ * source-hash match blocks them. At the final native pre-rename check,
+ * permit only the exact inode captured for THIS transaction's published
+ * journal, never another same-source journal or a same-name replacement.
+ * Unknown or changing recovery evidence fails closed. Read-only snapshots
+ * do not constitute OS-exclusive locks.
  */
 export async function hasPriorPublishedRestoreIntentForSource(
- sourcePath:string,backupDirectory:string
+ sourcePath:string,backupDirectory:string,
+ verifiedOwn?:Readonly<{fileName:string;identity:BigIntStats}>
 ):Promise<boolean>{
  try{
   if(await hasUnsafePathLink(sourcePath)||
@@ -211,8 +215,12 @@ export async function hasPriorPublishedRestoreIntentForSource(
   const start=await lstat(backupDirectory,{bigint:true});
   if(!start.isDirectory()||start.isSymbolicLink())return true;
   const expected=createHash('sha256').update(sourcePath).digest('hex');
+  if(verifiedOwn!==undefined&&
+     (!JOURNAL_NAME.test(verifiedOwn.fileName)||!verifiedOwn.identity.isFile()||
+      verifiedOwn.identity.isSymbolicLink()||
+      verifiedOwn.identity.nlink!==1n))return true;
   const independent:Array<{path:string;identity:BigIntStats;bytes:string}>=[];
-  let entries=0,journals=0;
+  let entries=0,journals=0,ownSeen=false;
   const directory=await opendir(backupDirectory);
   for await(const entry of directory){
    if(++entries>1024)return true;
@@ -228,9 +236,17 @@ export async function hasPriorPublishedRestoreIntentForSource(
    // The source path digest is an identity filter, never authentication.
    // Preserve this earlier journal and BOTH recovery versions for manual
    // inspection instead of publishing a new overwrite on top of them.
-   if(intent.sourcePathSha256===expected)return true;
+   const isOwn=verifiedOwn!==undefined&&
+     entry.name===verifiedOwn.fileName;
+   if(isOwn){
+    if(intent.sourcePathSha256!==expected||
+       !sameFile(before,verifiedOwn.identity)||
+       before.mode!==verifiedOwn.identity.mode)return true;
+    ownSeen=true;
+   }else if(intent.sourcePathSha256===expected)return true;
    independent.push({path,identity:before,bytes});
   }
+  if(verifiedOwn!==undefined&&!ownSeen)return true;
   const end=await lstat(backupDirectory,{bigint:true});
   if(!end.isDirectory()||end.isSymbolicLink()||
      !sameDir(start,end)||start.mtimeNs!==end.mtimeNs||
