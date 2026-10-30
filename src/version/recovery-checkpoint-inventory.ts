@@ -5,7 +5,7 @@
  */
 import type {BigIntStats} from 'node:fs';
 import {lstat,opendir} from 'node:fs/promises';
-import {basename,isAbsolute,join} from 'node:path';
+import {basename,dirname,isAbsolute,join} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../repair/patch-planner';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -97,9 +97,12 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
       return deny('UNSAFE_PATH');
     const sourceBefore=await lstat(options.sourcePath,{bigint:true});
     const dirBefore=await lstat(options.backupDirectory,{bigint:true});
+    const sourceParentBefore=await lstat(dirname(options.sourcePath),{bigint:true});
     if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
        sourceBefore.nlink!==1n||!dirBefore.isDirectory()||
-       dirBefore.isSymbolicLink())return deny('UNSAFE_PATH');
+       dirBefore.isSymbolicLink()||
+       !sourceParentBefore.isDirectory()||sourceParentBefore.isSymbolicLink()||
+       sameDir(sourceParentBefore,dirBefore))return deny('UNSAFE_PATH');
     const sourceCheck=await verifyApprovedSourceFingerprint({
       sourcePath:options.sourcePath,expectedSha256:request.expectedSourceSha256,
       userApproved:true
@@ -170,6 +173,7 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
       return deny('UNSAFE_PATH');
     const sourceAfter=await lstat(options.sourcePath,{bigint:true});
     const dirAfter=await lstat(options.backupDirectory,{bigint:true});
+    const sourceParentAfter=await lstat(dirname(options.sourcePath),{bigint:true});
     const sourceFinal=await verifyApprovedSourceFingerprint({
       sourcePath:options.sourcePath,expectedSha256:request.expectedSourceSha256,
       userApproved:true
@@ -181,6 +185,9 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
     // changing its identity. An inventory over a changed namespace is stale.
     if(!sameDir(dirBefore,dirAfter)||dirAfter.isSymbolicLink()||
        !dirAfter.isDirectory()||
+       !sourceParentAfter.isDirectory()||sourceParentAfter.isSymbolicLink()||
+       !sameDir(sourceParentBefore,sourceParentAfter)||
+       sameDir(sourceParentAfter,dirAfter)||
        dirBefore.mtimeNs!==dirAfter.mtimeNs||
        dirBefore.ctimeNs!==dirAfter.ctimeNs)return deny('UNSAFE_PATH');
     // Both independent inspectors can accept identical checkpoint bytes
