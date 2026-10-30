@@ -1043,3 +1043,27 @@ test('TASK-007/TEST-017/026: first GM read is denied when route verification con
  assert.deepEqual(calls,{gm:0,storageWrite:0,storageDelete:0,dom:0,report:0},
   'expired consent must bar the initial GM read, not merely later storage or DOM actions');
 });
+
+test('TASK-007/TEST-017/018/026: revoked GM probe snapshot must not expose accepted reports',async()=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ try{
+  const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+  assert.ok(token);
+  const response=await fetch(probe.origin+'/receipt',{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
+    gmStorageRoundtripMatched:true,businessAction:false})
+  });
+  assert.equal(response.status,204);
+  assert.equal(probe.receiptSnapshot().broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
+  await probe.stop();
+  assert.deepEqual(probe.receiptSnapshot(),{},
+   'Explicit session revocation must hide cached self-reports from any subsequent caller');
+  await probe.stop();
+  assert.deepEqual(probe.receiptSnapshot(),{},
+   'Repeated stop must never revive a stale report');
+ }finally{await probe.stop();}
+});
