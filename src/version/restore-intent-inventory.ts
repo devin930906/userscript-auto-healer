@@ -228,7 +228,7 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   }
   // A recovered backup-directory inventory is NOT clean if a crashed
   // restoration left an unrenamed source file in the selected script parent.
-  if(await hasInterruptedRestoreStaging(dirname(x.sourcePath)))
+  if(await hasInterruptedRestoreStaging(dirname(x.sourcePath),undefined,undefined,'source-parent'))
    return block('RECOVERY_REVIEW_REQUIRED');
   // A restore may acquire the path mutex during the inventory scan.
   if(await nativeRestorePathLockPresent(x.sourcePath))
