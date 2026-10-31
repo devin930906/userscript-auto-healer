@@ -554,3 +554,51 @@ test('TASK-009/TEST-014/019/026: DOM-only candidates require an explicit minimal
     assert.equal(result.businessRecoveredVerified,false,grant);
   }
 });
+
+test('TASK-009/TEST-014/019/026: DOM-only review refuses ambiguous injection timing and frame metadata',()=>{
+  // These are KNOWN metadata keys: unknownNames cannot catch malformed or
+  // contradictory values. A top-document DOM snapshot says nothing about
+  // a differently timed or ambiguously scoped manager injection.
+  const invalid=[
+    '// @run-at document-not-a-time',
+    '// @run-at document-start\\n// @run-at document-end',
+    '// @run-at document-idle\\n// @run-at document-idle',
+    '// @run-at',
+    '// @noframes false',
+    '// @noframes\\n// @noframes'
+  ];
+  for(const text of invalid){
+    const metadata=text.replace(/\\n/g,'\n');
+    const changed=source.replace('// @grant none',
+      metadata+'\n// @grant none');
+    const request={...patch,source:changed,
+      expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
+      callOffset:changed.indexOf('document.querySelector')};
+    const linked={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(request,linked,series(),true);
+    assert.equal(result.status,'BLOCKED',metadata);
+    assert.equal(result.automaticPatchAllowed,false,metadata);
+    assert.equal('candidateSource' in result,false,metadata);
+  }
+  // Explicit supported timing and a single empty @noframes marker keep
+  // the established review-only path for a top-level, non-login DOM sample.
+  for(const metadata of [
+    '// @run-at document-start',
+    '// @run-at document-body',
+    '// @run-at document-end',
+    '// @run-at document-idle',
+    '// @noframes',
+    '// @run-at document-end\n// @noframes'
+  ]){
+    const changed=source.replace('// @grant none',
+      metadata+'\n// @grant none');
+    const request={...patch,source:changed,
+      expectedSourceSha256:createHash('sha256').update(changed).digest('hex'),
+      callOffset:changed.indexOf('document.querySelector')};
+    const linked={...scenario,scriptSha256:request.expectedSourceSha256};
+    const result=proposeFromReadOnlyDomDiagnostic(request,linked,series(),true);
+    assert.equal(result.status,'CANDIDATE_ONLY',metadata);
+    assert.equal(result.automaticPatchAllowed,false,metadata);
+    assert.equal(result.tampermonkeyVerified,false,metadata);
+  }
+});
