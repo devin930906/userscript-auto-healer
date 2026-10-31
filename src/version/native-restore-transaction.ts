@@ -208,6 +208,20 @@ export async function removeOwnedPublishedJournalPending(
      pending.mtimeNs!==staged.mtimeNs||
      pending.mtimeNs!==published.mtimeNs)return false;
   await unlink(pendingPath);
+  // The unlink completes asynchronously. An external editor can swap the
+  // published pathname immediately after that operation. Do not turn an
+  // unowned replacement journal into a successful native publication receipt.
+  // ctime and nlink legitimately change after removing the staging hard link;
+  // compare stable inode/content metadata and the expected single remaining link.
+  const remainingDir=await lstat(dirname(publishedPath),{bigint:true});
+  const remaining=await lstat(publishedPath,{bigint:true});
+  if(!remainingDir.isDirectory()||remainingDir.isSymbolicLink()||
+     !sameDirectory(remainingDir,parentOwned)||
+     !remaining.isFile()||remaining.isSymbolicLink()||remaining.nlink!==1n||
+     !sameDirectory(remaining,published)||remaining.size!==published.size||
+     remaining.mtimeNs!==published.mtimeNs||
+     remaining.mode!==published.mode||
+     await hasUnsafePathLink(publishedPath))return false;
   return true;
  }catch{return false;}
 }

@@ -152,6 +152,40 @@ test('TEST-020/026: published restore intent cleanup never unlinks a foreign rep
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TASK-011/TEST-020/026: journal replaced immediately after pending unlink cannot receive a clean publication receipt',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-published-journal-post-unlink-'));
+ const directory=join(root,'recoveries');
+ try{
+  await mkdir(directory);
+  const dirIdentity=await lstat(directory,{bigint:true});
+  const id=randomUUID();
+  const pending=join(directory,'.uah-restore-'+id+'.pending');
+  const published=join(directory,'.uah-restore-'+id+'.journal.json');
+  const saved=join(directory,'retained-original-journal');
+  await writeFile(pending,'original verified journal bytes');
+  const staged=await lstat(pending,{bigint:true});
+  await link(pending,published);
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const realUnlink=fsPromises.unlink;
+  let swapped=false;
+  t.mock.method(fsPromises,'unlink',async(path:string)=>{
+   await realUnlink(path);
+   if(path===pending){
+    swapped=true;
+    await rename(published,saved);
+    await writeFile(published,'foreign replacement journal bytes');
+   }
+  });
+  const accepted=await removeOwnedPublishedJournalPending(
+   pending,published,staged,dirIdentity);
+  assert.equal(swapped,true,'inject the replacement after the real unlink');
+  assert.equal(accepted,false,
+   'a post-unlink journal inode swap cannot be acknowledged as successfully published');
+  assert.equal(await readFile(saved,'utf8'),'original verified journal bytes');
+  assert.equal(await readFile(published,'utf8'),'foreign replacement journal bytes');
+ }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-020/026: native restore cleanup removes only its own verified pending inode',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-pending-owner-'));
  const parent=join(root,'selected-parent');
