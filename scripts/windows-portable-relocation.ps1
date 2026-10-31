@@ -962,13 +962,29 @@ function Get-CandidatePortablePostMoveExeRmSummary([string]$destination) {
 # No process identifiers, executable paths, or candidate bytes are emitted.
 function Get-CandidatePortableDeniedExeRmSummary([string]$source) {
   try {
-    $snapshot=Get-CandidatePortablePostMoveExeRmSummary $source
-    if($snapshot -isnot [string] -or
-       -not $snapshot.StartsWith('postMove=ok rm=ok sampled=1 total=1 affected=',
-          [StringComparison]::Ordinal)) {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
       return 'deniedExe=unavailable'
     }
-    return ('deniedExe=ok '+$snapshot.Substring(12))
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return 'deniedExe=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $exe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
+    if(-not [IO.File]::Exists($exe)) { return 'deniedExe=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $exe
+    # Separate from the post-success function: tests (and release evidence)
+    # require exactly one post-success observation, not per-retry probes.
+    $rm=Get-CandidatePortableRestartManagerSummary $base @($exe)
+    if($rm -cnotmatch '^rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+       $rm.Contains("`r") -or $rm.Contains("`n")) {
+      return 'deniedExe=unavailable'
+    }
+    return "deniedExe=ok $rm"
   } catch { return 'deniedExe=unavailable' }
 }
 
