@@ -1575,3 +1575,54 @@ test('TASK-011/TEST-020/021/026: a competing same-source intent published after 
     'retain both conflicting native recovery intents for manual review');
  });
 });
+
+test('TASK-011/TEST-020/021/026: an unlisted Windows 8.3 grandparent spelling must not bypass the restore journal namespace',
+ {skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-unlisted-short-alias-'));
+ try{
+  // Deterministically simulate a Win32 8.3 alias: the selected path resolves,
+  // but the parent directory enumerates a different long-name entry.
+  // Do not depend on whether this GitHub runner has 8dot3 creation enabled.
+  const shortOuter=join(root,'CANONI~1');
+  const parent=join(shortOuter,'ExactInner');
+  const sourcePath=join(parent,'selected.user.js');
+  const backupDirectory=join(root,'recoveries');
+  await mkdir(parent,{recursive:true});
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const backup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(backup.status,'BACKUP_ONLY');
+  if(backup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,changed);
+  const before=await readdir(backupDirectory);
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const realRead=fsPromises.readdir;
+  let simulatedAliasObserved=false;
+  t.mock.method(fsPromises,'readdir',async (path:string)=>{
+   if(path===root){
+    simulatedAliasObserved=true;
+    return ['CanonicalLongName','recoveries'];
+   }
+   return realRead(path);
+  });
+  const result=await restoreVerifiedOriginalNativeOnly({
+   sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+   expectedCurrentSha256:sha(changed),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,
+   userApproved:true,manualRestoreApproved:true
+  });
+  assert.equal(simulatedAliasObserved,true,
+   'the high ancestor must be checked against its native directory listing');
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'UNSAFE_PATH',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  },'an unlisted 8.3-shaped spelling must never authorize a raw-path journal bypass');
+  assert.deepEqual(await readFile(sourcePath),changed,
+   'refused alias must not overwrite the user-selected source');
+  assert.deepEqual(await readdir(backupDirectory),before,
+   'refused alias must not publish additional backups or recovery intents');
+ }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
+});

@@ -364,16 +364,32 @@ export async function restoreVerifiedOriginalNativeOnly(
     // grandparent differs ONLY in letter case. A published journal hashes the
     // original path string, so that alternate spelling would evade an
     // unresolved restore intent. Compare higher ancestor names with their
-    // native directory entries, but reject only a PROVEN case-only alias:
-    // Windows runner temp/virtual paths can use a completely different name
-    // (e.g. short-name mapping) that cannot be attested from listing alone.
-    // Other path aliases remain outside this bounded case-only safeguard.
+    // native directory entries. Reject established case-only mismatches
+    // at every ancestor; also reject an unlisted short 8.3 spelling at the
+    // selected source's immediate grandparent only. Higher Windows runner
+    // temp/virtual aliases remain unresolved rather than breaking valid
+    // native restore operations across unrelated environment ancestors.
     for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
         ancestor=dirname(ancestor)){
      const expectedName=basename(ancestor);
      const names=await readdir(dirname(ancestor));
+     // A short 8.3 alias may resolve to an existing long-name directory
+     // while hashing to a different raw-path restore intent and mutex.
+     // Only reject an UNLISTED short-name shape; a literal FOO~1 directory
+     // stays eligible when the actual parent enumeration lists FOO~1.
+     const stem=expectedName.split('.')[0];
+     // Limit this new check to the directly selected source's grandparent.
+     // Hosted Windows temporary roots can themselves use unlisted 8.3
+     // spellings; rewriting that established environment-wide authority is
+     // outside this bounded, source-local guard.
+     const shortAliasShaped=ancestor===dirname(parent)&&stem.length<=8&&
+       /^[^~.\\/]{1,6}~[1-9][0-9]*$/.test(stem)&&
+       (expectedName===stem||
+        (expectedName[stem.length]==='.'&&
+         /^[^.\\/]{1,3}$/.test(expectedName.slice(stem.length+1))));
      if(!names.includes(expectedName)&&
-        names.some(name=>name.toLowerCase()===expectedName.toLowerCase()))
+        (shortAliasShaped||
+         names.some(name=>name.toLowerCase()===expectedName.toLowerCase())))
       return block('UNSAFE_PATH');
     }
    }catch{return block('UNSAFE_PATH');}
