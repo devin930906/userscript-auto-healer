@@ -10,7 +10,7 @@ import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
-import {hasPriorPublishedRestoreIntentForSource} from '../../src/version/restore-intent-inspection';
+import {hasPriorPublishedRestoreIntentForSource,hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
 const original=Buffer.from('// ==UserScript==\n// @name old\n// ==/UserScript==\n');
 const updated=Buffer.from('// ==UserScript==\n// @name new\n// ==/UserScript==\n');
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
@@ -487,4 +487,42 @@ test('TASK-011/TEST-020/021/026: malformed reserved journal name is never a clea
   assert.equal(await readFile(recoveryPath,'utf8'),marker,
    'a fail-closed preflight must never delete questionable recovery evidence');
  }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as canonical native recovery evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-native-journal-utf8-'));
+ try{
+  const id=randomUUID();
+  const journal=join(root,'.uah-restore-'+id+'.journal.json');
+  const prefix='restored-\uFFFD~'+'a'.repeat(24);
+  const backup=(identifier:string)=>prefix+'.'+identifier+'.backup.user.js';
+  // Exact native writer schema, canonical compact JSON and two distinct
+  // recovery versions. A genuine U+FFFD in a source filename is legal.
+  const valid=Buffer.from(JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:'1'.repeat(64),originalSha256:'2'.repeat(64),
+   displacedSha256:'3'.repeat(64),
+   originalBackupFileName:backup(randomUUID()),
+   displacedBackupFileName:backup(randomUUID()),
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\\n','utf8');
+  await writeFile(journal,valid);
+  assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),true,
+   'genuine UTF-8 replacement-character filenames remain valid');
+  // Replace ONE valid U+FFFD byte sequence with an invalid UTF-8 byte.
+  // Buffer.toString silently maps it back to the same U+FFFD: JSON text,
+  // structural prefixes and digests therefore look unchanged to a lossy reader.
+  const marker=Buffer.from('restored-\uFFFD~','utf8');
+  const at=valid.indexOf(marker);
+  assert.ok(at>=0);
+  const corrupt=Buffer.concat([
+   valid.subarray(0,at+'restored-'.length),Buffer.from([0xff]),
+   valid.subarray(at+marker.length)
+  ]);
+  assert.equal(corrupt.toString('utf8'),valid.toString('utf8'),
+   'lossy decoding must not be treated as byte-for-byte journal identity');
+  await writeFile(journal,corrupt);
+  assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),false,
+   'malformed journal bytes must require review, never a valid native intent');
+ }finally{await rm(root,{recursive:true,force:true});}
 });
