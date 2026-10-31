@@ -12,6 +12,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const http=require('node:http');
 const {createHash}=require('node:crypto');
+const {classifyTampermonkeyPageUrl}=require('./safe-tampermonkey-page-label.cjs');
 const dir=process.env.UAH_TM_EXTENSION_DIR;
 const profile=process.env.UAH_TM_PROFILE_DIR;
 if(!dir||!profile||!path.isAbsolute(dir)||!path.isAbsolute(profile))
@@ -553,8 +554,10 @@ async function main(){
   // Tampermonkey MV3 may use an intermediate vendor-hosted page or a
   // browser download, especially for loopback URLs. Never promote either
   // to installed-script evidence. Try the documented direct URL next.
+  // Vendor installer fragments can embed /install.user.js?key= capabilities.
+  // Classify the page type rather than log any raw browser URL.
   const displayPages=()=>context.pages().map(p=>({
-    url:p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]').slice(0,220)
+    kind:classifyTampermonkeyPageUrl(p.url())
   }));
   console.log('POST_LINK_NAVIGATION '+JSON.stringify(displayPages()));
   if(nativeProbe||!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
@@ -621,7 +624,8 @@ async function main(){
     }
   }
   tabs=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id));
-  console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(tabs.map(p=>p.url().replace(/([?&](?:url|token|key|aid)=)[^&]+/gi,'$1[redacted]'))));
+  console.log('MANAGER_INSTALLATION_PAGES '+JSON.stringify(
+    tabs.map(p=>classifyTampermonkeyPageUrl(p.url()))));
   const confirmation=tabs.find(p=>/confirm|install|\/ask\.html(?:\?|$)/i.test(p.url()));
   assert.ok(confirmation,'Manager script installation confirmation did not appear');
   let clicked=false;
