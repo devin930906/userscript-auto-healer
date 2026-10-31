@@ -454,3 +454,15 @@ test('TEST-017/026: a GM fixture report cannot predate the maximum consent lifet
   assert.deepEqual(await readdir(root),[],'no forged evidence published');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-007/TEST-017/026: native lease method stays private to the GM report session',()=>{
+ const native={...session,isActive:()=>true};
+ const report=createLimitedGmReport(native,Date.parse('2026-10-19T02:02:00.000Z'));
+ assert.equal(report.status,'UNVERIFIED_REPORT_READY');
+ if(report.status!=='UNVERIFIED_REPORT_READY')return;
+ const serialized=JSON.stringify(report.report);
+ assert.equal(serialized.includes('isActive'),false);
+ assert.equal(serialized.includes('installUrl'),false);
+ assert.equal(report.report.gmApiVerified,false);
+ assert.equal(report.report.businessVerified,false);
+});
