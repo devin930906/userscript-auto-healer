@@ -20,6 +20,18 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'),'utf8')
 assert.equal(manifest.manifest_version,3,'Official current Tampermonkey must be MV3');
 assert.ok(/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(manifest.version),'Unknown manager version');
 const EXPECTED_ID='dhdgffkkebhmkfjojejmpbldmpobfkfo';
+// Raw Playwright failures can include a capability-bearing URL, and
+// ask.html contains the complete installed script and GM receipt token.
+// Never serialize arbitrary UI bodies, URLs or error stacks into CI logs.
+const SAFE_DIAGNOSTIC_ERROR_NAMES=new Set([
+ 'Error','TimeoutError','TypeError','AssertionError','ProtocolError'
+]);
+function safeDiagnosticErrorKind(error){
+ let name;
+ try{name=error&&typeof error==='object'?error.name:undefined;}catch{}
+ return typeof name==='string'&&SAFE_DIAGNOSTIC_ERROR_NAMES.has(name)?
+   name:'OTHER_ERROR';
+}
 const RUN_AT_MODES=Object.freeze([
  'document-start','document-body','document-end','document-idle'
 ]);
@@ -548,7 +560,7 @@ async function main(){
   if(nativeProbe||!context.pages().some(p=>p.url().startsWith('chrome-extension://'+id+'/'))){
     const direct=await context.newPage();
     try{await direct.goto(nativeProbe?.installUrl||'http://127.0.0.1:'+port+'/test.user.js',{timeout:12000});}
-    catch(error){console.log('DIRECT_SCRIPT_NAVIGATION '+String(error).slice(0,130));}
+    catch(error){console.log('DIRECT_SCRIPT_NAVIGATION '+safeDiagnosticErrorKind(error));}
     await sleep(2200);
     console.log('POST_DIRECT_NAVIGATION '+JSON.stringify(displayPages()));
   }
@@ -565,10 +577,14 @@ async function main(){
           waitUntil:'domcontentloaded',timeout:15000
         });
         await sleep(1200);
-        console.log('OPTIONS_UI_TEXT '+JSON.stringify(
-          (await settings.locator('body').innerText()).slice(0,1500)));
+        const settingsText=await settings.locator('body').innerText();
+        console.log('OPTIONS_UI_SIGNAL '+JSON.stringify({
+          managerLabelVisible:settingsText.includes('Tampermonkey'),
+          settingsVisible:settingsText.includes('Settings'),
+          utilitiesVisible:settingsText.includes('Utilities')
+        }));
       }catch(error){
-        console.log('OPTIONS_PAGE_UNAVAILABLE '+String(error).slice(0,210));
+        console.log('OPTIONS_PAGE_UNAVAILABLE '+safeDiagnosticErrorKind(error));
       }
     }
   }
@@ -580,8 +596,21 @@ async function main(){
     const question=await ask.locator('body').innerText().catch(()=>'');
     const actions=await ask.locator('button,input[type="button"],input[type="submit"]').evaluateAll(nodes=>
       nodes.map(el=>({name:(el.innerText||el.value||'').trim().slice(0,90),id:el.id||''})));
+    const allowlistedControls=new Set([
+      'install','cancel','allow','grant','continue','proceed',
+      'always allow','reinstall','update'
+    ]);
     console.log('TAMPERMONKEY_ASK_PAGE '+JSON.stringify({
-      visibleText:question.slice(0,1600),controls:actions.slice(0,18)
+      isolatedFixtureLabelVisible:
+        question.includes('UAH Isolated GM Diagnostic')||
+        question.includes('UAH disposable Tampermonkey CI fixture'),
+      sourceHeaderVisible:question.includes('// ==UserScript=='),
+      installPromptVisible:question.includes('Install'),
+      controlCount:actions.length,
+      controlKinds:actions.slice(0,18).map(x=>{
+        const label=x.name.toLowerCase();
+        return allowlistedControls.has(label)?label:'other';
+      })
     }));
     const allow=actions.filter(x=>/^(allow|grant|continue|proceed|always allow)$/i.test(x.name));
     if(allow.length===1){
@@ -822,7 +851,7 @@ async function main(){
     const restoreUrl='http://127.0.0.1:'+port+'/test.user.js?manual-recovery=1';
     const restoreTab=await context.newPage();
     try{await restoreTab.goto(restoreUrl,{timeout:12000});}
-    catch(error){console.log('DIRECT_MANUAL_RESTORE_NAVIGATION '+String(error).slice(0,130));}
+    catch(error){console.log('DIRECT_MANUAL_RESTORE_NAVIGATION '+safeDiagnosticErrorKind(error));}
     await sleep(2300);
     let restorePages=context.pages().filter(p=>p.url().startsWith('chrome-extension://'+id+'/'));
     const restoreAsk=restorePages.find(p=>/\/ask\.html(?:\?|$)/i.test(p.url()));
@@ -903,6 +932,6 @@ async function main(){
  }
 }
 main().catch(error=>{
- console.error('TAMPERMONKEY_CLOUD_EXPERIMENT_BLOCKED: '+String(error?.stack||error).slice(0,2200));
+ console.error('TAMPERMONKEY_CLOUD_EXPERIMENT_BLOCKED: '+safeDiagnosticErrorKind(error));
  process.exitCode=1;
 });
