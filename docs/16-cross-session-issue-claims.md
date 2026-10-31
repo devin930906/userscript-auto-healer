@@ -83,3 +83,24 @@ A manual, main-only workflow is provided at `.github/workflows/governance-issue-
 Run it only when needed as a governance diagnostic through an authorized workflow_dispatch on `main`. The two runners each publish an independent readiness ref, wait for the other's readiness, and then attempt the **same** `test/atomic-issue-claim-<run_id>-<attempt>` Git ref. Verification requires one and only one HTTP-201 creator, one explicit existing-ref loser, a coordinated attempt interval, correct remote SHA, and rejection of a second POST with a different valid SHA while preserving the winner's ref. The test leaves those uniquely namespaced evidence refs intact and does not claim any real product Issue, enable protection rules, or release any product. Do not trigger this test in a loop just to increase run count.
 
 **Evidence status at authorship:** the script and workflow were authored; the independent-runner workflow can be executed only after its manual workflow is present on the repository default branch. Treat runner verification as **NOT YET EXECUTED** until an actual GitHub Actions run ID, job conclusions and the final commit are observed. Passing this workflow would prove one multi-runner collision experiment, **not** that two real ChatGPT chats were spawned or that arbitrary non-compliant writers cannot conflict.
+
+
+## 2026-10-31 independent GitHub Actions runner result — VERIFIED
+
+The manual GitHub-hosted test was **actually dispatched and completed successfully** on the merged `main@eddb030ec8921bbce1488922c8f9a4e3170c7a67`. Its authoritative run is [Actions #41211634125](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125), with three distinct GitHub-hosted runners/jobs:
+
+| Job | Actual GitHub job ID | Observed create attempt |
+| --- | --- | --- |
+| Independent runner A | [124567680023](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125/job/124567680023) | `occupied`, GitHub HTTP **422**, explicit existing ref |
+| Independent runner B | [124567680212](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125/job/124567680212) | `created`, GitHub HTTP **201** |
+| Verification runner | [124567715809](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125/job/124567715809) | **success**: exactly one creator, one occupied contender, negative duplicate create and unchanged source SHA |
+
+Both contenders used separate `ubuntu-latest` GitHub runners, independently created a readiness ref, observed the other's readiness and attempted the *same* test claim ref. The verifier recorded a request-start delta of **1640 ms**, then made a second create attempt with a different real parent commit, observed HTTP **422** for the duplicate and confirmed the winning ref still pointed to `eddb030ec8921bbce1488922c8f9a4e3170c7a67`. Each of the three job conclusions was **success** in GitHub Actions and the logs were read, not inferred from workflow configuration.
+
+This confirms both tested paths: (1) simultaneously invoked GitHub plugin and GitHub MCP against canonical `work/issue-549`; and (2) two distinct GitHub cloud runners, coordinated with a peer readiness barrier, against a test-only ref. The experiment **does not literally create two ChatGPT conversations**, does **not** prove cross-Issue file/resource conflict exclusion, and cannot prevent another authorized process that ignores this contract from deliberately updating a branch. Future agents must require an actual successful create-only response **from their own call**, not infer ownership from the existence of a claim ref or an Issue label.
+
+The test emitted three `test/atomic-issue-claim-41211634125-1*` refs and retained them as traceable test evidence; these are **not product Issue claims** and must not be assumed free for new tasks. No original product Issue was assigned, edited, closed or used as a race target.
+
+**Observed tooling advisory:** The first cloud run logged an `actions/checkout@v4` Node.js 20 deprecation warning despite passing. The subsequent maintenance update moves this **test-only workflow** to `actions/checkout@v6` (Node.js 24) with `persist-credentials: false`, leaving product workflows untouched. This warning was not a failure of the atomicity test; the updated workflow must be tested separately before claiming it passed.
+
+**Operational readiness for cooperative parallel chats:** same-Issue initial claim contention is now independently evidenced. Concurrent work on *distinct* Issues remains conditional on `docs/09-development-plan.md` task dependencies, pre-existing legacy branches, module/file ownership, shared interfaces, current PR status and controlled merge with integrated CI. If there is no provably independent eligible task or a create-only interface is unavailable, the chat must choose **NO_SAFE_TASK / CLAIM_BLOCKED** and avoid competing code writes.

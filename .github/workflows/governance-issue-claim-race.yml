@@ -16,7 +16,9 @@ jobs:
       outcome: ${{ steps.race.outputs.outcome }}
       attempt_ms: ${{ steps.race.outputs.attempt_ms }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Compete for the same test ref
         id: race
         env:
@@ -33,7 +35,9 @@ jobs:
       outcome: ${{ steps.race.outputs.outcome }}
       attempt_ms: ${{ steps.race.outputs.attempt_ms }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Compete for the same test ref
         id: race
         env:
@@ -48,7 +52,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Verify GitHub server-side atomic claim
         env:
           GH_TOKEN: ${{ github.token }}

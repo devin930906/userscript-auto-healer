@@ -59,3 +59,7 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 本仓库现已对治理测试 Issue #549 做过一次实际双连接并发分支创建：GitHub 插件成功，GitHub MCP 的同名创建被拒绝；已存在分支的插件再次创建也返回 422 且远程 SHA 未改变。详细原始请求状态、局限与后续独立 runner 实验见 `docs/16-cross-session-issue-claims.md`。本次不是两个真实 ChatGPT 对话，不能把结果扩大成未经测试的全平台保证。
 - 新增可选择手动运行的 GitHub Actions `governance-issue-claim-race.yml`，仅用于竞争测试 ref，不认领产品 Issues、不更改产品代码、不进入 Release。使用两个独立执行 Job + 最终核验 Job 检查“一位成功、一位明确冲突、再次创建不覆盖”。只有取得实际 workflow run success 才能声称该轮 GitHub runner 测试通过。
 - 当前连接实际测过的 create-only 分支接口为 GitHub 插件 `mcp__GitHub__create_branch` 与 GitHub MCP `mcp__Github_MCP__create_branch`；**每次新会话仍须先核验工具语义与权限**。认领失败后只允许重新读取和选择下一可行 Issue，不得从成功读取别人创建的分支推断本会话已经认领。并行执行其他 Issues 时仍必须检查文件和共享契约冲突，禁止将“同 Issue 互斥成功”误解为“所有 Issues 可安全同时开发”。
+
+## 已执行的独立 Runner 原子认领证据（2026-10-31）
+- 新版（7）兼容性专用 GitHub Actions [#41211634125](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125) 已在 GitHub 独立 `ubuntu-latest` Runner A、B 与核验 Runner 上执行且所有 Job 成功：A HTTP 422，B HTTP 201，请求相差 1640ms；第三 Runner 再次以不同有效 SHA 创建同一引用被 HTTP 422 拒绝，原引用 SHA 不变。原始日志与完整实验条件在 `docs/16-cross-session-issue-claims.md`。
+- 这是 GitHub 服务端针对相同 ref 的真实并发竞争证据，不是两个独立 ChatGPT 会话已被启动的证据，也不自动赋予每个 Issue 共享文件的并行修改安全性。**只有自己那次创建返回明确成功并且远程状态核对一致的会话才能声明占有该 Issue**；失败或结果未知时禁止接手现有认领分支。
