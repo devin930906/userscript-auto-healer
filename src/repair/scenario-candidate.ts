@@ -195,6 +195,19 @@ function sourceMatchesScenarioTarget(source:string,targetUrl:unknown):boolean{
       !DOM_ONLY_REVIEW_GRANTS.has(metadata.tags.grant[0]))||
      !Array.isArray(metadata.tags.match)||
      metadata.tags.match.length===0)return false;
+  // DOM-only evidence cannot resolve ambiguous manager injection timing or
+  // iframe directives. These are known parser tags, so unknownNames does not
+  // catch invalid values or duplicates. Treat unsupported/contradictory
+  // metadata as ineligible for even a review-only local patch proposal.
+  // Absence retains the manager's default; neither case proves injection.
+  const runAt=metadata.tags['run-at'];
+  if(runAt!==undefined&&
+     (runAt.length!==1||
+      !['document-start','document-body','document-end','document-idle']
+        .includes(runAt[0])))return false;
+  const noframes=metadata.tags.noframes;
+  if(noframes!==undefined&&
+     (noframes.length!==1||noframes[0]!==''))return false;
   // A single page proves nothing about a userscript's OTHER @match
   // destinations or paths. The entire declared execution scope must be
   // eligible for this exact read-only scenario before proposing even a
