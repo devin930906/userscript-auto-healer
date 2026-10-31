@@ -904,3 +904,45 @@ test('TASK-009/TEST-019/026: indirect global code evaluation blocks offline sele
   assert.equal(result.automaticPatchAllowed,false);
  }
 });
+
+
+test('TASK-009/TEST-019/026: indirect evaluator call/apply/bind/Reflect dispatch cannot certify a native DOM repair candidate',()=>{
+  // The outer Acorn AST cannot inspect strings executed by an evaluator.
+  // Calling eval/Function through Function.prototype or Reflect still
+  // changes which document method a later literal selector may invoke.
+  const unsafe=[
+    "eval.call(null, 'document.querySelector = () => null');",
+    "eval.apply(null, ['document.querySelector = () => null']);",
+    "eval.bind(null, 'document.querySelector = () => null')();",
+    "window['eval'].call(null, 'document.querySelector = () => null');",
+    "(0, eval).call(null, 'document.querySelector = () => null');",
+    "Reflect.apply(eval, null, ['document.querySelector = () => null']);",
+    "Reflect.apply(window.eval, null, ['document.querySelector = () => null']);",
+    "Function.call(null, 'document.querySelector = () => null')();",
+    "Function.apply(null, ['document.querySelector = () => null'])();",
+    "Reflect.apply(Function, null, ['document.querySelector = () => null'])();",
+    "Reflect.construct(Function, ['document.querySelector = () => null'])();"
+  ];
+  for(const invocation of unsafe){
+    const script=meta+invocation+"\ndocument.querySelector('#old');";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf("document.querySelector('#old')")
+    }));
+    assert.equal(result.status,'BLOCKED',invocation);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal('candidateSource' in result,false);
+  }
+  // Neither method dispatch itself nor an inert note is executable eval.
+  for(const harmless of [
+    'const value=Reflect.apply(Math.max,null,[2,3]);',
+    'const value=Number.parseInt.call(null,"12",10);',
+    'const note="Reflect.apply(eval, null, [unsafe])";'
+  ]){
+    const script=meta+harmless+"\ndocument.querySelector('#old');";
+    const result=proposeLiteralSelectorPatch(request(script,{
+      callOffset:script.lastIndexOf("document.querySelector('#old')")
+    }));
+    assert.equal(result.status,'CANDIDATE_ONLY',harmless);
+    assert.equal(result.automaticPatchAllowed,false);
+  }
+});
