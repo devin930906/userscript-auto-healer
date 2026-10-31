@@ -173,6 +173,10 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
  // Check raw active states before normalizing interrupted attempts.
  // A two-lane scheduler cannot publish three simultaneous RUNNING jobs.
  let running=0;
+ // Both lanes select the earliest queued ordinal. A later attempt
+ // cannot precede a never-dispatched earlier job in a genuine checkpoint.
+ // Validate raw states before interrupted RUNNING attempts are normalized.
+ let earlierNeverDispatched=false;
  for(let i=0;i<opts.count;i++){
   const slot=slots[String(i)];
   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
@@ -185,6 +189,9 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
       job.attempts===0)||
      (job.state==='QUEUED'&&job.attempts===opts.maxAttempts))
     throw Error('INVALID_BATCH_CHECKPOINT');
+  if(earlierNeverDispatched&&job.attempts>0)
+   throw Error('INVALID_BATCH_CHECKPOINT');
+  if(job.attempts===0)earlierNeverDispatched=true;
   if(job.state==='QUEUED')anyQueued=true;
   if(job.state==='CANCELLED')anyCancelled=true;
   if(job.state==='RUNNING'&&++running>opts.concurrency)
