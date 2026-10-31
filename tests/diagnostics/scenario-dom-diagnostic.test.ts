@@ -5,6 +5,7 @@ import {join,win32} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
+import {performance} from 'node:perf_hooks';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {launchApprovedIsolatedChrome} from '../../src/browser/owned-chrome';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
@@ -420,6 +421,25 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
  }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
+ // TASK-008 / Issue #480 / TEST-013: a delayed frame receipt must not
+ // turn into navigation success after the original monotonic nine-second
+ // confirmation window. Simulate a stall at the post-receipt boundary
+ // without sleeping, touching the user's browser or increasing budgets.
+ const actualMonotonicNow=performance.now;
+ let lateFrameSeen=false;
+ let lateResult:Awaited<ReturnType<typeof openApprovedTarget>>|undefined;
+ try{
+  lateResult=await openApprovedTarget(opened,url,true,undefined,stage=>{
+   if(stage==='MAIN_FRAME_CONFIRMED'&&!lateFrameSeen){
+    lateFrameSeen=true;
+    performance.now=()=>actualMonotonicNow.call(performance)+10000;
+   }
+  });
+ }finally{performance.now=actualMonotonicNow;}
+ assert.equal(lateFrameSeen,true,
+  'the real owned Chrome must reach the late frame-confirmation boundary');
+ assert.deepEqual(lateResult,{ok:false,code:'TARGET_NOT_CONFIRMED'},
+  'no post-deadline main-frame receipt may bypass the original nine-second budget');
  // A user-controlled target hint must not execute a getter or Proxy trap,
  // even while the browser itself is a legitimately owned live Chrome.
  const {observeApprovedDom}=await import('../../src/observe/dom-observer');

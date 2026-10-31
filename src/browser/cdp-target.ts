@@ -402,6 +402,10 @@ export async function openApprovedTarget(
           inspected.websocketUrl,targetUrl,signal);
         stage(frameStage);
         if(frameStage==='MAIN_FRAME_CONFIRMED'){
+        // The bounded loop entry is not permission to accept a delayed
+        // Page.getFrameTree receipt after its original monotonic deadline.
+        if(performance.now()-began>=9000)
+          return {ok:false,code:'TARGET_NOT_CONFIRMED'};
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
         const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
@@ -411,6 +415,10 @@ export async function openApprovedTarget(
         // An earlier listener match cannot verify an already-ended browser.
         if(!isLiveApprovedChromeSession(session))
           return {ok:false,code:'UNVERIFIED_BROWSER'};
+        // PID and session rechecks may also complete after the budget;
+        // never mint a trusted-navigation hint past that same deadline.
+        if(performance.now()-began>=9000)
+          return {ok:false,code:'TARGET_NOT_CONFIRMED'};
         verified=true;
         return {ok:true,status:'TARGET_ID_AND_URL_MATCH_ONLY',
           targetId:created,businessVerified:false};
