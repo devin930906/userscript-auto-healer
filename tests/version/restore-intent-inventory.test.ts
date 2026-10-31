@@ -517,7 +517,7 @@ test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as 
   assert.ok(at>=0);
   const corrupt=Buffer.concat([
    valid.subarray(0,at+'restored-'.length),Buffer.from([0xff]),
-   valid.subarray(at+marker.length)
+   valid.subarray(at+marker.length-1)
   ]);
   assert.equal(corrupt.toString('utf8'),valid.toString('utf8'),
    'lossy decoding must not be treated as byte-for-byte journal identity');
