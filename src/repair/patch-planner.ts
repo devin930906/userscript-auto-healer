@@ -315,6 +315,9 @@ function invokesUnanalyzedGlobalCode(node:AstNode):boolean{
  if(node.type!=='CallExpression'&&node.type!=='NewExpression')return false;
  const isEvaluator=(target:unknown):boolean=>{
   const callee=asNode(target);
+  if(callee?.type==='SequenceExpression'&&
+     Array.isArray(callee.expressions)&&callee.expressions.length>0)
+   return isEvaluator(callee.expressions[callee.expressions.length-1]);
   if(callee?.type==='Identifier')
    return callee.name==='eval'||callee.name==='Function';
   if(callee?.type!=='MemberExpression')return false;
@@ -326,10 +329,18 @@ function invokesUnanalyzedGlobalCode(node:AstNode):boolean{
  };
  const callee=asNode(node.callee);
  if(isEvaluator(callee))return true;
- // (0,eval)(source) is an indirect global evaluator, not a benign call.
- return callee?.type==='SequenceExpression'&&
-   Array.isArray(callee.expressions)&&callee.expressions.length>0&&
-   isEvaluator(callee.expressions[callee.expressions.length-1]);
+ if(callee?.type!=='MemberExpression')return false;
+ // Calling a recognized evaluator via Function.prototype dispatch or
+ // Reflect does not make its generated code visible to the outer Acorn AST.
+ // Reject these exact aliases instead of treating the later selector as a
+ // reliably native DOM call. Ordinary method dispatch remains reviewable.
+ if((hasMemberName(callee,'call')||hasMemberName(callee,'apply')||
+     hasMemberName(callee,'bind'))&&isEvaluator(callee.object))return true;
+ const host=asNode(callee.object);
+ return host?.type==='Identifier'&&host.name==='Reflect'&&
+   (hasMemberName(callee,'apply')||hasMemberName(callee,'construct'))&&
+   Array.isArray(node.arguments)&&node.arguments.length>0&&
+   isEvaluator(node.arguments[0]);
 }
 
 /** Reject source whose `document` reference or selector methods cannot be
