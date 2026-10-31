@@ -377,12 +377,16 @@ test('TASK-011/TEST-020/026: published hard-link aliases with non-project filena
   const pendingName='.12345678-1234-4123-8123-123456789abc.pending';
   const publishedCases=[
    {name:'unrelated-user-document.txt',valid:false},
+   {name:'unrelated-user-document.user.js',valid:false},
    {name:'source.backup.user.js',valid:false},
+   {name:'UAH-Reviewed-not-a-hash-12345678-1234-4123-8123-123456789abc.user.js',valid:false},
    {name:'source.12345678-1234-4123-8123-123456789abc.journal.json',valid:false},
    {name:'source.12345678-1234-4123-8123-123456789abc.backup.user.js',valid:true},
-   {name:'source.12345678-1234-4123-8123-123456789abc.candidate.user.js',valid:true}
-  ];
-  for(const [index,{name,valid}] of publishedCases.entries()){
+   {name:'source.12345678-1234-4123-8123-123456789abc.candidate.user.js',valid:true},
+   {name:'source.12345678-1234-4123-8123-123456789abc.checkpoint.json',valid:true},
+   {name:'UAH-Reviewed-0123456789ab-12345678-1234-4123-8123-123456789abc.user.js',valid:true},
+   {name:'UAH-Original-0123456789ab-12345678-1234-4123-8123-123456789abc.user.js',valid:true}
+  ];  for(const [index,{name,valid}] of publishedCases.entries()){
    const root=join(backupDir,'staging-'+index);
    await mkdir(root);
    const pending=join(root,pendingName);
