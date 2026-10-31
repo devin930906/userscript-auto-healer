@@ -922,7 +922,7 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     }));
     t.mock.method(childProcesses,'spawn',()=>child as unknown as
       import('node:child_process').ChildProcess);
-    t.mock.method(globalThis,'fetch',(_request,init)=>
+    t.mock.method(globalThis,'fetch',(_request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1])=>
       new Promise<Response>((_resolve,reject)=>{
         probeSignal=init?.signal??undefined;
         const onAbort=()=>reject(new DOMException('Cancelled','AbortError'));
@@ -937,12 +937,13 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     await Promise.race([fetchStarted,delay(1000).then(()=>{
       throw Error('SYNTHETIC_CDP_PROBE_DID_NOT_BEGIN');
     })]);
-    assert.equal(probeSignal?.aborted,false,
+    const activeBeforeRevocation=probeSignal?.aborted;
+    assert.equal(activeBeforeRevocation,false,
       'the synthetic CDP fetch must genuinely be pending at revocation');
     controller.abort();
     // Capture this synchronously: a separate fixed 1500ms timeout is NOT
     // evidence that user revocation cancelled the HTTP probe.
-    const cancelledByUser=probeSignal?.aborted===true;
+    const cancelledByUser=Boolean(probeSignal?.aborted);
     result=await pending;
     assert.equal(cancelledByUser,true,
       'the active CDP fetch must receive user cancellation immediately');
