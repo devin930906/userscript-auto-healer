@@ -372,8 +372,19 @@ export async function restoreVerifiedOriginalNativeOnly(
         ancestor=dirname(ancestor)){
      const expectedName=basename(ancestor);
      const names=await readdir(dirname(ancestor));
+     // A short 8.3 alias may resolve to an existing long-name directory
+     // while hashing to a different raw-path restore intent and mutex.
+     // Only reject an UNLISTED short-name shape; a literal FOO~1 directory
+     // stays eligible when the actual parent enumeration lists FOO~1.
+     const stem=expectedName.split('.')[0];
+     const shortAliasShaped=stem.length<=8&&
+       /^[^~.\\/]{1,6}~[1-9][0-9]*$/.test(stem)&&
+       (expectedName===stem||
+        (expectedName[stem.length]==='.'&&
+         /^[^.\\/]{1,3}$/.test(expectedName.slice(stem.length+1))));
      if(!names.includes(expectedName)&&
-        names.some(name=>name.toLowerCase()===expectedName.toLowerCase()))
+        (shortAliasShaped||
+         names.some(name=>name.toLowerCase()===expectedName.toLowerCase())))
       return block('UNSAFE_PATH');
     }
    }catch{return block('UNSAFE_PATH');}
