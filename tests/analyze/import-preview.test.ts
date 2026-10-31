@@ -226,6 +226,44 @@ test('TASK-013/TEST-004/022/026: malformed Worker message is rejected before exi
  assert.ok(!warnings.join(' ').includes('private-invalid-reply'));
 });
 
+test('TASK-013/TEST-022: ready marker separates parser readiness from an actual reply, without exposing source',async()=>{
+ const script=imported(header+'document.querySelector("#PRIVATE_READY_SOURCE");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const originalWorker=workers.Worker;
+ const originalWarn=console.warn;
+ const warnings:string[]=[];
+ let actual;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){
+    super();
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message','UAH_AST_WORKER_READY_V1');
+     this.emit('error',Error('PRIVATE_READY_FAILURE'));
+    });
+   }
+   terminate(){return Promise.resolve(1);}
+  } as unknown as typeof originalWorker;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  actual=await previewImportedBatchOffMain([script]);
+ }finally{
+  workers.Worker=originalWorker;
+  console.warn=originalWarn;
+ }
+ assert.deepEqual(actual?.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED'],
+  'a readiness-only message never authenticates a completed AST result');
+ assert.equal(warnings.length,1);
+ assert.match(warnings[0],
+  /^UAH_AST_WORKER_UNAVAILABLE reason=WORKER_ERROR count=1 phase=POST_READY elapsedBucketMs=\d+ onlineBucketMs=\d+ readyBucketMs=\d+$/,
+  'diagnostic must distinguish parser-ready from thread-online without extending budget');
+ assert.ok(!warnings.join(' ').includes('PRIVATE_READY_SOURCE'));
+ assert.ok(!warnings.join(' ').includes('PRIVATE_READY_FAILURE'));
+ assert.ok(actual?.every(x=>!x.automaticPatchAllowed&&!x.tampermonkeyVerified&&!x.businessVerified));
+});
+
 test('TEST-022/017: native batch previews 36 scripts across bounded isolated worker segments',async()=>{
  const scripts=Array.from({length:36},(_,i)=>imported(
   header+'document.querySelector("#private-segment-'+i+'");'
