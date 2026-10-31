@@ -170,6 +170,9 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
  // changes ALL still-queued jobs to CANCELLED. A disk hint containing both
  // states cannot be the result of a genuine scheduler transition.
  let anyQueued=false,anyCancelled=false;
+ // Check raw active states before normalizing interrupted attempts.
+ // A two-lane scheduler cannot publish three simultaneous RUNNING jobs.
+ let running=0;
  for(let i=0;i<opts.count;i++){
   const slot=slots[String(i)];
   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))
@@ -184,6 +187,8 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
     throw Error('INVALID_BATCH_CHECKPOINT');
   if(job.state==='QUEUED')anyQueued=true;
   if(job.state==='CANCELLED')anyCancelled=true;
+  if(job.state==='RUNNING'&&++running>opts.concurrency)
+   throw Error('INVALID_BATCH_CHECKPOINT');
   if(opts.concurrency===1){
    if(earlierUnsettled&&
       (job.state==='RUNNING'||job.state==='SUCCEEDED'||job.state==='FAILED'))
