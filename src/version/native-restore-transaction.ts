@@ -326,7 +326,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   // the source parent or a recovery-intent pending file in the backup store.
   // These files require independent manual reconciliation, not another write.
   // Check both BEFORE acquiring this transaction's lock or creating backups.
-  if(await hasInterruptedRestoreStaging(parent)||
+  if(await hasInterruptedRestoreStaging(parent,undefined,undefined,'source-parent')||
      await hasInterruptedRestoreStaging(opts.backupDirectory))
    return block('RECOVERY_REVIEW_REQUIRED');
   // Capture the actual directories, not only names used during cleanup.
@@ -570,7 +570,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   // content and mode were just independently verified above; never ignore
   // another process's pending restoration or unpublished journal.
   // These bounded snapshots are not an OS-exclusive cross-process lock.
-  if(await hasInterruptedRestoreStaging(parent,basename(pending),finalPending)||
+  if(await hasInterruptedRestoreStaging(parent,basename(pending),finalPending,'source-parent')||
      await hasInterruptedRestoreStaging(opts.backupDirectory))
    return block('RECOVERY_REVIEW_REQUIRED');
   // The first scan ran before our own intent was published. An external
