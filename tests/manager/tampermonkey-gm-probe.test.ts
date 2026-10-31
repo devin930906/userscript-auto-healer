@@ -1,9 +1,17 @@
 import {test} from 'node:test';
 import {request} from 'node:http';
 import {createConnection} from 'node:net';
-import {runInNewContext} from 'node:vm';
+import {runInNewContext as nativeRunInNewContext} from 'node:vm';
+import {performance as nodePerformance} from 'node:perf_hooks';
 import {strict as assert} from 'node:assert';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
+
+// VM contexts are not complete browser environments by default. Real modern
+// Chrome has a monotonic Performance API; install the real Node clock for
+// all positive fixture scenarios. Individual negative cases can explicitly
+// override performance to emulate a missing or corrupted browser clock.
+const runInNewContext=(code:string,sandbox:Record<string,unknown>)=>
+ nativeRunInNewContext(code,{performance:nodePerformance,...sandbox});
 
 test('TEST-017: explicit consent and bounded lifetime required before binding probe',async()=>{
  assert.deepEqual(await startIsolatedTampermonkeyGmProbe(false),
@@ -656,6 +664,30 @@ test('TASK-007/TEST-017/026: invalid negative monotonic elapsed never permits GM
  });
  assert.deepEqual(effects,{gm:0,query:0,network:0},
   'a negative performance.now must fail closed before GM reads');
+});
+
+test('TASK-007/TEST-017/026: missing Performance must fail closed after browser wall-clock rollback',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ for(const missing of [undefined,null]){
+  const effects={gm:0,query:0,network:0};
+  // On a stripped browser-like global, Date.now can be behind real expiry.
+  // Without a monotonic clock there is no reliable positive TTL evidence:
+  // fail closed before even the FIRST disposable GM call.
+  runInNewContext(probe.source,{
+    Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+    performance:missing,
+    location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+    document:{readyState:'complete',querySelector:()=>{effects.query++;return null;}},
+    GM_getValue:(_key:string,fallback:string)=>{effects.gm++;return fallback;},
+    fetch:()=>{effects.network++;return Promise.resolve();}
+  });
+  assert.deepEqual(effects,{gm:0,query:0,network:0},
+    'missing monotonic clock must not authorize GM/DOM/network effects');
+ }
 });
 
 test('TASK-007/TEST-017/026: GM fixture refuses effects when wall-clock rolls back past real expiry',async t=>{
