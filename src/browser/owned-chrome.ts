@@ -31,26 +31,45 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
   const reader=response.body.getReader();
   const decoder=new TextDecoder('utf-8',{fatal:true});
   let bytes=0,body='';
-  try {
-    while(true){
-      const {done,value}=await reader.read();
-      if(done)break;
-      bytes+=value.byteLength;
-      if(bytes>limit){
-        // Cancellation is best-effort cleanup. A hostile or broken response
-        // may never settle its cancel promise; never block fail-closed size
-        // rejection or the owning Chrome startup on that asynchronous work.
-        void reader.cancel().catch(()=>undefined);
-        return null;
+  // HTTP headers may arrive within the fetch timeout while the body never
+  // finishes. A separate bounded body deadline is necessary: response.json(),
+  // reader.read() and even reader.cancel() can otherwise remain pending and
+  // stall the owned-Chrome bootstrap indefinitely. No partial JSON is trusted.
+  let deadline:NodeJS.Timeout|undefined;
+  const readBody=async():Promise<unknown|null>=>{
+    try{
+      while(true){
+        const {done,value}=await reader.read();
+        if(done)break;
+        bytes+=value.byteLength;
+        if(bytes>limit){
+          // Never await an untrusted cancellation implementation.
+          try{void reader.cancel().catch(()=>undefined);}catch{}
+          return null;
+        }
+        body+=decoder.decode(value,{stream:true});
       }
-      body+=decoder.decode(value,{stream:true});
-    }
-    body+=decoder.decode();
-    return bytes>0?JSON.parse(body) as unknown:null;
-  }catch{
-    return null;
+      body+=decoder.decode();
+      return bytes>0?JSON.parse(body) as unknown:null;
+    }catch{return null;}
+  };
+  try{
+    return await Promise.race([
+      readBody(),
+      new Promise<null>(resolve=>{
+        deadline=setTimeout(()=>{
+          // Revoke a stalled stream without waiting for its cancel hook.
+          // A late read result cannot authorize a partial CDP response.
+          try{void reader.cancel().catch(()=>undefined);}catch{}
+          resolve(null);
+        },1500);
+      })
+    ]);
   }finally{
-    reader.releaseLock();
+    if(deadline)clearTimeout(deadline);
+    // A pending reader.read() can make releaseLock throw. Cleanup must not
+    // hide the bounded, fail-closed outcome or extend the startup deadline.
+    try{reader.releaseLock();}catch{}
   }
 }
 

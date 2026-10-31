@@ -526,6 +526,29 @@ test('TEST-009/026: rejected CDP HTTP/status headers close untrusted response st
  }
 });
 
+test('TASK-005/TEST-006/009/026: CDP body that stops after headers is bounded and denied',async()=>{
+ // A 200 response and one partial byte chunk can arrive before an untrusted
+ // stream stalls permanently. Neither a stalled read nor its unresponsive
+ // cancel hook may keep the owned-Chrome startup alive without a bound.
+ let cancelCalls=0;
+ const body=new ReadableStream<Uint8Array>({
+  start(controller){controller.enqueue(new TextEncoder().encode('{"Browser":"Chrome/'));},
+  pull(){return new Promise<void>(()=>{});},
+  cancel(){cancelCalls++;return new Promise<void>(()=>{});}
+ });
+ let timer:NodeJS.Timeout|undefined;
+ try{
+  const result=await Promise.race([
+   readBoundedCdpJson(new Response(body,{status:200})),
+   new Promise<never>((_resolve,reject)=>{
+    timer=setTimeout(()=>reject(Error('CDP_PARTIAL_BODY_UNBOUNDED')),2400);
+   })
+  ]);
+  assert.equal(result,null,'partial stalled CDP JSON must never be trusted');
+  assert.equal(cancelCalls,1,'timed-out CDP stream must request nonblocking cleanup');
+ }finally{if(timer)clearTimeout(timer);}
+});
+
 test('TEST-009: CDP JSON accepts split chunks but rejects malformed UTF-8',async()=>{
   const encoded=new TextEncoder().encode('{"Browser":"Chrome/155.0.1.1"}');
   const split=new Response(new ReadableStream<Uint8Array>({
