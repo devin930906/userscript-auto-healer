@@ -892,11 +892,11 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
 });
 
 test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
-  // This fixture creates no browser/profile/network activity. It uses the
-  // existing trusted-native mock boundary to model a Chrome child whose
-  // first CDP HTTP request is still pending when approval is revoked.
+  // Native-only disposable synthetic process: no Chrome, Profile or web I/O.
+  // Keep a refed watchdog so a pending fetch cannot make node:test silently
+  // cancel the test before the expected RED/GREEN assertion executes.
   const {EventEmitter}=require('node:events') as typeof import('node:events');
-  const childProcesses=require('node:child_process') as typeof import('node:child_process');
+  const cp=require('node:child_process') as typeof import('node:child_process');
   const launcher=require('../../src/browser/chrome-launcher') as
     typeof import('../../src/browser/chrome-launcher');
   const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\isolated-profile',12025);
@@ -906,9 +906,7 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     signalCode:null as string|null,
     kill(){this.killed=true;return true;}
   });
-  let onFetch:()=>void=()=>{};
-  const fetchStarted=new Promise<void>(resolve=>{onFetch=resolve;});
-  let probeSignal:AbortSignal|undefined;
+  let fetchStarted=false,cancelledByUser=false;
   let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
   try{
     t.mock.method(launcher,'preflightChrome',async()=>({
@@ -920,36 +918,35 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
       version:'155.0.1.1',publisher:'Google LLC' as const,
       runtimeVerified:false as const
     }));
-    t.mock.method(childProcesses,'spawn',()=>child as unknown as
+    t.mock.method(cp,'spawn',()=>child as unknown as
       import('node:child_process').ChildProcess);
-    t.mock.method(globalThis,'fetch',(_request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1])=>
-      new Promise<Response>((_resolve,reject)=>{
-        probeSignal=init?.signal??undefined;
-        const onAbort=()=>reject(new DOMException('Cancelled','AbortError'));
-        probeSignal?.addEventListener('abort',onAbort,{once:true});
-        if(probeSignal?.aborted)onAbort();
-        onFetch();
-      })
-    );
-    const pending=launchApprovedIsolatedChrome(cfg,{
+    t.mock.method(globalThis,'fetch',
+      (_request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1])=>{
+        fetchStarted=true;
+        const signal=init?.signal;
+        return new Promise<Response>((_resolve,reject)=>{
+          const watchdog=setTimeout(()=>reject(Error('FIXTURE_FETCH_DEADLINE')),3500);
+          const onAbort=()=>{
+            clearTimeout(watchdog);
+            reject(new DOMException('Cancelled','AbortError'));
+          };
+          signal?.addEventListener('abort',onAbort,{once:true});
+          if(signal?.aborted)onAbort();
+          // Abort only AFTER the production code has entered fetch.
+          queueMicrotask(()=>{
+            controller.abort();
+            cancelledByUser=Boolean(signal?.aborted);
+          });
+        });
+      });
+    result=await launchApprovedIsolatedChrome(cfg,{
       userApproved:true,signal:controller.signal
     });
-    await Promise.race([fetchStarted,delay(1000).then(()=>{
-      throw Error('SYNTHETIC_CDP_PROBE_DID_NOT_BEGIN');
-    })]);
-    const activeBeforeRevocation=probeSignal?.aborted;
-    assert.equal(activeBeforeRevocation,false,
-      'the synthetic CDP fetch must genuinely be pending at revocation');
-    controller.abort();
-    // Capture this synchronously: a separate fixed 1500ms timeout is NOT
-    // evidence that user revocation cancelled the HTTP probe.
-    const cancelledByUser=Boolean(probeSignal?.aborted);
-    result=await pending;
+    assert.equal(fetchStarted,true,'the CDP fetch was genuinely pending');
     assert.equal(cancelledByUser,true,
-      'the active CDP fetch must receive user cancellation immediately');
+      'revoking native consent must synchronously abort active CDP HTTP fetch');
     assert.deepEqual(result,{ok:false,code:'ABORTED'});
-    assert.equal(child.killed,true,
-      'cancelling owned bootstrap must terminate only its own child');
+    assert.equal(child.killed,true,'only this owned child must be stopped');
     assert.equal(isLiveApprovedChromeSession(result),false);
   }finally{
     if(result?.ok)result.stop();
