@@ -30,6 +30,33 @@ test('TASK-013/TEST-022/026: serial checkpoint cannot finish a later job before 
  assert.deepEqual(allowed.snapshot().jobs.map(x=>x.state),['QUEUED','SUCCEEDED']);
 });
 
+test('TASK-013/TEST-022/026: a two-lane checkpoint cannot have three in-flight jobs',()=>{
+ const options={count:4,concurrency:2,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C,'d'.repeat(64)]};
+ const worker=async()=> 'DONE' as const;
+ const baseline=new ReadOnlyBatchCoordinator(options,worker).snapshot();
+ // A genuine scheduler cannot have more RUNNING jobs than active lanes.
+ // Untrusted disk hints must be checked BEFORE RUNNING is normalized to QUEUED.
+ const forged={...baseline,jobs:[
+  {ordinal:0,state:'RUNNING' as const,attempts:1},
+  {ordinal:1,state:'RUNNING' as const,attempts:1},
+  {ordinal:2,state:'RUNNING' as const,attempts:1},
+  {ordinal:3,state:'QUEUED' as const,attempts:0}
+ ]};
+ assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker,forged),
+  /INVALID_BATCH_CHECKPOINT/,
+  'a forged third in-flight worker must not become a recoverable queued job');
+ const valid={...baseline,jobs:[
+  {...forged.jobs[0]}, {...forged.jobs[1]},
+  {ordinal:2,state:'QUEUED' as const,attempts:0},
+  {ordinal:3,state:'QUEUED' as const,attempts:0}
+ ]};
+ const recovered=new ReadOnlyBatchCoordinator(options,worker,valid);
+ assert.deepEqual(recovered.snapshot().jobs.map(j=>j.state),
+  ['QUEUED','QUEUED','QUEUED','QUEUED'],
+  'the permitted two concurrent interrupted attempts remain recoverable');
+});
+
 test('TASK-013/TEST-022/026: parallel cancelled checkpoint cannot replay any queued job',async()=>{
  const options={count:3,concurrency:2,maxAttempts:2,
   jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
