@@ -466,3 +466,37 @@ test('TASK-007/TEST-017/026: native lease method stays private to the GM report 
  assert.equal(report.report.gmApiVerified,false);
  assert.equal(report.report.businessVerified,false);
 });
+
+test('TASK-007/TEST-017/026: two accepted mode receipts always include the failed broken action',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-broken-invariant-'));
+ const at=Date.parse('2026-10-19T02:02:00.000Z');
+ // The receiver rejects broken.businessAction=true and the assessment
+ // derives brokenFailed directly from the sanitized broken receipt.
+ // A *two-mode* diagnostic therefore cannot report brokenFailed=false,
+ // even if its other self-reported GM/business fields indicate mismatch.
+ const mismatch={...summary,status:'REPORTED_MISMATCH' as const,
+  observedModes:2,reportedGmDefaultMatched:false,
+  reportedGmStorageRoundtripMatched:false,
+  reportedBrokenFailed:true,reportedFixedRecovered:false};
+ const mismatchConsistency={...consistency,
+  status:'REPORTED_MISMATCH' as const,comparedModes:0 as const};
+ const base={...session,snapshot:()=>mismatch,
+  consistencySnapshot:()=>mismatchConsistency,domSnapshot:()=>({})};
+ try{
+  const valid=createLimitedGmReport(base,at);
+  assert.equal(valid.status,'UNVERIFIED_REPORT_READY',
+   'legitimate two-mode mismatch must remain exportable as unverified');
+  if(valid.status!=='UNVERIFIED_REPORT_READY')return;
+  const forgedSession={...base,snapshot:()=>({...mismatch,
+   reportedBrokenFailed:false})};
+  assert.equal(createLimitedGmReport(forgedSession,at).status,'BLOCKED',
+   'report capture must not hide an impossible broken-mode result');
+  const forgedReport={...valid.report,
+   assessment:{...valid.report.assessment,reportedBrokenFailed:false}};
+  assert.equal((await saveLimitedGmReportOnly(
+   forgedReport,join(root,'forged.json'),true)).status,'BLOCKED',
+   'native save must revalidate the same two-mode receipt invariant');
+  assert.deepEqual(await readdir(root),[],
+   'contradictory manager diagnostic must never be written');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
