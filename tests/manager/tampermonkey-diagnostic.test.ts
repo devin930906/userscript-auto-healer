@@ -803,3 +803,36 @@ test('TASK-007/TEST-017/026: manual diagnostic revokes on monotonic TTL even whe
    frozenWall+60000,1000,performance.now()-1001);
  assert.equal(active(),false,'expired elapsed consent must deny despite a plausible wall deadline');
 });
+
+test('TASK-007/TEST-017/026: desktop GM fixture status cannot revive after native monotonic consent expiry',()=>{
+  // Read only the native helper: the desktop renderer cannot grant itself
+  // consent or supply a forged manager/GM success receipt.
+  const getStatus=(require('../../src/manager/tampermonkey-diagnostic') as {
+    isCurrentManualDiagnosticSession?:(
+      session:{expiresAt:number;isActive:()=>boolean}|null
+    )=>boolean
+  }).isCurrentManualDiagnosticSession;
+  assert.equal(typeof getStatus,'function',
+    'desktop fixture status requires a native active-session lease gate');
+  if(!getStatus)return;
+  const originalNow=Date.now;
+  const now=originalNow();
+  const expiry=now+1000;
+  const startedAt=performance.now();
+  const active=createManualDiagnosticConsentWindow(expiry,1000,startedAt);
+  try{
+    Date.now=()=>now;
+    const nativeSession={expiresAt:expiry,isActive:active};
+    assert.equal(getStatus(nativeSession),true,
+      'a live native consent window remains visible');
+    Date.now=()=>expiry+1;
+    assert.equal(getStatus(nativeSession),false,
+      'expired native consent immediately removes the desktop session');
+    Date.now=()=>now-10000;
+    assert.equal(getStatus(nativeSession),false,
+      'clock rollback cannot revive a revoked diagnostic');
+    assert.equal(getStatus(null),false);
+    assert.equal(getStatus({expiresAt:expiry,isActive:()=>false}),false);
+    assert.equal(getStatus({expiresAt:expiry,isActive:()=>{throw Error('revoked');}}),false);
+  }finally{Date.now=originalNow;}
+});
