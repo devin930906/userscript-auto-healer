@@ -87,9 +87,9 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  // revive GM/storage/DOM/fetch effects after server expiry.
  ' const expired=()=>{',
  '  if(Date.now()>='+expiresAt+')return true;',
- // The existing date check is retained for old hosts lacking Performance.
- // A malformed/throwing Performance object cannot authorize actions.
- "  if(typeof performance==='undefined')return false;",
+ // Date.now alone is not proof that consent is live after a clock rollback.
+ // If Performance is missing or malformed, fail closed BEFORE GM/DOM/fetch.
+ "  if(typeof performance==='undefined')return true;",
  "  try{const epoch=performance.timeOrigin;const elapsed=performance.now();",
  '   return !Number.isFinite(epoch)||!Number.isFinite(elapsed)||elapsed<0||',
  '    epoch+elapsed>='+expiresAt+';}',
