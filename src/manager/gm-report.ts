@@ -114,7 +114,12 @@ function coherentLimitedEvidence(
  // Preserve partial legitimate reports but reject impossible combinations,
  // including hand-edited reports submitted through native Save.
  const n=assessment.observedModes;
- if((n<2&&(assessment.reportedGmDefaultMatched||
+ // The receiver rejects broken.businessAction=true; cleanReceipt only
+ // counts a broken report when its business action is FALSE. A full pair
+ // must therefore carry reportedBrokenFailed=true even if the fixed mode or
+ // GM values disagree. Apply the same invariant at capture AND native save.
+ if((n===2&&!assessment.reportedBrokenFailed)||
+    (n<2&&(assessment.reportedGmDefaultMatched||
             assessment.reportedGmStorageRoundtripMatched))||
     (n===0&&(assessment.reportedBrokenFailed||
              assessment.reportedFixedRecovered))||
