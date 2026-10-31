@@ -285,7 +285,13 @@ export async function launchApprovedIsolatedChrome(
       if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
       let phase:'FETCH'|'PROCESS'='FETCH';
       try{
-        const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(1500)});
+        // The per-probe timeout is independent of native revocation. A
+        // revoked consent must cancel a still-pending CDP HTTP request,
+        // not wait for this independent 1500ms deadline to expire.
+        const fetchSignal=checked.signal?
+          AbortSignal.any([checked.signal,AbortSignal.timeout(1500)]):
+          AbortSignal.timeout(1500);
+        const response=await fetch(url,{redirect:'error',signal:fetchSignal});
         phase='PROCESS';
         const payload=await readBoundedCdpJson(response);
         if(response.status!==200)emitStage('HTTP_REJECTED');

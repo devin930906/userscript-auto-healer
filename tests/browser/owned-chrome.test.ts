@@ -890,3 +890,67 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
     t.mock.reset();
   }
 });
+
+test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
+  // Native-only disposable synthetic process: no Chrome, Profile or web I/O.
+  // Keep a refed watchdog so a pending fetch cannot make node:test silently
+  // cancel the test before the expected RED/GREEN assertion executes.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\isolated-profile',12025);
+  const controller=new AbortController();
+  const child=Object.assign(new EventEmitter(),{
+    pid:41236,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let fetchStarted=false,cancelledByUser=false;
+  let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',
+      (_request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1])=>{
+        fetchStarted=true;
+        const signal=init?.signal;
+        return new Promise<Response>((_resolve,reject)=>{
+          const watchdog=setTimeout(()=>reject(Error('FIXTURE_FETCH_DEADLINE')),3500);
+          const onAbort=()=>{
+            clearTimeout(watchdog);
+            reject(new DOMException('Cancelled','AbortError'));
+          };
+          signal?.addEventListener('abort',onAbort,{once:true});
+          if(signal?.aborted)onAbort();
+          // Abort only AFTER the production code has entered fetch.
+          queueMicrotask(()=>{
+            controller.abort();
+            cancelledByUser=Boolean(signal?.aborted);
+          });
+        });
+      });
+    result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal
+    });
+    assert.equal(fetchStarted,true,'the CDP fetch was genuinely pending');
+    assert.equal(cancelledByUser,true,
+      'revoking native consent must synchronously abort active CDP HTTP fetch');
+    assert.deepEqual(result,{ok:false,code:'ABORTED'});
+    assert.equal(child.killed,true,'only this owned child must be stopped');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    if(result?.ok)result.stop();
+    controller.abort();
+    t.mock.reset();
+  }
+});
