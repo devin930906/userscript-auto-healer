@@ -129,3 +129,25 @@ test('TASK-010/TEST-021/026: acceptance request must be own plain data without e
   assert.equal(getterCalls,0,
     'untrusted request getters must not run in the acceptance preflight');
 });
+
+
+test('TASK-010/TEST-018/021/026: reject object-valued evidence IDs before implicit coercion',()=>{
+  // A plain request can carry an object-valued data property. The lower-level
+  // planner's RegExp.test would coerce the value and run attacker JavaScript;
+  // the acceptance boundary must refuse it before any such coercion.
+  let coercions=0;
+  const forgedIds:unknown[]=[
+    {toString(){coercions++;return 'scenario_assertion_1';}},
+    {[Symbol.toPrimitive](){coercions++;throw Error('PRIVATE_EVIDENCE_ID');}}
+  ];
+  for(const faultEvidenceId of forgedIds){
+    const hostile={...request,faultEvidenceId} as unknown as LiteralPatchRequest;
+    const result=assessLocalAcceptancePreflight(hostile,candidate,opts);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.tampermonkeyVerified,false);
+    assert.equal(result.businessRecoveredVerified,false);
+    assert.equal(JSON.stringify(result).includes('PRIVATE_EVIDENCE_ID'),false);
+  }
+  assert.equal(coercions,0,'never execute attacker-controlled evidence ID coercion');
+});
