@@ -956,6 +956,22 @@ function Get-CandidatePortablePostMoveExeRmSummary([string]$destination) {
   }
 }
 
+# ISSUE-215 / TEST-028: reuse the verified one-EXE, runner-contained,
+# non-reparse read-only RM probe while the original source is still present.
+# One sampled association is not proof of a lock or authorization to retry.
+# No process identifiers, executable paths, or candidate bytes are emitted.
+function Get-CandidatePortableDeniedExeRmSummary([string]$source) {
+  try {
+    $snapshot=Get-CandidatePortablePostMoveExeRmSummary $source
+    if($snapshot -isnot [string] -or
+       -not $snapshot.StartsWith('postMove=ok rm=ok sampled=1 total=1 affected=',
+          [StringComparison]::Ordinal)) {
+      return 'deniedExe=unavailable'
+    }
+    return ('deniedExe=ok '+$snapshot.Substring(12))
+  } catch { return 'deniedExe=unavailable' }
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
   [int]$maxAttempts=12,[int]$delayMilliseconds=250,
@@ -1042,6 +1058,18 @@ function Move-CandidatePortableDirectory(
           $firstDenial=Get-CandidatePortableFirstDenialSummary $from $candidateFiles
         } catch { }
         Write-Warning -WarningAction Continue ("TASK-020 first relocation denial: "+$firstDenial)
+      }
+      # Capture limited mid-denial snapshots rather than just first/final:
+      # at retry 2, 4, 8, 16 only. This uses one EXE file (not a repeated
+      # whole-tree scan), never changes the retry bound or stops processes.
+      # A read-only observation cannot authorize a rename.
+      if($attempt -gt 1 -and $attempt -lt $maxAttempts -and
+         (($attempt -band ($attempt - 1)) -eq 0)) {
+        $intermediate='deniedExe=unavailable'
+        try { $intermediate=Get-CandidatePortableDeniedExeRmSummary $from }
+        catch { }
+        Write-Warning -WarningAction Continue (
+          "TASK-020 intermediate denial attempt $attempt/$maxAttempts EXE association: "+$intermediate)
       }
       if($attempt -eq $maxAttempts) {
         # Do not mask/replace the original .NET access exception when CIM is
