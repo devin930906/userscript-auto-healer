@@ -895,6 +895,84 @@ try {
     throw 'TEST-028: retry-denial EXE probe exceeded verified disposable candidate scope'
   }
   Write-Output 'PASS: retry-denial EXE association is bounded and anonymous'
+  # ISSUE-215 / TEST-028: reproduce an OUT-OF-PROCESS candidate EXE
+  # association, rather than conflating a same-process FileStream with
+  # the real external-process Restart Manager observation. Start-Job owns
+  # exactly one disposable pwsh child and has a bounded release protocol.
+  # This verifies a plausible Windows sharing mechanism, not the identity
+  # or culpability of any unrelated real runner process.
+  $foreignLockRoot=Join-Path $root 'external-lock-exe-source'
+  $foreignLockDest=Join-Path $root 'external-lock-exe-moved'
+  New-Item -ItemType Directory -Path $foreignLockRoot | Out-Null
+  $foreignLockExe=Join-Path $foreignLockRoot 'UserscriptAutoHealer.exe'
+  Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Destination $foreignLockExe
+  $foreignLockHash=(Get-FileHash -LiteralPath $foreignLockExe -Algorithm SHA256).Hash
+  $foreignReady=Join-Path $root 'external-lock.ready'
+  $foreignRelease=Join-Path $root 'external-lock.release'
+  $foreignJob=Start-Job -ArgumentList $foreignLockExe,$foreignReady,$foreignRelease -ScriptBlock {
+    param([string]$exe,[string]$ready,[string]$release)
+    $handle=[IO.File]::Open($exe,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try {
+      [IO.File]::WriteAllText($ready,'ready')
+      $deadline=[DateTime]::UtcNow.AddSeconds(35)
+      while(-not [IO.File]::Exists($release) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+      }
+      if(-not [IO.File]::Exists($release)) { throw 'Disposable external lock release timed out' }
+    } finally { $handle.Dispose() }
+  }
+  try {
+    for($spin=0; $spin -lt 120 -and -not (Test-Path -LiteralPath $foreignReady); $spin++) {
+      if($foreignJob.State -in @('Failed','Stopped','Completed')) { break }
+      Start-Sleep -Milliseconds 100
+    }
+    if(-not (Test-Path -LiteralPath $foreignReady -PathType Leaf) -or
+       $foreignJob.State -in @('Failed','Stopped','Completed')) {
+      throw 'TEST-028: disposable external process did not acquire candidate EXE handle'
+    }
+    $foreignRm=Get-CandidatePortableDeniedExeRmSummary $foreignLockRoot
+    if($foreignRm -notmatch '^deniedExe=ok rm=ok sampled=1 total=1 affected=[1-9][0-9]* ' -or
+       $foreignRm -notmatch 'imageScope=\[[^\]]*outsideRunner=[1-9][0-9]*' -or
+       $foreignRm.Contains($foreignLockRoot) -or
+       $foreignRm.Contains($foreignLockExe)) {
+      throw "TEST-028: real child file association was not safely attributed: $foreignRm"
+    }
+    $foreignDenied=$false
+    try {
+      Move-CandidatePortableDirectory $foreignLockRoot $foreignLockDest 1 0 @($foreignLockExe) | Out-Null
+    } catch {
+      $cause=$_.Exception
+      while($cause.InnerException) { $cause=$cause.InnerException }
+      if(-not (Test-CandidatePortableRetryableMoveError $cause)) { throw }
+      $foreignDenied=$true
+    }
+    if(-not $foreignDenied -or (Test-Path -LiteralPath $foreignLockDest) -or
+       -not (Test-Path -LiteralPath $foreignLockExe -PathType Leaf) -or
+       (Get-FileHash -LiteralPath $foreignLockExe -Algorithm SHA256).Hash -cne $foreignLockHash) {
+      throw 'TEST-028: externally held EXE did not cause a safe, byte-preserving rename denial'
+    }
+  } finally {
+    # Only signal / stop the exact child job this fixture created.
+    [IO.File]::WriteAllText($foreignRelease,'release')
+    $null=Wait-Job -Job $foreignJob -Timeout 12
+    if($foreignJob.State -notin @('Completed','Failed','Stopped')) {
+      Stop-Job -Job $foreignJob -ErrorAction SilentlyContinue
+    }
+    try { Receive-Job -Job $foreignJob -ErrorAction Stop | Out-Null }
+    finally { Remove-Job -Job $foreignJob -Force -ErrorAction SilentlyContinue }
+  }
+  $foreignAfter=Get-CandidatePortableDeniedExeRmSummary $foreignLockRoot
+  if($foreignAfter -notmatch '^deniedExe=ok rm=ok sampled=1 total=1 affected=0 ' -or
+     (Get-FileHash -LiteralPath $foreignLockExe -Algorithm SHA256).Hash -cne $foreignLockHash) {
+    throw "TEST-028: released disposable job left candidate EXE association or modified bytes: $foreignAfter"
+  }
+  $foreignMoved=Move-CandidatePortableDirectory $foreignLockRoot $foreignLockDest 12 250 @($foreignLockExe)
+  if($foreignMoved -lt 1 -or
+     (Test-Path -LiteralPath $foreignLockRoot) -or
+     (Get-FileHash -LiteralPath (Join-Path $foreignLockDest 'UserscriptAutoHealer.exe') -Algorithm SHA256).Hash -cne $foreignLockHash) {
+    throw 'TEST-028: candidate failed exact relocation after disposable child lock release'
+  }
+  Write-Output 'PASS: real out-of-process candidate EXE association blocks rename, clears on release and preserves bytes'
   Write-Output 'PASS: bounded post-move EXE RM observation preserves hashes and rejects external paths'
 
   # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
