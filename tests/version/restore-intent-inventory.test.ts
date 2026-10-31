@@ -505,7 +505,7 @@ test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as 
    originalBackupFileName:backup(randomUUID()),
    displacedBackupFileName:backup(randomUUID()),
    automaticPatchAllowed:false,automaticRollbackAllowed:false
-  })+'\\n','utf8');
+  })+'\n','utf8');
   await writeFile(journal,valid);
   assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),true,
    'genuine UTF-8 replacement-character filenames remain valid');
