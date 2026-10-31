@@ -846,6 +846,21 @@ try {
      (Get-CandidatePortablePostMoveExeRmSummary $env:SystemRoot) -cne 'postMove=unavailable') {
     throw 'TEST-028: post-move RM observation exceeded verified runner candidate scope'
   }
+  # ISSUE-215 / TEST-028 RED: compare the anonymous candidate EXE association
+  # while a real retryable rename denial is still present, not just after
+  # the eventual success. This must remain candidate-only and read-only.
+  $deniedExeEvidence=Get-CandidatePortableDeniedExeRmSummary $postRoot
+  if($deniedExeEvidence -cnotmatch '^deniedExe=ok rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+     $deniedExeEvidence.Contains($postRoot) -or
+     $deniedExeEvidence.Contains($postExe) -or
+     (Get-FileHash -LiteralPath $postExe -Algorithm SHA256).Hash -cne $postHash) {
+    throw "TEST-028: retry-denial EXE association was not safely observed: $deniedExeEvidence"
+  }
+  if((Get-CandidatePortableDeniedExeRmSummary $env:SystemRoot) -cne 'deniedExe=unavailable' -or
+     (Get-CandidatePortableDeniedExeRmSummary (Join-Path $root 'missing-retry-source')) -cne 'deniedExe=unavailable') {
+    throw 'TEST-028: retry-denial EXE probe exceeded verified disposable candidate scope'
+  }
+  Write-Output 'PASS: retry-denial EXE association is bounded and anonymous'
   Write-Output 'PASS: bounded post-move EXE RM observation preserves hashes and rejects external paths'
 
   # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
