@@ -37,7 +37,8 @@ function sameOwnedPending(actual:BigIntStats,owned:BigIntStats):boolean{
  */
 export async function hasInterruptedRestoreStaging(
  directory:string,verifiedOwnPendingName?:string,
- verifiedOwnPendingIdentity?:BigIntStats
+ verifiedOwnPendingIdentity?:BigIntStats,
+ namespace:'source-parent'|'recovery-store'='recovery-store'
 ):Promise<boolean>{
  // The exemption is only for a staging inode independently verified by
  // its native owning transaction at the last pre-rename boundary. Never
@@ -46,6 +47,8 @@ export async function hasInterruptedRestoreStaging(
      !RESTORE_PENDING.test(verifiedOwnPendingName))||
     (verifiedOwnPendingIdentity!==undefined&&verifiedOwnPendingName===undefined))
   throw new Error('invalid owned staging exception');
+ if(namespace!=='source-parent'&&namespace!=='recovery-store')
+  throw new Error('invalid restore namespace');
  if(await hasUnsafePathLink(directory))throw new Error('unsafe restore directory');
  const before=await lstat(directory,{bigint:true});
  if(!before.isDirectory()||before.isSymbolicLink())
@@ -63,6 +66,13 @@ export async function hasInterruptedRestoreStaging(
    // directory. A masquerading directory, hard link or symlink requires
    // explicit native review BEFORE any restore can change the source.
    const published=PUBLISHED_JOURNAL.test(entry.name);
+   // The native writer only publishes journals in the separate recovery
+   // store. A journal found beside the selected userscript is stray crash
+   // or foreign evidence even when its JSON is structurally valid.
+   // Never accept it as a clean source-parent directory.
+   if(published&&namespace==='source-parent'){
+    pending=true;continue;
+   }
    const lock=RESTORE_PATH_MUTEX.test(entry.name);
    if(published||lock){
     try{
