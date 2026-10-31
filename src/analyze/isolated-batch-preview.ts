@@ -26,16 +26,18 @@ type WorkerFailureReason='START_FAILED'|'REPLY_REJECTED'|
  * Logging must not replace the caller's fail-closed result even if a hook throws.
  */
 function reportWorkerFailure(
- reason:WorkerFailureReason,count:number,startedAt:number,onlineAt:number|null
+ reason:WorkerFailureReason,count:number,startedAt:number,onlineAt:number|null,
+ readyAt:number|null
 ):void{
  try{
   // 'online' confirms the Worker thread began executing, not that the
   // parser loaded or finished. Log bounded relative timings only.
   const bucket=(ms:number)=>String(Math.min(12000,
    Math.max(0,Math.ceil(ms/1000)*1000)));
-  const phase=onlineAt===null?'PRE_ONLINE':'POST_ONLINE';
+  const phase=readyAt!==null?'POST_READY':onlineAt===null?'PRE_ONLINE':'POST_ONLINE';
   const onlineBucket=onlineAt===null?'NA':bucket(onlineAt-startedAt);
-  console.warn(`UAH_AST_WORKER_UNAVAILABLE reason=${reason} count=${count} phase=${phase} elapsedBucketMs=${bucket(performance.now()-startedAt)} onlineBucketMs=${onlineBucket}`);
+  const readyBucket=readyAt===null?'':` readyBucketMs=${bucket(readyAt-startedAt)}`;
+  console.warn(`UAH_AST_WORKER_UNAVAILABLE reason=${reason} count=${count} phase=${phase} elapsedBucketMs=${bucket(performance.now()-startedAt)} onlineBucketMs=${onlineBucket}${readyBucket}`);
  }catch{/* Diagnostics never alter read-only fail-closed behavior. */}
 }
 const WORKER_DEADLINE_MS=10000;
@@ -292,7 +294,7 @@ async function previewImportedChunkOffMain(
    resourceLimits:{maxOldGenerationSizeMb:96,maxYoungGenerationSizeMb:16}
   });
  }catch{
-  reportWorkerFailure('START_FAILED',selected.length,startedAt,null);
+  reportWorkerFailure('START_FAILED',selected.length,startedAt,null,null);
   return {previews:output,safeToContinue:true};
  }
  const result=await new Promise<{
@@ -301,11 +303,12 @@ async function previewImportedChunkOffMain(
   let finished=false;
   let timer:NodeJS.Timeout|undefined;
   let onlineAt:number|null=null;
+  let readyAt:number|null=null;
   const finish=(answer:ImportAnalysisPreview[]|null,stopWorker:boolean,
    reason?:WorkerFailureReason)=>{
    if(finished)return;
    finished=true;
-   if(reason)reportWorkerFailure(reason,selected.length,startedAt,onlineAt);
+   if(reason)reportWorkerFailure(reason,selected.length,startedAt,onlineAt,readyAt);
    if(timer)clearTimeout(timer);
    signal?.removeEventListener('abort',cancel);
    if(!stopWorker){resolve({answer,retired:true});return;}
@@ -333,6 +336,13 @@ async function previewImportedChunkOffMain(
    if(!finished&&onlineAt===null)onlineAt=performance.now();
   });
   worker.on('message',(value:unknown)=>{
+   // Worker-only parser-ready receipt is diagnostic, never a preview or authority.
+   // Distinguish module initialization from analysis after the 'online' event.
+   // It does not change the original deadline, isolation or failure policy.
+   if(value==='UAH_AST_WORKER_READY_V1'){
+    if(!finished&&readyAt===null)readyAt=performance.now();
+    return;
+   }
    const checked=validateIsolatedPreviewReply(value,selected.length);
    // A valid message can arrive before its Worker exits. Retire within the
    // existing segment deadline before allowing another segment to start.

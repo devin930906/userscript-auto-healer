@@ -9,6 +9,9 @@ if(!parentPort||!Array.isArray(workerData))
  throw Error('INVALID_ISOLATED_PREVIEW_REQUEST');
 
 try{
+ // Diagnostic-only fixed marker: imports loaded; no script bytes or paths sent.
+ // The parent must never treat this as completed analysis or authorization.
+ parentPort.postMessage('UAH_AST_WORKER_READY_V1');
  const results=previewImportedBatch(workerData);
  parentPort.postMessage(results);
 }finally{
