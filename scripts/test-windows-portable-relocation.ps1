@@ -735,6 +735,40 @@ try {
       Remove-Variable -Name task020FinalEvidenceSamples -Scope Script -ErrorAction SilentlyContinue
     }
 
+    # ISSUE-215 / TEST-028: a real held file lock must cause intermediate
+    # anonymous EXE observations only at bounded powers-of-two retry
+    # checkpoints (2,4), without changing the original Windows exception.
+    $originalIntermediateProbe=(Get-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary').ScriptBlock
+    $script:task020IntermediateSamples=0
+    try {
+      Set-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary' -Value {
+        param([string]$source)
+        $script:task020IntermediateSamples++
+        return 'deniedExe=unavailable'
+      }
+      $intermediateRefused=$false
+      $intermediateDest=Join-Path $root 'intermediate-denial-receipts'
+      try {
+        Move-CandidatePortableDirectory $permanent $intermediateDest 5 0 @($permanentFile) | Out-Null
+      } catch {
+        $reason=$_.Exception
+        while($reason.InnerException) { $reason=$reason.InnerException }
+        $intermediateRefused=(($reason -is [System.IO.IOException] -or
+          $reason -is [System.UnauthorizedAccessException]) -and
+          (($reason.HResult -band 0xFFFF) -in @(5,32,33)))
+        if(-not $intermediateRefused) { throw }
+      }
+      if(-not $intermediateRefused -or $script:task020IntermediateSamples -ne 2 -or
+         (Test-Path -LiteralPath $intermediateDest) -or
+         -not (Test-Path -LiteralPath $permanentFile -PathType Leaf)) {
+        throw "TEST-028: intermediate diagnostics must only sample retries 2 and 4 without changing source"
+      }
+      Write-Output 'PASS: real locked candidate retains original denial and samples only retries 2 and 4'
+    } finally {
+      Set-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary' -Value $originalIntermediateProbe
+      Remove-Variable -Name task020IntermediateSamples -Scope Script -ErrorAction SilentlyContinue
+    }
+
     # ISSUE-215 / TEST-028: a read-only failure-evidence collector is
     # best-effort. A fault in it must not replace the real Windows rename
     # access-denied error, shorten the bound, or alter original bytes.
@@ -846,6 +880,21 @@ try {
      (Get-CandidatePortablePostMoveExeRmSummary $env:SystemRoot) -cne 'postMove=unavailable') {
     throw 'TEST-028: post-move RM observation exceeded verified runner candidate scope'
   }
+  # ISSUE-215 / TEST-028 RED: compare the anonymous candidate EXE association
+  # while a real retryable rename denial is still present, not just after
+  # the eventual success. This must remain candidate-only and read-only.
+  $deniedExeEvidence=Get-CandidatePortableDeniedExeRmSummary $postRoot
+  if($deniedExeEvidence -cnotmatch '^deniedExe=ok rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+     $deniedExeEvidence.Contains($postRoot) -or
+     $deniedExeEvidence.Contains($postExe) -or
+     (Get-FileHash -LiteralPath $postExe -Algorithm SHA256).Hash -cne $postHash) {
+    throw "TEST-028: retry-denial EXE association was not safely observed: $deniedExeEvidence"
+  }
+  if((Get-CandidatePortableDeniedExeRmSummary $env:SystemRoot) -cne 'deniedExe=unavailable' -or
+     (Get-CandidatePortableDeniedExeRmSummary (Join-Path $root 'missing-retry-source')) -cne 'deniedExe=unavailable') {
+    throw 'TEST-028: retry-denial EXE probe exceeded verified disposable candidate scope'
+  }
+  Write-Output 'PASS: retry-denial EXE association is bounded and anonymous'
   Write-Output 'PASS: bounded post-move EXE RM observation preserves hashes and rejects external paths'
 
   # ISSUE-215 RED regression: a file opened WITH read/write sharing but WITHOUT
