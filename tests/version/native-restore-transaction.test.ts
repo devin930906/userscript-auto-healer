@@ -43,6 +43,38 @@ async function fixture(run:(data:{
   });
  }finally{await rm(root,{recursive:true,force:true});}
 }
+test('TASK-011/TEST-020/021/026: valid but misplaced native restore journal in source parent blocks transaction',async()=>{
+ await fixture(async opts=>{
+  const parent=dirname(opts.sourcePath);
+  // A canonical journal is legal only in the separately selected recovery
+  // store. A copied, interrupted or foreign one in the selected source
+  // directory is anomalous native restore evidence requiring review.
+  const prefix=opts.backupFileName.slice(0,-(1+36+'.backup.user.js'.length));
+  const foreignJournal=join(parent,'.uah-restore-'+randomUUID()+'.journal.json');
+  await writeFile(foreignJournal,JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:sha(Buffer.from(opts.sourcePath)),
+   originalSha256:sha(original),displacedSha256:sha(changed),
+   originalBackupFileName:opts.backupFileName,
+   displacedBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\n');
+  const prior=(await readdir(opts.backupDirectory)).sort();
+  const result=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'RECOVERY_REVIEW_REQUIRED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  },'misplaced native intent must not be treated as a clean source folder');
+  assert.deepEqual(await readFile(opts.sourcePath),changed,
+   'no irreversible source rename is permitted while evidence is misplaced');
+  assert.deepEqual((await readdir(opts.backupDirectory)).sort(),prior,
+   'no displaced backup or new recovery intent should be published');
+  assert.equal(await hasInterruptedRestoreStaging(parent),true,
+   'misplaced journal remains evidence, not an exempted backup-store intent');
+ });
+});
+
 test('TEST-020/026: published restore intent cleanup never unlinks a foreign replacement',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-published-journal-'));
  const directory=join(root,'recoveries');
