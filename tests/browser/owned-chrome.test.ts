@@ -890,3 +890,69 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
     t.mock.reset();
   }
 });
+
+test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
+  // This fixture creates no browser/profile/network activity. It uses the
+  // existing trusted-native mock boundary to model a Chrome child whose
+  // first CDP HTTP request is still pending when approval is revoked.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const childProcesses=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\isolated-profile',12025);
+  const controller=new AbortController();
+  const child=Object.assign(new EventEmitter(),{
+    pid:41236,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let onFetch:()=>void=()=>{};
+  const fetchStarted=new Promise<void>(resolve=>{onFetch=resolve;});
+  let probeSignal:AbortSignal|undefined;
+  let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(childProcesses,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',(_request,init)=>
+      new Promise<Response>((_resolve,reject)=>{
+        probeSignal=init?.signal??undefined;
+        const onAbort=()=>reject(new DOMException('Cancelled','AbortError'));
+        probeSignal?.addEventListener('abort',onAbort,{once:true});
+        if(probeSignal?.aborted)onAbort();
+        onFetch();
+      })
+    );
+    const pending=launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal
+    });
+    await Promise.race([fetchStarted,delay(1000).then(()=>{
+      throw Error('SYNTHETIC_CDP_PROBE_DID_NOT_BEGIN');
+    })]);
+    assert.equal(probeSignal?.aborted,false,
+      'the synthetic CDP fetch must genuinely be pending at revocation');
+    controller.abort();
+    // Capture this synchronously: a separate fixed 1500ms timeout is NOT
+    // evidence that user revocation cancelled the HTTP probe.
+    const cancelledByUser=probeSignal?.aborted===true;
+    result=await pending;
+    assert.equal(cancelledByUser,true,
+      'the active CDP fetch must receive user cancellation immediately');
+    assert.deepEqual(result,{ok:false,code:'ABORTED'});
+    assert.equal(child.killed,true,
+      'cancelling owned bootstrap must terminate only its own child');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    if(result?.ok)result.stop();
+    controller.abort();
+    t.mock.reset();
+  }
+});
