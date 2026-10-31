@@ -1626,3 +1626,62 @@ test('TASK-011/TEST-020/021/026: an unlisted Windows 8.3 grandparent spelling mu
    'refused alias must not publish additional backups or recovery intents');
  }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/021/026: an unlisted Windows 8.3 direct parent cannot bypass the restore journal namespace',
+ {skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-unlisted-parent-short-'));
+ try{
+  // Model a true Win32 short alias: the selected directory resolves, while
+  // its enumerating parent reports the underlying LONG spelling instead.
+  // Only the directory listing is mocked; all file/backup/restore I/O is real
+  // and confined to temporary .user.js fixtures.
+  const parent=join(root,'CANONI~1');
+  const sourcePath=join(parent,'selected.user.js');
+  const backupDirectory=join(root,'recoveries');
+  await mkdir(parent);
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const backup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(backup.status,'BACKUP_ONLY');
+  if(backup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,changed);
+  const opts={
+   sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+   expectedCurrentSha256:sha(changed),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,
+   userApproved:true,manualRestoreApproved:true
+  };
+  const before=(await readdir(backupDirectory)).sort();
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const actualReaddir=fsPromises.readdir;
+  let simulatedAliasObserved=false;
+  t.mock.method(fsPromises,'readdir',async (path:string)=>{
+   if(path===root){
+    simulatedAliasObserved=true;
+    return ['CanonicalLongName','recoveries'];
+   }
+   return actualReaddir(path);
+  });
+  const refused=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.deepEqual(refused,{
+   status:'BLOCKED',reason:'UNSAFE_PATH',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,businessVerified:false
+  },'an unresolved direct parent alias must never create a recovery intent');
+  assert.equal(simulatedAliasObserved,true,
+   'the source parent name must be compared against the actual parent listing');
+  assert.deepEqual(await readFile(sourcePath),changed);
+  assert.deepEqual((await readdir(backupDirectory)).sort(),before,
+   'blocked path must preserve all existing backups and not create a journal');
+
+  // A legitimately named CANONI~1 directory exists in the REAL listing.
+  // Never reject it solely because its spelling resembles an 8.3 alias.
+  t.mock.reset();
+  assert.ok((await readdir(root)).includes('CANONI~1'));
+  const approved=await restoreVerifiedOriginalNativeOnly(opts);
+  assert.equal(approved.status,'RESTORED_NATIVE_ONLY',JSON.stringify(approved));
+  assert.deepEqual(await readFile(sourcePath),original);
+ }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
+});
