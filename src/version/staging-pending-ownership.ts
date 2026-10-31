@@ -9,6 +9,11 @@ import {basename,dirname,isAbsolute,resolve} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 
 const NAME=/^\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pending$/;
+/** Only the two native publishers may retire a pending inode after link().
+ * Same inode and link count are insufficient if its second name is outside
+ * our UUID-scoped backup/candidate output namespace. */
+const PUBLISHED_NAME=/^.+\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:backup|candidate)\.user\.js$/;
+
 function same(a:BigIntStats,b:BigIntStats):boolean{
  return a.dev===b.dev&&a.ino===b.ino;
 }
@@ -34,6 +39,7 @@ export async function removeOwnedStagingPending(
   if(published!==undefined){
    if(!isAbsolute(published)||published!==resolve(published)||
       dirname(published)!==folder||published===pending||
+      !PUBLISHED_NAME.test(basename(published))||
       await hasUnsafePathLink(published))return false;
    const final=await lstat(published,{bigint:true});
    if(!final.isFile()||final.isSymbolicLink()||
