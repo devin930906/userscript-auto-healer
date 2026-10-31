@@ -130,3 +130,40 @@ test('TEST-024/026: reject live and revoked Proxy observations before any reflec
   assert.equal(traps, 0);
   assert.equal(registry.snapshot(A).status, 'UNTESTED');
 });
+
+test('TASK-015/TEST-024/026: aged health evidence cannot become fresh after Windows clock rollback',()=>{
+ let clock=1000;
+ const registry=new LimitedHealthRegistry(()=>clock);
+ assert.equal(registry.record(hit()).status,'ELEMENT_FOUND_ONLY');
+ clock=1000+600001;
+ assert.equal(registry.snapshot(A).status,'INDETERMINATE','age past TTL is observed');
+ clock=1000+1000;
+ assert.equal(registry.snapshot(A).status,'INDETERMINATE',
+  'moving wall clock backwards into original TTL cannot revive stale evidence');
+ assert.equal(registry.snapshot(A).history.length,1,'no historical events rewritten');
+ clock=1000+1001;
+ const refreshed=registry.record(hit());
+ assert.equal(refreshed.status,'ELEMENT_FOUND_ONLY','a NEW observation can restore a limited status');
+ assert.equal(refreshed.history.length,2);
+ assert.equal(refreshed.businessVerified,false);
+ assert.equal(refreshed.automaticPatchAllowed,false);
+});
+
+test('TASK-015/TEST-024/026: rejected rollback remains revoked until a new valid event, per script',()=>{
+ let clock=1000;
+ const registry=new LimitedHealthRegistry(()=>clock);
+ registry.record(hit(A));
+ clock=1001;
+ registry.record(hit(B));
+ clock=999;
+ assert.equal(registry.snapshot(A).status,'INDETERMINATE');
+ assert.throws(()=>registry.record(hit(A)),/HEALTH_CLOCK_ROLLBACK/);
+ clock=1002;
+ assert.equal(registry.snapshot(A).status,'INDETERMINATE',
+  'the old observation must not regain freshness after clock recovery');
+ assert.equal(registry.snapshot(B).status,'ELEMENT_FOUND_ONLY',
+  'another script with no stale observation remains independent');
+ const fresh=registry.record(hit(A));
+ assert.equal(fresh.status,'ELEMENT_FOUND_ONLY');
+ assert.equal(fresh.history.length,2);
+});
