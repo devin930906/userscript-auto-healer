@@ -312,6 +312,12 @@ export async function launchApprovedIsolatedChrome(
               // Consent may be revoked during the asynchronous handshake.
               // A successful transport proof must never reactivate a cancelled launch.
               if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+              // CDP identity proofs completed after the fixed monotonic
+              // bootstrap deadline are not a valid launch receipt. In
+              // particular, a late successful WebSocket handshake must not
+              // turn an already-expired launch into an authorized session.
+              if(performance.now()-began>=20000)
+                return {ok:false,code:'CDP_TIMEOUT'};
               if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               if(errored||exited||child.killed||child.exitCode!==null)
                 return {ok:false,code:'LAUNCH_FAILED'};

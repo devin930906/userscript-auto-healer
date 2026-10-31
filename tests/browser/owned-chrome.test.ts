@@ -768,6 +768,63 @@ test('TASK-005/TEST-006/008/009/026: diagnostic classifier never executes Proxy 
 });
 
 
+test('TASK-005/TEST-006/009/026: a late handshake cannot certify Chrome after the monotonic startup deadline',async t=>{
+  // Controlled synthetic Chrome: no real executable, Profile, endpoint, PID
+  // lookup or user's browser is contacted. Hold all prior proofs valid, then
+  // cross the existing 20-second deadline while the last proof is pending.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12041);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41241,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let elapsedMs=0,handshakeObserved=false;
+  let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(performance,'now',()=>elapsedMs);
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+      elapsedMs=19999;
+      return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+        pid:41241,executableVerified:false as const};
+    });
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      handshakeObserved=true;
+      elapsedMs=20001;
+      return true;
+    });
+    t.mock.method(globalThis,'fetch',async()=>
+      new Response(JSON.stringify({
+        Browser:'Chrome/155.0.1.1',
+        webSocketDebuggerUrl:'ws://127.0.0.1:12041/devtools/browser/abcdefgh-1234'
+      }))
+    );
+    result=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.equal(handshakeObserved,true,'deadline must expire during a successful synthetic handshake');
+    assert.deepEqual(result,{ok:false,code:'CDP_TIMEOUT'},
+      'proof completed after the deadline cannot grant an owned browser session');
+    assert.equal(child.killed,true,'failed launch must retire only its owned child');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    if(result?.ok)result.stop();
+    t.mock.reset();
+  }
+});
+
 test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot prematurely expire an owned Chrome bootstrap',async t=>{
   // Synthetic, strictly owned launch fixture: no user Chrome, filesystem,
   // network endpoint, profile or script is touched. This isolates deadline
