@@ -76,3 +76,8 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 - 本表不是所有 Stable 缺口的总数：`TASK-012/014/015/016/017/018/019/021` 在开发计划/工作登记中保留实际剩余工作，目前没有专属 Open Issue；其正式验证要求不能因无 Issue 而遗漏。阶段性完成的 `TASK-001..006` 不反向生成历史 Issue。
 - 每个后续 PR 记录受影响 TASK、Issue（如有）、REQ/NFR、TEST/GATE、代码 SHA、验证运行及合并状态。只有真实运行/人工验收能够使对应要求状态进展；PR 已合并或 Issue 已关闭本身都不构成 TEST/GATE 成功证明。
 - 新增/修改 Issue 时先查重，并按实际变更更新本节及 `docs/09-development-plan.md`、`docs/12-handoff.md`、`docs/14-stable-work-register.md`；保留原始 28 行追踪表和正式 TASK 编号，不以额外 Issue 取代需求或测试。见 `docs/15-issue-driven-stable-bridge.md`。
+
+## 2026-10-31 TASK-013 检查点安全边界实证增量
+
+- `REQ-022 / NFR-009 → TASK-013 → TEST-022/026 → [Issue #440](https://github.com/devin930906/userscript-auto-healer/issues/440) → [PR #531](https://github.com/devin930906/userscript-auto-healer/pull/531) → main `f7bd2cc0ed89bbf914aac0d02b48bf6a5004c937``：双并发持久检查点不得出现三个同时 RUNNING 的不可能状态。Windows RED [#41173176156](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173176156)；PR GREEN [#41173377967](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173377967)；合并后 main GREEN [#41173898572](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173898572)。
+- 这是已有 TASK 下的独立部分安全修复；#440 原始间歇性 AST Worker 故障仍 Open，TEST-004/011/022 全量及 GATE-003/007 不据此通过。所有历史 REQ/NFR/TASK/TEST/GATE 编号不变，未创建新的 GitHub Issue。

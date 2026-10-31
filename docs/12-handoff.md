@@ -310,3 +310,9 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 **准入/发布状态**：历史（4）阶段为有条件准入，正式（7）开发已在进行；本迁移不需要先重新准入。当前验证并不覆盖真实用户 Chrome/Tampermonkey 所有组合、可信自动修复/回滚、发行级 EXE/ZIP 与全部 GATE-001..011，不应宣称已有 Stable 版本。任何对已安装用户脚本/Profile 的操作、正式 Release、仓库规则/Secrets 更改仍需各自的实际授权和验证。
 
 **迁移交接收据**：该分支首先由 PR #485 提出文档治理迁移；后续同 PR 追加 09/10/12/14/AGENTS 与现有 Issues 映射。合并前只能称“已提交待审”，不能称 main 已采用新版规则；合并后仍须读取真实合并 SHA、Docs Integrity CI 结论并按照实际结果更新迁移状态。已完成的软件进度不因治理迁移重置。
+
+## 2026-10-31 正式（7）开发增量交接：TASK-013 并发检查点拒绝异常状态
+
+- 先以实际 GitHub main/PR/Issues/Actions 为准，本节新增合并证据：代码 PR [#531](https://github.com/devin930906/userscript-auto-healer/pull/531) squash 合并 `main@f7bd2cc0ed89bbf914aac0d02b48bf6a5004c937`，在双并发模式中拒绝超额的 `RUNNING` 快照；变更文件 `src/jobs/batch-coordinator.ts` 与 `tests/jobs/batch-coordinator.test.ts`。测试先行 RED `e4849f3cc14c25db93fda3931bc4e8234191d0b1`，修复分支 HEAD `e1e17bd40d84676a19b6ee41372c4df49b07f03e`。
+- Windows RED [#41173176156](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173176156) 760/758 pass/1 expected fail/1 skip；PR GREEN [#41173377967](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173377967) 与最终 main [#41173898572](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173898572) 均 760/759 pass/0 fail/1 skip，Electron smoke 成功。Windows 开发候选 [#41173378150](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173378150) 成功，检出的是 PR 合成提交 `3dbe9f9904cfc43c0a583c233b5cb406651a8827`，**不是**正式 Stable 发布源。
+- 此轮仅限阶段性安全约束，关联 [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) 仍 Open：其原始 AST Worker 偶发故障未确认根因；其他当前 Open Issues 包括 #510/#489/#488/#487/#486/#480/#215。真实用户 Tampermonkey 产品业务/修复/回滚、Windows 支持矩阵、完整 TEST 与全部 GATE-001..011 仍未闭环。EXE/ZIP 仅为开发候选，未发布正式 GitHub Release；下一轮按当前 Issue 与计划依赖选择可安全执行的最高优先级任务，不重复本次守卫逻辑。

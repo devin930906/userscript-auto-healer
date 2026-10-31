@@ -393,3 +393,9 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - **尚未建 Issue 的已批准任务**：TASK-012/014/015/016/017/018/019/021 保持正式计划中的实际待办与各自完成条件；进入可执行阶段时先查重、再按实际需要建立精确 Issue，不因当前未建 Issue 将其误报为完成或取消。
 - **每轮工作**：读取当前 main/分支/PR/Issue/CI；以 TASK、REQ/NFR、TEST/GATE 及 Issue 目标确认范围；完成真正代码修改与测试后经适用 PR 审核合并；仅当 Issue 全部验收满足时关闭或使用 GitHub 默认分支适用的自动关闭语句。将剩余阻断交还 12/14，本工程不通过大量 Issue、提交和 PR 数量计算完成度。
 - **Stable 交付仍受阻**：用户真实 Tampermonkey 产品级业务修复/回滚、全量支持矩阵、Windows 正式双包和 GATE-001..011 未取得完整最终证据；单一 PR 或一次 CI 绿灯不能转为 Stable 发布通过。
+
+## 2026-10-31 TASK-013 双并发检查点安全增量（部分完成；Issue #440 未关闭）
+
+- 当前正式基线：PR [#531](https://github.com/devin930906/userscript-auto-healer/pull/531) 已合并至 `main@f7bd2cc0ed89bbf914aac0d02b48bf6a5004c937`。在 `src/jobs/batch-coordinator.ts` 原始检查点状态校验中，`RUNNING` 任务数超过已批准 `concurrency` 时拒绝，不让伪造的第三条运行中任务被重启归一化为合法可恢复任务；回归测试保留两条真实并发中断任务的正常恢复。范围仅为 TASK-013 / REQ-022 / TEST-022/026，不增加修复权限。
+- [RED #41173176156](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173176156)：760 项 / 758 通过 / 1 个预期失败 / 1 条条件跳过；[PR GREEN #41173377967](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173377967)、[合并后 main GREEN #41173898572](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173898572)：760 项 / 759 通过 / 0 失败 / 1 条条件跳过，真实 Electron smoke 成功。Windows 候选 [#41173378150](https://github.com/devin930906/userscript-auto-healer/actions/runs/41173378150) 成功，但属于非 Stable 临时双包。
+- #440 原来的间歇性隔离 AST Worker 失败仍未找到根因，继续 Open；不能将本次独立检查点修复视为原 Issue 完全解决。TASK-007/009/010/011/018/020/021 与 GATE-001..011 的正式验收边界均未被改变。
