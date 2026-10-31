@@ -956,6 +956,38 @@ function Get-CandidatePortablePostMoveExeRmSummary([string]$destination) {
   }
 }
 
+# ISSUE-215 / TEST-028: reuse the verified one-EXE, runner-contained,
+# non-reparse read-only RM probe while the original source is still present.
+# One sampled association is not proof of a lock or authorization to retry.
+# No process identifiers, executable paths, or candidate bytes are emitted.
+function Get-CandidatePortableDeniedExeRmSummary([string]$source) {
+  try {
+    if([string]::IsNullOrWhiteSpace($source) -or
+       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return 'deniedExe=unavailable'
+    }
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
+    $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
+    if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
+       [StringComparison]::OrdinalIgnoreCase) -or
+       -not [IO.Directory]::Exists($base)) { return 'deniedExe=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $base
+    $exe=[IO.Path]::Combine($base,'UserscriptAutoHealer.exe')
+    if(-not [IO.File]::Exists($exe)) { return 'deniedExe=unavailable' }
+    Assert-CandidatePortableNoReparsePath $runner $exe
+    # Separate from the post-success function: tests (and release evidence)
+    # require exactly one post-success observation, not per-retry probes.
+    $rm=Get-CandidatePortableRestartManagerSummary $base @($exe)
+    if($rm -cnotmatch '^rm=ok sampled=1 total=1 affected=[0-9]+ ' -or
+       $rm.Contains("`r") -or $rm.Contains("`n")) {
+      return 'deniedExe=unavailable'
+    }
+    return "deniedExe=ok $rm"
+  } catch { return 'deniedExe=unavailable' }
+}
+
 function Move-CandidatePortableDirectory(
   [string]$source,[string]$destination,
   [int]$maxAttempts=12,[int]$delayMilliseconds=250,
@@ -1042,6 +1074,18 @@ function Move-CandidatePortableDirectory(
           $firstDenial=Get-CandidatePortableFirstDenialSummary $from $candidateFiles
         } catch { }
         Write-Warning -WarningAction Continue ("TASK-020 first relocation denial: "+$firstDenial)
+      }
+      # Capture limited mid-denial snapshots rather than just first/final:
+      # at retry 2, 4, 8, 16 only. This uses one EXE file (not a repeated
+      # whole-tree scan), never changes the retry bound or stops processes.
+      # A read-only observation cannot authorize a rename.
+      if($attempt -gt 1 -and $attempt -lt $maxAttempts -and
+         (($attempt -band ($attempt - 1)) -eq 0)) {
+        $intermediate='deniedExe=unavailable'
+        try { $intermediate=Get-CandidatePortableDeniedExeRmSummary $from }
+        catch { }
+        Write-Warning -WarningAction Continue (
+          "TASK-020 intermediate denial attempt $attempt/$maxAttempts EXE association: "+$intermediate)
       }
       if($attempt -eq $maxAttempts) {
         # Do not mask/replace the original .NET access exception when CIM is
