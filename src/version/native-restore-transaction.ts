@@ -360,6 +360,22 @@ export async function restoreVerifiedOriginalNativeOnly(
     if(basename(await realpath(opts.sourcePath))!==basename(opts.sourcePath)||
        basename(await realpath(parent))!==basename(parent))
      return block('UNSAFE_PATH');
+    // On Windows a direct parent spelled as an 8.3 alias can resolve while
+    // realpath() retains that short spelling. A recovery intent indexed by
+    // raw source-path bytes would then use a different key for the same file.
+    // Reject an UNLISTED short-shaped parent before publishing a journal;
+    // keep genuinely named FOO~1 directories eligible when listed exactly.
+    const selectedParentName=basename(parent);
+    const shortStem=selectedParentName.split('.')[0];
+    const shortParentShaped=shortStem.length<=8&&
+      /^[^~.\\/]{1,6}~[1-9][0-9]*$/.test(shortStem)&&
+      (selectedParentName===shortStem||
+       (selectedParentName[shortStem.length]==='.'&&
+        /^[^.\\/]{1,3}$/.test(
+          selectedParentName.slice(shortStem.length+1))));
+    if(shortParentShaped&&
+       !(await readdir(dirname(parent))).includes(selectedParentName))
+      return block('UNSAFE_PATH');
     // The script and direct parent may match their exact names while a
     // grandparent differs ONLY in letter case. A published journal hashes the
     // original path string, so that alternate spelling would evade an
