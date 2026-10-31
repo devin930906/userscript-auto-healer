@@ -1,0 +1,59 @@
+name: Governance Atomic Issue Claim Race (NOT PRODUCT CI)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  contender_a:
+    name: Independent GitHub runner A
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      outcome: ${{ steps.race.outputs.outcome }}
+      attempt_ms: ${{ steps.race.outputs.attempt_ms }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compete for the same test ref
+        id: race
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/verify-issue-claim-race.sh contend a
+
+  contender_b:
+    name: Independent GitHub runner B
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      outcome: ${{ steps.race.outputs.outcome }}
+      attempt_ms: ${{ steps.race.outputs.attempt_ms }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compete for the same test ref
+        id: race
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/verify-issue-claim-race.sh contend b
+
+  verify:
+    name: Verify one winner, duplicate refusal and unchanged SHA
+    needs: [contender_a, contender_b]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify GitHub server-side atomic claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT_A: ${{ needs.contender_a.outputs.outcome }}
+          RESULT_B: ${{ needs.contender_b.outputs.outcome }}
+          ATTEMPT_A_MS: ${{ needs.contender_a.outputs.attempt_ms }}
+          ATTEMPT_B_MS: ${{ needs.contender_b.outputs.attempt_ms }}
+        run: bash .github/scripts/verify-issue-claim-race.sh verify

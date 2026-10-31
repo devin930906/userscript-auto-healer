@@ -53,3 +53,9 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 对新的产品 Issue 实施代码前，全面核查当前 Open Issues / PR / 已有分支 / CI / 依赖 / 文件范围；通过服务端**仅创建、已存在必拒绝**的 Git 引用操作申请固定 `work/issue-<N>` 分支，再读取核对归属与 SHA 才能进入编码。单独的标签、Assignee、评论及非原子读后写不提供互斥；若实际工具不能保证仅创建则 **CLAIM_BLOCKED**，不得冒险并行写入。
 - 已有的 `feat/`、`fix/`、`diagnostic/` 历史分支需要先核对真实归属，不自动删除、抢占或视作无人开发；冲突时跳过该 Issue 并检查下一个依赖与文件范围均合格的任务。会话失联、久未提交均不是自动释放条件。
 - 不同 Issue 不自动构成安全并行：检查源/测试目录、共享 API、工作流、锁文件和 TASK 依赖；每项仅修改自己已确认的范围，各用独立分支，PR 按最新主分支审查并在合并后重新运行适用集成测试。协议不承诺零冲突，也不更改仓库权限、发布条件或用户设备授权。
+
+## 双客户端竞争测试与可复核验证（2026-10-31）
+
+- 本仓库现已对治理测试 Issue #549 做过一次实际双连接并发分支创建：GitHub 插件成功，GitHub MCP 的同名创建被拒绝；已存在分支的插件再次创建也返回 422 且远程 SHA 未改变。详细原始请求状态、局限与后续独立 runner 实验见 `docs/16-cross-session-issue-claims.md`。本次不是两个真实 ChatGPT 对话，不能把结果扩大成未经测试的全平台保证。
+- 新增可选择手动运行的 GitHub Actions `governance-issue-claim-race.yml`，仅用于竞争测试 ref，不认领产品 Issues、不更改产品代码、不进入 Release。使用两个独立执行 Job + 最终核验 Job 检查“一位成功、一位明确冲突、再次创建不覆盖”。只有取得实际 workflow run success 才能声称该轮 GitHub runner 测试通过。
+- 当前连接实际测过的 create-only 分支接口为 GitHub 插件 `mcp__GitHub__create_branch` 与 GitHub MCP `mcp__Github_MCP__create_branch`；**每次新会话仍须先核验工具语义与权限**。认领失败后只允许重新读取和选择下一可行 Issue，不得从成功读取别人创建的分支推断本会话已经认领。并行执行其他 Issues 时仍必须检查文件和共享契约冲突，禁止将“同 Issue 互斥成功”误解为“所有 Issues 可安全同时开发”。

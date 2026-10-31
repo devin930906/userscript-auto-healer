@@ -59,3 +59,27 @@ For each PR: link actual Issue, TASK, REQ/NFR, TEST/GATE, claim branch, expected
 - **STABLE_BLOCKED:** outstanding TEST/GATE/real device verification, even with a successful governance PR.
 
 For Issue #547 the migration gate is: preserve historical work, document and link this protocol, verify a real isolated branch/PR, observe documentation CI against the resulting SHA, and ensure `main` was not directly modified by this migration. This procedure does not create a GitHub server-side queue, enforce branch protection, distribute file locks, provide subagents, or prove zero collisions. Any direct writer that ignores this protocol can still conflict.
+
+
+## 2026-10-31 live cross-client contention evidence (Issue #549)
+
+An authorized, governance-only test Issue [#549](https://github.com/devin930906/userscript-auto-healer/issues/549) was created, with original `main@5723f5c934ce6361a91c4e9472bff430355723fa`. Its canonical `work/issue-549` ref was confirmed absent (GitHub 404) before the test. Two **different connected GitHub client implementations** issued competing create-branch calls targeting the exact same name and baseline using one concurrent `Promise.all` invocation:
+
+- GitHub plugin `mcp__GitHub__create_branch`: **fulfilled** creating `work/issue-549`.
+- GitHub MCP `mcp__Github_MCP__create_branch`: **rejected** with `Reference already exists`.
+- Independent GitHub branch readback: exactly the canonical branch name, commit `5723f5c934ce6361a91c4e9472bff430355723fa`.
+- An additional **GitHub plugin** create attempt against the *already-existing* branch used a **different real commit** `0ad14ef92b37d15c846fbff3dbecdfdc0fc3f3e3`; GitHub returned **422, `Reference already exists`** and the authoritative ref remained at `5723f5c934ce6361a91c4e9472bff430355723fa` (no silent upsert observed).
+
+This verifies a **single-winner result for the tested GitHub plugin / GitHub MCP calls** and post-claim duplicate rejection, not an actual pair of independently created ChatGPT conversation sessions. Both reported operations were remote GitHub writes; no application/source-code Issue was touched.
+
+**Allowed acquisition interfaces (as observed):** The connected `mcp__GitHub__create_branch` path and `mcp__Github_MCP__create_branch` path returned the creation/duplicate behavior described above. These observations apply to the tools and permissions in this execution; future conversations MUST re-check actual interface availability, require a demonstrably create-only operation, and must **never treat a successful GET or a second write as ownership**. GitHub's official REST *Create a reference* endpoint is `POST /repos/{owner}/{repo}/git/refs` with `ref=refs/heads/work/issue-N` and source SHA; success is HTTP 201, with HTTP 409 or 422 potentially signifying a conflict. **Only an explicit, verified "Reference already exists" response should be classified OCCUPIED; other 409/422 errors, timeouts, unknown response statuses or branch mismatches are CLAIM_BLOCKED until reconciled.**
+
+**Concurrently claiming distinct Issues is a separate permission test:** the exact same file/module/interface may still cause conflicts after successful distinct Issue claims. Respect the parallel admission section; do not infer file-level locks or automatic distributed execution from this result.
+
+## GitHub-hosted independent-runner reproducibility check
+
+A manual, main-only workflow is provided at `.github/workflows/governance-issue-claim-race.yml` with script `.github/scripts/verify-issue-claim-race.sh`. It is **test-only**, has no pull_request/push/schedule trigger, does not accept untrusted parameters and uses narrowly scoped `contents: write` credentials exclusively for two GitHub-hosted contender jobs and a verification job.
+
+Run it only when needed as a governance diagnostic through an authorized workflow_dispatch on `main`. The two runners each publish an independent readiness ref, wait for the other's readiness, and then attempt the **same** `test/atomic-issue-claim-<run_id>-<attempt>` Git ref. Verification requires one and only one HTTP-201 creator, one explicit existing-ref loser, a coordinated attempt interval, correct remote SHA, and rejection of a second POST with a different valid SHA while preserving the winner's ref. The test leaves those uniquely namespaced evidence refs intact and does not claim any real product Issue, enable protection rules, or release any product. Do not trigger this test in a loop just to increase run count.
+
+**Evidence status at authorship:** the script and workflow were authored; the independent-runner workflow can be executed only after its manual workflow is present on the repository default branch. Treat runner verification as **NOT YET EXECUTED** until an actual GitHub Actions run ID, job conclusions and the final commit are observed. Passing this workflow would prove one multi-runner collision experiment, **not** that two real ChatGPT chats were spawned or that arbitrary non-compliant writers cannot conflict.
