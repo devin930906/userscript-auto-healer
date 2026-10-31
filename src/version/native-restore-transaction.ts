@@ -775,6 +775,11 @@ export async function restoreVerifiedOriginalNativeOnly(
       receiptJournal.path,publishedJournalIdentity,journalParentIdentity)||
      !await restorePathUnclaimed(lock))
    return block('RECOVERY_SAFETY_FAILED');
+  // Revocation can arrive after an irreversible source rename while
+  // post-rename evidence is still being checked. Retain both backups and
+  // the published intent, but never issue a clean success receipt after
+  // native consent has been withdrawn. No automatic rollback is attempted.
+  if(signal?.aborted)return block('CANCELLED');
   return completedRestore;
  }catch{return block('RECOVERY_SAFETY_FAILED');}
 }
