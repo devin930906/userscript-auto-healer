@@ -364,10 +364,11 @@ export async function restoreVerifiedOriginalNativeOnly(
     // grandparent differs ONLY in letter case. A published journal hashes the
     // original path string, so that alternate spelling would evade an
     // unresolved restore intent. Compare higher ancestor names with their
-    // native directory entries. Reject an established case-only mismatch
-    // or an unlisted 8.3 short-name shape. Windows runner temp/virtual
-    // paths may map to different ancestor names, so unrelated unexplained
-    // mismatches remain outside this deliberately bounded safeguard.
+    // native directory entries. Reject established case-only mismatches
+    // at every ancestor; also reject an unlisted short 8.3 spelling at the
+    // selected source's immediate grandparent only. Higher Windows runner
+    // temp/virtual aliases remain unresolved rather than breaking valid
+    // native restore operations across unrelated environment ancestors.
     for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
         ancestor=dirname(ancestor)){
      const expectedName=basename(ancestor);
@@ -377,7 +378,11 @@ export async function restoreVerifiedOriginalNativeOnly(
      // Only reject an UNLISTED short-name shape; a literal FOO~1 directory
      // stays eligible when the actual parent enumeration lists FOO~1.
      const stem=expectedName.split('.')[0];
-     const shortAliasShaped=stem.length<=8&&
+     // Limit this new check to the directly selected source's grandparent.
+     // Hosted Windows temporary roots can themselves use unlisted 8.3
+     // spellings; rewriting that established environment-wide authority is
+     // outside this bounded, source-local guard.
+     const shortAliasShaped=ancestor===dirname(parent)&&stem.length<=8&&
        /^[^~.\\/]{1,6}~[1-9][0-9]*$/.test(stem)&&
        (expectedName===stem||
         (expectedName[stem.length]==='.'&&
