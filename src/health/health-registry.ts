@@ -81,6 +81,10 @@ function validObservation(input: unknown): ObservationInput {
 }
 export class LimitedHealthRegistry {
   private readonly entries = new Map<string, LimitedHealthEvent[]>();
+  // An observation once seen expired or time-reversed must never regain
+  // fresh status merely because the OS clock moved backwards. Per-script
+  // revocation is cleared only by a NEW, timestamp-ordered observation.
+  private readonly staleEvidence = new Set<string>();
   constructor(private readonly now: () => number = Date.now) {
     if (typeof now !== 'function') throw Error('INVALID_HEALTH_CLOCK');
   }
@@ -96,8 +100,10 @@ export class LimitedHealthRegistry {
     const prior = this.entries.get(observation.scriptHash);
     if (!prior && this.entries.size >= MAX_SCRIPTS)
       throw Error('HEALTH_CAPACITY_EXCEEDED');
-    if (prior && prior.length && timestamp < prior[prior.length - 1].observedAtMs)
+    if (prior && prior.length && timestamp < prior[prior.length - 1].observedAtMs) {
+      this.staleEvidence.add(observation.scriptHash);
       throw Error('HEALTH_CLOCK_ROLLBACK');
+    }
     const status = observation.kind === 'LIMITED_DOM_OBSERVATION'
       ? 'ELEMENT_FOUND_ONLY' : 'INDETERMINATE';
     const event = Object.freeze({
@@ -108,6 +114,7 @@ export class LimitedHealthRegistry {
     }) as LimitedHealthEvent;
     const history = [...(prior || []), event].slice(-MAX_EVENTS_PER_SCRIPT);
     this.entries.set(observation.scriptHash, history);
+    this.staleEvidence.delete(observation.scriptHash);
     return this.snapshotAt(observation.scriptHash, timestamp);
   }
   /** Freshness concerns only the limited observation, never script health. */
@@ -118,10 +125,14 @@ export class LimitedHealthRegistry {
   private snapshotAt(hash: string, timestamp: number): LimitedHealthSnapshot {
     const history = this.entries.get(hash) || [];
     const latest = history[history.length - 1];
+    // A wall-clock rollback must not revive previously stale evidence.
+    // Retain the fact that this specific script was observed as expired or
+    // time-reversed, without changing or deleting historical observations.
+    const expired = !!latest && (timestamp < latest.observedAtMs ||
+      timestamp - latest.observedAtMs > FRESHNESS_MS);
+    if (expired) this.staleEvidence.add(hash);
     const status: LimitedHealthStatus = !latest ? 'UNTESTED' :
-      timestamp < latest.observedAtMs ||
-      timestamp - latest.observedAtMs > FRESHNESS_MS
-        ? 'INDETERMINATE' : latest.status;
+      this.staleEvidence.has(hash) ? 'INDETERMINATE' : latest.status;
     return Object.freeze({
       schema: 'uah-limited-health-v1' as const,
       phase: 'UNVERIFIED_LOCAL_HISTORY' as const,
