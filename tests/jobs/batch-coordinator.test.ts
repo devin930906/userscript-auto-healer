@@ -30,6 +30,34 @@ test('TASK-013/TEST-022/026: serial checkpoint cannot finish a later job before 
  assert.deepEqual(allowed.snapshot().jobs.map(x=>x.state),['QUEUED','SUCCEEDED']);
 });
 
+test('TASK-013/TEST-022/026: parallel checkpoint cannot skip a never-dispatched earlier job',()=>{
+ const options={count:3,concurrency:2,maxAttempts:2,
+  jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
+ const worker=async()=> 'DONE' as const;
+ const initial=new ReadOnlyBatchCoordinator(options,worker).snapshot();
+ // The scheduler always takes the earliest QUEUED ordinal. If ordinal 0
+ // has zero attempts, ordinal 2 cannot already be running, settled or
+ // waiting for a retry: that would skip required read-only work on resume.
+ for(const state of ['RUNNING','SUCCEEDED','FAILED','QUEUED'] as const){
+  const forged={...initial,jobs:[
+   {ordinal:0,state:'QUEUED' as const,attempts:0},
+   {ordinal:1,state:'QUEUED' as const,attempts:0},
+   {ordinal:2,state,attempts:1}
+  ]};
+  assert.throws(()=>new ReadOnlyBatchCoordinator(options,worker,forged),
+   /INVALID_BATCH_CHECKPOINT/,state);
+ }
+ // Earlier queued work that was genuinely attempted before process restart
+ // must remain resumable while the other lane may already have settled.
+ const legitimate={...initial,jobs:[
+  {ordinal:0,state:'QUEUED' as const,attempts:1},
+  {ordinal:1,state:'SUCCEEDED' as const,attempts:1},
+  {ordinal:2,state:'QUEUED' as const,attempts:0}
+ ]};
+ assert.deepEqual(new ReadOnlyBatchCoordinator(options,worker,legitimate)
+  .snapshot().jobs.map(job=>job.state),['QUEUED','SUCCEEDED','QUEUED']);
+});
+
 test('TASK-013/TEST-022/026: a two-lane checkpoint cannot have three in-flight jobs',()=>{
  const options={count:4,concurrency:2,maxAttempts:2,
   jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C,'d'.repeat(64)]};
