@@ -187,7 +187,7 @@ export function createLimitedGmReport(
   const meta=captureFields(session,[
    'runAt','browserVersion','expiresAt','snapshot','consistencySnapshot',
    'domSnapshot','status','source','installUrl','origin','runtimeHint',
-   'visit','observe','stop','domSnapshot','consistencySnapshot','modeReportSnapshot'
+   'visit','observe','stop','isActive','domSnapshot','consistencySnapshot','modeReportSnapshot'
   ],['runAt','browserVersion','expiresAt','snapshot',
      'consistencySnapshot','domSnapshot']);
   if(!meta||!iso(collectedAt)||!iso(meta.expiresAt)||

@@ -13,7 +13,7 @@ import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../s
 import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
-import { startApprovedTampermonkeyDiagnostic, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
+import { startApprovedTampermonkeyDiagnostic, isCurrentManualDiagnosticSession, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
@@ -98,7 +98,10 @@ function stopOnlyGmProbe():void {
   if(active)void active.stop().catch(()=>undefined);
 }
 function liveGmProbe():ManualTampermonkeyDiagnosticSession|null {
-  if(gmProbeSession&&Date.now()>=gmProbeSession.expiresAt)
+  // The native server may have irrevocably expired by monotonic elapsed time
+  // even if the Windows wall clock is moved backwards. Never offer a stale
+  // fixture as active in status, visit, DOM observation or Save Report UI.
+  if(gmProbeSession&&!isCurrentManualDiagnosticSession(gmProbeSession))
     stopOnlyGmProbe();
   return gmProbeSession;
 }

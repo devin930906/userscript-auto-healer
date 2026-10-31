@@ -216,6 +216,8 @@ export interface ManualTampermonkeyDiagnosticSession {
  readonly installUrl:string;
  readonly origin:string;
  readonly expiresAt:number;
+ /** Native lease check for desktop state only; never grants manager or write rights. */
+ readonly isActive:()=>boolean;
  readonly runtimeHint:Extract<ManagerPresenceResult,{ok:true}>;
  /** Only navigates a new tab in the already-owned isolated Chrome. */
  readonly visit:(mode:GmProbeMode,explicitUserApproved:boolean)=>Promise<VisitStatus>;
@@ -233,6 +235,19 @@ export interface ManualTampermonkeyDiagnosticSession {
  /** Closes only the disposable fixture, NOT the separately owned Chrome. */
  readonly stop:()=>Promise<void>;
 }
+/** Desktop activity must follow the same native monotonic consent and browser
+ * ownership decision as visit()/observe(), not wall time alone.
+ * This is only an ephemeral lifecycle check, NEVER GM/business attestation.
+ */
+export function isCurrentManualDiagnosticSession(
+ session:Pick<ManualTampermonkeyDiagnosticSession,'expiresAt'|'isActive'>|null
+):boolean{
+ try{
+  return session!==null&&session.isActive()===true&&
+   Number.isFinite(session.expiresAt)&&Date.now()<session.expiresAt;
+ }catch{return false;}
+}
+
 export type StartDiagnosticResult=
  |{readonly ok:true;readonly session:ManualTampermonkeyDiagnosticSession}
  |{readonly ok:false;readonly code:
@@ -606,7 +621,7 @@ export async function startApprovedTampermonkeyDiagnostic(
    status:'MANUAL_TEST_READY_NOT_VERIFIED',runAt:probe.runAt,
     browserVersion:browser.chromeVersion,source:probe.source,
    installUrl:probe.installUrl,
-   origin:probe.origin,expiresAt:probe.expiresAt,runtimeHint:hint,
+   origin:probe.origin,expiresAt:probe.expiresAt,isActive:ready,runtimeHint:hint,
    visit,observe,domSnapshot,
    modeReportSnapshot:()=>summarizeManualModeReceipts(
      ready()?probe.receiptSnapshot():{}),
