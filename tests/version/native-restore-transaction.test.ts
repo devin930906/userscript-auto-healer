@@ -1133,6 +1133,46 @@ test('TASK-011/TEST-020/021/026: revoked native window before final rename retai
  });
 });
 
+
+test('TASK-011/TEST-020/021/026: revocation immediately after native rename cannot acknowledge restoration',async()=>{
+ await fixture(async opts=>{
+  const controller=new AbortController();
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const realRename=fsPromises.rename;
+  let revokedAfterRename=false;
+  (fsPromises as {rename:typeof realRename}).rename=async(from,to)=>{
+   await realRename(from,to);
+   // The actual selected source has already been replaced. The caller
+   // withdraws native consent while post-rename evidence is still pending.
+   // Never undo the filesystem rename or delete the recovery copies.
+   if(typeof from==='string'&&from.endsWith('.pending')&&to===opts.sourcePath){
+    revokedAfterRename=true;
+    controller.abort();
+   }
+  };
+  try{
+   const receipt=await invokeNativeRestoreWithSignal(opts,controller.signal);
+   assert.equal(revokedAfterRename,true,'revocation must follow a real native source rename');
+   assert.deepEqual(receipt,{
+    status:'BLOCKED',reason:'CANCELLED',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   },'native consent revocation must revoke success even after source replacement');
+   assert.deepEqual(await readFile(opts.sourcePath),original,
+    'completed source replacement cannot be automatically rolled back');
+   const files=await readdir(opts.backupDirectory);
+   assert.ok(files.includes(opts.backupFileName),
+    'original backup remains for manual reconciliation');
+   assert.ok(files.some(n=>n.endsWith('.backup.user.js')&&n!==opts.backupFileName),
+    'displaced version must remain independently recoverable');
+   assert.ok(files.some(n=>n.endsWith('.journal.json')),
+    'published recovery intent must survive an aborted receipt');
+  }finally{
+   (fsPromises as {rename:typeof realRename}).rename=realRename;
+  }
+ });
+});
+
 test('TEST-020/026: renamed ancestor junction must invalidate restore lock ownership',async t=>{
  const root=await mkdtemp(join(tmpdir(),'uah-restore-lock-ancestor-'));
  const parent=join(root,'canonical');
