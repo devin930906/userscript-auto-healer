@@ -26,7 +26,7 @@ test('TASK-007/TEST-017/026: manager URL diagnostics never log raw URLs with fra
  // Real native-gm Windows job #124592885695 leaked ?key= inside the URL
  // encoded by Tampermonkey's vendor installer as a fragment (#url=...).
  // A regular expression on only top-level ?key= is not sufficient.
- assert.doesNotMatch(source,/p\\.url\\(\\)\\.replace\\(/,
+ assert.ok(!source.includes('p.url().replace('),
   'never copy arbitrary browser URLs to Actions logs after query-only redaction');
 });
 
