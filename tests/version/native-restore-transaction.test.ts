@@ -70,7 +70,7 @@ test('TASK-011/TEST-020/021/026: valid but misplaced native restore journal in s
    'no irreversible source rename is permitted while evidence is misplaced');
   assert.deepEqual((await readdir(opts.backupDirectory)).sort(),prior,
    'no displaced backup or new recovery intent should be published');
-  assert.equal(await hasInterruptedRestoreStaging(parent),true,
+  assert.equal(await hasInterruptedRestoreStaging(parent,undefined,undefined,'source-parent'),true,
    'misplaced journal remains evidence, not an exempted backup-store intent');
  });
 });
