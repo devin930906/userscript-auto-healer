@@ -735,6 +735,40 @@ try {
       Remove-Variable -Name task020FinalEvidenceSamples -Scope Script -ErrorAction SilentlyContinue
     }
 
+    # ISSUE-215 / TEST-028: a real held file lock must cause intermediate
+    # anonymous EXE observations only at bounded powers-of-two retry
+    # checkpoints (2,4), without changing the original Windows exception.
+    $originalIntermediateProbe=(Get-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary').ScriptBlock
+    $script:task020IntermediateSamples=0
+    try {
+      Set-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary' -Value {
+        param([string]$source)
+        $script:task020IntermediateSamples++
+        return 'deniedExe=unavailable'
+      }
+      $intermediateRefused=$false
+      $intermediateDest=Join-Path $root 'intermediate-denial-receipts'
+      try {
+        Move-CandidatePortableDirectory $permanent $intermediateDest 5 0 @($permanentFile) | Out-Null
+      } catch {
+        $reason=$_.Exception
+        while($reason.InnerException) { $reason=$reason.InnerException }
+        $intermediateRefused=(($reason -is [System.IO.IOException] -or
+          $reason -is [System.UnauthorizedAccessException]) -and
+          (($reason.HResult -band 0xFFFF) -in @(5,32,33)))
+        if(-not $intermediateRefused) { throw }
+      }
+      if(-not $intermediateRefused -or $script:task020IntermediateSamples -ne 2 -or
+         (Test-Path -LiteralPath $intermediateDest) -or
+         -not (Test-Path -LiteralPath $permanentFile -PathType Leaf)) {
+        throw "TEST-028: intermediate diagnostics must only sample retries 2 and 4 without changing source"
+      }
+      Write-Output 'PASS: real locked candidate retains original denial and samples only retries 2 and 4'
+    } finally {
+      Set-Item 'Function:\Get-CandidatePortableDeniedExeRmSummary' -Value $originalIntermediateProbe
+      Remove-Variable -Name task020IntermediateSamples -Scope Script -ErrorAction SilentlyContinue
+    }
+
     # ISSUE-215 / TEST-028: a read-only failure-evidence collector is
     # best-effort. A fault in it must not replace the real Windows rename
     # access-denied error, shorten the bound, or alter original bytes.
