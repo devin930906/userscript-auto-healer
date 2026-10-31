@@ -293,6 +293,11 @@ export class ReadOnlyBatchCoordinator{
   return persisted.every((old,i)=>{
    const current=this.jobs[i];
    if(current.attempts<old.attempts)return false;
+   // A queued retry cannot become RUNNING or terminal without starting a
+   // new attempt. A batch-wide cancellation needs no additional dispatch.
+   if(old.state==='QUEUED'&&current.attempts===old.attempts&&
+      (current.state==='RUNNING'||current.state==='SUCCEEDED'||
+       current.state==='FAILED'))return false;
    // Once a job has a persisted terminal outcome, a stale process must
    // never erase it, change its outcome, or replay its attempt count.
    if(old.state==='SUCCEEDED'||old.state==='FAILED'||old.state==='CANCELLED')

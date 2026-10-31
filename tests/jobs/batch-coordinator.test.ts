@@ -57,6 +57,46 @@ test('TASK-013/TEST-022/026: a two-lane checkpoint cannot have three in-flight j
   'the permitted two concurrent interrupted attempts remain recoverable');
 });
 
+test('TASK-013/TEST-022/026: queued retries cannot report terminal results without a new attempt',()=>{
+ const options={count:2,concurrency:2,maxAttempts:2,jobHashes:[SCRIPT_A,SCRIPT_B]};
+ const initial=new ReadOnlyBatchCoordinator(options,async()=> 'DONE').snapshot();
+ const old={...initial,jobs:[
+  {ordinal:0,state:'SUCCEEDED' as const,attempts:1},
+  {ordinal:1,state:'QUEUED' as const,attempts:1}
+ ]};
+ for(const nextState of ['SUCCEEDED','FAILED'] as const){
+  const forged={...initial,jobs:[
+   {...old.jobs[0]},
+   {ordinal:1,state:nextState,attempts:1}
+  ]};
+  const coordinator=new ReadOnlyBatchCoordinator(options,async()=> 'DONE',forged);
+  assert.equal(coordinator.mayPersistOver(old),false,
+   'same-attempt '+nextState+' cannot replace a queued retry receipt');
+ }
+ // An interrupted RUNNING snapshot is normalized back to QUEUED before
+ // persistence; it is not an observed in-process RUNNING transition.
+ const interrupted={...initial,jobs:[
+  {...old.jobs[0]},
+  {ordinal:1,state:'RUNNING' as const,attempts:1}
+ ]};
+ const recovered=new ReadOnlyBatchCoordinator(options,async()=> 'DONE',interrupted);
+ assert.equal(recovered.snapshot().jobs[1].state,'QUEUED');
+ assert.equal(recovered.mayPersistOver(old),true,
+  'an unchanged, normalized queued retry remains safely idempotent');
+ const valid={...initial,jobs:[
+  {...old.jobs[0]},
+  {ordinal:1,state:'SUCCEEDED' as const,attempts:2}
+ ]};
+ assert.equal(new ReadOnlyBatchCoordinator(options,async()=> 'DONE',valid).mayPersistOver(old),
+  true,'completed retry with a new attempt can advance journal');
+ const cancelled={...initial,jobs:[
+  {...old.jobs[0]},
+  {ordinal:1,state:'CANCELLED' as const,attempts:1}
+ ]};
+ assert.equal(new ReadOnlyBatchCoordinator(options,async()=> 'DONE',cancelled).mayPersistOver(old),
+  true,'batch cancellation does not require starting another attempt');
+});
+
 test('TASK-013/TEST-022/026: parallel cancelled checkpoint cannot replay any queued job',async()=>{
  const options={count:3,concurrency:2,maxAttempts:2,
   jobHashes:[SCRIPT_A,SCRIPT_B,SCRIPT_C]};
