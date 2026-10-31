@@ -93,7 +93,10 @@ export function assessLocalAcceptancePreflight(
          !REQUEST_FIELDS.includes(k as typeof REQUEST_FIELDS[number]))||
        REQUEST_FIELDS.some(k=>!Object.prototype.hasOwnProperty.call(requestDescriptors,k)||
          !Object.prototype.hasOwnProperty.call(requestDescriptors[k],'value'))||
-       requestDescriptors.expectedSourceSha256.value!==diskSourceSha256)
+       requestDescriptors.expectedSourceSha256.value!==diskSourceSha256||
+       // RegExp.test in the downstream candidate planner would coerce an
+       // object-valued evidence ID and invoke caller-controlled JavaScript.
+       typeof requestDescriptors.faultEvidenceId.value!=='string')
       return blocked('SOURCE_IDENTITY_UNCONFIRMED');
 
     // Regenerate the AST-anchored diff and exact candidate schema, including
