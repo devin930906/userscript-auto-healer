@@ -8,6 +8,7 @@ permissions: {}
 jobs:
   contender_a:
     name: Independent GitHub runner A
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,6 +25,7 @@ jobs:
 
   contender_b:
     name: Independent GitHub runner B
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -41,6 +43,7 @@ jobs:
   verify:
     name: Verify one winner, duplicate refusal and unchanged SHA
     needs: [contender_a, contender_b]
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
