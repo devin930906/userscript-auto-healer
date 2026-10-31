@@ -405,3 +405,7 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 修正后的真实 Windows RED [#41174961316](https://github.com/devin930906/userscript-auto-healer/actions/runs/41174961316)：761 项/759 通过/1 个预期失败/1 跳过；GREEN [#41174965009](https://github.com/devin930906/userscript-auto-healer/actions/runs/41174965009)、PR Application [#41175266262](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175266262)、合并后 main [#41175855520](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175855520)：761 项/760 通过/0 失败/1 条件跳过，Electron smoke 成功。最初测试错误地预期重启 RUNNING 仍维持运行中状态，已明确修正，原失败日志仍保留在 PR。
 - Windows [候选双包 #41175266285](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175266285) 成功，PR 合成源 `4c8e52d632c1ffd581c4c7836736b25e659a012d`，**不是正式 Stable RC**。
 - 此项为 `TASK-013/REQ-022/TEST-022/026` 单独的持久化防回归修复；#440 原始间歇性 AST Worker 问题未查明，保持 Open；其他 TASK/TEST/GATE 和正式发布门槛不变。
+
+## 2026-10-31 跨会话并行执行补充（仅执行治理）
+
+TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式代码实施，先依 `AGENTS.md` 与 `docs/16-cross-session-issue-claims.md` 核验完整的 Issues/PR/分支/CI 状态并用**服务端创建唯一引用**对实际 Issue 取得可核验独占权；认领失败或历史分支归属不明则跳过。并行候选不是事先批准的分组；必须逐一核验模块、拟改文件、共享类型与工作流、接口/依赖及 PR 集成门槛。未实际验证的并行性记为“无法确认”，不虚构分组或修改 TASK 正式编号。
