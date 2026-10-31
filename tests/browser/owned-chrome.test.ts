@@ -287,6 +287,13 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     t.diagnostic('CDP_BOOTSTRAP_TIMELINE='+timeline.summary());
   }
   assert.equal(result.ok,true,JSON.stringify(result));
+  // Chrome uses an explicit nonzero CDP port here. Chromium writes
+  // DevToolsActivePort for an OS-assigned port (0); absence with this
+  // fixed-port successful control is NOT evidence of a missing listener.
+  // See chromium/src/chrome/browser/devtools/remote_debugging_server.cc.
+  // Record only disposable-profile marker presence, never its contents.
+  t.diagnostic('CDP_FIXED_PORT_SUCCESS_MARKERS='+
+    await redactedChromeBootstrapMarkers(profile));
   const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
     'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED',
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP']);
