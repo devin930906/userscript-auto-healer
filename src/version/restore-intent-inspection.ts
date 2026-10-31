@@ -12,7 +12,7 @@ import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
 import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join,resolve} from 'node:path';
-import {types as nodeTypes} from 'node:util';
+import {TextDecoder,types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {hasUnsafePathLink} from './path-boundary';
 import {backupPrefix} from './verified-backup';
@@ -153,7 +153,12 @@ async function readJournal(path:string):Promise<string|null>{
    const byPath=await lstat(path,{bigint:true});
    if(!sameFile(before,after)||!sameFile(after,byPath)||
       byPath.nlink!==1n||await hasUnsafePathLink(path))return null;
-   return buffer.subarray(0,count).toString('utf8');
+   // Recovery journals are canonical native byte records. Buffer.toString()
+   // silently substitutes malformed UTF-8 with U+FFFD, allowing damaged
+   // bytes to look exactly like a legitimate filename containing U+FFFD.
+   // Refuse lossy decoding before JSON/schema validation; preserve valid
+   // Unicode filenames and require manual review of corrupt journal bytes.
+   return new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,count));
   }finally{await h.close();}
  }catch{return null;}
 }
