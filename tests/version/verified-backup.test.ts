@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {removeOwnedStagingPending} from '../../src/version/staging-pending-ownership';
 import {verifyBackupRecoverySource} from '../../src/version/recovery-source';
 import {verifyExactCandidateBytesReadOnly} from '../../src/version/candidate-bytes';
 
@@ -367,5 +368,36 @@ test('TASK-011/TEST-020/026: an independent original backup cannot share its sel
   assert.deepEqual((await readdir(dir)).sort(),originalEntries,
    'the declined destination must not create a backup or a lock artifact');
   assert.deepEqual(await readFile(file),script);
+ });
+});
+
+
+test('TASK-011/TEST-020/026: published hard-link aliases with non-project filenames cannot retire staging evidence',async()=>{
+ await fixture(async(_source,backupDir)=>{
+  const pendingName='.12345678-1234-4123-8123-123456789abc.pending';
+  const publishedCases=[
+   {name:'unrelated-user-document.txt',valid:false},
+   {name:'source.backup.user.js',valid:false},
+   {name:'source.12345678-1234-4123-8123-123456789abc.journal.json',valid:false},
+   {name:'source.12345678-1234-4123-8123-123456789abc.backup.user.js',valid:true},
+   {name:'source.12345678-1234-4123-8123-123456789abc.candidate.user.js',valid:true}
+  ];
+  for(const [index,{name,valid}] of publishedCases.entries()){
+   const root=join(backupDir,'staging-'+index);
+   await mkdir(root);
+   const pending=join(root,pendingName);
+   const published=join(root,name);
+   await writeFile(pending,script);
+   const owned=await lstat(pending,{bigint:true});
+   const parentOwned=await lstat(root,{bigint:true});
+   await link(pending,published);
+   assert.equal(await removeOwnedStagingPending(
+     pending,owned,parentOwned,published),valid,
+    'must validate the native publication filename before retiring '+name);
+   assert.deepEqual(await readFile(published),script);
+   assert.deepEqual((await readdir(root)).sort(),
+    valid?[name]:[name,pendingName].sort(),
+    'invalid external publication alias must retain all staging evidence');
+  }
  });
 });
