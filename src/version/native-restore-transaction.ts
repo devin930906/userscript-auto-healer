@@ -364,10 +364,10 @@ export async function restoreVerifiedOriginalNativeOnly(
     // grandparent differs ONLY in letter case. A published journal hashes the
     // original path string, so that alternate spelling would evade an
     // unresolved restore intent. Compare higher ancestor names with their
-    // native directory entries, but reject only a PROVEN case-only alias:
-    // Windows runner temp/virtual paths can use a completely different name
-    // (e.g. short-name mapping) that cannot be attested from listing alone.
-    // Other path aliases remain outside this bounded case-only safeguard.
+    // native directory entries. Reject an established case-only mismatch
+    // or an unlisted 8.3 short-name shape. Windows runner temp/virtual
+    // paths may map to different ancestor names, so unrelated unexplained
+    // mismatches remain outside this deliberately bounded safeguard.
     for(let ancestor=dirname(parent);dirname(ancestor)!==ancestor;
         ancestor=dirname(ancestor)){
      const expectedName=basename(ancestor);
