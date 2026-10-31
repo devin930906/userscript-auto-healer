@@ -866,3 +866,41 @@ test('TASK-009/TEST-019/026: top and parent browser aliases must not disguise do
     assert.equal(outcome.automaticPatchAllowed,false);
   }
 });
+
+// TEST-019/026: the offline AST reviewer cannot resolve dynamic evaluation.
+// Global eval and Function constructors may replace document selectors without
+// exposing their execution inside the parsed, outer script AST. They must not
+// yield even a manual-review proposal from a misleading native-DOM assumption.
+test('TASK-009/TEST-019/026: indirect global code evaluation blocks offline selector patch proposals',()=>{
+ const dynamic=[
+  "window.eval('document.querySelector = () => null');",
+  "globalThis['eval']('document.querySelector = () => null');",
+  "(0, eval)('document.querySelector = () => null');",
+  "Function('document.querySelector = () => null')();",
+  "new Function('document.querySelector = () => null')();",
+  "window.Function('document.querySelector = () => null')();",
+  "globalThis['Function']('document.querySelector = () => null')();"
+ ];
+ for(const code of dynamic){
+  const script=meta+code+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'BLOCKED',code);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal('candidateSource' in result,false);
+ }
+ // A harmless ordinary method call and quoted eval-like source text are not
+ // execution. Keep existing local, strictly review-only eligibility intact.
+ for(const safe of [
+  "window.parseInt('12',10);",
+  "const note=\"window.eval('document.querySelector=undefined')\";"
+ ]){
+  const script=meta+safe+"\ndocument.querySelector('#old');";
+  const result=proposeLiteralSelectorPatch(request(script,{
+   callOffset:script.lastIndexOf("document.querySelector('#old')")
+  }));
+  assert.equal(result.status,'CANDIDATE_ONLY',safe);
+  assert.equal(result.automaticPatchAllowed,false);
+ }
+});

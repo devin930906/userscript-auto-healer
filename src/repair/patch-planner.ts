@@ -305,6 +305,33 @@ function capturesDestructuredDocumentAlias(node:AstNode):boolean{
  });
 }
 
+/** Dynamic code generation obscures changes to the global document and its
+ * selector methods from the outer Acorn AST. This bounded phase-one review
+ * refuses recognized global evaluators, including common indirect spellings.
+ * It does not claim a complete JavaScript alias/side-effect analysis; no
+ * candidate from this planner can ever be automatically applied.
+ */
+function invokesUnanalyzedGlobalCode(node:AstNode):boolean{
+ if(node.type!=='CallExpression'&&node.type!=='NewExpression')return false;
+ const isEvaluator=(target:unknown):boolean=>{
+  const callee=asNode(target);
+  if(callee?.type==='Identifier')
+   return callee.name==='eval'||callee.name==='Function';
+  if(callee?.type!=='MemberExpression')return false;
+  const host=asNode(callee.object);
+  return host?.type==='Identifier'&&
+    (host.name==='window'||host.name==='globalThis'||host.name==='self'||
+     host.name==='top'||host.name==='parent')&&
+    (hasMemberName(callee,'eval')||hasMemberName(callee,'Function'));
+ };
+ const callee=asNode(node.callee);
+ if(isEvaluator(callee))return true;
+ // (0,eval)(source) is an indirect global evaluator, not a benign call.
+ return callee?.type==='SequenceExpression'&&
+   Array.isArray(callee.expressions)&&callee.expressions.length>0&&
+   isEvaluator(callee.expressions[callee.expressions.length-1]);
+}
+
 /** Reject source whose `document` reference or selector methods cannot be
  * conservatively trusted. Direct eval and with-statements also make name
  * resolution ambiguous.
@@ -362,8 +389,7 @@ function ambiguousDocumentBinding(source:string):boolean{
         (isGlobalDocumentMember(node.argument)||
          isDynamicGlobalDocumentAlias(node.argument)||
          mayReplaceDomSelectorMethod(node.argument)))||
-       (node.type==='CallExpression'&&asNode(node.callee)?.type==='Identifier'&&
-        asNode(node.callee)?.name==='eval')||
+       invokesUnanalyzedGlobalCode(node)||
        mayReflectivelyMutateDocument(node)){
       ambiguous=true;return;
     }
