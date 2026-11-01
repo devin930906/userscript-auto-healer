@@ -1140,6 +1140,10 @@ test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful
   assert.equal(classify(error('ETIMEDOUT')),'FETCH_TIMEOUT');
   assert.equal(classify(error('ECONNRESET')),'FETCH_RESET');
   assert.equal(classify({name:'TimeoutError'}),'FETCH_TIMEOUT');
+  assert.equal(classify(new DOMException('private loopback timeout','TimeoutError')),
+    'FETCH_TIMEOUT','native DOMException.name is inherited, not an own descriptor');
+  assert.equal(classify(new DOMException('cancelled','AbortError')),'FETCH_FAILED',
+    'revocation must not be misreported as a transport timeout');
   for(const bad of [
     error('EPRIVATE_SCRIPT_CONTENT'),new Error('secret path C:/data/source.user.js'),
     Object.defineProperty({},'cause',{get(){throw Error('PRIVATE_DETAILS');}}),
