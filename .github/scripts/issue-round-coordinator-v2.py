@@ -216,6 +216,42 @@ def verify_owner_context():
     prs=get("/pulls?state=open&per_page=100")
     require(len(prs)<100 and not prs,"Competing open PR or incomplete PR listing")
 
+def verify_integrated_product_snapshot(main_sha):
+    """Fail closed if the existing legacy branch has unmatched final file content.
+
+    Exact final file comparison is NOT proof of former owner exit or of all
+    historical commits. The original work ref is retained in every case.
+    """
+    if ISSUE == 565:
+        return
+    compare = get("/compare/" + main_sha + "..." + LEGACY_SHA + "?per_page=100")
+    files = compare.get("files")
+    require(isinstance(files, list) and 0 < len(files) < 300,
+            "Incomplete legacy compare file inventory")
+    unexpected = []
+    for item in files:
+        name = item.get("filename", "")
+        require(item.get("status") != "renamed" and isinstance(name, str)
+                and name and not name.startswith("/"), "Unreviewed historical path")
+        url = "/contents/" + quote(name, safe="/") + "?ref="
+        old_blob = get(url + LEGACY_SHA)
+        main_blob = get(url + main_sha)
+        require(old_blob.get("type") == "file" and main_blob.get("type") == "file",
+                "Legacy changed path not present on both branches")
+        if old_blob["sha"] == main_blob["sha"]:
+            continue
+        # Owner has separately audited the main-side-only 78-line #215 test.
+        allowed = MAIN_ONLY_DIFF.get(ISSUE, {}).get(name)
+        if allowed != (main_blob["sha"], old_blob["sha"]):
+            unexpected.append(name)
+    require(not unexpected, "Unreconciled legacy final snapshots: " + ", ".join(unexpected))
+    require(get("/git/ref/heads/work/issue-" + str(ISSUE))["object"]["sha"] == LEGACY_SHA,
+            "Historical Issue branch moved during inspection")
+    require(get("/git/ref/heads/main")["object"]["sha"] == main_sha,
+            "main moved during historical snapshot inspection")
+    print("PASS: historical final file snapshots matched; prior owner exit NOT inferred")
+
+
 def initialize():
     verify_owner_context()
     start=os.environ["GITHUB_SHA"]
@@ -241,6 +277,11 @@ def transition(op, proof_hash=None, public_key_hex=None,
     require(state.get("legacy_ref_sha")==LEGACY_SHA,"Unexpected legacy snapshot")
     if op == "release":
         require(old_sha == expected_head_sha, "Coordinator moved since release was signed")
+    if op == "recover" and ISSUE != 565:
+        require(os.getenv("COORD_RECOVERY_CONFIRM") ==
+                "RECOVER-" + str(ISSUE) + "-PRESERVE-HISTORY",
+                "Missing explicit owner Issue-specific recovery authorization")
+        verify_integrated_product_snapshot(os.environ["GITHUB_SHA"])
     next_state=state_step(state, op, proof_hash=proof_hash,
                           public_key_hex=public_key_hex,
                           signature_hex=signature_hex,
