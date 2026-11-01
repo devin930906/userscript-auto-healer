@@ -112,8 +112,8 @@ def release_payload(state, expected_head_sha):
     require(isinstance(expected_head_sha, str) and
             re.fullmatch(r"[0-9a-f]{40}", expected_head_sha) is not None,
             "Expected coordinator commit SHA missing")
-    return ("coord-release/v2\\n" + REPO + "\\n" + str(ISSUE) + "\\n"
-            + str(state["round"]) + "\\n" + expected_head_sha + "\\n").encode("utf-8")
+    return ("coord-release/v2\n" + REPO + "\n" + str(ISSUE) + "\n"
+            + str(state["round"]) + "\n" + expected_head_sha + "\n").encode("utf-8")
 
 
 def verify_release_signature(state, expected_head_sha, signature_hex):
@@ -126,8 +126,8 @@ def verify_release_signature(state, expected_head_sha, signature_hex):
             "Malformed Ed25519 signature")
     # RFC 8410 SubjectPublicKeyInfo prefix for the 32-byte Ed25519 public key.
     der = bytes.fromhex("302a300506032b6570032100" + pubkey)
-    pem = (b"-----BEGIN PUBLIC KEY-----\\n" +
-           base64.encodebytes(der).replace(b"\\n", b"") + b"\\n-----END PUBLIC KEY-----\\n")
+    pem = (b"-----BEGIN PUBLIC KEY-----\n" +
+           base64.encodebytes(der).replace(b"\n", b"") + b"\n-----END PUBLIC KEY-----\n")
     with tempfile.TemporaryDirectory(prefix="coord-owner-verify-") as directory:
         root = Path(directory)
         (root / "pub.pem").write_bytes(pem)
