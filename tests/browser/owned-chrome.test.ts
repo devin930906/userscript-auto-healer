@@ -404,6 +404,87 @@ test('TASK-005/TEST-007/009/026: revocation interrupts pending prelaunch checks 
   }
 });
 
+/** Netstat can remain in its own 12s Windows subprocess while approval or
+ * the owned child disappears. Neither event may wait for the PID probe.
+ * All Chrome, filesystem, fetch and OS probes are synthetic (zero user I/O).
+ */
+test('TASK-005/TEST-006/007/009/026: pending native listener PID proof cannot delay revocation or owned-child exit',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12069);
+  for(const phase of ['consent','child-exit'] as const){
+    const controller=new AbortController();
+    let enterProbe!:()=>void,completeProbe!:()=>void;
+    const entered=new Promise<void>(resolve=>{enterProbe=resolve;});
+    const blocked=new Promise<void>(resolve=>{completeProbe=resolve;});
+    const child=Object.assign(new EventEmitter(),{
+      pid:41269,exitCode:null as number|null,killed:false,
+      signalCode:null as string|null,
+      kill(){this.killed=true;return true;}
+    });
+    let websocketProofs=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>({
+        ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+        config:cfg,runtimeIdentityVerified:false as const
+      }));
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+        ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+        version:'155.0.1.1',publisher:'Google LLC' as const,
+        runtimeVerified:false as const
+      }));
+      t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+      t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+        enterProbe();
+        await blocked;
+        return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+          pid:41269,executableVerified:false as const};
+      });
+      t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+        websocketProofs++;
+        return true;
+      });
+      t.mock.method(globalThis,'fetch',async()=>
+        new Response(JSON.stringify({
+          Browser:'Chrome/155.0.1.1',
+          webSocketDebuggerUrl:'ws://127.0.0.1:12069/devtools/browser/abcdefgh-1234'
+        }))
+      );
+      const pending=launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:controller.signal
+      });
+      await entered;
+      if(phase==='consent')controller.abort();
+      else{
+        child.exitCode=1;
+        child.emit('exit',1,null);
+      }
+      const early=await Promise.race([
+        pending.then(value=>({settled:true as const,value})),
+        delay(160).then(()=>({settled:false as const}))
+      ]);
+      completeProbe();
+      const result=await pending;
+      const expected={ok:false,code:phase==='consent'?'ABORTED':'LAUNCH_FAILED'};
+      assert.equal(early.settled,true,
+        phase+' must finish before the blocked native netstat proof resolves');
+      if(early.settled)assert.deepEqual(early.value,expected);
+      assert.deepEqual(result,expected);
+      assert.equal(websocketProofs,0,'cancelled owner check must never open CDP WebSocket');
+      assert.equal(isLiveApprovedChromeSession(result),false);
+      if(phase==='consent')assert.equal(child.killed,true,
+        'only the synthetic owned child must be retired on revoked consent');
+    }finally{
+      completeProbe();
+      t.mock.reset();
+    }
+  }
+});
+
 test('TASK-005/TEST-006/007/009/026: Chrome launch consent options never evaluate accessors or Proxy traps',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
