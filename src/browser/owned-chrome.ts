@@ -266,10 +266,12 @@ export async function launchApprovedIsolatedChrome(
   if(!checked)return {ok:false,code:'NOT_AUTHORIZED'};
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   const preflight=await preflightChrome(input);
+  // A revoked native approval wins over a concurrently failed async preflight.
+  if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!preflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const binary=await inspectWindowsChromeBinary(preflight.config);
-  if(!binary.ok)return {ok:false,code:'BINARY_NOT_VERIFIED'};
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  if(!binary.ok)return {ok:false,code:'BINARY_NOT_VERIFIED'};
   if(checked.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
     return {ok:false,code:'NOT_AUTHORIZED'};
   // Authenticode inspection may take seconds after the first port/profile
@@ -278,8 +280,8 @@ export async function launchApprovedIsolatedChrome(
   // before spawn; fail closed rather than boot Chrome against a stale receipt.
   // This narrows, but cannot eliminate, the final OS port bind race.
   const finalPreflight=await preflightChrome(preflight.config);
-  if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const cfg=finalPreflight.config;
   const argv=[
     '--no-first-run','--no-default-browser-check','--disable-background-networking',
