@@ -998,8 +998,10 @@ test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry
     });
     assert.deepEqual(result,{ok:false,code:'ABORTED'});
     assert.equal(fetches,1,'revoked consent must prevent a second CDP probe');
-    assert.deepEqual(pauseSignals,[controller.signal],
-      'owned bootstrap retry pause must receive the native cancellation signal');
+    assert.equal(pauseSignals.length,1,'exactly one cancelled retry pause');
+    assert.equal(controller.signal.aborted,true,'native consent was revoked');
+    assert.equal(pauseSignals[0]?.aborted,true,
+      'combined child-exit and native consent signal must cancel retry immediately');
     assert.deepEqual(stages,['FETCH_REFUSED']);
     assert.equal(child.killed,true,'cancellation must stop only the owned child');
   }finally{t.mock.reset();}
