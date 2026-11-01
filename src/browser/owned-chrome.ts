@@ -285,14 +285,19 @@ export async function launchApprovedIsolatedChrome(
     child=spawn(cfg.executablePath,argv,{shell:false,windowsHide:true,stdio:'ignore'});
   }catch{return {ok:false,code:'LAUNCH_FAILED'};}
   let errored=false,exited=false,retained=false;
-  child.once('error',()=>{errored=true;});
-  child.once('exit',()=>{exited=true;});
+  // A terminal owned-child event must cancel an in-flight CDP probe without
+  // waiting for its separate network timeout. No unrelated PID is touched.
+  const childExit=new AbortController();
+  child.once('error',()=>{errored=true;childExit.abort();});
+  child.once('exit',()=>{exited=true;childExit.abort();});
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
   const emitStage=(stage:ChromeStartupStage):void=>{
     try{checked.onStartupStage?.(stage);}
     catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
   };
   const pid=child.pid;
+  const activeSignal=checked.signal?
+    AbortSignal.any([checked.signal,childExit.signal]):childExit.signal;
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
   // Deadline uses monotonic process time: OS clock corrections must not
   // prematurely cut off (or extend) the 20-second consented CDP bootstrap.
@@ -306,13 +311,12 @@ export async function launchApprovedIsolatedChrome(
         // The per-probe timeout is independent of native revocation. A
         // revoked consent must cancel a still-pending CDP HTTP request,
         // not wait for this independent 1500ms deadline to expire.
-        const fetchSignal=checked.signal?
-          AbortSignal.any([checked.signal,AbortSignal.timeout(1500)]):
-          AbortSignal.timeout(1500);
+        const fetchSignal=AbortSignal.any([activeSignal,AbortSignal.timeout(1500)]);
         const response=await fetch(url,{redirect:'error',signal:fetchSignal});
         phase='PROCESS';
-        const payload=await readBoundedCdpJson(response,checked.signal);
+        const payload=await readBoundedCdpJson(response,activeSignal);
         if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
         if(response.status!==200)emitStage('HTTP_REJECTED');
         else if(payload===null)emitStage('BODY_REJECTED');
         if(payload!==null){
@@ -362,6 +366,8 @@ export async function launchApprovedIsolatedChrome(
             }
         }
       }catch(error){
+        if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
         // Fixed labels only. Raw transport errors may disclose loopback
         // addresses, user paths or Chrome runtime details.
         emitStage(phase==='FETCH'
@@ -370,9 +376,10 @@ export async function launchApprovedIsolatedChrome(
       // An already-revoked consent must interrupt the bounded retry pause,
       // not leave its own Chrome child alive for another fixed delay.
       try{
-        await delay(250,undefined,checked.signal?{signal:checked.signal}:undefined);
+        await delay(250,undefined,{signal:activeSignal});
       }catch{
         if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
         // Timers failing for any other reason never authorize the browser.
         return {ok:false,code:'LAUNCH_FAILED'};
       }
