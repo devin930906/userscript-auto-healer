@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Owner-authorized, monotonic coordination for eight legacy product Issues and #565.
 
-Production: operator may initialize and inspect #565; recovery and acquisition
+Production: owner may initialize and inspect an allowlisted Issue; recovery and acquisition
 require explicit owner-authorized Actions invocation. Historical work ref stays.
 Private release uses an Ed25519 signature on round/head only; the signing key
 is NEVER passed through Actions, logs or dispatch data.
@@ -266,7 +266,8 @@ def initialize():
     require(head("coord/issue-" + str(ISSUE))==commit,"Initializer readback mismatch")
     checked,_=state_at(commit)
     require(checked==state,"Initializer state mismatch")
-    print("INIT_OK: held legacy claim preserved; coord/issue-565 currently BLOCKED_LEGACY; SHA="+commit)
+    print("INIT_OK: legacy branch preserved; coord/issue-" + str(ISSUE)
+          + " is BLOCKED_LEGACY; SHA=" + commit)
 
 def transition(op, proof_hash=None, public_key_hex=None,
                signature_hex=None, expected_head_sha=None):
