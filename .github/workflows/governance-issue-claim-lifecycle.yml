@@ -1,0 +1,106 @@
+name: Governance Claim Lifecycle Test (NOT PRODUCT CI)
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/verify-issue-claim-lifecycle.sh'
+      - '.github/workflows/governance-issue-claim-lifecycle.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  syntax:
+    name: Script syntax only (no GitHub mutations)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: bash -n .github/scripts/verify-issue-claim-lifecycle.sh
+
+  init:
+    name: Create test-only claim and release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      release: ${{ steps.round.outputs.release }}
+      first: ${{ steps.round.outputs.first }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: round
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/verify-issue-claim-lifecycle.sh init none
+
+  contender_a:
+    name: Independent reacquisition runner A
+    needs: init
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      outcome: ${{ steps.round.outputs.outcome }}
+      candidate: ${{ steps.round.outputs.candidate }}
+      start: ${{ steps.round.outputs.start }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: round
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.init.outputs.release }}
+        run: bash .github/scripts/verify-issue-claim-lifecycle.sh contend a
+
+  contender_b:
+    name: Independent reacquisition runner B
+    needs: init
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      outcome: ${{ steps.round.outputs.outcome }}
+      candidate: ${{ steps.round.outputs.candidate }}
+      start: ${{ steps.round.outputs.start }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: round
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.init.outputs.release }}
+        run: bash .github/scripts/verify-issue-claim-lifecycle.sh contend b
+
+  verify:
+    name: Verify exclusive reacquisition and stale-round refusal
+    needs: [init, contender_a, contender_b]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.init.outputs.release }}
+          FIRST_CLAIM_SHA: ${{ needs.init.outputs.first }}
+          OUTCOME_A: ${{ needs.contender_a.outputs.outcome }}
+          OUTCOME_B: ${{ needs.contender_b.outputs.outcome }}
+          CANDIDATE_A: ${{ needs.contender_a.outputs.candidate }}
+          CANDIDATE_B: ${{ needs.contender_b.outputs.candidate }}
+          START_A: ${{ needs.contender_a.outputs.start }}
+          START_B: ${{ needs.contender_b.outputs.start }}
+        run: bash .github/scripts/verify-issue-claim-lifecycle.sh verify none
