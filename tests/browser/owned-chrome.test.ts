@@ -78,7 +78,7 @@ test('TASK-005/TEST-006/008/009: CPU pressure is manual Windows CI opt-in only',
     ['win32','true','push','true'],
     ['win32','true','workflow_dispatch','false'],
     ['win32','true','workflow_dispatch',undefined]
-  ] as const)assert.equal(active(...entry),false);
+  ] as const)assert.equal(active(entry[0],entry[1],entry[2],entry[3]),false);
 });
 
 /** Read only existence of Chrome's bootstrap markers inside this test-owned
