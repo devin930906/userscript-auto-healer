@@ -10,7 +10,7 @@ import { openApprovedTarget } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
@@ -34,6 +34,53 @@ async function unusedLoopbackPort():Promise<number>{
   if(!address||typeof address==='string')throw Error('PORT_PROBE_FAILED');
   return address.port;
 }
+/** Opt-in, manual-workflow-only bounded CPU contention to investigate the
+ * historical Windows Chrome child-running/no-CDP startup under resource load.
+ * Two test-owned Node children, each at most eight seconds; no user Chrome,
+ * profile, script, executable, port, endpoint or system settings are touched.
+ * Default pull_request and normal candidate tests never start these children.
+ */
+function shouldUseCiChromeCpuPressure(platform:string,actions:string|undefined,
+  eventName:string|undefined,requested:string|undefined):boolean {
+  return platform==='win32'&&actions==='true'&&
+    eventName==='workflow_dispatch'&&requested==='true';
+}
+function beginBoundedCiChromeCpuPressure():{workers:number;stop:()=>void} {
+  if(!shouldUseCiChromeCpuPressure(process.platform,process.env.GITHUB_ACTIONS,
+    process.env.GITHUB_EVENT_NAME,process.env.UAH_TEST_CHROME_CPU_PRESSURE))
+    return {workers:0,stop:()=>{}};
+  const children:ReturnType<typeof spawn>[]=[];
+  const stop=()=>{
+    for(const child of children)
+      if(child.pid&&child.exitCode===null&&!child.killed)child.kill();
+  };
+  try{
+    for(let i=0;i<2;i++){
+      const child=spawn(process.execPath,
+        ['-e','const end=Date.now()+8000;while(Date.now()<end){Math.imul(37,41)}'],
+        {shell:false,windowsHide:true,stdio:'ignore'});
+      child.on('error',()=>{/* A diagnostic child must not crash the runner. */});
+      if(!child.pid)throw Error('CI_CPU_PRESSURE_SPAWN_FAILED');
+      children.push(child);
+    }
+  }catch(error){stop();throw error;}
+  return {workers:children.length,stop};
+}
+test('TASK-005/TEST-006/008/009: CPU pressure is manual Windows CI opt-in only',()=>{
+  const active=(platform:string,actions:string|undefined,event:string|undefined,
+    requested:string|undefined)=>shouldUseCiChromeCpuPressure(
+      platform,actions,event,requested);
+  assert.equal(active('win32','true','workflow_dispatch','true'),true);
+  for(const entry of [
+    ['linux','true','workflow_dispatch','true'],
+    ['win32','false','workflow_dispatch','true'],
+    ['win32','true','pull_request','true'],
+    ['win32','true','push','true'],
+    ['win32','true','workflow_dispatch','false'],
+    ['win32','true','workflow_dispatch',undefined]
+  ] as const)assert.equal(active(entry[0],entry[1],entry[2],entry[3]),false);
+});
+
 /** Read only existence of Chrome's bootstrap markers inside this test-owned
  * disposable profile. Never read their contents or report paths, ports/PIDs,
  * command lines, Chrome logs or user data. These hints are not CDP proof.
@@ -309,6 +356,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   let timeline=createBoundedChromeBootstrapTimeline();
   let listenerTimeline=createBoundedListenerPresenceTimeline();
   const launchWithBoundedMarkers=async()=>{
+    const pressure=beginBoundedCiChromeCpuPressure();
+    if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE=2_WORKERS_MAX_8S');
     const started=performance.now();
     let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
@@ -330,7 +379,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const interval=setInterval(()=>{void poll();},750);
     try{return await launchApprovedIsolatedChrome(configForTest,launchOptions);}
     finally{
+      pressure.stop();
       clearInterval(interval);
+      if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE_LISTENER_TIMELINE='+listenerTimeline.summary());
       timeline.observe(performance.now()-started,
         await redactedChromeBootstrapMarkers(profile));
     }
