@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-  # Historical bootstrap only; do not run on every later AGENTS/docs edit.
+      # Historical bootstrap only; do not run on every later AGENTS/docs edit.
       - '.github/scripts/verify-governance-recovery.py'
       - '.github/workflows/governance-recovery-guard.yml'
 
@@ -13,9 +13,8 @@ permissions: {}
 jobs:
   validate:
     # This was an exact one-time bootstrap branch, not a general-purpose CI gate.
-    if: github.head_ref == 'repair/governance-565-bootstrap-20261101'
+    if: github.head_ref == 'repair/governance-565-bootstrap-20261101' && github.event.pull_request.head.repo.full_name == 'devin930906/userscript-auto-healer'
     name: Owner-authorized historical bootstrap scope (NOT PRODUCTION FENCE)
-    if: github.event.pull_request.head.repo.full_name == 'devin930906/userscript-auto-healer'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
