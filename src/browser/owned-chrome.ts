@@ -347,11 +347,15 @@ export async function launchApprovedIsolatedChrome(
               // bootstrap deadline are not a valid launch receipt. In
               // particular, a late successful WebSocket handshake must not
               // turn an already-expired launch into an authorized session.
+              // An owned child that dies during the asynchronous WebSocket
+              // proof has failed its launch, even when the proof itself
+              // returns false because the child-exit signal cancelled it.
+              // Consent revocation above still takes precedence.
+              if(errored||exited||child.killed||child.exitCode!==null)
+                return {ok:false,code:'LAUNCH_FAILED'};
               if(performance.now()-began>=20000)
                 return {ok:false,code:'CDP_TIMEOUT'};
               if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
-              if(errored||exited||child.killed||child.exitCode!==null)
-                return {ok:false,code:'LAUNCH_FAILED'};
               const verified:Extract<ManagedLaunchResult,{ok:true}>=Object.freeze({
                 ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
