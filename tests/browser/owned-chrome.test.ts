@@ -250,6 +250,27 @@ test('TEST-006: Chrome bootstrap diagnostics are bounded and content-blind',asyn
   assert.equal(evidence.includes('PRIVATE_'),false);
 });
 
+/** An inaccessible disposable Profile marker is UNKNOWN, never "absent".
+ * A native Windows EACCES/error during a read-only file check must not create
+ * a false 'untouched' receipt and authorize another Chrome startup attempt.
+ */
+test('TASK-005/TEST-006/008/009/026: unreadable Chrome markers cannot authorize untouched retry',async t=>{
+  const fs=require('node:fs/promises') as typeof import('node:fs/promises');
+  const denied=()=>Object.assign(new Error('PRIVATE_WINDOWS_IO_ERROR'),{code:'EACCES'});
+  try{
+    t.mock.method(fs,'access',async()=>{throw denied();});
+    t.mock.method(fs,'lstat',async()=>{throw denied();});
+    const marker=await redactedChromeBootstrapMarkers('C:\\synthetic\\owned-profile');
+    assert.equal(marker,'state=? endpointMarker=?',
+      'permission error is unknown, not proof no Profile state exists');
+    assert.equal(mayRetryUntouchedChromeBootstrap(
+      {ok:false,code:'CDP_TIMEOUT'},marker,0,true),false,
+      'no retry on an unknown or inaccessible marker');
+    assert.equal(marker.includes('PRIVATE_'),false,
+      'untrusted filesystem error text cannot appear in diagnostic output');
+  }finally{t.mock.reset();}
+});
+
 test('TEST-007/008: never launch without approval or with bad config',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:false}),
