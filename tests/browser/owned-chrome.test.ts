@@ -1076,6 +1076,83 @@ test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot 
 });
 
 
+/** Consent revocation during a *pending* CDP browser WebSocket proof must
+ * promptly terminate the owned Chrome bootstrap, not wait for the separate
+ * four-second proof timer. Entire fixture is an in-memory synthetic child
+ * and proof; no Chrome, socket, user Profile, website or script is touched.
+ */
+test('TASK-005/TEST-006/009/026: in-flight WebSocket proof observes native consent cancellation immediately',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\pending-ws-profile',12036);
+  const controller=new AbortController();
+  const child=Object.assign(new EventEmitter(),{
+    pid:41236,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let markHandshake:()=>void=()=>{};
+  const handshakeStarted=new Promise<void>(resolve=>{markHandshake=resolve;});
+  let cancellationObserved=false;
+  let pending:ReturnType<typeof launchApprovedIsolatedChrome>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41236,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',
+      (_url:string,_port:number,_version:string,signal?:AbortSignal)=>
+        new Promise<boolean>(resolve=>{
+          markHandshake();
+          const fallback=setTimeout(()=>resolve(false),400);
+          signal?.addEventListener('abort',()=>{
+            cancellationObserved=true;
+            clearTimeout(fallback);
+            resolve(false);
+          },{once:true});
+        })
+    );
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12036/devtools/browser/abcdefgh-1234'
+    })));
+    pending=launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal
+    });
+    await Promise.race([
+      handshakeStarted,
+      delay(1000).then(()=>{throw Error('SYNTHETIC_HANDSHAKE_NEVER_STARTED');})
+    ]);
+    controller.abort();
+    const timely=await Promise.race([
+      pending,
+      delay(175).then(()=>({ok:false as const,code:'HANDSHAKE_NOT_CANCELLED' as const}))
+    ]);
+    assert.deepEqual(timely,{ok:false,code:'ABORTED'},
+      'native cancellation must stop a pending CDP proof promptly');
+    assert.equal(cancellationObserved,true,
+      'the in-flight WebSocket proof must receive the native abort signal');
+    assert.equal(child.killed,true,'the launcher stops only its own synthetic child');
+  }finally{
+    controller.abort();
+    if(pending)await pending;
+    t.mock.reset();
+  }
+});
+
 test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake cannot register an owned browser',async t=>{
   // This synthetic child never starts a real Chrome, touches a user Profile,
   // or performs network I/O. Consent is revoked *after* the earlier abort
