@@ -20,6 +20,8 @@ GOVERNANCE_ONLY = frozenset({
     "docs/18-production-coordination-gates.md",
     ".github/scripts/issue-merge-fence.py",
     ".github/workflows/governance-issue-merge-fence.yml",
+    ".github/scripts/issue-round-coordinator-v2.py",
+    ".github/workflows/governance-production-coordinator.yml",
 })
 IMPLEMENTATION_BRANCH = re.compile(r"^impl/issue-([1-9][0-9]*)-r([1-9][0-9]*)$")
 COORD_MESSAGE = "coord/v2 "
