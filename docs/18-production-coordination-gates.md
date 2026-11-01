@@ -50,3 +50,13 @@ On a fresh, additive, governance-only PR against the hardened `main`, independen
 ## Live smoke validation after the trusted-event fix
 
 A subsequent governance-only PR must verify that the `pull_request_target` event runs the **default branch** workflow, checks out the PR's immutable base SHA, executes `--self-test` plus the live API validation, and attaches the passing check to the proposed PR HEAD. This check is a real integration test of the advisory gate, **not** evidence of mandatory GitHub rules or production Issue handoff. Preserve any previous failed run as diagnostic evidence.
+
+## Governance-only production coordinator V2 (Issue #565)
+
+A separate forward-only coordination ref `coord/issue-565` is managed by `.github/scripts/issue-round-coordinator-v2.py` and a manual, authenticated `governance-production-coordinator.yml` workflow. **Only Issue #565** is admitted; all eight historical product work branches remain unchanged, and the coordinator is not a generic Issue takeover tool.
+
+The first create-only operation stores a `coord/v2` JSON commit with `status=blocked_legacy`, `round=0` and the immutable legacy `work/issue-565` ref SHA; it does not claim that former work was released. The repository owner may perform an explicitly authorized one-time governance recovery only while default-branch SHA, the legacy ref SHA, and zero open PRs are verified. Recovery moves the same coordination ref forward to `released`. Subsequent acquisition is another non-force forward-only commit from the observed parent with `round+1`, bound to the authenticated GitHub actor and the SHA-256 digest of a private per-round owner proof. A sibling contender trying a stale parent is rejected by GitHub's fast-forward rule. The workflow never accepts the raw owner proof and does not support `release` through public dispatch inputs.
+
+The private owner proof must remain confidential in the current execution context. The coordinator library has a proof-verifying `release` state transition, but **no production release transport is authorized or deployed yet**: it must not be simulated by giving the secret to workflow dispatch or resetting a ref. GitHub account authentication does not distinguish different ChatGPT chats belonging to that same account; real multi-session owner security and per-Issue release are still pending. Do not acquire a production round if the safe release route and human-approved recovery plan cannot be verified.
+
+A GitHub Actions passing self-test establishes local state-transition safety; a live owner `init/recover` run must be verified separately by its run ID, job logs, and authoritative remote ref SHA. No result of this governance-only workflow permits automatic product Issue takeover or Stable classification.
