@@ -348,7 +348,15 @@ export async function launchApprovedIsolatedChrome(
         emitStage(phase==='FETCH'
           ?classifyCdpStartupTransportFailure(error):'PROBE_ERROR');
       }
-      await delay(250);
+      // An already-revoked consent must interrupt the bounded retry pause,
+      // not leave its own Chrome child alive for another fixed delay.
+      try{
+        await delay(250,undefined,checked.signal?{signal:checked.signal}:undefined);
+      }catch{
+        if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        // Timers failing for any other reason never authorize the browser.
+        return {ok:false,code:'LAUNCH_FAILED'};
+      }
     }
     // A child can stay alive without ever exposing the required owned
     // listener. Record only that boundary, not process/profile/port data.
