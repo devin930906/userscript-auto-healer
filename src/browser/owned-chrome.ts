@@ -13,7 +13,7 @@ import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWe
 /** Reject oversized or invalid CDP JSON based on bytes actually streamed.
  * A missing or dishonest Content-Length must not bypass this limit.
  */
-export async function readBoundedCdpJson(response:Response):Promise<unknown|null> {
+export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):Promise<unknown|null> {
   const limit=16384;
   // An early status/header rejection must not leave an unread HTTP response
   // pinned to the loopback connection. Cleanup is best-effort and must never
@@ -23,6 +23,7 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
     return null;
   };
   if(response.status!==200)return rejectUnread();
+  if(signal?.aborted)return rejectUnread();
   const length=response.headers.get('content-length');
   if(length!==null &&
      (!/^[0-9]+$/.test(length) || !Number.isSafeInteger(Number(length)) ||
@@ -36,6 +37,7 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
   // reader.read() and even reader.cancel() can otherwise remain pending and
   // stall the owned-Chrome bootstrap indefinitely. No partial JSON is trusted.
   let deadline:NodeJS.Timeout|undefined;
+  let onAbort:(()=>void)|undefined;
   const readBody=async():Promise<unknown|null>=>{
     try{
       while(true){
@@ -53,6 +55,20 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
       return bytes>0?JSON.parse(body) as unknown:null;
     }catch{return null;}
   };
+  // Headers can arrive before consent is revoked while the response stream
+  // remains stalled. Cancellation must not wait out the independent body
+  // timeout or permit a late response to authorize Chrome.
+  const aborted=signal?new Promise<null>(resolve=>{
+    let settled=false;
+    onAbort=()=>{
+      if(settled)return;
+      settled=true;
+      try{void reader.cancel().catch(()=>undefined);}catch{}
+      resolve(null);
+    };
+    signal.addEventListener('abort',onAbort,{once:true});
+    if(signal.aborted)onAbort();
+  }):undefined;
   try{
     return await Promise.race([
       readBody(),
@@ -63,9 +79,11 @@ export async function readBoundedCdpJson(response:Response):Promise<unknown|null
           try{void reader.cancel().catch(()=>undefined);}catch{}
           resolve(null);
         },1500);
-      })
+      }),
+      ...(aborted?[aborted]:[])
     ]);
   }finally{
+    if(signal&&onAbort)signal.removeEventListener('abort',onAbort);
     if(deadline)clearTimeout(deadline);
     // A pending reader.read() can make releaseLock throw. Cleanup must not
     // hide the bounded, fail-closed outcome or extend the startup deadline.
@@ -254,7 +272,15 @@ export async function launchApprovedIsolatedChrome(
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(checked.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
     return {ok:false,code:'NOT_AUTHORIZED'};
-  const cfg=preflight.config;
+  // Authenticode inspection may take seconds after the first port/profile
+  // preflight. An unrelated process can claim the loopback CDP port during
+  // that gap. Recheck the selected isolated Profile and port immediately
+  // before spawn; fail closed rather than boot Chrome against a stale receipt.
+  // This narrows, but cannot eliminate, the final OS port bind race.
+  const finalPreflight=await preflightChrome(preflight.config);
+  if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
+  if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  const cfg=finalPreflight.config;
   const argv=[
     '--no-first-run','--no-default-browser-check','--disable-background-networking',
     '--remote-debugging-address=127.0.0.1',
@@ -267,14 +293,19 @@ export async function launchApprovedIsolatedChrome(
     child=spawn(cfg.executablePath,argv,{shell:false,windowsHide:true,stdio:'ignore'});
   }catch{return {ok:false,code:'LAUNCH_FAILED'};}
   let errored=false,exited=false,retained=false;
-  child.once('error',()=>{errored=true;});
-  child.once('exit',()=>{exited=true;});
+  // A terminal owned-child event must cancel an in-flight CDP probe without
+  // waiting for its separate network timeout. No unrelated PID is touched.
+  const childExit=new AbortController();
+  child.once('error',()=>{errored=true;childExit.abort();});
+  child.once('exit',()=>{exited=true;childExit.abort();});
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
   const emitStage=(stage:ChromeStartupStage):void=>{
     try{checked.onStartupStage?.(stage);}
     catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
   };
   const pid=child.pid;
+  const activeSignal=checked.signal?
+    AbortSignal.any([checked.signal,childExit.signal]):childExit.signal;
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
   // Deadline uses monotonic process time: OS clock corrections must not
   // prematurely cut off (or extend) the 20-second consented CDP bootstrap.
@@ -288,12 +319,12 @@ export async function launchApprovedIsolatedChrome(
         // The per-probe timeout is independent of native revocation. A
         // revoked consent must cancel a still-pending CDP HTTP request,
         // not wait for this independent 1500ms deadline to expire.
-        const fetchSignal=checked.signal?
-          AbortSignal.any([checked.signal,AbortSignal.timeout(1500)]):
-          AbortSignal.timeout(1500);
+        const fetchSignal=AbortSignal.any([activeSignal,AbortSignal.timeout(1500)]);
         const response=await fetch(url,{redirect:'error',signal:fetchSignal});
         phase='PROCESS';
-        const payload=await readBoundedCdpJson(response);
+        const payload=await readBoundedCdpJson(response,activeSignal);
+        if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
         if(response.status!==200)emitStage('HTTP_REJECTED');
         else if(payload===null)emitStage('BODY_REJECTED');
         if(payload!==null){
@@ -343,12 +374,23 @@ export async function launchApprovedIsolatedChrome(
             }
         }
       }catch(error){
+        if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
         // Fixed labels only. Raw transport errors may disclose loopback
         // addresses, user paths or Chrome runtime details.
         emitStage(phase==='FETCH'
           ?classifyCdpStartupTransportFailure(error):'PROBE_ERROR');
       }
-      await delay(250);
+      // An already-revoked consent must interrupt the bounded retry pause,
+      // not leave its own Chrome child alive for another fixed delay.
+      try{
+        await delay(250,undefined,{signal:activeSignal});
+      }catch{
+        if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+        if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
+        // Timers failing for any other reason never authorize the browser.
+        return {ok:false,code:'LAUNCH_FAILED'};
+      }
     }
     // A child can stay alive without ever exposing the required owned
     // listener. Record only that boundary, not process/profile/port data.
