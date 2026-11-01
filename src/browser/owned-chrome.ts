@@ -258,6 +258,28 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
     onUnexpectedExit:unexpected as ChromeLaunchOptions['onUnexpectedExit']};
  }catch{return null;}
 }
+/** A native cancellation must not remain blocked behind Windows filesystem
+ * preflight or the 15s Authenticode subprocess. These are read-only checks:
+ * cancelling this wait never grants a browser receipt or launches Chrome.
+ * The underlying check retains its own cleanup/timeout, while rejection is
+ * still propagated normally if approval was not revoked.
+ */
+async function awaitPrelaunchCheckOrRevocation<T>(pending:Promise<T>,
+  signal?:AbortSignal):Promise<{aborted:true}|{aborted:false;value:T}> {
+  if(!signal)return {aborted:false,value:await pending};
+  let onAbort:()=>void=()=>{};
+  const revoked=new Promise<{aborted:true}>(resolve=>{
+    onAbort=()=>resolve({aborted:true});
+    signal.addEventListener('abort',onAbort,{once:true});
+    if(signal.aborted)onAbort();
+  });
+  try{
+    return await Promise.race([
+      pending.then(value=>({aborted:false as const,value})),
+      revoked
+    ]);
+  }finally{signal.removeEventListener('abort',onAbort);}
+}
 /** Never attach to an unowned endpoint, create an unknown Profile or stop another PID. */
 export async function launchApprovedIsolatedChrome(
   input:unknown,options:ChromeLaunchOptions
@@ -265,11 +287,15 @@ export async function launchApprovedIsolatedChrome(
   const checked=checkedChromeLaunchOptions(options);
   if(!checked)return {ok:false,code:'NOT_AUTHORIZED'};
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
-  const preflight=await preflightChrome(input);
-  // A revoked native approval wins over a concurrently failed async preflight.
+  const firstCheck=await awaitPrelaunchCheckOrRevocation(preflightChrome(input),checked.signal);
+  if(firstCheck.aborted)return {ok:false,code:'ABORTED'};
+  const preflight=firstCheck.value;
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!preflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
-  const binary=await inspectWindowsChromeBinary(preflight.config);
+  const binaryCheck=await awaitPrelaunchCheckOrRevocation(
+    inspectWindowsChromeBinary(preflight.config),checked.signal);
+  if(binaryCheck.aborted)return {ok:false,code:'ABORTED'};
+  const binary=binaryCheck.value;
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!binary.ok)return {ok:false,code:'BINARY_NOT_VERIFIED'};
   if(checked.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
@@ -279,7 +305,10 @@ export async function launchApprovedIsolatedChrome(
   // that gap. Recheck the selected isolated Profile and port immediately
   // before spawn; fail closed rather than boot Chrome against a stale receipt.
   // This narrows, but cannot eliminate, the final OS port bind race.
-  const finalPreflight=await preflightChrome(preflight.config);
+  const finalCheck=await awaitPrelaunchCheckOrRevocation(
+    preflightChrome(preflight.config),checked.signal);
+  if(finalCheck.aborted)return {ok:false,code:'ABORTED'};
+  const finalPreflight=finalCheck.value;
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const cfg=finalPreflight.config;

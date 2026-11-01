@@ -303,6 +303,72 @@ test('TASK-005/TEST-007/009/026: revocation wins over a failing asynchronous lau
   }
 });
 
+/** A revoked approval must not wait for a hanging asynchronous path/port
+ * check or Windows signature subprocess to settle. These tests mock every
+ * I/O boundary; a real Chrome child, Profile or listener is never launched.
+ */
+test('TASK-005/TEST-007/009/026: revocation interrupts pending prelaunch checks before they settle',async t=>{
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12061);
+  const validPreflight={ok:true as const,
+    status:'PATH_AND_PORT_CHECKED_ONLY' as const,config:cfg,
+    runtimeIdentityVerified:false as const};
+  const validBinary={ok:true as const,
+    status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+    version:'155.0.1.1',publisher:'Google LLC' as const,
+    runtimeVerified:false as const};
+  for(const phase of ['initial','binary','final'] as const){
+    const consent=new AbortController();
+    let announceEntered!:()=>void;
+    let finishBlocked!:()=>void;
+    const entered=new Promise<void>(resolve=>{announceEntered=resolve;});
+    const blocked=new Promise<void>(resolve=>{finishBlocked=resolve;});
+    let checks=0,spawned=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>{
+        checks++;
+        if(phase==='initial'||(phase==='final'&&checks===2)){
+          announceEntered();
+          await blocked;
+        }
+        return validPreflight;
+      });
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>{
+        if(phase==='binary'){
+          announceEntered();
+          await blocked;
+        }
+        return validBinary;
+      });
+      t.mock.method(cp,'spawn',()=>{
+        spawned++;
+        throw Error('No Chrome spawn after revoked native launch approval');
+      });
+      const pending=launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:consent.signal
+      });
+      await entered; // The target async stage is truly pending, not skipped.
+      consent.abort();
+      const early=await Promise.race([
+        pending.then(value=>({settled:true as const,value})),
+        delay(125).then(()=>({settled:false as const}))
+      ]);
+      finishBlocked();
+      const finalResult=await pending;
+      assert.equal(early.settled,true,
+        phase+' must abort without awaiting the blocked prelaunch check');
+      if(early.settled)assert.deepEqual(early.value,{ok:false,code:'ABORTED'});
+      assert.deepEqual(finalResult,{ok:false,code:'ABORTED'});
+      assert.equal(spawned,0,phase);
+    }finally{
+      finishBlocked();
+      t.mock.reset();
+    }
+  }
+});
+
 test('TASK-005/TEST-006/007/009/026: Chrome launch consent options never evaluate accessors or Proxy traps',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
