@@ -1217,7 +1217,7 @@ test('TASK-005/TEST-006/009/026: owned child exit during pending WebSocket proof
       'an exited owned child cannot be misclassified as a mere WebSocket failure');
     assert.equal(proofCancelled,true,
       'the pending identity proof must observe the owned child termination');
-    assert.equal(child.killed,true,'cleanup is limited to the synthetic owned child');
+    assert.equal(child.killed,false,'an already exited owned child is not killed a second time');
     assert.equal(isLiveApprovedChromeSession(result),false);
   }finally{
     child.emit('exit',1);
