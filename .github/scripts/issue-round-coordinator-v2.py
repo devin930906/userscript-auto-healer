@@ -132,10 +132,9 @@ def verify_owner_context():
     require(os.getenv("GITHUB_REF")=="refs/heads/main","Only default-branch owner action")
     require(os.getenv("GITHUB_ACTOR")==OWNER,"Only authenticated repository owner can authorize recovery")
     require(os.getenv("GITHUB_EVENT_NAME")=="workflow_dispatch","Manual owner action required")
-    current=head("main") if False else get("/git/ref/heads/main")["object"]["sha"]
+    current=get("/git/ref/heads/main")["object"]["sha"]
     require(current==os.getenv("GITHUB_SHA"),"Main changed since workflow dispatch; stop")
-    require(head("work/issue-565") == LEGACY_SHA if False else
-            get("/git/ref/heads/work/issue-565")["object"]["sha"]==LEGACY_SHA,
+    require(get("/git/ref/heads/work/issue-565")["object"]["sha"] == LEGACY_SHA,
             "Historical #565 claim changed: stop")
     prs=get("/pulls?state=open&per_page=100")
     require(len(prs)<100 and not prs,"Competing open PR or incomplete PR listing")
