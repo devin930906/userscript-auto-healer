@@ -541,6 +541,67 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
 });
 
 
+/** The existing early port preflight can pass before the expensive trusted
+ * Windows Authenticode inspection. Bind ONLY a disposable test listener after
+ * that authentic inspection but before Chrome spawn, and prove the launcher
+ * must reject the changed external port without touching its owned Profile.
+ * This reproduces one plausible real Chrome child-running/no-CDP mechanism,
+ * not the root cause of the historical intermittent #510 failure.
+ */
+test('TASK-005/TEST-006/009: port claimed during signed Chrome inspection fails before launch',async t=>{
+  if(process.platform!=='win32')return;
+  let chrome:string|undefined;
+  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],
+    process.env.LOCALAPPDATA]){
+    if(!base)continue;
+    const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+    try{await access(candidate);chrome=candidate;break;}catch{}
+  }
+  if(!chrome){t.skip('No official Chrome binary on runner');return;}
+  const root=await mkdtemp(join(tmpdir(),'uah-chrome-port-race-'));
+  const profile=join(root,'profile');
+  const port=await unusedLoopbackPort();
+  const cfg=config(chrome,profile,port);
+  const ready=await prepareApprovedIsolatedProfile(cfg,true);
+  assert.equal(ready.ok,true,JSON.stringify(ready));
+  const blocker=createServer((_req,res)=>{res.writeHead(503);res.end();});
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const inspectOriginal=launcher.inspectWindowsChromeBinary;
+  let portClaimed=false;
+  (launcher as {inspectWindowsChromeBinary:typeof inspectOriginal})
+    .inspectWindowsChromeBinary=async (...args)=>{
+      const signed=await inspectOriginal(...args);
+      if(signed.ok){
+        await new Promise<void>((resolve,reject)=>{
+          blocker.once('error',reject);
+          blocker.listen(port,'127.0.0.1',resolve);
+        });
+        portClaimed=true;
+      }
+      return signed;
+    };
+  const abort=new AbortController();
+  const timeout=setTimeout(()=>abort.abort(),3000);
+  try{
+    const outcome=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,testHeadless:true,signal:abort.signal});
+    assert.equal(portClaimed,true,'the port was genuinely claimed after Authenticode');
+    assert.deepEqual(outcome,{ok:false,code:'PREFLIGHT_FAILED'},
+      'a port claimed after initial preflight must fail closed before spawning Chrome');
+    assert.equal(await redactedChromeBootstrapMarkers(profile),
+      'state=0 endpointMarker=0',
+      'prelaunch port-claim rejection must not bootstrap or mutate this disposable Profile');
+  }finally{
+    clearTimeout(timeout);
+    abort.abort();
+    (launcher as {inspectWindowsChromeBinary:typeof inspectOriginal})
+      .inspectWindowsChromeBinary=inspectOriginal;
+    if(blocker.listening)
+      await new Promise<void>(resolve=>blocker.close(()=>resolve()));
+    await rm(root,{recursive:true,force:true}).catch(()=>undefined);
+  }
+});
+
 test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its owner exactly once',async t=>{
   if(process.platform!=='win32')return;
   let chrome:string|undefined;
