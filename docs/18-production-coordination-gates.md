@@ -36,3 +36,9 @@ All nine historical `work/issue-N` refs remain untouched. No old claim is automa
 Acceptance needs: a genuine production v2 writer; round owner custody and safe release/reacquisition; real concurrent adversarial CI; required status check verified through the GitHub rules API or an actual denied stale PR merge; authenticated eight-claim migration with no data loss. Keep #565 OPEN until all are met.
 
 The first live PR/CI and post-merge main verification must be recorded separately; file creation does not prove deployment.
+
+## Security hardening after bootstrap
+
+The initial PR #573 validation used a `pull_request` event. That can load the workflow definition from the proposed PR merge commit, so the initial check by itself is **not** tamper-resistant against a PR that rewrites its workflow. A follow-up governance-only hardening change switches the workflow to **`pull_request_target`**, whose workflow definition is read from the trusted default branch. It checks out only `github.event.pull_request.base.sha`, runs a read-only API validator from that baseline, uses minimal read permissions, and executes no proposed PR code. This closes the *PR-controlled workflow-definition* loophole for future checks, but an appropriately privileged repository administrator can still change rules, and the check still needs to become **mandatory** in GitHub protection rules.
+
+**Remaining race:** coordinator state can change after a PR check succeeds. A static green status alone is not a merge-time authorization. Production release must prevent/invalidates obsolete PRs and the server must enforce revalidation for all integrations; #565 is not closed on the basis of this workflow.
