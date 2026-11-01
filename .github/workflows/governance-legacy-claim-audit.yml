@@ -1,0 +1,57 @@
+name: Governance Legacy Claim Inventory (READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/audit-legacy-issue-claims.py'
+      - '.github/workflows/governance-legacy-claim-audit.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate read-only audit script
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: |
+          python3 -m py_compile .github/scripts/audit-legacy-issue-claims.py
+          python3 .github/scripts/audit-legacy-issue-claims.py --self-test
+      - name: Fail closed for non-main manual invocation
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::This inventory must use the current main branch"
+          exit 1
+
+  audit:
+    name: Inspect eight historical claims without mutation
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Read immutable refs, file blob identities, and exact-head PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/audit-legacy-issue-claims.py
+      - name: Keep evidence for owner-reviewed handoffs, never auto-release
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: read-only-legacy-claims-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            legacy-claims-audit.json
+            legacy-claims-audit.md
+          if-no-files-found: warn
+          retention-days: 14
