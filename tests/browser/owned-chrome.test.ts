@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,6 +10,11 @@ import { openApprovedTarget } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
+import { hasUnsafePathLink } from '../../src/version/path-boundary';
+const execFileAsync=promisify(execFile);
 
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
@@ -94,6 +99,68 @@ test('TASK-005/TEST-006/008/009/026: profile readiness evidence is bounded, mono
   assert.equal(hostile.summary().split(',').length,12);
   assert.ok(hostile.summary().length<=100);
   assert.ok(!hostile.summary().includes('PRIVATE'));
+});
+
+
+/** TEST-006/008/009: external OS listener *presence*, never identity/authority.
+ * Windows CI only. netstat output is immediately reduced to 0/1/? and is
+ * NEVER stored or printed: no PID, port, address, profile or command line.
+ * An uncertain probe is ?, not proof that no listener exists.
+ */
+function redactedLocalListenerFromNetstat(output:unknown,port:number):'0'|'1'|'?'{
+  if(typeof output!=='string'||!Number.isInteger(port)||port<1024||port>65535)
+    return '?';
+  return parseWindowsLoopbackListeners(output,port).length?'1':'0';
+}
+async function readTestOnlyLocalListenerPresence(port:number):Promise<'0'|'1'|'?'>{
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true')return '?';
+  try{
+    const native=resolveWindowsNetstatExecutable(process.env.SystemRoot);
+    if(!native||await hasUnsafePathLink(native)||!(await lstat(native)).isFile())
+      return '?';
+    const {stdout}=await execFileAsync(native,['-ano','-p','TCP'],
+      {windowsHide:true,timeout:1200,maxBuffer:8*1024*1024});
+    return redactedLocalListenerFromNetstat(stdout,port);
+  }catch{return '?';}
+}
+/** Only changes in the read-only CI listener probe are reported, rounded to
+ * seconds and capped. It is intentionally not a browser ownership receipt.
+ */
+function createBoundedListenerPresenceTimeline(){
+  const transitions:string[]=[];
+  let last:'0'|'1'|'?'|undefined;
+  return {
+    observe(elapsedMs:number,presence:unknown):void{
+      if(!Number.isFinite(elapsedMs)||elapsedMs<0||
+         (presence!=='0'&&presence!=='1'&&presence!=='?'))return;
+      if(last===presence||transitions.length>=12)return;
+      last=presence;
+      transitions.push('t'+Math.min(31,Math.floor(elapsedMs/1000))+':'+presence);
+    },
+    summary():string{return transitions.length?transitions.join(','):'NONE';}
+  };
+}
+test('TASK-005/TEST-006/008/009: CI listener evidence reveals only bounded 0/1/? changes',()=>{
+  const port=54321;
+  const matched='  TCP    127.0.0.1:54321   0.0.0.0:0   LISTENING  987654';
+  assert.equal(redactedLocalListenerFromNetstat(matched,port),'1');
+  assert.equal(redactedLocalListenerFromNetstat(
+    '  TCP 0.0.0.0:54321 0.0.0.0:0 LISTENING 987654',port),'0');
+  assert.equal(redactedLocalListenerFromNetstat(matched,0),'?');
+  assert.equal(redactedLocalListenerFromNetstat({},port),'?');
+  const timeline=createBoundedListenerPresenceTimeline();
+  timeline.observe(0,'0');
+  timeline.observe(300,'0');
+  timeline.observe(2100,'1');
+  timeline.observe(3100,'?');
+  timeline.observe(4700,'0');
+  timeline.observe(4800,'PID=987654');
+  assert.equal(timeline.summary(),'t0:0,t2:1,t3:?,t4:0');
+  for(let i=0;i<100;i++)timeline.observe(5000+i*100,i%2?'0':'1');
+  assert.equal(timeline.summary().split(',').length,12);
+  assert.ok(timeline.summary().length<=100);
+  assert.ok(!timeline.summary().includes('987654'));
+  assert.ok(!timeline.summary().includes('54321'));
 });
 
 /** A bounded CI-only recovery for Chrome that has not even touched its
@@ -240,15 +307,23 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   // directory: polling never edits Chrome, changes the launch deadline, reads
   // marker contents, queries the user profile or retries a touched browser.
   let timeline=createBoundedChromeBootstrapTimeline();
+  let listenerTimeline=createBoundedListenerPresenceTimeline();
   const launchWithBoundedMarkers=async()=>{
     const started=performance.now();
-    let sampling=false;
+    let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
       sampling=true;
       try{
-        timeline.observe(performance.now()-started,
-          await redactedChromeBootstrapMarkers(profile));
+        const elapsed=performance.now()-started;
+        timeline.observe(elapsed,await redactedChromeBootstrapMarkers(profile));
+        // Sampling once per ~2.5 s avoids competing with Chrome startup.
+        // Only the binary 0/1/? result survives the native OS query.
+        if(elapsed-latestListenerSampleMs>=2500){
+          latestListenerSampleMs=elapsed;
+          listenerTimeline.observe(elapsed,
+            await readTestOnlyLocalListenerPresence(port));
+        }
       }finally{sampling=false;}
     };
     await poll();
@@ -274,6 +349,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       assert.equal(secondPrepared.ok,true,JSON.stringify(secondPrepared));
       startupStages.length=0;
       timeline=createBoundedChromeBootstrapTimeline();
+      listenerTimeline=createBoundedListenerPresenceTimeline();
       result=await launchWithBoundedMarkers();
     }
   }
@@ -285,6 +361,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
     t.diagnostic('CDP_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
     t.diagnostic('CDP_BOOTSTRAP_TIMELINE='+timeline.summary());
+    t.diagnostic('CDP_LISTENER_PRESENCE_TIMELINE='+listenerTimeline.summary());
+    // 1 means *some* IPv4 loopback listener was seen, NOT verified ownership.
   }
   assert.equal(result.ok,true,JSON.stringify(result));
   // Chrome uses an explicit nonzero CDP port here. Chromium writes
