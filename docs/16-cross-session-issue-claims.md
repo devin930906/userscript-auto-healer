@@ -1,8 +1,5 @@
 # Cross-session Issue claim and parallel integration protocol
 
-> **2026-11-01 V2 precedence notice:** The fixed `work/issue-N` branch described below is preserved as **historical implementation/claim evidence only** for the eight pre-migration open Issues; it is NOT the current production coordination reference. For these eight Issues, the new separate `coord/issue-N` (forward-only, owner-gated) and `impl/issue-N-rR` implementation branch contract in `docs/18-production-coordination-gates.md` supersedes the *new-claim and re-acquisition mechanics* below, **only after per-Issue owner-authorized legacy recovery is verified**. Until then mark `HANDOFF_BLOCKED`, never delete or reset a `work/issue-N` branch, and never start an uncoordinated product PR. This notice does not mark any product Issue recovered or Stable-ready.
-
-
 > Status: governance migration for Issue #547, prepared from the verified `main@0ad14ef92b37d15c846fbff3dbecdfdc0fc3f3e3` baseline on 2026-10-31 UTC. It does not change approved REQ/NFR/TASK/TEST/GATE, historical admissions, source-code permissions or Stable acceptance. **Documented process and a single observed branch creation are not proof that concurrent actors or every client enforce the process.**
 
 ## Authority and scope
