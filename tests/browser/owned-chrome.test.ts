@@ -86,8 +86,22 @@ test('TASK-005/TEST-006/008/009: CPU pressure is manual Windows CI opt-in only',
  * command lines, Chrome logs or user data. These hints are not CDP proof.
  */
 async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
-  const exists=async(name:string)=>{
-    try { await access(join(profile,name)); return 1; } catch { return 0; }
+  const exists=async(name:string):Promise<'0'|'1'|'?'>=>{
+    try{
+      // lstat observes a marker itself, including a dangling link. access()
+      // follows links and can mistake unreadable/touched state for absence.
+      await lstat(join(profile,name));
+      return '1';
+    }catch(error){
+      // Only genuine ENOENT means absent. All other Windows I/O failures
+      // are unknown, never authorization for a second Chrome bootstrap.
+      try{
+        if(error&&typeof error==='object'&&
+           Object.getOwnPropertyDescriptor(error,'code')?.value==='ENOENT')
+          return '0';
+      }catch{/* Hostile error shape cannot prove absence. */}
+      return '?';
+    }
   };
   const [state,endpoint]=await Promise.all([
     exists('Local State'),exists('DevToolsActivePort')
