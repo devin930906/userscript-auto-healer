@@ -326,3 +326,11 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 ## 2026-10-31 新版（7）跨会话续接补充
 
 原（4）有条件准入与既有实现继续有效，不重做前期准备。本次针对新版（7）新增跨网页对话独占认领和并行文件/接口冲突控制，规范位于 `docs/16-cross-session-issue-claims.md`，过程追踪为 GitHub Issue #547。其记录的 `main@0ad14ef92b37d15c846fbff3dbecdfdc0fc3f3e3` 为本次迁移开始时的审计基线，并非持续变化的最新主干。后续会话须重新读取 main、全部 Open Issues/PR、有关历史工作分支与 CI，执行 creation-only `work/issue-<N>` 认领验证及依赖/文件隔离检查；工具不具备原子创建语义时不得声称互斥已经生效。项目 Stable GATE、最终 EXE＋ZIP 产品验收仍依原权威标准，不能由本治理迁移代替。
+
+## 2026-11-01：新版（4）→（7）跨轮次安全续接迁移（增量）
+
+- GitHub 远程审计基线 `main@850349001a52326fca09e8c5dccdcfd4ab043cbd`。既有 Electron/TypeScript 产品代码、TASK-001..021、REQ/NFR/ADR/RISK/TEST/GATE、历史 PR 和证据全部保留；不重新执行原（4）或 TASK-001。
+- 当前 8 个 Open Issues：#215/#440/#480/#486/#487/#488/#489/#510；各自固定 `work/issue-N` 分支存在，均相对本次 main 有 ahead/behind 差异；当时没有 Open PR。此快照不能判定分支代码是否已全部整合，也不能推定原执行者已经安全退出。
+- 首次创建互斥已见 [Actions #41211634125](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125) 和 [#41211891107](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211891107)；跨轮次的**并发安全释放/重新认领/失效写入隔离**尚无生产 Issue 验证证据。八个 Issue 均须先按 `docs/16-cross-session-issue-claims.md` 分别核验归属、合并范围、实际剩余、停止写入及安全接管。
+- 严禁直接删除旧分支或建立带后缀的第二认领；取得正式安全释放证据后才允许新一轮从最新 main 原子认领并接续。缺少条件标记 `HANDOFF_BLOCKED`，不应暂停其他不冲突的治理工作。
+- 新增手动治理测试仅操作 `test/claim-lifecycle-*`，不构成生产交接。合并后应使用实际 run ID 复核结果；不将脚本文件存在当作测试通过，不将开发候选 EXE/ZIP 当作 Stable 发行包。

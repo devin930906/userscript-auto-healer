@@ -327,3 +327,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - **真实 RED**：新增 `tests/version/recovery-checkpoint.test.ts` 的 TEST-020/026 两种磁盘故障注入，源码 `c2f1bf4a0f79ed7744d699b5e3cafb5aff3fbfca`；Windows [#40457329095](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457329095) 643 tests，641 pass、1 fail（内容被外部修改后仍错误返回成功）、1 conditional skip；TypeScript 检查成功。
 - **真实 GREEN**：实现 `74eb05cf6c971e13a212b87ede93fdcb15d596e9`，记录原暂存 inode 对应的已发布文件对象，在末次候选复核后再次验证检查点原始字节、inode、时间戳、单硬链及父目录身份；失败保留文件供人工核对、不覆盖源脚本。[Windows #40457596319](https://github.com/devin930906/userscript-auto-healer/actions/runs/40457596319) 643 tests，642 pass、0 fail、1 conditional skip，类型检查和实际 Electron shell smoke 成功。
 - **未解除的发布门槛**：属于 TASK-011 本地检查点阶段的安全回归，不提供操作系统排他锁或断电原子性证明，不实现可信 Tampermonkey 业务验收、源脚本自动修复/回滚，也不代表 TEST-020/021/026 全量、GATE-006/007 或 Stable 发布通过。PR 整合及主线验证须独立复核。
+
+## 2026-11-01：治理生命周期专项验证（不新增产品 TEST/GATE 编号）
+
+除了已验证的首次创建单赢家，还须在隔离测试引用上验证 release→reclaim 的并发单赢家、旧轮次的非 fast-forward 写入失败、重复/失联释放不会覆盖新轮次、旧分支代码不丢失，并在生产部署前另行证明当前归属/合并保护可执行。治理专用 `governance-issue-claim-lifecycle.yml` 不接受真实 Issue，不属于产品 TEST/GATE，不保证不遵守协议的外部写入者被阻断。任何未运行的工作流如实标记未验证。
