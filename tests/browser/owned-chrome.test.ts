@@ -948,6 +948,63 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
   }
 });
 
+test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry pause',async t=>{
+  // Entirely synthetic owned child and HTTP rejection: no Chrome, user
+  // Profile, network request, external process or user-script interaction.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const timers=require('node:timers/promises') as typeof import('node:timers/promises');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\cancelled-profile',12046);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41246,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const controller=new AbortController();
+  const pauseSignals:(AbortSignal|undefined)[]=[];
+  const stages:string[]=[];
+  let fetches=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async()=>{
+      fetches++;
+      throw Object.assign(new Error('synthetic refused request'),{code:'ECONNREFUSED'});
+    });
+    t.mock.method(timers,'setTimeout',async(
+      ms?:number,_value?:unknown,options?:{signal?:AbortSignal}
+    )=>{
+      if(ms!==250)throw Error('UNEXPECTED_SYNTHETIC_TIMER');
+      pauseSignals.push(options?.signal);
+      if(options?.signal?.aborted)
+        throw Object.assign(new Error('synthetic timer cancellation'),{name:'AbortError'});
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal,
+      onStartupStage:(stage)=>{
+        stages.push(stage);
+        if(stage==='FETCH_REFUSED')controller.abort();
+      }
+    });
+    assert.deepEqual(result,{ok:false,code:'ABORTED'});
+    assert.equal(fetches,1,'revoked consent must prevent a second CDP probe');
+    assert.deepEqual(pauseSignals,[controller.signal],
+      'owned bootstrap retry pause must receive the native cancellation signal');
+    assert.deepEqual(stages,['FETCH_REFUSED']);
+    assert.equal(child.killed,true,'cancellation must stop only the owned child');
+  }finally{t.mock.reset();}
+});
+
 test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
   // Native-only disposable synthetic process: no Chrome, Profile or web I/O.
   // Keep a refed watchdog so a pending fetch cannot make node:test silently
