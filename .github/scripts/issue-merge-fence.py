@@ -135,7 +135,7 @@ def self_test():
 
 def live():
     require(os.environ.get("GITHUB_REPOSITORY") == REPO, "Wrong repository")
-    require(os.environ.get("GITHUB_EVENT_NAME") == "pull_request", "Expected PR event")
+    require(os.environ.get("GITHUB_EVENT_NAME") == "pull_request_target", "Expected trusted-base PR event")
     number = int(os.environ["PR_NUMBER"])
     expected_head = os.environ["EXPECTED_HEAD_SHA"]
     pr = api("/pulls/" + str(number))
