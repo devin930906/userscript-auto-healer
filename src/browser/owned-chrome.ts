@@ -366,9 +366,18 @@ export async function launchApprovedIsolatedChrome(
               if(inspected.browser!=='Chrome/'+binary.version &&
                  inspected.browser!=='HeadlessChrome/'+binary.version)
                 return {ok:false,code:'VERSION_MISMATCH'};
-              const owner=await verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid);
-              if(!owner.ok)return {ok:false,code:'OWNER_MISMATCH'};
+              // Native Windows netstat can remain blocked independently of
+              // the CDP HTTP response. User revocation or owned-child exit
+              // retires the launch without awaiting that OS subprocess.
+              // A pending read-only probe never grants a listener receipt.
+              const ownership=await awaitPrelaunchCheckOrRevocation(
+                verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid),
+                activeSignal);
+              if(ownership.aborted)
+                return {ok:false,code:checked.signal?.aborted?'ABORTED':'LAUNCH_FAILED'};
               if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+              if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
+              if(!ownership.value.ok)return {ok:false,code:'OWNER_MISMATCH'};
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version,activeSignal);
               // Consent may be revoked during the asynchronous handshake.
