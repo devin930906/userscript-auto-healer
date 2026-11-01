@@ -1211,7 +1211,7 @@ test('TASK-005/TEST-006/009/026: owned child exit during pending WebSocket proof
     child.emit('exit',1);
     const result=await Promise.race([
       pending,
-      delay(175).then(()=>({ok:false as const,code:'OWNED_EXIT_NOT_HANDLED' as const}))
+      delay(175).then(()=>({ok:false as const,code:'CDP_TIMEOUT' as const}))
     ]);
     assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},
       'an exited owned child cannot be misclassified as a mere WebSocket failure');
