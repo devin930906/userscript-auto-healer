@@ -46,3 +46,7 @@ The initial PR #573 validation used a `pull_request` event. That can load the wo
 ## Mandatory post-hardening validation method
 
 On a fresh, additive, governance-only PR against the hardened `main`, independently check the workflow run's event is `pull_request_target`, its source SHA is the trusted base, and the job `Issue coordination / stale round fence` executes the `--self-test` and live PR validation steps. Never mark the work secure from a workflow file diff or a green documentation-only job. Negative cases remain necessary; a green governance PR does not imply that a product branch or legacy owner can merge safely.
+
+## Live smoke validation after the trusted-event fix
+
+A subsequent governance-only PR must verify that the `pull_request_target` event runs the **default branch** workflow, checks out the PR's immutable base SHA, executes `--self-test` plus the live API validation, and attaches the passing check to the proposed PR HEAD. This check is a real integration test of the advisory gate, **not** evidence of mandatory GitHub rules or production Issue handoff. Preserve any previous failed run as diagnostic evidence.
