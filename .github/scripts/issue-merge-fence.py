@@ -22,6 +22,7 @@ GOVERNANCE_ONLY = frozenset({
     ".github/workflows/governance-issue-merge-fence.yml",
     ".github/scripts/issue-round-coordinator-v2.py",
     ".github/workflows/governance-production-coordinator.yml",
+    ".github/workflows/governance-recovery-guard.yml",  # retire obsolete one-time PR trigger
 })
 IMPLEMENTATION_BRANCH = re.compile(r"^impl/issue-([1-9][0-9]*)-r([1-9][0-9]*)$")
 COORD_MESSAGE = "coord/v2 "
