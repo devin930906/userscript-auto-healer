@@ -248,12 +248,13 @@ export async function verifyCdpBrowserWebSocket(
     signal?.addEventListener('abort',onAbort,{once:true});
     if(signal?.aborted){finish(false);return;}
     try{
-      client=new WebSocket(websocketUrl);
-      client.addEventListener('open',()=>{
-        try{client.send(JSON.stringify({id:1,method:'Browser.getVersion'}));}
+      const socket=new WebSocket(websocketUrl);
+      client=socket;
+      socket.addEventListener('open',()=>{
+        try{socket.send(JSON.stringify({id:1,method:'Browser.getVersion'}));}
         catch{finish(false);}
       });
-      client.addEventListener('message',event=>{
+      socket.addEventListener('message',event=>{
         try{
           const payload=JSON.parse(String(event.data)) as {
             id?:unknown;result?:{product?:unknown};error?:unknown
@@ -265,8 +266,8 @@ export async function verifyCdpBrowserWebSocket(
           ));
         }catch{finish(false);}
       });
-      client.addEventListener('error',()=>finish(false));
-      client.addEventListener('close',()=>finish(false));
+      socket.addEventListener('error',()=>finish(false));
+      socket.addEventListener('close',()=>finish(false));
     }catch{finish(false);}
   });
 }
