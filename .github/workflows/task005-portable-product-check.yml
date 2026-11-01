@@ -8,6 +8,12 @@ on:
       - 'package.json'
       - '.github/workflows/task005-portable-product-check.yml'
   workflow_dispatch:
+    inputs:
+      chrome_cpu_pressure:
+        description: 'Manual diagnostic only: two test-owned CPU workers for at most eight seconds during Chrome startup'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +39,8 @@ jobs:
         run: npm run build
       - name: Verify signed Chrome moved to independent application path
         shell: pwsh
+        env:
+          UAH_TEST_CHROME_CPU_PRESSURE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_cpu_pressure && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
