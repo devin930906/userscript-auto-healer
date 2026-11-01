@@ -1,7 +1,9 @@
 name: 'Issue Coordination PR Fence'
 
+# Run ONLY the default-branch workflow; never execute or trust a PR-edited
+# workflow or script. No PR code is checked out or run.
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
@@ -17,45 +19,12 @@ jobs:
       pull-requests: read
       issues: read
     steps:
-      - name: Checkout trusted base (not PR code)
+      - name: Checkout trusted base commit only (never PR HEAD)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - name: Bootstrap exception - verify immutable base and recovery PR scope
-        id: bootstrap
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          if [[ -f .github/scripts/issue-merge-fence.py ]]; then
-            echo 'required=false' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Only this one reviewed bootstrap base can lack the trusted guard.
-          [[ "$BASE_SHA" == 'ac0819e1c2299f537a8de7e22d680a4bb105b42e' ]] || exit 1
-          [[ "$HEAD_BRANCH" == 'repair/issue565-production-pr-fence-20261101' ]] || exit 1
-          [[ "$HEAD_REPO" == 'devin930906/userscript-auto-healer' ]] || exit 1
-          [[ "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.state')" == open ]] || exit 1
-          python3 - <<'PY'
-          import json, os, subprocess
-          p = subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/pulls/{os.environ["PR"]}/files?per_page=100'],capture_output=True,text=True,check=True)
-          files = json.loads(p.stdout)
-          allowed = {
-            '.github/scripts/issue-merge-fence.py',
-            '.github/workflows/governance-issue-merge-fence.yml',
-            'docs/18-production-coordination-gates.md',
-          }
-          assert len(files) == len(allowed) and {v['filename'] for v in files} == allowed, 'Bootstrap scope failed'
-          assert all(v['status'] == 'added' for v in files), 'Expected additive governance bootstrap'
-          print('PASS: exact pinned bootstrap baseline and additive-only scoped files; not a required merge policy')
-          PY
-          echo 'required=true' >> "$GITHUB_OUTPUT"
-      - name: Verify current round from immutable base guard (never execute PR file content)
-        if: steps.bootstrap.outputs.required == 'false'
+      - name: Validate exact PR against current coordinator state
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
