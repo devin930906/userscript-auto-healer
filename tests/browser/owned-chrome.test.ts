@@ -1153,6 +1153,79 @@ test('TASK-005/TEST-006/009/026: in-flight WebSocket proof observes native conse
   }
 });
 
+test('TASK-005/TEST-006/009/026: owned child exit during pending WebSocket proof reports launch failure',async t=>{
+  // An in-memory owned child, signed-binary preflight and CDP proof only.
+  // The synthetic process exits *during* the pending identity handshake,
+  // which must be reported as LAUNCH_FAILED, not a network proof failure.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\ws-child-exit',12037);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41237,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let enteredProof:()=>void=()=>{};
+  const proofStarted=new Promise<void>(resolve=>{enteredProof=resolve;});
+  let proofCancelled=false;
+  let pending:ReturnType<typeof launchApprovedIsolatedChrome>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41237,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',
+      (_url:string,_port:number,_version:string,signal?:AbortSignal)=>
+        new Promise<boolean>(resolve=>{
+          enteredProof();
+          const fallback=setTimeout(()=>resolve(false),400);
+          signal?.addEventListener('abort',()=>{
+            proofCancelled=true;
+            clearTimeout(fallback);
+            resolve(false);
+          },{once:true});
+        })
+    );
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12037/devtools/browser/abcdefgh-1234'
+    })));
+    pending=launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    await Promise.race([
+      proofStarted,
+      delay(1000).then(()=>{throw Error('SYNTHETIC_PROOF_NOT_STARTED');})
+    ]);
+    child.exitCode=1;
+    child.emit('exit',1);
+    const result=await Promise.race([
+      pending,
+      delay(175).then(()=>({ok:false as const,code:'OWNED_EXIT_NOT_HANDLED' as const}))
+    ]);
+    assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},
+      'an exited owned child cannot be misclassified as a mere WebSocket failure');
+    assert.equal(proofCancelled,true,
+      'the pending identity proof must observe the owned child termination');
+    assert.equal(child.killed,true,'cleanup is limited to the synthetic owned child');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    child.emit('exit',1);
+    if(pending)await pending;
+    t.mock.reset();
+  }
+});
+
 test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake cannot register an owned browser',async t=>{
   // This synthetic child never starts a real Chrome, touches a user Profile,
   // or performs network I/O. Consent is revoked *after* the earlier abort
