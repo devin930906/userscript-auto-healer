@@ -1,4 +1,4 @@
-name: 'Governance Production V2 Coordinator (Issue 565)'
+name: 'Governance Production V2 Coordinator (Audited Issues)'
 
 on:
   pull_request:
@@ -7,13 +7,39 @@ on:
       - '.github/workflows/governance-production-coordinator.yml'
   workflow_dispatch:
     inputs:
-      operation:
-        description: 'Owner-authorized #565 operation (no product Issue transfers)'
+      issue_number:
+        description: 'Audited legacy Issue, one owner-confirmed transition at a time'
         required: true
         type: choice
-        options: [inspect, init, recover, acquire]
+        options: ['215','440','480','486','487','488','489','510','565']
+        default: '565'
+      recovery_confirmation:
+        description: 'For product recover only: RECOVER-<Issue>-PRESERVE-HISTORY'
+        required: false
+        type: string
+        default: ''
+      operation:
+        description: 'Owner-authorized Issue coordination; historical work refs preserved'
+        required: true
+        type: choice
+        options: [inspect, init, recover, acquire, release]
       proof_hash:
         description: 'For acquire only: SHA-256 owner proof digest, NOT the secret'
+        required: false
+        type: string
+        default: ''
+      public_key_hex:
+        description: 'For acquire: public Ed25519 key (64 hex chars, NOT private key)'
+        required: false
+        type: string
+        default: ''
+      signature_hex:
+        description: 'For release: one-use Ed25519 signature over round and expected head'
+        required: false
+        type: string
+        default: ''
+      expected_coord_sha:
+        description: 'For release: signed current coordination head (40 hex chars)'
         required: false
         type: string
         default: ''
@@ -22,7 +48,7 @@ permissions: {}
 
 jobs:
   test:
-    name: Validate owner-bound V2 transitions (NO REMOTE WRITE)
+    name: Validate owner-bound V2 transitions across nine audited Issues (NO REMOTE WRITE)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -33,10 +59,12 @@ jobs:
           persist-credentials: false
       - run: |
           python3 -m py_compile .github/scripts/issue-round-coordinator-v2.py
-          python3 .github/scripts/issue-round-coordinator-v2.py --self-test
+          for issue in 215 440 480 486 487 488 489 510 565; do
+            COORD_ISSUE_NUMBER="$issue" python3 .github/scripts/issue-round-coordinator-v2.py --self-test
+          done
 
   owner-operation:
-    name: Owner-authenticated issue 565 transition (NO PRODUCT REF WRITE)
+    name: Owner-authenticated historical Issue transition (coord refs only)
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'devin930906'
     needs: test
     runs-on: ubuntu-24.04
@@ -55,16 +83,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OP: ${{ inputs.operation }}
           PROOF_HASH: ${{ inputs.proof_hash }}
+          PUBLIC_KEY_HEX: ${{ inputs.public_key_hex }}
+          SIGNATURE_HEX: ${{ inputs.signature_hex }}
+          EXPECTED_COORD_SHA: ${{ inputs.expected_coord_sha }}
+          COORD_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          COORD_RECOVERY_CONFIRM: ${{ inputs.recovery_confirmation }}
         run: |
           set -euo pipefail
           case "$OP" in
-            inspect|init|recover)
-              [[ -z "$PROOF_HASH" ]] || { echo "::error::Unexpected proof hash"; exit 1; }
+            inspect|init)
+              [[ -z "$COORD_RECOVERY_CONFIRM" && -z "$PROOF_HASH" && -z "$PUBLIC_KEY_HEX" && -z "$SIGNATURE_HEX" && -z "$EXPECTED_COORD_SHA" ]] || { echo "::error::Unexpected owner-proof input"; exit 1; }
               python3 .github/scripts/issue-round-coordinator-v2.py --operation "$OP"
               ;;
+            recover)
+              [[ -z "$PROOF_HASH" && -z "$PUBLIC_KEY_HEX" && -z "$SIGNATURE_HEX" && -z "$EXPECTED_COORD_SHA" ]] || { echo "::error::Unexpected recovery input"; exit 1; }
+              python3 .github/scripts/issue-round-coordinator-v2.py --operation recover
+              ;;
             acquire)
-              [[ "$PROOF_HASH" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::Malformed digest"; exit 1; }
-              python3 .github/scripts/issue-round-coordinator-v2.py --operation acquire --proof-hash "$PROOF_HASH"
+              [[ -z "$COORD_RECOVERY_CONFIRM" && "$PROOF_HASH" =~ ^[0-9a-f]{64}$ && "$PUBLIC_KEY_HEX" =~ ^[0-9a-f]{64}$ && -z "$SIGNATURE_HEX" && -z "$EXPECTED_COORD_SHA" ]] || { echo "::error::Invalid acquire public-key inputs"; exit 1; }
+              python3 .github/scripts/issue-round-coordinator-v2.py --operation acquire --proof-hash "$PROOF_HASH" --public-key-hex "$PUBLIC_KEY_HEX"
+              ;;
+            release)
+              [[ -z "$COORD_RECOVERY_CONFIRM" && -z "$PROOF_HASH" && -z "$PUBLIC_KEY_HEX" && "$SIGNATURE_HEX" =~ ^[0-9a-f]{128}$ && "$EXPECTED_COORD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid signed release inputs"; exit 1; }
+              python3 .github/scripts/issue-round-coordinator-v2.py --operation release --signature-hex "$SIGNATURE_HEX" --expected-coord-sha "$EXPECTED_COORD_SHA"
               ;;
             *)
               echo '::error::Unsupported operation'; exit 1
