@@ -3,16 +3,20 @@
 
 Production: operator may initialize and inspect #565; recovery and acquisition
 require explicit owner-authorized Actions invocation. Historical work ref stays.
-No production release through workflow inputs: private owner proof is never
-published in Actions logs/dispatch data.
+Private release uses an Ed25519 signature on round/head only; the signing key
+is NEVER passed through Actions, logs or dispatch data.
 """
 import argparse
+import base64
 import hashlib
 import hmac
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -79,9 +83,19 @@ def state_at(commit_sha):
     require(type(state.get("round")) is int and state["round"] >= 0, "Bad round")
     require(state.get("owner_login") in (None, OWNER), "Bad owner")
     if state["status"] == "held":
-        require(state["owner_login"] == OWNER and re.fullmatch("[0-9a-f]{64}",state.get("proof_hash","")) is not None, "Invalid held owner proof")
+        public_key = state.get("owner_pubkey", "")
+        require(state["owner_login"] == OWNER
+                and isinstance(public_key, str)
+                and re.fullmatch(r"[0-9a-f]{64}", public_key) is not None,
+                "Invalid held Ed25519 public key")
+        require(hmac.compare_digest(
+            hashlib.sha256(bytes.fromhex(public_key)).hexdigest(),
+            state.get("proof_hash", "")), "Owner public key digest mismatch")
     else:
-        require(state.get("owner_login") is None and state.get("proof_hash") is None, "Unreleased owner data in free state")
+        require(state.get("owner_login") is None
+                and state.get("proof_hash") is None
+                and state.get("owner_pubkey") is None,
+                "Unreleased owner data in free state")
     return state, commit
 
 def new_commit(parent, state):
@@ -93,7 +107,46 @@ def new_commit(parent, state):
     require(code == 201, "Could not create immutable coordinator commit: " + str(code))
     return data["sha"]
 
-def state_step(state, op, proof_hash=None, secret=None):
+def release_payload(state, expected_head_sha):
+    """Signed message binds this specific repository/Issue/round/ref head."""
+    require(isinstance(expected_head_sha, str) and
+            re.fullmatch(r"[0-9a-f]{40}", expected_head_sha) is not None,
+            "Expected coordinator commit SHA missing")
+    return ("coord-release/v2\\n" + REPO + "\\n" + str(ISSUE) + "\\n"
+            + str(state["round"]) + "\\n" + expected_head_sha + "\\n").encode("utf-8")
+
+
+def verify_release_signature(state, expected_head_sha, signature_hex):
+    """Verify Ed25519 without ever sending the private key to GitHub Actions."""
+    pubkey = state.get("owner_pubkey", "")
+    require(isinstance(pubkey, str) and re.fullmatch(r"[0-9a-f]{64}", pubkey) is not None,
+            "Invalid release public key")
+    require(isinstance(signature_hex, str)
+            and re.fullmatch(r"[0-9a-f]{128}", signature_hex) is not None,
+            "Malformed Ed25519 signature")
+    # RFC 8410 SubjectPublicKeyInfo prefix for the 32-byte Ed25519 public key.
+    der = bytes.fromhex("302a300506032b6570032100" + pubkey)
+    pem = (b"-----BEGIN PUBLIC KEY-----\\n" +
+           base64.encodebytes(der).replace(b"\\n", b"") + b"\\n-----END PUBLIC KEY-----\\n")
+    with tempfile.TemporaryDirectory(prefix="coord-owner-verify-") as directory:
+        root = Path(directory)
+        (root / "pub.pem").write_bytes(pem)
+        (root / "signature.bin").write_bytes(bytes.fromhex(signature_hex))
+        (root / "message.bin").write_bytes(release_payload(state, expected_head_sha))
+        try:
+            outcome = subprocess.run([
+                "openssl", "pkeyutl", "-verify", "-pubin",
+                "-inkey", str(root / "pub.pem"), "-sigfile",
+                str(root / "signature.bin"), "-rawin", "-in",
+                str(root / "message.bin")
+            ], capture_output=True, timeout=12, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise Blocked("Ed25519 verification unavailable; fail closed") from exc
+    require(outcome.returncode == 0, "Ed25519 release signature rejected")
+
+
+def state_step(state, op, proof_hash=None, public_key_hex=None,
+               signature_hex=None, expected_head_sha=None):
     next_state = dict(state)
     if op == "recover":
         require(state["status"] == "blocked_legacy" and state["round"] == 0, "Recovery not eligible")
@@ -101,15 +154,21 @@ def state_step(state, op, proof_hash=None, secret=None):
                           recovery="2026-11-01: repository-owner-authorized governance-only recovery; historical ref retained")
     elif op == "acquire":
         require(state["status"] == "released", "Issue is occupied or blocked")
-        require(isinstance(proof_hash, str) and re.fullmatch("[0-9a-f]{64}", proof_hash), "Owner proof digest missing")
-        next_state.update(round=state["round"]+1,status="held",
-                          owner_login=OWNER,proof_hash=proof_hash)
+        require(isinstance(public_key_hex, str)
+                and re.fullmatch(r"[0-9a-f]{64}", public_key_hex) is not None,
+                "Ed25519 public key missing")
+        require(isinstance(proof_hash, str)
+                and re.fullmatch(r"[0-9a-f]{64}", proof_hash) is not None
+                and hmac.compare_digest(
+                    hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest(), proof_hash),
+                "Owner public key digest mismatch")
+        next_state.update(round=state["round"]+1, status="held", owner_login=OWNER,
+                          proof_hash=proof_hash, owner_pubkey=public_key_hex)
     elif op == "release":
         require(state["status"] == "held", "No current owner")
-        require(isinstance(secret,str) and len(secret) >= 32, "Missing private owner proof")
-        expected=hashlib.sha256(secret.encode("utf-8")).hexdigest()
-        require(hmac.compare_digest(expected,state["proof_hash"]), "Wrong owner secret")
-        next_state.update(status="released",owner_login=None,proof_hash=None)
+        verify_release_signature(state, expected_head_sha, signature_hex)
+        next_state.update(status="released", owner_login=None,
+                          proof_hash=None, owner_pubkey=None)
     else:
         raise Blocked("Unsupported production transition")
     return next_state
@@ -155,13 +214,19 @@ def initialize():
     require(checked==state,"Initializer state mismatch")
     print("INIT_OK: held legacy claim preserved; coord/issue-565 currently BLOCKED_LEGACY; SHA="+commit)
 
-def transition(op,proof_hash=None):
+def transition(op, proof_hash=None, public_key_hex=None,
+               signature_hex=None, expected_head_sha=None):
     verify_owner_context()
     name="coord/issue-565"
     old_sha=head(name)
     state,_=state_at(old_sha)
     require(state.get("legacy_ref_sha")==LEGACY_SHA,"Unexpected legacy snapshot")
-    next_state=state_step(state,op,proof_hash)
+    if op == "release":
+        require(old_sha == expected_head_sha, "Coordinator moved since release was signed")
+    next_state=state_step(state, op, proof_hash=proof_hash,
+                          public_key_hex=public_key_hex,
+                          signature_hex=signature_hex,
+                          expected_head_sha=expected_head_sha)
     candidate=forward(name,old_sha,next_state)
     print("TRANSITION_OK:",op,"round",next_state["round"],"state",next_state["status"],"sha",candidate)
     print("No product claim was released or acquired; all work/issue-* refs unchanged")
@@ -177,39 +242,75 @@ def inspect():
 def self_test():
     init=dict(v=2,repo=REPO,issue=ISSUE,round=0,status="blocked_legacy",
               owner_login=None,proof_hash=None,legacy_ref_sha=LEGACY_SHA)
-    assert state_step(init,"recover")["status"]=="released"
     free=state_step(init,"recover")
-    digest=hashlib.sha256(("x"*48).encode()).hexdigest()
-    hold=state_step(free,"acquire",digest)
-    assert hold["round"]==1 and hold["status"]=="held"
-    done=state_step(hold,"release",secret="x"*48)
-    assert done["status"]=="released" and done["round"]==1
-    assert state_step(done,"acquire",hashlib.sha256(b"new-round").hexdigest())["round"]==2
-    for thunk in (
-        lambda:state_step(init,"acquire",digest),
-        lambda:state_step(hold,"acquire",digest),
-        lambda:state_step(hold,"release",secret="wrong-secret-should-not-work"),
-        lambda:state_step(done,"release",secret="x"*48),
-        lambda:state_step(free,"recover"),
-        lambda:state_step(free,"acquire","not-a-sha"),
-    ):
-        try: thunk()
-        except Blocked: pass
-        else: raise AssertionError("Invalid owner or round transition accepted")
-    print("PASS: v2 owner proof, exclusive acquisition, release/reacquire, replay/duplicate rejects")
+    assert free["status"]=="released"
+    with tempfile.TemporaryDirectory(prefix="coord-owner-selftest-") as directory:
+        root=Path(directory)
+        private_key=root/"private.pem"
+        pub_der=root/"public.der"
+        subprocess.run(["openssl","genpkey","-algorithm","ED25519",
+                        "-out",str(private_key)],check=True,capture_output=True)
+        subprocess.run(["openssl","pkey","-in",str(private_key),
+                        "-pubout","-outform","DER","-out",str(pub_der)],
+                        check=True,capture_output=True)
+        key=pub_der.read_bytes()
+        assert key.startswith(bytes.fromhex("302a300506032b6570032100"))
+        public_key_hex=key[-32:].hex()
+        digest=hashlib.sha256(key[-32:]).hexdigest()
+        held=state_step(free,"acquire",digest,public_key_hex)
+        assert held["round"]==1 and held["status"]=="held"
+        held_head="a"*40
+        payload=release_payload(held,held_head)
+        (root/"message.bin").write_bytes(payload)
+        signature=root/"signature.bin"
+        subprocess.run(["openssl","pkeyutl","-sign","-inkey",str(private_key),
+                        "-rawin","-in",str(root/"message.bin"),"-out",str(signature)],
+                        check=True,capture_output=True)
+        sig_hex=signature.read_bytes().hex()
+        done=state_step(held,"release",signature_hex=sig_hex,
+                        expected_head_sha=held_head)
+        assert done["status"]=="released" and done["round"]==1
+        assert done["owner_pubkey"] is None
+        assert state_step(done,"acquire",digest,public_key_hex)["round"]==2
+        for thunk in (
+            lambda: state_step(init,"acquire",digest,public_key_hex),
+            lambda: state_step(held,"acquire",digest,public_key_hex),
+            lambda: state_step(held,"release",signature_hex="0"*128,
+                               expected_head_sha=held_head),
+            lambda: state_step(held,"release",signature_hex=sig_hex,
+                               expected_head_sha="b"*40),
+            lambda: state_step(done,"release",signature_hex=sig_hex,
+                               expected_head_sha=held_head),
+            lambda: state_step(free,"recover"),
+            lambda: state_step(free,"acquire","not-a-digest",public_key_hex),
+            lambda: state_step(free,"acquire",digest,"a"*64),
+            lambda: verify_release_signature(held,"bad-sha",sig_hex),
+        ):
+            try: thunk()
+            except Blocked: pass
+            else: raise AssertionError("Invalid owner, stale round or signature accepted")
+    print("PASS: Ed25519 owner proof, signed release, anti-replay, duplicate and stale-round rejects")
+
 
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--self-test",action="store_true")
-    p.add_argument("--operation",choices=("init","recover","acquire","inspect"))
+    p.add_argument("--operation",choices=("init","recover","acquire","inspect","release"))
     p.add_argument("--proof-hash")
+    p.add_argument("--public-key-hex")
+    p.add_argument("--signature-hex")
+    p.add_argument("--expected-coord-sha")
     args=p.parse_args()
     if args.self_test: self_test(); return
     if args.operation=="init": initialize()
     elif args.operation=="recover": transition("recover")
-    elif args.operation=="acquire": transition("acquire",args.proof_hash)
+    elif args.operation=="acquire":
+        transition("acquire",proof_hash=args.proof_hash,public_key_hex=args.public_key_hex)
+    elif args.operation=="release":
+        transition("release",signature_hex=args.signature_hex,
+                   expected_head_sha=args.expected_coord_sha)
     elif args.operation=="inspect": inspect()
-    else: raise Blocked("No production release through workflow dispatch: keep secret private")
+    else: raise Blocked("Unsupported operation")
 
 if __name__=="__main__":
     try: main()
