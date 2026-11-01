@@ -257,6 +257,52 @@ test('TEST-007/008: never launch without approval or with bad config',async()=>{
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:true}),
     {ok:false,code:process.platform==='win32'?'PREFLIGHT_FAILED':'PREFLIGHT_FAILED'});
 });
+/** A native user cancellation must take priority even when an awaited
+ * read-only preflight or signed-binary inspection concurrently fails. All
+ * fixtures are mocked; no Chrome, Profile or listener is touched.
+ */
+test('TASK-005/TEST-007/009/026: revocation wins over a failing asynchronous launch preflight',async t=>{
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12059);
+  for(const phase of ['initial','binary','final'] as const){
+    const consent=new AbortController();
+    let checks=0,spawned=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>{
+        checks++;
+        if(phase==='initial'||(phase==='final'&&checks===2)){
+          consent.abort();
+          return {ok:false as const,code:'PORT_PROBE_FAILED' as const};
+        }
+        return {ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+          config:cfg,runtimeIdentityVerified:false as const};
+      });
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>{
+        if(phase==='binary'){
+          consent.abort();
+          return {ok:false as const,code:'UNTRUSTED_BINARY' as const};
+        }
+        return {ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+          version:'155.0.1.1',publisher:'Google LLC' as const,
+          runtimeVerified:false as const};
+      });
+      t.mock.method(cp,'spawn',()=>{
+        spawned++;
+        throw Error('Synthetic launch must never start after revoked consent');
+      });
+      const result=await launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:consent.signal
+      });
+      assert.deepEqual(result,{ok:false,code:'ABORTED'},phase);
+      assert.equal(consent.signal.aborted,true,phase);
+      assert.equal(spawned,0,phase);
+      assert.equal(checks,phase==='final'?2:1,phase);
+    }finally{t.mock.reset();}
+  }
+});
+
 test('TASK-005/TEST-006/007/009/026: Chrome launch consent options never evaluate accessors or Proxy traps',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
