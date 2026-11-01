@@ -71,3 +71,10 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 轮次收尾分别核验：合法原持有者退出、已合并 PR/commit、剩余验收范围、未整合代码/进行中 PR、认领引用对象及轮次、并发安全释放、GitHub 远程复核。原工作分支保留追踪价值，但已有效释放的历史轮次不应永久占用。
 - 新一轮必须重新原子认领，并从最新 main 建立独立实施分支；每次写入/合并前核验当前轮次。创建引用成功与释放引用安全是独立能力。**读取后直接 DELETE Git 引用不是条件删除**，不得作为自动释放。
 - 新增测试专用生命周期脚本/Actions 只允许操作 `test/claim-lifecycle-*`，不是产品 Issue 生产协调机制。八个旧认领分支仍须逐项核验与安全交接，不得把文档更新当作 Stable 验收或强互斥已部署。
+
+## Owner-authorized governance #565 deadlock bootstrap (2026-11-01)
+
+- **Exception is limited to governance repair only**, authorized by the repository owner's explicit request to solve the repeated-execution deadlock. See `docs/17-owner-authorized-governance-recovery.md`. The independently created `repair/governance-565-bootstrap-20261101` branch is a *one-off isolated repair lane*, **not** a legitimate transfer/renewal of `work/issue-565` or any product claim.
+- In the single-writer repair lane, only the five paths listed in `docs/17-owner-authorized-governance-recovery.md` may change, using a PR into `main` and the read-only `governance-recovery-guard.yml` check. Existing historical claims, implementation branches, TASK/REQ/NFR/TEST/GATE and Stable Release criteria remain unchanged.
+- **This exception does not unblock competing product writes.** Before any product development, establish a production-grade owner/round coordinator, authenticated safe release/reacquisition and enforceable stale-writer/merge protection. Individually reconcile eight historical product Issues and preserve all work. A successful bootstrap CI or merge is not proof of these steps.
+- If legacy refs move, other PRs compete, the one-time scope expands, or owner permission is uncertain, stop this repair without force push/delete/branch stealing. Repository ruleset checks currently returned no rules; the classic branch-protection read was permission-denied, so do not assume main is unprotected or protected.
