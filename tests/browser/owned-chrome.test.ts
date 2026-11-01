@@ -1068,3 +1068,35 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     t.mock.reset();
   }
 });
+
+
+test('TASK-005/TEST-006/009/026: native consent revocation interrupts a stalled CDP response body',async()=>{
+  // Synthetic response stream only: no Chrome process, Profile or network.
+  // The fetch may have completed its headers before user revocation.
+  const controller=new AbortController();
+  const neverYieldingBody=new ReadableStream<Uint8Array>({
+    pull:()=>new Promise<void>(()=>{})
+  });
+  const response=new Response(neverYieldingBody,{status:200});
+  // Keep the regression compilable against the old one-argument signature;
+  // previously the second argument was ignored and the body waited 1500ms.
+  const readWithSignal=readBoundedCdpJson as unknown as
+    (response:Response,signal:AbortSignal)=>Promise<unknown|null>;
+  const pending=readWithSignal(response,controller.signal);
+  const deadline=Symbol('stalled-cdp-body-did-not-stop');
+  let watchdog:ReturnType<typeof setTimeout>|undefined;
+  try{
+    controller.abort();
+    const outcome=await Promise.race([
+      pending,
+      new Promise<typeof deadline>(resolve=>{
+        watchdog=setTimeout(()=>resolve(deadline),400);
+      })
+    ]);
+    assert.notEqual(outcome,deadline,
+      'revoked consent must stop a stalled CDP body without waiting for its separate 1500ms deadline');
+    assert.equal(outcome,null,'a revoked CDP body must never yield verified JSON');
+  }finally{
+    if(watchdog)clearTimeout(watchdog);
+  }
+});
