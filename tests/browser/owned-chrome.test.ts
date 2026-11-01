@@ -1100,3 +1100,49 @@ test('TASK-005/TEST-006/009/026: native consent revocation interrupts a stalled 
     if(watchdog)clearTimeout(watchdog);
   }
 });
+
+
+test('TASK-005/TEST-006/009/026: owned Chrome exit immediately cancels an in-flight CDP HTTP probe',async t=>{
+  // Controlled synthetic child only. No user Chrome, Profile, port or network.
+  // When the owned process exits during fetch, a 1500ms HTTP probe must not
+  // stay alive or be mistaken for an ordinary temporary refused connection.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12047);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41247,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let observedAborted=false,requests=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async(
+      _request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1]
+    )=>{
+      requests++;
+      assert.ok(init?.signal,'the owned probe must be cancellable');
+      child.emit('exit',1);
+      observedAborted=Boolean(init.signal.aborted);
+      throw Object.assign(new Error('synthetic child closed the listener'),
+        {code:'ECONNRESET'});
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.equal(requests,1,'do not retry a terminal child');
+    assert.equal(observedAborted,true,
+      'process exit must synchronously revoke the active CDP HTTP probe');
+    assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},
+      'a dead owned Chrome is a terminal failure, not a CDP timeout');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{t.mock.reset();}
+});
