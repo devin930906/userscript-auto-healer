@@ -52,6 +52,8 @@ def self_test():
     reject(lambda: step(b, "release", OWNER_A, 1))
     reject(lambda: step(b, "release", OWNER_B, 1))
     assert step(b, "release", OWNER_B, 2)["status"] == "released"
+    assert path("test/coord-round-1-1") == "/git/ref/heads/test/coord-round-1-1"
+    assert path("test/coord-round-1-1").replace("/git/ref/", "/git/refs/", 1) == "/git/refs/heads/test/coord-round-1-1"
     print("PASS: local stale round/duplicate acquire/wrong owner rejects")
 
 def api(method, endpoint, value=None):
@@ -99,7 +101,7 @@ def new_commit(parent, state):
     return data["sha"]
 
 def advance(name, sha):
-    return api("PATCH", path(name), {"sha": sha, "force": False})[0]
+    return api("PATCH", path(name).replace("/git/ref/", "/git/refs/", 1), {"sha": sha, "force": False})[0]
 
 def check(name, sha):
     if head(name) != sha:
