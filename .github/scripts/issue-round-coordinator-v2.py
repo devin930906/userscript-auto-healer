@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Owner-authorized, monotonic Git coordination for governance #565.
+"""Owner-authorized, monotonic coordination for eight legacy product Issues and #565.
 
-Production: operator may initialize and inspect #565; recovery and acquisition
+Production: owner may initialize and inspect an allowlisted Issue; recovery and acquisition
 require explicit owner-authorized Actions invocation. Historical work ref stays.
 Private release uses an Ed25519 signature on round/head only; the signing key
 is NEVER passed through Actions, logs or dispatch data.
@@ -24,9 +24,24 @@ from urllib.request import Request, urlopen
 REPO = "devin930906/userscript-auto-healer"
 ROOT = "https://api.github.com/repos/" + REPO
 OWNER = "devin930906"
-ISSUE = 565
-LEGACY_SHA = "ced1316eacf7fc9aee76a27d8fa1debdacb34248"
+LEGACY_SHAS = {
+    215: "05210b7b03819fff01baf1c8fb9b86b8f98100ac",
+    440: "c47ac7354a57033fb6ba3b6bc5bc5dd85e06a359",
+    480: "f26aad0ca5dc900bb5d51fef2bc8adbbfaef7207",
+    486: "171aca86f58d5d21bb98e8dcbde070d79b495298",
+    487: "0e4410494d260f20d4a8883efb16dfd03ee87658",
+    488: "ee0f007631aedf5f0a392a6f03ed211117a79e45",
+    489: "a046b5766b9efa06790ae9acedc4c23f4f302dfd",
+    510: "6d99c808d70dd6f7d4221e272d81a7b412cb081f",
+    565: "ced1316eacf7fc9aee76a27d8fa1debdacb34248",
+}
+ISSUE = int(os.environ.get("COORD_ISSUE_NUMBER", "565"))
+LEGACY_SHA = LEGACY_SHAS.get(ISSUE)
 PREFIX = "coord/v2 "
+MAIN_ONLY_DIFF = {215: {"scripts/test-windows-portable-relocation.ps1": (
+    "e71b350b6385f421b0cc9723ed35b55488c1c49c",
+    "1365588f8b91e755c9989bb1a9bad686cf19a868")}}
+
 
 class Blocked(Exception):
     pass
@@ -62,7 +77,7 @@ def get(path):
     return data
 
 def ref_path(name):
-    require(re.fullmatch(r"(?:coord/issue-565|test/v2-565-[0-9]+-[0-9]+)", name) is not None, "Ref outside governance coordinator scope")
+    require(name == "coord/issue-" + str(ISSUE), "Ref outside selected Issue coordinator scope")
     return "/git/ref/heads/" + quote(name, safe="/")
 
 def head(name):
@@ -151,7 +166,8 @@ def state_step(state, op, proof_hash=None, public_key_hex=None,
     if op == "recover":
         require(state["status"] == "blocked_legacy" and state["round"] == 0, "Recovery not eligible")
         next_state.update(status="released", owner_login=None, proof_hash=None,
-                          recovery="2026-11-01: repository-owner-authorized governance-only recovery; historical ref retained")
+                          recovery=("2026-11-01 repository-owner-authorized Issue #"
+                                    + str(ISSUE) + " recovery; historical ref retained"))
     elif op == "acquire":
         require(state["status"] == "released", "Issue is occupied or blocked")
         require(isinstance(public_key_hex, str)
@@ -193,10 +209,48 @@ def verify_owner_context():
     require(os.getenv("GITHUB_EVENT_NAME")=="workflow_dispatch","Manual owner action required")
     current=get("/git/ref/heads/main")["object"]["sha"]
     require(current==os.getenv("GITHUB_SHA"),"Main changed since workflow dispatch; stop")
-    require(get("/git/ref/heads/work/issue-565")["object"]["sha"] == LEGACY_SHA,
-            "Historical #565 claim changed: stop")
+    require(ISSUE in LEGACY_SHAS and LEGACY_SHA is not None,
+            "Issue outside approved legacy recovery scope")
+    require(get("/git/ref/heads/work/issue-" + str(ISSUE))["object"]["sha"] == LEGACY_SHA,
+            "Historical Issue claim changed: stop")
     prs=get("/pulls?state=open&per_page=100")
     require(len(prs)<100 and not prs,"Competing open PR or incomplete PR listing")
+
+def verify_integrated_product_snapshot(main_sha):
+    """Fail closed if the existing legacy branch has unmatched final file content.
+
+    Exact final file comparison is NOT proof of former owner exit or of all
+    historical commits. The original work ref is retained in every case.
+    """
+    if ISSUE == 565:
+        return
+    compare = get("/compare/" + main_sha + "..." + LEGACY_SHA + "?per_page=100")
+    files = compare.get("files")
+    require(isinstance(files, list) and 0 < len(files) < 300,
+            "Incomplete legacy compare file inventory")
+    unexpected = []
+    for item in files:
+        name = item.get("filename", "")
+        require(item.get("status") != "renamed" and isinstance(name, str)
+                and name and not name.startswith("/"), "Unreviewed historical path")
+        url = "/contents/" + quote(name, safe="/") + "?ref="
+        old_blob = get(url + LEGACY_SHA)
+        main_blob = get(url + main_sha)
+        require(old_blob.get("type") == "file" and main_blob.get("type") == "file",
+                "Legacy changed path not present on both branches")
+        if old_blob["sha"] == main_blob["sha"]:
+            continue
+        # Owner has separately audited the main-side-only 78-line #215 test.
+        allowed = MAIN_ONLY_DIFF.get(ISSUE, {}).get(name)
+        if allowed != (main_blob["sha"], old_blob["sha"]):
+            unexpected.append(name)
+    require(not unexpected, "Unreconciled legacy final snapshots: " + ", ".join(unexpected))
+    require(get("/git/ref/heads/work/issue-" + str(ISSUE))["object"]["sha"] == LEGACY_SHA,
+            "Historical Issue branch moved during inspection")
+    require(get("/git/ref/heads/main")["object"]["sha"] == main_sha,
+            "main moved during historical snapshot inspection")
+    print("PASS: historical final file snapshots matched; prior owner exit NOT inferred")
+
 
 def initialize():
     verify_owner_context()
@@ -205,39 +259,46 @@ def initialize():
                owner_login=None,proof_hash=None,
                legacy_ref_sha=LEGACY_SHA,bootstrap_main=start)
     commit=new_commit(start,state)
-    code,data=api("POST","/git/refs",{"ref":"refs/heads/coord/issue-565","sha":commit})
+    code,data=api("POST","/git/refs",{"ref":"refs/heads/coord/issue-" + str(ISSUE),"sha":commit})
     if code!=201:
         raise Blocked("Create-only coordinator ref refused: "+str(code)+
                       "; read existing ref, never overwrite")
-    require(head("coord/issue-565")==commit,"Initializer readback mismatch")
+    require(head("coord/issue-" + str(ISSUE))==commit,"Initializer readback mismatch")
     checked,_=state_at(commit)
     require(checked==state,"Initializer state mismatch")
-    print("INIT_OK: held legacy claim preserved; coord/issue-565 currently BLOCKED_LEGACY; SHA="+commit)
+    print("INIT_OK: legacy branch preserved; coord/issue-" + str(ISSUE)
+          + " is BLOCKED_LEGACY; SHA=" + commit)
 
 def transition(op, proof_hash=None, public_key_hex=None,
                signature_hex=None, expected_head_sha=None):
     verify_owner_context()
-    name="coord/issue-565"
+    name="coord/issue-" + str(ISSUE)
     old_sha=head(name)
     state,_=state_at(old_sha)
     require(state.get("legacy_ref_sha")==LEGACY_SHA,"Unexpected legacy snapshot")
     if op == "release":
         require(old_sha == expected_head_sha, "Coordinator moved since release was signed")
+    if op == "recover" and ISSUE != 565:
+        require(os.getenv("COORD_RECOVERY_CONFIRM") ==
+                "RECOVER-" + str(ISSUE) + "-PRESERVE-HISTORY",
+                "Missing explicit owner Issue-specific recovery authorization")
+        verify_integrated_product_snapshot(os.environ["GITHUB_SHA"])
     next_state=state_step(state, op, proof_hash=proof_hash,
                           public_key_hex=public_key_hex,
                           signature_hex=signature_hex,
                           expected_head_sha=expected_head_sha)
     candidate=forward(name,old_sha,next_state)
     print("TRANSITION_OK:",op,"round",next_state["round"],"state",next_state["status"],"sha",candidate)
-    print("No product claim was released or acquired; all work/issue-* refs unchanged")
+    print("Historical work/issue-" + str(ISSUE)
+          + " preserved; only its separate coordination reference was changed")
 
 def inspect():
-    sha=head("coord/issue-565")
+    sha=head("coord/issue-" + str(ISSUE))
     state,_=state_at(sha)
-    print(canonical({"ref":"refs/heads/coord/issue-565","sha":sha,"round":state["round"],
+    print(canonical({"ref":"refs/heads/coord/issue-" + str(ISSUE),"sha":sha,"round":state["round"],
                      "status":state["status"],"owner_login":state["owner_login"],
                      "legacy_ref_sha":state.get("legacy_ref_sha")}))
-    print("Not certified: per-chat identity, historical product owner handoffs or Stable")
+    print("Inspect only: do not claim product acceptance or Stable")
 
 def self_test():
     init=dict(v=2,repo=REPO,issue=ISSUE,round=0,status="blocked_legacy",
@@ -302,6 +363,8 @@ def main():
     p.add_argument("--expected-coord-sha")
     args=p.parse_args()
     if args.self_test: self_test(); return
+    if ISSUE not in LEGACY_SHAS:
+        raise Blocked("Issue not on the approved legacy recovery list")
     if args.operation=="init": initialize()
     elif args.operation=="recover": transition("recover")
     elif args.operation=="acquire":
