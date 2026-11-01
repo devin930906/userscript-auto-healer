@@ -272,7 +272,15 @@ export async function launchApprovedIsolatedChrome(
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(checked.testHeadless===true && process.env.GITHUB_ACTIONS!=='true')
     return {ok:false,code:'NOT_AUTHORIZED'};
-  const cfg=preflight.config;
+  // Authenticode inspection may take seconds after the first port/profile
+  // preflight. An unrelated process can claim the loopback CDP port during
+  // that gap. Recheck the selected isolated Profile and port immediately
+  // before spawn; fail closed rather than boot Chrome against a stale receipt.
+  // This narrows, but cannot eliminate, the final OS port bind race.
+  const finalPreflight=await preflightChrome(preflight.config);
+  if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
+  if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  const cfg=finalPreflight.config;
   const argv=[
     '--no-first-run','--no-default-browser-check','--disable-background-networking',
     '--remote-debugging-address=127.0.0.1',
