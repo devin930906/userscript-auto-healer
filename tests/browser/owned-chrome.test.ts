@@ -948,6 +948,63 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
   }
 });
 
+test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry pause',async t=>{
+  // Entirely synthetic owned child and HTTP rejection: no Chrome, user
+  // Profile, network request, external process or user-script interaction.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const timers=require('node:timers/promises') as typeof import('node:timers/promises');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\cancelled-profile',12046);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41246,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const controller=new AbortController();
+  const pauseSignals:(AbortSignal|undefined)[]=[];
+  const stages:string[]=[];
+  let fetches=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async()=>{
+      fetches++;
+      throw Object.assign(new Error('synthetic refused request'),{code:'ECONNREFUSED'});
+    });
+    t.mock.method(timers,'setTimeout',async(
+      ms?:number,_value?:unknown,options?:{signal?:AbortSignal}
+    )=>{
+      if(ms!==250)throw Error('UNEXPECTED_SYNTHETIC_TIMER');
+      pauseSignals.push(options?.signal);
+      if(options?.signal?.aborted)
+        throw Object.assign(new Error('synthetic timer cancellation'),{name:'AbortError'});
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal,
+      onStartupStage:(stage)=>{
+        stages.push(stage);
+        if(stage==='FETCH_REFUSED')controller.abort();
+      }
+    });
+    assert.deepEqual(result,{ok:false,code:'ABORTED'});
+    assert.equal(fetches,1,'revoked consent must prevent a second CDP probe');
+    assert.deepEqual(pauseSignals,[controller.signal],
+      'owned bootstrap retry pause must receive the native cancellation signal');
+    assert.deepEqual(stages,['FETCH_REFUSED']);
+    assert.equal(child.killed,true,'cancellation must stop only the owned child');
+  }finally{t.mock.reset();}
+});
+
 test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
   // Native-only disposable synthetic process: no Chrome, Profile or web I/O.
   // Keep a refed watchdog so a pending fetch cannot make node:test silently
@@ -1009,5 +1066,37 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     if(result?.ok)result.stop();
     controller.abort();
     t.mock.reset();
+  }
+});
+
+
+test('TASK-005/TEST-006/009/026: native consent revocation interrupts a stalled CDP response body',async()=>{
+  // Synthetic response stream only: no Chrome process, Profile or network.
+  // The fetch may have completed its headers before user revocation.
+  const controller=new AbortController();
+  const neverYieldingBody=new ReadableStream<Uint8Array>({
+    pull:()=>new Promise<void>(()=>{})
+  });
+  const response=new Response(neverYieldingBody,{status:200});
+  // Keep the regression compilable against the old one-argument signature;
+  // previously the second argument was ignored and the body waited 1500ms.
+  const readWithSignal=readBoundedCdpJson as unknown as
+    (response:Response,signal:AbortSignal)=>Promise<unknown|null>;
+  const pending=readWithSignal(response,controller.signal);
+  const deadline=Symbol('stalled-cdp-body-did-not-stop');
+  let watchdog:ReturnType<typeof setTimeout>|undefined;
+  try{
+    controller.abort();
+    const outcome=await Promise.race([
+      pending,
+      new Promise<typeof deadline>(resolve=>{
+        watchdog=setTimeout(()=>resolve(deadline),400);
+      })
+    ]);
+    assert.notEqual(outcome,deadline,
+      'revoked consent must stop a stalled CDP body without waiting for its separate 1500ms deadline');
+    assert.equal(outcome,null,'a revoked CDP body must never yield verified JSON');
+  }finally{
+    if(watchdog)clearTimeout(watchdog);
   }
 });
