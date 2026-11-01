@@ -1,4 +1,4 @@
-name: Governance #565 Bootstrap Recovery Guard (READ ONLY)
+name: 'Governance #565 Bootstrap Recovery Guard (READ ONLY)'
 
 on:
   pull_request:
