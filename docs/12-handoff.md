@@ -334,3 +334,10 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 - 首次创建互斥已见 [Actions #41211634125](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125) 和 [#41211891107](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211891107)；跨轮次的**并发安全释放/重新认领/失效写入隔离**尚无生产 Issue 验证证据。八个 Issue 均须先按 `docs/16-cross-session-issue-claims.md` 分别核验归属、合并范围、实际剩余、停止写入及安全接管。
 - 严禁直接删除旧分支或建立带后缀的第二认领；取得正式安全释放证据后才允许新一轮从最新 main 原子认领并接续。缺少条件标记 `HANDOFF_BLOCKED`，不应暂停其他不冲突的治理工作。
 - 新增手动治理测试仅操作 `test/claim-lifecycle-*`，不构成生产交接。合并后应使用实际 run ID 复核结果；不将脚本文件存在当作测试通过，不将开发候选 EXE/ZIP 当作 Stable 发行包。
+
+
+## 2026-11-01 cross-round coordination test receipt (after PR #566)
+
+The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github.com/devin930906/userscript-auto-healer/actions/runs/41281277986) completed **SUCCESS** on `main@4ce1c9b55fcd1721f95b0cd9df75da21f6222bc8`: two independent runners contested a descendant of a previously released coordination ref, with HTTP 200 winner A / HTTP 422 loser B and 741ms start gap. Final verification rejected a losing sibling and an old-round replay, then recorded release and successful round-three acquisition. See `docs/16-cross-session-issue-claims.md` for exact job evidence.
+
+**Development handoff still blocked for prior eight product Issue claims:** this experimental ref mechanism is not a production owner/round authorization or protected merge/write gate; legacy `work/issue-215/440/480/486/487/488/489/510` ownership and unmatched changes remain unverified. Track full production coordinator, protected integration and individual handoffs in open [Issue #565](https://github.com/devin930906/userscript-auto-healer/issues/565). Do not infer safe product takeover from this success or start over with the former (4) preparation. Other independent, properly authorized work may continue under the existing scope and admission rules.
