@@ -1,0 +1,41 @@
+name: Governance Issue Round Coordination (TEST ONLY)
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/issue-round-coordinator.py'
+      - '.github/workflows/governance-round-coordination.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  checks:
+    name: Reject invalid round transitions (local tests)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: |
+          python3 -m py_compile .github/scripts/issue-round-coordinator.py
+          python3 .github/scripts/issue-round-coordinator.py --self-test
+
+  isolated-live-test:
+    name: Verify GitHub CAS with isolated immutable test ref
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Real create/release/reacquire + stale replay rejection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/issue-round-coordinator.py --live-test
