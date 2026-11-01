@@ -216,7 +216,8 @@ export async function verifyWindowsLoopbackListenerPid(
  * No Runtime.evaluate, website navigation, scripts, or GM APIs are invoked.
  */
 export async function verifyCdpBrowserWebSocket(
-  websocketUrl:string,expectedPort:number,expectedVersion:string
+  websocketUrl:string,expectedPort:number,expectedVersion:string,
+  signal?:AbortSignal
 ):Promise<boolean>{
   if(typeof websocketUrl!=='string'||typeof expectedVersion!=='string'||
      !/^\d+\.\d+\.\d+\.\d+$/.test(expectedVersion)||
@@ -229,15 +230,23 @@ export async function verifyCdpBrowserWebSocket(
      parsed.search||parsed.hash||
      !/^\/devtools\/browser\/[a-zA-Z0-9-]{8,128}$/.test(parsed.pathname))
     return false;
+  // Native consent revocation and owned-child exit must interrupt a
+  // pending browser proof. The caller must never wait out the separate
+  // four-second network deadline after its authority has been revoked.
+  if(signal?.aborted)return false;
   return new Promise(resolve=>{
-    let client:WebSocket,settled=false;
+    let client:WebSocket|undefined,settled=false;
     const finish=(passed:boolean)=>{
       if(settled)return;
       settled=true;clearTimeout(timer);
-      try{client.close();}catch{ /* socket already closed */ }
+      signal?.removeEventListener('abort',onAbort);
+      try{client?.close();}catch{ /* connecting/closed socket */ }
       resolve(passed);
     };
+    const onAbort=()=>finish(false);
     const timer=setTimeout(()=>finish(false),4000);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    if(signal?.aborted){finish(false);return;}
     try{
       client=new WebSocket(websocketUrl);
       client.addEventListener('open',()=>{
