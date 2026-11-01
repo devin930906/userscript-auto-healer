@@ -1,0 +1,37 @@
+name: Governance #565 Bootstrap Recovery Guard (READ ONLY)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'AGENTS.md'
+      - 'docs/16-cross-session-issue-claims.md'
+      - 'docs/17-owner-authorized-governance-recovery.md'
+      - '.github/scripts/verify-governance-recovery.py'
+      - '.github/workflows/governance-recovery-guard.yml'
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Owner-authorized governance repair scope (NOT PRODUCTION FENCE)
+    if: github.event.pull_request.head.repo.full_name == 'devin930906/userscript-auto-healer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Python syntax and adversarial local checks
+        run: |
+          python3 -m py_compile .github/scripts/verify-governance-recovery.py
+          python3 .github/scripts/verify-governance-recovery.py --self-test
+      - name: Verify exact PR, unchanged historical refs and exclusive PR review window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_PR_NUMBER: ${{ github.event.pull_request.number }}
+          RECOVERY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/verify-governance-recovery.py
