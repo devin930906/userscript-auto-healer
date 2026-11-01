@@ -84,7 +84,25 @@ case "$mode" in
     third="$(child "$release2" 'test-only round 3 claimed')"
     [[ "$(advance "$third")" == 200 ]] || exit 1
     assert_head "$third"
-    echo "PASS: one reacquisition winner; stale sibling and round-one replay rejected; round three succeeds; delta=$delta ms"
+    # Failure injection: a prior round's second release must not overtake a newer claim.
+    repeat_release="$(child "$winner" 'test-only stale duplicate release from round 2')"
+    refused "$(advance "$repeat_release")"; assert_head "$third"
+    # Deliberately discard the client response to a real update; do not retry a blind write.
+    third_release="$(child "$third" 'test-only round 3 released')"
+    release_code="$(advance "$third_release")"
+    [[ "$release_code" == 200 ]] || exit 1
+    unset release_code
+    assert_head "$third_release"
+    # An old round cannot replay a release, even after a later release has occurred.
+    old_release_replay="$(child "$release2" 'test-only stale round 2 release replay')"
+    refused "$(advance "$old_release_replay")"; assert_head "$third_release"
+    # Post-release sibling attempt cannot overwrite the next winner.
+    fourth="$(child "$third_release" 'test-only round 4 claimed')"
+    [[ "$(advance "$fourth")" == 200 ]] || exit 1
+    assert_head "$fourth"
+    stale_post_release="$(child "$third_release" 'test-only post-release stale sibling')"
+    refused "$(advance "$stale_post_release")"; assert_head "$fourth"
+    echo "PASS: single-winner reacquisition; old-round replay, stale sibling, duplicate release, post-release sibling rejected; lost-response simulation reconciled by readback; round four succeeds; delta=$delta ms"
     ;;
   *) echo 'Expected init/contend/verify'; exit 2 ;;
 esac
