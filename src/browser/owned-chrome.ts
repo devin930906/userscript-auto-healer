@@ -125,8 +125,8 @@ export function classifyCdpStartupTransportFailure(error:unknown):
  'FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|'FETCH_RESET' {
  let current:unknown=error;
  for(let depth=0;depth<3;depth++){
-  if(!current||typeof current!=='object'||nodeTypes.isProxy(current))
-    return 'FETCH_FAILED';
+  if(!current||typeof current!=='object')break;
+  if(nodeTypes.isProxy(current))return 'FETCH_FAILED';
   let desc:PropertyDescriptorMap;
   try{desc=Object.getOwnPropertyDescriptors(current);}
   catch{return 'FETCH_FAILED';}
