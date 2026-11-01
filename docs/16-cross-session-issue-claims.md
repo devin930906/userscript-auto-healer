@@ -1,5 +1,8 @@
 # Cross-session Issue claim and parallel integration protocol
 
+> **2026-11-01 effective V2 coordination protocol:** The original fixed `work/issue-N` branches discussed below are **preserved historical claim/implementation refs**, not reusable active claims for the eight legacy product Issues. The current transition system uses separate `coord/issue-N` forward-only refs plus `impl/issue-N-rR` work branches, described in `docs/18-production-coordination-gates.md` and enforced on `main` by ruleset #26307718. A specific Issue becomes eligible **only after a real owner-authorized `blocked_legacy → released` recovery**, with unchanged historic ref SHA, fresh final-file reconciliation, and an actual successful GitHub Actions readback. Without that evidence mark it `HANDOFF_BLOCKED`; never automatically steal/delete/reset old branches. This V2 notice supersedes the *fixed-branch new acquisition and release steps* below for those eight Issues only, not their safety or product TEST/GATE requirements.
+
+
 > Status: governance migration for Issue #547, prepared from the verified `main@0ad14ef92b37d15c846fbff3dbecdfdc0fc3f3e3` baseline on 2026-10-31 UTC. It does not change approved REQ/NFR/TASK/TEST/GATE, historical admissions, source-code permissions or Stable acceptance. **Documented process and a single observed branch creation are not proof that concurrent actors or every client enforce the process.**
 
 ## Authority and scope
