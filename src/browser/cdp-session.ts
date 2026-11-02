@@ -251,6 +251,9 @@ export async function verifyCdpBrowserWebSocket(
       const socket=new WebSocket(websocketUrl);
       client=socket;
       socket.addEventListener('open',()=>{
+        // close() may throw while the WebSocket is CONNECTING. Its late open
+        // event must not send CDP commands after cancellation or timeout.
+        if(settled||signal?.aborted)return;
         try{socket.send(JSON.stringify({id:1,method:'Browser.getVersion'}));}
         catch{finish(false);}
       });
