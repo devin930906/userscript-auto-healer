@@ -424,11 +424,7 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
 
-| 既有 TASK | 当前新增 Issue | 原有 TASK | 当前新增 Issue |
-|---|---|---|---|
-| TASK-012 | [#603](https://github.com/devin930906/userscript-auto-healer/issues/603) | TASK-014 | [#604](https://github.com/devin930906/userscript-auto-healer/issues/604) |
-| TASK-015 | [#605](https://github.com/devin930906/userscript-auto-healer/issues/605) | TASK-016 | [#606](https://github.com/devin930906/userscript-auto-healer/issues/606) |
-| TASK-017 | [#607](https://github.com/devin930906/userscript-auto-healer/issues/607) | TASK-018 | [#608](https://github.com/devin930906/userscript-auto-healer/issues/608) |
-| TASK-019 | [#609](https://github.com/devin930906/userscript-auto-healer/issues/609) | TASK-021 | [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) |
+
+新映射详见 `docs/19-stable-v7-migration.md` 的专门表格；此计划仅保留上方 TASK-001..021 唯一正式任务主表，避免开发计划验证器将追加映射误认为重复 TASK 记录。
 
 注：2026-10-29 旧表是当日历史状态，不重写当时“尚未建 Issue”的真实记录；现行映射以本节和真实 GitHub 为准。
