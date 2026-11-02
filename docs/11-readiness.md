@@ -1,5 +1,8 @@
 # 开发前最终准入审查
 
+> **2026-11-02 有效范围校正**：下方历史有条件准入及当时旧 Issue 认领受阻结论均按原发生时间保留；新版（4）/（7）已取消 Issue 独占锁，旧交接不能阻止已授权且满足其他依赖的产品开发。正式 TEST/GATE 仍须独立验证；见 `docs/19-stable-v7-migration.md`。
+
+
 > 审查日期：2026-10-18；**（4）期末交叉审查与交接完成；开发准入判定为「有条件准入」**，仅允许（7）从 TASK-001 安全骨架开始。全部产品兼容、真实脚本修复及 Stable GATE 均未验收。参见 docs/13-predevelopment-admission.md、docs/12-handoff.md。
 
 ## 审查范围
@@ -88,3 +91,13 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 ## 2026-11-01：开发执行机制增量准入（不覆盖历史有条件准入）
 
 原（4）准备和当前正式产品开发进度均不重启。首次服务端 Git 引用创建互斥已有真实竞争实证；但新版（4）/（7）额外要求的同一 Issue **安全释放、重新认领、陈旧执行者写入/合并隔离**，尚未对生产 Issue 完成验证。八个开放 Issue 均有旧固定认领/工作分支，须逐项核验历史提交、PR、原归属退出和可安全接管条件；在此之前不得因为历史 PR 已合并就抢占。同仓库互不冲突的治理工作可以继续；不宣称 Stable GATE 已通过。见 `docs/16-cross-session-issue-claims.md` 和 `docs/12-handoff.md`。
+
+
+## 2026-11-02 新版（4）/（7）无独占认领迁移（现行续接依据）
+
+- PR [#602](https://github.com/devin930906/userscript-auto-healer/pull/602) 合并提交 `617fd3879f7a33ff3a5311868c1164b4e6dfb6fb`，经 Documentation Integrity 和 Required PR Fence 成功验证。此 SHA 只是当时迁移基准，不保证永远是当前 main。
+- 新指令取消 Issue 独占锁、创建认领分支、持有者签名轮次和 `HANDOFF_BLOCKED` 开发门槛。旧相关记录仍保留历史与安全证据，不能再阻止符合批准范围、依赖和 PR 规则的独立产品开发。
+- 保留原始 REQ/NFR/ADR/RISK/TEST/GATE、TASK-001..021、已经合并的产品代码、PR 与 CI；（4）历史有条件准入不重跑，旧产品阶段不重做。并行工作必须以最新 main SHA、实际文件/接口冲突、分支隔离、PR Required Checks 及合并后回归为依据。
+- 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
+- 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
+- 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
