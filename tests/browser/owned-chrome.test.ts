@@ -611,7 +611,12 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     try{await access(candidate);chrome=candidate;break;}catch{ /* other location */ }
   }
   if(!chrome){t.skip('No official Chrome binary on runner');return;}
-  const root=await mkdtemp(join(tmpdir(),'uah-owned-chrome-test-'));
+  // The manual CI logging mode confines this test-owned Profile to RUNNER_TEMP.
+  // Other Windows CI runs retain their existing temporary test path.
+  const ciLogRoot=process.env.GITHUB_ACTIONS==='true'&&
+    process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+    process.env.UAH_TEST_CHROME_BOOT_LOG==='true'&&process.env.RUNNER_TEMP;
+  const root=await mkdtemp(join(ciLogRoot||tmpdir(),'uah-owned-chrome-test-'));
   let profile=join(root,'profile');
   let stop:()=>void=()=>{};
   let unexpectedExits=0;
@@ -2059,6 +2064,31 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
       'Chrome log path must be confined to the disposable test profile');
     assert.ok(!observedArgs.some(x=>x.includes('--no-sandbox')),
       'diagnostics must not weaken Chrome sandbox');
+    // A manual opt-in must never bleed into PR/push CI, default runs or
+    // non-headless product launches even when the environment variable leaks.
+    if(session.ok)session.stop();
+    for(const [event,requested,headless] of [
+      ['pull_request','true',true],
+      ['push','true',true],
+      ['workflow_dispatch','false',true],
+      ['workflow_dispatch','true',false]
+    ] as const){
+      process.env.GITHUB_EVENT_NAME=event;
+      process.env.UAH_TEST_CHROME_BOOT_LOG=requested;
+      child.killed=false; // fresh synthetic spawn result, no real process
+      observedArgs=[];
+      observedLogFile=undefined;
+      const normal=await launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,testHeadless:headless
+      });
+      assert.equal(normal.ok,true,JSON.stringify(normal));
+      assert.ok(!observedArgs.includes('--enable-logging')&&
+        !observedArgs.includes('--v=0'),
+        'logging flags must be absent outside manual headless CI opt-in');
+      assert.equal(observedLogFile,undefined,
+        'normal launches must not override the Chrome log destination');
+      if(normal.ok)normal.stop();
+    }
   }finally{
     if(session?.ok)session.stop();
     t.mock.reset();
