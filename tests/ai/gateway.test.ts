@@ -381,3 +381,22 @@ test('TEST-016/026: streamed model discovery preserves chunks from a reused tran
     models:['buffer-reused-model'],manualModelAvailable:true,automaticPatchAllowed:false
   });
 });
+
+
+test('TEST-015/016: reject Unicode URL normalization before approving an AI credential destination',()=>{
+  // WHATWG URL may silently erase a soft hyphen or normalize Unicode dots
+  // and IDNs. The configured, consented host must be unambiguous ASCII.
+  for(const baseUrl of [
+    'https://api.examp\u00adle.com/v1',
+    'https://api\u3002example.com/v1',
+    'https://api\uff0eexample.com/v1',
+    'https://api\uff61example.com/v1',
+    'https://\u00e9xample.com/v1'
+  ]){
+    assert.throws(()=>new OptionalAiGateway(options(baseUrl)),
+      /INVALID_AI_CONFIGURATION/,JSON.stringify(baseUrl));
+  }
+  assert.doesNotThrow(()=>new OptionalAiGateway(options('https://api.example.com/v1')));
+  // Explicit ASCII IDNA representation remains possible without silent URL rewriting.
+  assert.doesNotThrow(()=>new OptionalAiGateway(options('https://xn--xample-9ua.com/v1')));
+});
