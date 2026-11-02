@@ -12,7 +12,7 @@ import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launche
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable, verifyCdpBrowserWebSocket } from '../../src/browser/cdp-session';
+import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
 const execFileAsync=promisify(execFile);
 
