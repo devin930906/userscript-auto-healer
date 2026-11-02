@@ -374,11 +374,21 @@ export async function launchApprovedIsolatedChrome(
               // the CDP HTTP response. User revocation or owned-child exit
               // retires the launch without awaiting that OS subprocess.
               // A pending read-only probe never grants a listener receipt.
+              // Native Windows PID inspection has its own OS timeout, but it
+              // must not outlive this launch's shorter remaining 20s budget.
+              // Preserve user revocation and owned-child exit precedence.
+              if(performance.now()-began>=20000)
+                return {ok:false,code:'CDP_TIMEOUT'};
+              const pendingOwnership=verifyWindowsLoopbackListenerPid(
+                cfg.remoteDebuggingPort,pid);
+              const remainingMs=Math.max(1,Math.ceil(
+                20000-(performance.now()-began)));
               const ownership=await awaitPrelaunchCheckOrRevocation(
-                verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid),
-                activeSignal);
+                pendingOwnership,
+                AbortSignal.any([activeSignal,AbortSignal.timeout(remainingMs)]));
               if(ownership.aborted)
-                return {ok:false,code:checked.signal?.aborted?'ABORTED':'LAUNCH_FAILED'};
+                return {ok:false,code:checked.signal?.aborted?'ABORTED':
+                  (errored||exited?'LAUNCH_FAILED':'CDP_TIMEOUT')};
               if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
               if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
               if(!ownership.value.ok)return {ok:false,code:'OWNER_MISMATCH'};
