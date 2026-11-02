@@ -190,6 +190,11 @@ test('TEST-016: invalid endpoints and unsafe configuration are rejected before n
     'https://user:password@api.example.com/v1',
     'https://api.example.com/v1?secret=1',
     'https://api.example.com/v1#note',
+    // WHATWG URL parsing silently strips interior CR/LF/TAB. Configuration
+    // must reject those raw bytes instead of approving a different address.
+    'https://api.examp\nle.com/v1',
+    'https://api.examp\rle.com/v1',
+    'https://api.examp\tle.com/v1',
     'https://api.example.com/%2e%2e/private',
     'file:///C:/Users/admin',
     'https://127.0.0.1/v1'

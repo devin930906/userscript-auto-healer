@@ -52,7 +52,8 @@ function record(input:unknown,keys:readonly string[]):Record<string,unknown>|nul
 function validateConfig(input:unknown):{options:Options;url:URL}{
   const c=record(input,['baseUrl','apiKey','manualModel','maxRequests','timeoutMs','maxOutputTokens']);
   if(!c||typeof c.baseUrl!=='string'||c.baseUrl.length>512||
-     c.baseUrl.trim()!==c.baseUrl||c.baseUrl.includes('%')||
+     c.baseUrl.trim()!==c.baseUrl||/[\x00-\x1f\x7f]/.test(c.baseUrl)||
+     c.baseUrl.includes('%')||
      /(?:^|\/)\.{1,2}(?:\/|$)/.test(c.baseUrl))
     throw Error('INVALID_AI_CONFIGURATION');
   let url:URL;
