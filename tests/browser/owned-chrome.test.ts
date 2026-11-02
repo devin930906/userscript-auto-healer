@@ -231,7 +231,7 @@ test('TASK-005/TEST-006/008/009: CI listener evidence reveals only bounded 0/1/?
  */
 function createBoundedCdpStageWindows() {
   const permitted=new Set([
-    'FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT','FETCH_RESET',
+    'CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT','FETCH_RESET',
     'CHILD_RUNNING_NO_CDP','HTTP_REJECTED','BODY_REJECTED',
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','PROBE_ERROR',
     'CDP_TIMEOUT_LISTENER_PID_MATCH','CDP_TIMEOUT_LISTENER_UNAVAILABLE',
@@ -257,13 +257,15 @@ function createBoundedCdpStageWindows() {
 }
 test('TASK-005/TEST-006/008/009: startup stage windows expose only bounded fixed-label timings',()=>{
   const windows=createBoundedCdpStageWindows();
+  windows.observe(1400,'CHROME_SPAWN_RETURNED');
   windows.observe(0,'FETCH_REFUSED');
   windows.observe(19999,'FETCH_REFUSED');
   windows.observe(20001,'CHILD_RUNNING_NO_CDP');
   windows.observe(20002,'CDP_TIMEOUT_LISTENER_UNAVAILABLE');
   const before=windows.summary();
   assert.equal(before,
-    'FETCH_REFUSED=t0..t19,CHILD_RUNNING_NO_CDP=t20..t20,'+
+    'CHROME_SPAWN_RETURNED=t1..t1,FETCH_REFUSED=t0..t19,'+
+    'CHILD_RUNNING_NO_CDP=t20..t20,'+
     'CDP_TIMEOUT_LISTENER_UNAVAILABLE=t20..t20');
   for(const [elapsed,stage] of [
     [-1,'FETCH_FAILED'],[Infinity,'FETCH_FAILED'],[1000,'PRIVATE_PORT=12345'],
@@ -706,6 +708,11 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     // 1 means *some* IPv4 loopback listener was seen, NOT verified ownership.
   }
   assert.equal(result.ok,true,JSON.stringify(result));
+  assert.ok(startupStages.includes('CHROME_SPAWN_RETURNED'),
+    'Chrome spawn-return boundary must be emitted before CDP transport probing');
+  // The prelaunch portion of the following timing starts before native binary
+  // verification, whereas Chrome's 20-second CDP budget starts after spawn.
+  t.diagnostic('CDP_SUCCESS_STAGE_WINDOWS='+startupStageWindows.summary());
   // Chrome uses an explicit nonzero CDP port here. Chromium writes
   // DevToolsActivePort for an OS-assigned port (0); absence with this
   // fixed-port successful control is NOT evidence of a missing listener.
@@ -713,7 +720,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   // Record only disposable-profile marker presence, never its contents.
   t.diagnostic('CDP_FIXED_PORT_SUCCESS_MARKERS='+
     await redactedChromeBootstrapMarkers(profile));
-  const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
+  const allowed=new Set(['CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
     'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED',
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP']);
   assert.ok(startupStages.every(stage=>allowed.has(stage)),
@@ -1636,7 +1643,7 @@ test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry
     assert.equal(controller.signal.aborted,true,'native consent was revoked');
     assert.equal(pauseSignals[0]?.aborted,true,
       'combined child-exit and native consent signal must cancel retry immediately');
-    assert.deepEqual(stages,['FETCH_REFUSED']);
+    assert.deepEqual(stages,['CHROME_SPAWN_RETURNED','FETCH_REFUSED']);
     assert.equal(child.killed,true,'cancellation must stop only the owned child');
   }finally{t.mock.reset();}
 });
