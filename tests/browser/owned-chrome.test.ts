@@ -1643,7 +1643,7 @@ test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry
     assert.equal(controller.signal.aborted,true,'native consent was revoked');
     assert.equal(pauseSignals[0]?.aborted,true,
       'combined child-exit and native consent signal must cancel retry immediately');
-    assert.deepEqual(stages,['FETCH_REFUSED']);
+    assert.deepEqual(stages,['CHROME_SPAWN_RETURNED','FETCH_REFUSED']);
     assert.equal(child.killed,true,'cancellation must stop only the owned child');
   }finally{t.mock.reset();}
 });
