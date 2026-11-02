@@ -382,6 +382,10 @@ export async function launchApprovedIsolatedChrome(
               if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
               if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
               if(!ownership.value.ok)return {ok:false,code:'OWNER_MISMATCH'};
+              // The native OS PID receipt may arrive after the 20s startup
+              // deadline. Refuse any NEW browser CDP I/O after expiry.
+              if(performance.now()-began>=20000)
+                return {ok:false,code:'CDP_TIMEOUT'};
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version,activeSignal);
               // Consent may be revoked during the asynchronous handshake.
