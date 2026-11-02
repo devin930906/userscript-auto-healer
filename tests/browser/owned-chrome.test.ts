@@ -1868,3 +1868,61 @@ test('TASK-005/TEST-009/026: unsolicited CDP WebSocket identity response is deni
     assert.equal(outbound,0,'no local CDP method was sent');
   }finally{globalThis.WebSocket=nativeSocket;}
 });
+
+
+/** TASK-005/TEST-006/009/026: the 20s owned-Chrome startup gate also
+ * applies BETWEEN the native listener PID proof and any CDP WebSocket I/O.
+ * A late positive PID receipt must not initiate a new browser connection.
+ * All network, file system, Chrome, and native probes here are synthetic.
+ */
+test('TASK-005/TEST-006/009/026: late native PID receipt must not open a CDP WebSocket after deadline',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12071);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41271,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let elapsedMs=0,websocketProofs=0;
+  let outcome:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    t.mock.method(performance,'now',()=>elapsedMs);
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+      elapsedMs=20001; // Native OS proof resolves after 20s, but is positive.
+      return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+        pid:41271,executableVerified:false as const};
+    });
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      websocketProofs++;
+      return true;
+    });
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12071/devtools/browser/abcdefgh-1234'
+    })));
+    outcome=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.deepEqual(outcome,{ok:false,code:'CDP_TIMEOUT'},
+      'an expired startup cannot certify an owned browser');
+    assert.equal(websocketProofs,0,
+      'no new CDP transport request is permitted after the 20s gate');
+    assert.equal(child.killed,true,'only the synthetic owned child is retired');
+  }finally{
+    if(outcome?.ok)outcome.stop();
+    t.mock.reset();
+  }
+});
