@@ -1926,3 +1926,74 @@ test('TASK-005/TEST-006/009/026: late native PID receipt must not open a CDP Web
     t.mock.reset();
   }
 });
+
+
+/** TASK-005 / TEST-006/009/026: a native Windows listener PID query can
+ * suspend indefinitely despite the owned Chrome launch having a fixed 20s
+ * budget. An expired ownership proof must not hold a user-consented launch
+ * open. All external operations here are synthetic; no system PID is queried.
+ */
+test('TASK-005/TEST-006/009/026: pending native PID proof obeys remaining Chrome startup deadline',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12071);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41271,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let elapsedMs=0,observedRemainingMs:number|undefined,handshakes=0;
+  let outcome:unknown;
+  try{
+    t.mock.method(performance,'now',()=>elapsedMs);
+    const realTimeout=AbortSignal.timeout;
+    t.mock.method(AbortSignal,'timeout',(ms:number)=>{
+      if(ms<1500){
+        observedRemainingMs=ms;
+        return AbortSignal.abort(); // Deterministic synthetic deadline expiry.
+      }
+      return realTimeout(ms);
+    });
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+      elapsedMs=19999;
+      return await new Promise<Awaited<ReturnType<typeof cdp.verifyWindowsLoopbackListenerPid>>>(()=>{});
+    });
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      handshakes++;
+      return true;
+    });
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12071/devtools/browser/abcdefgh-1234'
+    })));
+    outcome=await Promise.race([
+      launchApprovedIsolatedChrome(cfg,{userApproved:true}),
+      delay(350).then(()=>({ok:false,code:'NATIVE_PID_WAIT_STALLED'}))
+    ]);
+    assert.deepEqual(outcome,{ok:false,code:'CDP_TIMEOUT'},
+      'pending native verification must not outlive the fixed 20s launch gate');
+    assert.equal(observedRemainingMs,1,
+      'native proof must inherit exactly the one millisecond left in the launch budget');
+    assert.equal(handshakes,0,'expired native proof must never authorize CDP WebSocket I/O');
+    assert.equal(child.killed,true,'retire only this synthetic owned child');
+  }finally{
+    if(outcome&&typeof outcome==='object'&&
+       'ok' in outcome&&outcome.ok===true&&'stop' in outcome&&
+       typeof outcome.stop==='function')outcome.stop();
+    t.mock.reset();
+  }
+});
