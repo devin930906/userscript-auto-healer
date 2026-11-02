@@ -67,7 +67,7 @@ function validateConfig(input:unknown):{options:Options;url:URL}{
      !/^\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]*$/.test(url.pathname)||
      (url.pathname!=='/'&&url.pathname.endsWith('/'))||
      typeof c.apiKey!=='string'||c.apiKey.length<1||c.apiKey.length>512||
-     /[\r\n\0]/.test(c.apiKey)||c.apiKey.trim()!==c.apiKey||
+     /[\x00-\x1f\x7f]/.test(c.apiKey)||c.apiKey.trim()!==c.apiKey||
      !(c.manualModel===null||
        typeof c.manualModel==='string'&&MODEL.test(c.manualModel))||
      !Number.isSafeInteger(c.maxRequests)||Number(c.maxRequests)<1||Number(c.maxRequests)>8||
