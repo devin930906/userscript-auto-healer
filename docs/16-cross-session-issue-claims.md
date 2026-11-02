@@ -1,5 +1,8 @@
 # Cross-session Issue claim and parallel integration protocol
 
+> **2026-11-02 已退役的历史独占认领协议。** 当前新版（4）/（7）取消任何 Issue 独占认领与释放先决条件。以下旧 V1/V2、原子认领、轮次和 HANDOFF_BLOCKED 内容仅作历史审计，不得执行为当前任务锁。现行规范以 `AGENTS.md` 的 2026-11-02 迁移段及新增迁移交接记录为准；保留旧 refs、代码、提交、CI 与安全证据。并发安全依赖分支隔离、实时 GitHub 远端核验、同文件/共享接口冲突检查、PR、Required Checks、严格合并规则；不保证零冲突。
+
+
 > **2026-11-01 effective V2 coordination protocol:** The original fixed `work/issue-N` branches discussed below are **preserved historical claim/implementation refs**, not reusable active claims for the eight legacy product Issues. The current transition system uses separate `coord/issue-N` forward-only refs plus `impl/issue-N-rR` work branches, described in `docs/18-production-coordination-gates.md` and enforced on `main` by ruleset #26307718. A specific Issue becomes eligible **only after a real owner-authorized `blocked_legacy → released` recovery**, with unchanged historic ref SHA, fresh final-file reconciliation, and an actual successful GitHub Actions readback. Without that evidence mark it `HANDOFF_BLOCKED`; never automatically steal/delete/reset old branches. This V2 notice supersedes the *fixed-branch new acquisition and release steps* below for those eight Issues only, not their safety or product TEST/GATE requirements.
 
 
