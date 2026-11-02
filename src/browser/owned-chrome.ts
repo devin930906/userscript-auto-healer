@@ -99,7 +99,7 @@ export type ManagedLaunchResult =
       readonly pid:number;readonly chromeVersion:string;readonly browserWebsocket:string;
       readonly websocketHandshakeVerified:true;readonly targetVerified:false;
       readonly stop:()=>void};
-export type ChromeStartupStage='FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
+export type ChromeStartupStage='CHROME_SPAWN_RETURNED'|'FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
   'FETCH_RESET'|'CHILD_RUNNING_NO_CDP'|'HTTP_REJECTED'|'BODY_REJECTED'|
   'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR'|
   'CDP_TIMEOUT_LISTENER_PID_MATCH'|'CDP_TIMEOUT_LISTENER_UNAVAILABLE'|
@@ -335,6 +335,10 @@ export async function launchApprovedIsolatedChrome(
     catch{/* Diagnostic subscribers cannot affect Chrome authorization. */}
   };
   const pid=child.pid;
+  // Native spawn returned with an owned child PID. This fixed label distinguishes
+  // prelaunch Profile/port/signature checks from the separate 20-second CDP
+  // readiness window, without exposing PID, paths or browser data.
+  emitStage('CHROME_SPAWN_RETURNED');
   const activeSignal=checked.signal?
     AbortSignal.any([checked.signal,childExit.signal]):childExit.signal;
   const url='http://127.0.0.1:'+cfg.remoteDebuggingPort+'/json/version';
