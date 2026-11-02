@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
+import {isAbsolute,join,relative,resolve,sep} from 'node:path';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
 import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
 
@@ -312,6 +313,20 @@ export async function launchApprovedIsolatedChrome(
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const cfg=finalPreflight.config;
+  // Opt-in diagnostic is restricted to a manual Windows Actions run and a
+  // Profile strictly INSIDE the runner's temporary directory. Never use it
+  // for normal product sessions, PR/push CI or a user/default Chrome Profile.
+  // Chrome logs may contain URLs: keep raw bytes in this disposable directory,
+  // never print or upload them, and preserve all normal CDP/ownership gates.
+  const ciTemp=process.env.RUNNER_TEMP;
+  const relativeProfile=ciTemp&&isAbsolute(ciTemp)?
+    relative(resolve(ciTemp),resolve(cfg.userDataDir)):null;
+  const diagnostic=checked.testHeadless===true&&process.platform==='win32'&&
+    process.env.GITHUB_ACTIONS==='true'&&
+    process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+    process.env.UAH_TEST_CHROME_BOOT_LOG==='true'&&
+    relativeProfile!==null&&relativeProfile!==''&&relativeProfile!=='..'&&
+    !relativeProfile.startsWith('..'+sep)&&!isAbsolute(relativeProfile);
   const argv=[
     '--no-first-run','--no-default-browser-check','--disable-background-networking',
     '--remote-debugging-address=127.0.0.1',
@@ -319,9 +334,14 @@ export async function launchApprovedIsolatedChrome(
     '--user-data-dir='+cfg.userDataDir,'about:blank'
   ];
   if(checked.testHeadless===true)argv.unshift('--headless=new');
+  if(diagnostic)argv.unshift('--enable-logging','--v=0');
   let child:ChildProcess;
   try{
-    child=spawn(cfg.executablePath,argv,{shell:false,windowsHide:true,stdio:'ignore'});
+    child=spawn(cfg.executablePath,argv,{
+      shell:false,windowsHide:true,stdio:'ignore',
+      ...(diagnostic?{env:{...process.env,
+        CHROME_LOG_FILE:join(cfg.userDataDir,'chrome_debug.log')}}:{})
+    });
   }catch{return {ok:false,code:'LAUNCH_FAILED'};}
   let errored=false,exited=false,retained=false;
   // A terminal owned-child event must cancel an in-flight CDP probe without
