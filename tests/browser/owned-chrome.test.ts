@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,6 +10,11 @@ import { openApprovedTarget } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
+import { hasUnsafePathLink } from '../../src/version/path-boundary';
+const execFileAsync=promisify(execFile);
 
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
@@ -29,13 +34,74 @@ async function unusedLoopbackPort():Promise<number>{
   if(!address||typeof address==='string')throw Error('PORT_PROBE_FAILED');
   return address.port;
 }
+/** Opt-in, manual-workflow-only bounded CPU contention to investigate the
+ * historical Windows Chrome child-running/no-CDP startup under resource load.
+ * Two test-owned Node children, each at most eight seconds; no user Chrome,
+ * profile, script, executable, port, endpoint or system settings are touched.
+ * Default pull_request and normal candidate tests never start these children.
+ */
+function shouldUseCiChromeCpuPressure(platform:string,actions:string|undefined,
+  eventName:string|undefined,requested:string|undefined):boolean {
+  return platform==='win32'&&actions==='true'&&
+    eventName==='workflow_dispatch'&&requested==='true';
+}
+function beginBoundedCiChromeCpuPressure():{workers:number;stop:()=>void} {
+  if(!shouldUseCiChromeCpuPressure(process.platform,process.env.GITHUB_ACTIONS,
+    process.env.GITHUB_EVENT_NAME,process.env.UAH_TEST_CHROME_CPU_PRESSURE))
+    return {workers:0,stop:()=>{}};
+  const children:ReturnType<typeof spawn>[]=[];
+  const stop=()=>{
+    for(const child of children)
+      if(child.pid&&child.exitCode===null&&!child.killed)child.kill();
+  };
+  try{
+    for(let i=0;i<2;i++){
+      const child=spawn(process.execPath,
+        ['-e','const end=Date.now()+8000;while(Date.now()<end){Math.imul(37,41)}'],
+        {shell:false,windowsHide:true,stdio:'ignore'});
+      child.on('error',()=>{/* A diagnostic child must not crash the runner. */});
+      if(!child.pid)throw Error('CI_CPU_PRESSURE_SPAWN_FAILED');
+      children.push(child);
+    }
+  }catch(error){stop();throw error;}
+  return {workers:children.length,stop};
+}
+test('TASK-005/TEST-006/008/009: CPU pressure is manual Windows CI opt-in only',()=>{
+  const active=(platform:string,actions:string|undefined,event:string|undefined,
+    requested:string|undefined)=>shouldUseCiChromeCpuPressure(
+      platform,actions,event,requested);
+  assert.equal(active('win32','true','workflow_dispatch','true'),true);
+  for(const entry of [
+    ['linux','true','workflow_dispatch','true'],
+    ['win32','false','workflow_dispatch','true'],
+    ['win32','true','pull_request','true'],
+    ['win32','true','push','true'],
+    ['win32','true','workflow_dispatch','false'],
+    ['win32','true','workflow_dispatch',undefined]
+  ] as const)assert.equal(active(entry[0],entry[1],entry[2],entry[3]),false);
+});
+
 /** Read only existence of Chrome's bootstrap markers inside this test-owned
  * disposable profile. Never read their contents or report paths, ports/PIDs,
  * command lines, Chrome logs or user data. These hints are not CDP proof.
  */
 async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
-  const exists=async(name:string)=>{
-    try { await access(join(profile,name)); return 1; } catch { return 0; }
+  const exists=async(name:string):Promise<'0'|'1'|'?'>=>{
+    try{
+      // lstat observes a marker itself, including a dangling link. access()
+      // follows links and can mistake unreadable/touched state for absence.
+      await lstat(join(profile,name));
+      return '1';
+    }catch(error){
+      // Only genuine ENOENT means absent. All other Windows I/O failures
+      // are unknown, never authorization for a second Chrome bootstrap.
+      try{
+        if(error&&typeof error==='object'&&
+           Object.getOwnPropertyDescriptor(error,'code')?.value==='ENOENT')
+          return '0';
+      }catch{/* Hostile error shape cannot prove absence. */}
+      return '?';
+    }
   };
   const [state,endpoint]=await Promise.all([
     exists('Local State'),exists('DevToolsActivePort')
@@ -96,6 +162,124 @@ test('TASK-005/TEST-006/008/009/026: profile readiness evidence is bounded, mono
   assert.ok(!hostile.summary().includes('PRIVATE'));
 });
 
+
+/** TEST-006/008/009: external OS listener *presence*, never identity/authority.
+ * Windows CI only. netstat output is immediately reduced to 0/1/? and is
+ * NEVER stored or printed: no PID, port, address, profile or command line.
+ * An uncertain probe is ?, not proof that no listener exists.
+ */
+function redactedLocalListenerFromNetstat(output:unknown,port:number):'0'|'1'|'?'{
+  if(typeof output!=='string'||!Number.isInteger(port)||port<1024||port>65535)
+    return '?';
+  return parseWindowsLoopbackListeners(output,port).length?'1':'0';
+}
+async function readTestOnlyLocalListenerPresence(port:number):Promise<'0'|'1'|'?'>{
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true')return '?';
+  try{
+    const native=resolveWindowsNetstatExecutable(process.env.SystemRoot);
+    if(!native||await hasUnsafePathLink(native)||!(await lstat(native)).isFile())
+      return '?';
+    const {stdout}=await execFileAsync(native,['-ano','-p','TCP'],
+      {windowsHide:true,timeout:1200,maxBuffer:8*1024*1024});
+    return redactedLocalListenerFromNetstat(stdout,port);
+  }catch{return '?';}
+}
+/** Only changes in the read-only CI listener probe are reported, rounded to
+ * seconds and capped. It is intentionally not a browser ownership receipt.
+ */
+function createBoundedListenerPresenceTimeline(){
+  const transitions:string[]=[];
+  let last:'0'|'1'|'?'|undefined;
+  return {
+    observe(elapsedMs:number,presence:unknown):void{
+      if(!Number.isFinite(elapsedMs)||elapsedMs<0||
+         (presence!=='0'&&presence!=='1'&&presence!=='?'))return;
+      if(last===presence||transitions.length>=12)return;
+      last=presence;
+      transitions.push('t'+Math.min(31,Math.floor(elapsedMs/1000))+':'+presence);
+    },
+    summary():string{return transitions.length?transitions.join(','):'NONE';}
+  };
+}
+test('TASK-005/TEST-006/008/009: CI listener evidence reveals only bounded 0/1/? changes',()=>{
+  const port=54321;
+  const matched='  TCP    127.0.0.1:54321   0.0.0.0:0   LISTENING  987654';
+  assert.equal(redactedLocalListenerFromNetstat(matched,port),'1');
+  assert.equal(redactedLocalListenerFromNetstat(
+    '  TCP 0.0.0.0:54321 0.0.0.0:0 LISTENING 987654',port),'0');
+  assert.equal(redactedLocalListenerFromNetstat(matched,0),'?');
+  assert.equal(redactedLocalListenerFromNetstat({},port),'?');
+  const timeline=createBoundedListenerPresenceTimeline();
+  timeline.observe(0,'0');
+  timeline.observe(300,'0');
+  timeline.observe(2100,'1');
+  timeline.observe(3100,'?');
+  timeline.observe(4700,'0');
+  timeline.observe(4800,'PID=987654');
+  assert.equal(timeline.summary(),'t0:0,t2:1,t3:?,t4:0');
+  for(let i=0;i<100;i++)timeline.observe(5000+i*100,i%2?'0':'1');
+  assert.equal(timeline.summary().split(',').length,12);
+  assert.ok(timeline.summary().length<=100);
+  assert.ok(!timeline.summary().includes('987654'));
+  assert.ok(!timeline.summary().includes('54321'));
+});
+
+/** Fixed-label CDP probe stage timing for a single disposable Windows CI launch.
+ * Capture only the first/last second of each known stage, never raw errors,
+ * URLs, PIDs, ports, Chrome Profile paths or fetched browser responses.
+ * Stage windows are diagnostics, not authorization or reasons to retry.
+ */
+function createBoundedCdpStageWindows() {
+  const permitted=new Set([
+    'CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT','FETCH_RESET',
+    'CHILD_RUNNING_NO_CDP','HTTP_REJECTED','BODY_REJECTED',
+    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','PROBE_ERROR',
+    'CDP_TIMEOUT_LISTENER_PID_MATCH','CDP_TIMEOUT_LISTENER_UNAVAILABLE',
+    'CDP_TIMEOUT_LISTENER_PID_MISMATCH','CDP_TIMEOUT_LISTENER_AMBIGUOUS',
+    'CDP_TIMEOUT_PROBE_INCONCLUSIVE'
+  ]);
+  const windows=new Map<string,{first:number;last:number}>();
+  return {
+    observe(elapsedMs:number,stage:unknown):void {
+      if(!Number.isFinite(elapsedMs)||elapsedMs<0||typeof stage!=='string'||
+         !permitted.has(stage))return;
+      const second=Math.min(31,Math.floor(elapsedMs/1000));
+      const previous=windows.get(stage);
+      if(previous){previous.last=Math.max(previous.last,second);return;}
+      if(windows.size<16)windows.set(stage,{first:second,last:second});
+    },
+    summary():string {
+      return windows.size?
+        Array.from(windows,([stage,period])=>
+          stage+'=t'+period.first+'..t'+period.last).join(','):'NONE';
+    }
+  };
+}
+test('TASK-005/TEST-006/008/009: startup stage windows expose only bounded fixed-label timings',()=>{
+  const windows=createBoundedCdpStageWindows();
+  windows.observe(1400,'CHROME_SPAWN_RETURNED');
+  windows.observe(0,'FETCH_REFUSED');
+  windows.observe(19999,'FETCH_REFUSED');
+  windows.observe(20001,'CHILD_RUNNING_NO_CDP');
+  windows.observe(20002,'CDP_TIMEOUT_LISTENER_UNAVAILABLE');
+  const before=windows.summary();
+  assert.equal(before,
+    'CHROME_SPAWN_RETURNED=t1..t1,FETCH_REFUSED=t0..t19,'+
+    'CHILD_RUNNING_NO_CDP=t20..t20,'+
+    'CDP_TIMEOUT_LISTENER_UNAVAILABLE=t20..t20');
+  for(const [elapsed,stage] of [
+    [-1,'FETCH_FAILED'],[Infinity,'FETCH_FAILED'],[1000,'PRIVATE_PORT=12345'],
+    [1000,'PROFILE=SECRET'],[NaN,'FETCH_RESET'],[1000,{code:'FETCH_FAILED'}]
+  ] as const)windows.observe(elapsed,stage);
+  assert.equal(windows.summary(),before);
+  assert.ok(!windows.summary().includes('12345'));
+  assert.ok(!windows.summary().includes('SECRET'));
+  const many=createBoundedCdpStageWindows();
+  for(let i=0;i<1000;i++)many.observe(i*10,i%2?'FETCH_REFUSED':'FETCH_RESET');
+  assert.equal(many.summary(),'FETCH_RESET=t0..t9,FETCH_REFUSED=t0..t9');
+  assert.ok(many.summary().length<200);
+});
+
 /** A bounded CI-only recovery for Chrome that has not even touched its
  * disposable test profile. Never retry PID, version, WebSocket or permission
  * failures, or a partially bootstrapped browser; each fresh attempt must still
@@ -136,6 +320,27 @@ test('TEST-006: Chrome bootstrap diagnostics are bounded and content-blind',asyn
   assert.equal(evidence.includes('PRIVATE_'),false);
 });
 
+/** An inaccessible disposable Profile marker is UNKNOWN, never "absent".
+ * A native Windows EACCES/error during a read-only file check must not create
+ * a false 'untouched' receipt and authorize another Chrome startup attempt.
+ */
+test('TASK-005/TEST-006/008/009/026: unreadable Chrome markers cannot authorize untouched retry',async t=>{
+  const fs=require('node:fs/promises') as typeof import('node:fs/promises');
+  const denied=()=>Object.assign(new Error('PRIVATE_WINDOWS_IO_ERROR'),{code:'EACCES'});
+  try{
+    t.mock.method(fs,'access',async()=>{throw denied();});
+    t.mock.method(fs,'lstat',async()=>{throw denied();});
+    const marker=await redactedChromeBootstrapMarkers('C:\\synthetic\\owned-profile');
+    assert.equal(marker,'state=? endpointMarker=?',
+      'permission error is unknown, not proof no Profile state exists');
+    assert.equal(mayRetryUntouchedChromeBootstrap(
+      {ok:false,code:'CDP_TIMEOUT'},marker,0,true),false,
+      'no retry on an unknown or inaccessible marker');
+    assert.equal(marker.includes('PRIVATE_'),false,
+      'untrusted filesystem error text cannot appear in diagnostic output');
+  }finally{t.mock.reset();}
+});
+
 test('TEST-007/008: never launch without approval or with bad config',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:false}),
@@ -143,6 +348,199 @@ test('TEST-007/008: never launch without approval or with bad config',async()=>{
   assert.deepEqual(await launchApprovedIsolatedChrome(impossible,{userApproved:true}),
     {ok:false,code:process.platform==='win32'?'PREFLIGHT_FAILED':'PREFLIGHT_FAILED'});
 });
+/** A native user cancellation must take priority even when an awaited
+ * read-only preflight or signed-binary inspection concurrently fails. All
+ * fixtures are mocked; no Chrome, Profile or listener is touched.
+ */
+test('TASK-005/TEST-007/009/026: revocation wins over a failing asynchronous launch preflight',async t=>{
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12059);
+  for(const phase of ['initial','binary','final'] as const){
+    const consent=new AbortController();
+    let checks=0,spawned=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>{
+        checks++;
+        if(phase==='initial'||(phase==='final'&&checks===2)){
+          consent.abort();
+          return {ok:false as const,code:'PORT_PROBE_FAILED' as const};
+        }
+        return {ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+          config:cfg,runtimeIdentityVerified:false as const};
+      });
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>{
+        if(phase==='binary'){
+          consent.abort();
+          return {ok:false as const,code:'UNTRUSTED_BINARY' as const};
+        }
+        return {ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+          version:'155.0.1.1',publisher:'Google LLC' as const,
+          runtimeVerified:false as const};
+      });
+      t.mock.method(cp,'spawn',()=>{
+        spawned++;
+        throw Error('Synthetic launch must never start after revoked consent');
+      });
+      const result=await launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:consent.signal
+      });
+      assert.deepEqual(result,{ok:false,code:'ABORTED'},phase);
+      assert.equal(consent.signal.aborted,true,phase);
+      assert.equal(spawned,0,phase);
+      assert.equal(checks,phase==='final'?2:1,phase);
+    }finally{t.mock.reset();}
+  }
+});
+
+/** A revoked approval must not wait for a hanging asynchronous path/port
+ * check or Windows signature subprocess to settle. These tests mock every
+ * I/O boundary; a real Chrome child, Profile or listener is never launched.
+ */
+test('TASK-005/TEST-007/009/026: revocation interrupts pending prelaunch checks before they settle',async t=>{
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12061);
+  const validPreflight={ok:true as const,
+    status:'PATH_AND_PORT_CHECKED_ONLY' as const,config:cfg,
+    runtimeIdentityVerified:false as const};
+  const validBinary={ok:true as const,
+    status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+    version:'155.0.1.1',publisher:'Google LLC' as const,
+    runtimeVerified:false as const};
+  for(const phase of ['initial','binary','final'] as const){
+    const consent=new AbortController();
+    let announceEntered!:()=>void;
+    let finishBlocked!:()=>void;
+    const entered=new Promise<void>(resolve=>{announceEntered=resolve;});
+    const blocked=new Promise<void>(resolve=>{finishBlocked=resolve;});
+    let checks=0,spawned=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>{
+        checks++;
+        if(phase==='initial'||(phase==='final'&&checks===2)){
+          announceEntered();
+          await blocked;
+        }
+        return validPreflight;
+      });
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>{
+        if(phase==='binary'){
+          announceEntered();
+          await blocked;
+        }
+        return validBinary;
+      });
+      t.mock.method(cp,'spawn',()=>{
+        spawned++;
+        throw Error('No Chrome spawn after revoked native launch approval');
+      });
+      const pending=launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:consent.signal
+      });
+      await entered; // The target async stage is truly pending, not skipped.
+      consent.abort();
+      const early=await Promise.race([
+        pending.then(value=>({settled:true as const,value})),
+        delay(125).then(()=>({settled:false as const}))
+      ]);
+      finishBlocked();
+      const finalResult=await pending;
+      assert.equal(early.settled,true,
+        phase+' must abort without awaiting the blocked prelaunch check');
+      if(early.settled)assert.deepEqual(early.value,{ok:false,code:'ABORTED'});
+      assert.deepEqual(finalResult,{ok:false,code:'ABORTED'});
+      assert.equal(spawned,0,phase);
+    }finally{
+      finishBlocked();
+      t.mock.reset();
+    }
+  }
+});
+
+/** Netstat can remain in its own 12s Windows subprocess while approval or
+ * the owned child disappears. Neither event may wait for the PID probe.
+ * All Chrome, filesystem, fetch and OS probes are synthetic (zero user I/O).
+ */
+test('TASK-005/TEST-006/007/009/026: pending native listener PID proof cannot delay revocation or owned-child exit',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12069);
+  for(const phase of ['consent','child-exit'] as const){
+    const controller=new AbortController();
+    let enterProbe!:()=>void,completeProbe!:()=>void;
+    const entered=new Promise<void>(resolve=>{enterProbe=resolve;});
+    const blocked=new Promise<void>(resolve=>{completeProbe=resolve;});
+    const child=Object.assign(new EventEmitter(),{
+      pid:41269,exitCode:null as number|null,killed:false,
+      signalCode:null as string|null,
+      kill(){this.killed=true;return true;}
+    });
+    let websocketProofs=0;
+    try{
+      t.mock.method(launcher,'preflightChrome',async()=>({
+        ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+        config:cfg,runtimeIdentityVerified:false as const
+      }));
+      t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+        ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+        version:'155.0.1.1',publisher:'Google LLC' as const,
+        runtimeVerified:false as const
+      }));
+      t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+      t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+        enterProbe();
+        await blocked;
+        return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+          pid:41269,executableVerified:false as const};
+      });
+      t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+        websocketProofs++;
+        return true;
+      });
+      t.mock.method(globalThis,'fetch',async()=>
+        new Response(JSON.stringify({
+          Browser:'Chrome/155.0.1.1',
+          webSocketDebuggerUrl:'ws://127.0.0.1:12069/devtools/browser/abcdefgh-1234'
+        }))
+      );
+      const pending=launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,signal:controller.signal
+      });
+      await entered;
+      if(phase==='consent')controller.abort();
+      else{
+        child.exitCode=1;
+        child.emit('exit',1,null);
+      }
+      const early=await Promise.race([
+        pending.then(value=>({settled:true as const,value})),
+        delay(160).then(()=>({settled:false as const}))
+      ]);
+      completeProbe();
+      const result=await pending;
+      const expected={ok:false,code:phase==='consent'?'ABORTED':'LAUNCH_FAILED'};
+      assert.equal(early.settled,true,
+        phase+' must finish before the blocked native netstat proof resolves');
+      if(early.settled)assert.deepEqual(early.value,expected);
+      assert.deepEqual(result,expected);
+      assert.equal(websocketProofs,0,'cancelled owner check must never open CDP WebSocket');
+      assert.equal(isLiveApprovedChromeSession(result),false);
+      if(phase==='consent')assert.equal(child.killed,true,
+        'only the synthetic owned child must be retired on revoked consent');
+    }finally{
+      completeProbe();
+      t.mock.reset();
+    }
+  }
+});
+
 test('TASK-005/TEST-006/007/009/026: Chrome launch consent options never evaluate accessors or Proxy traps',async()=>{
   const impossible=config('C:\\nonexistent\\chrome.exe','C:\\uah-isolated');
   type Options=Parameters<typeof launchApprovedIsolatedChrome>[1];
@@ -231,31 +629,49 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
     {ok:false,code:'PROFILE_EXISTS'});
   const startupStages:string[]=[];
+  let startupStageWindows=createBoundedCdpStageWindows();
+  let launchBegan=0;
   // Pass through a variable so TS can compile this behavioural regression
   // against the old implementation, before the new optional hook exists.
   const launchOptions={userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
-    onStartupStage:(stage:string)=>{startupStages.push(stage);}};
+    onStartupStage:(stage:string)=>{
+      startupStages.push(stage);
+      startupStageWindows.observe(performance.now()-launchBegan,stage);
+    }};
   // This is TEST-ONLY observation of the independently owned disposable
   // directory: polling never edits Chrome, changes the launch deadline, reads
   // marker contents, queries the user profile or retries a touched browser.
   let timeline=createBoundedChromeBootstrapTimeline();
+  let listenerTimeline=createBoundedListenerPresenceTimeline();
   const launchWithBoundedMarkers=async()=>{
+    const pressure=beginBoundedCiChromeCpuPressure();
+    if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE=2_WORKERS_MAX_8S');
     const started=performance.now();
-    let sampling=false;
+    launchBegan=started;
+    let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
       sampling=true;
       try{
-        timeline.observe(performance.now()-started,
-          await redactedChromeBootstrapMarkers(profile));
+        const elapsed=performance.now()-started;
+        timeline.observe(elapsed,await redactedChromeBootstrapMarkers(profile));
+        // Sampling once per ~2.5 s avoids competing with Chrome startup.
+        // Only the binary 0/1/? result survives the native OS query.
+        if(elapsed-latestListenerSampleMs>=2500){
+          latestListenerSampleMs=elapsed;
+          listenerTimeline.observe(elapsed,
+            await readTestOnlyLocalListenerPresence(port));
+        }
       }finally{sampling=false;}
     };
     await poll();
     const interval=setInterval(()=>{void poll();},750);
     try{return await launchApprovedIsolatedChrome(configForTest,launchOptions);}
     finally{
+      pressure.stop();
       clearInterval(interval);
+      if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE_LISTENER_TIMELINE='+listenerTimeline.summary());
       timeline.observe(performance.now()-started,
         await redactedChromeBootstrapMarkers(profile));
     }
@@ -273,7 +689,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       const secondPrepared=await prepareApprovedIsolatedProfile(configForTest,true);
       assert.equal(secondPrepared.ok,true,JSON.stringify(secondPrepared));
       startupStages.length=0;
+      startupStageWindows=createBoundedCdpStageWindows();
       timeline=createBoundedChromeBootstrapTimeline();
+      listenerTimeline=createBoundedListenerPresenceTimeline();
       result=await launchWithBoundedMarkers();
     }
   }
@@ -283,10 +701,18 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const counts:Record<string,number>={};
     for(const stage of startupStages)counts[stage]=(counts[stage]??0)+1;
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
+    t.diagnostic('CDP_STARTUP_STAGE_WINDOWS='+startupStageWindows.summary());
     t.diagnostic('CDP_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
     t.diagnostic('CDP_BOOTSTRAP_TIMELINE='+timeline.summary());
+    t.diagnostic('CDP_LISTENER_PRESENCE_TIMELINE='+listenerTimeline.summary());
+    // 1 means *some* IPv4 loopback listener was seen, NOT verified ownership.
   }
   assert.equal(result.ok,true,JSON.stringify(result));
+  assert.ok(startupStages.includes('CHROME_SPAWN_RETURNED'),
+    'Chrome spawn-return boundary must be emitted before CDP transport probing');
+  // The prelaunch portion of the following timing starts before native binary
+  // verification, whereas Chrome's 20-second CDP budget starts after spawn.
+  t.diagnostic('CDP_SUCCESS_STAGE_WINDOWS='+startupStageWindows.summary());
   // Chrome uses an explicit nonzero CDP port here. Chromium writes
   // DevToolsActivePort for an OS-assigned port (0); absence with this
   // fixed-port successful control is NOT evidence of a missing listener.
@@ -294,7 +720,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   // Record only disposable-profile marker presence, never its contents.
   t.diagnostic('CDP_FIXED_PORT_SUCCESS_MARKERS='+
     await redactedChromeBootstrapMarkers(profile));
-  const allowed=new Set(['FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
+  const allowed=new Set(['CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
     'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED',
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP']);
   assert.ok(startupStages.every(stage=>allowed.has(stage)),
@@ -411,6 +837,67 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   }
 });
 
+
+/** The existing early port preflight can pass before the expensive trusted
+ * Windows Authenticode inspection. Bind ONLY a disposable test listener after
+ * that authentic inspection but before Chrome spawn, and prove the launcher
+ * must reject the changed external port without touching its owned Profile.
+ * This reproduces one plausible real Chrome child-running/no-CDP mechanism,
+ * not the root cause of the historical intermittent #510 failure.
+ */
+test('TASK-005/TEST-006/009: port claimed during signed Chrome inspection fails before launch',async t=>{
+  if(process.platform!=='win32')return;
+  let chrome:string|undefined;
+  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],
+    process.env.LOCALAPPDATA]){
+    if(!base)continue;
+    const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+    try{await access(candidate);chrome=candidate;break;}catch{}
+  }
+  if(!chrome){t.skip('No official Chrome binary on runner');return;}
+  const root=await mkdtemp(join(tmpdir(),'uah-chrome-port-race-'));
+  const profile=join(root,'profile');
+  const port=await unusedLoopbackPort();
+  const cfg=config(chrome,profile,port);
+  const ready=await prepareApprovedIsolatedProfile(cfg,true);
+  assert.equal(ready.ok,true,JSON.stringify(ready));
+  const blocker=createServer((_req,res)=>{res.writeHead(503);res.end();});
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const inspectOriginal=launcher.inspectWindowsChromeBinary;
+  let portClaimed=false;
+  (launcher as {inspectWindowsChromeBinary:typeof inspectOriginal})
+    .inspectWindowsChromeBinary=async (...args)=>{
+      const signed=await inspectOriginal(...args);
+      if(signed.ok){
+        await new Promise<void>((resolve,reject)=>{
+          blocker.once('error',reject);
+          blocker.listen(port,'127.0.0.1',resolve);
+        });
+        portClaimed=true;
+      }
+      return signed;
+    };
+  const abort=new AbortController();
+  const timeout=setTimeout(()=>abort.abort(),3000);
+  try{
+    const outcome=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,testHeadless:true,signal:abort.signal});
+    assert.equal(portClaimed,true,'the port was genuinely claimed after Authenticode');
+    assert.deepEqual(outcome,{ok:false,code:'PREFLIGHT_FAILED'},
+      'a port claimed after initial preflight must fail closed before spawning Chrome');
+    assert.equal(await redactedChromeBootstrapMarkers(profile),
+      'state=0 endpointMarker=0',
+      'prelaunch port-claim rejection must not bootstrap or mutate this disposable Profile');
+  }finally{
+    clearTimeout(timeout);
+    abort.abort();
+    (launcher as {inspectWindowsChromeBinary:typeof inspectOriginal})
+      .inspectWindowsChromeBinary=inspectOriginal;
+    if(blocker.listening)
+      await new Promise<void>(resolve=>blocker.close(()=>resolve()));
+    await rm(root,{recursive:true,force:true}).catch(()=>undefined);
+  }
+});
 
 test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its owner exactly once',async t=>{
   if(process.platform!=='win32')return;
@@ -722,6 +1209,10 @@ test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful
   assert.equal(classify(error('ETIMEDOUT')),'FETCH_TIMEOUT');
   assert.equal(classify(error('ECONNRESET')),'FETCH_RESET');
   assert.equal(classify({name:'TimeoutError'}),'FETCH_TIMEOUT');
+  assert.equal(classify(new DOMException('private loopback timeout','TimeoutError')),
+    'FETCH_TIMEOUT','native DOMException.name is inherited, not an own descriptor');
+  assert.equal(classify(new DOMException('cancelled','AbortError')),'FETCH_FAILED',
+    'revocation must not be misreported as a transport timeout');
   for(const bad of [
     error('EPRIVATE_SCRIPT_CONTENT'),new Error('secret path C:/data/source.user.js'),
     Object.defineProperty({},'cause',{get(){throw Error('PRIVATE_DETAILS');}}),
@@ -886,6 +1377,156 @@ test('TASK-005/TEST-006/008/009: a forward Windows wall-clock adjustment cannot 
 });
 
 
+/** Consent revocation during a *pending* CDP browser WebSocket proof must
+ * promptly terminate the owned Chrome bootstrap, not wait for the separate
+ * four-second proof timer. Entire fixture is an in-memory synthetic child
+ * and proof; no Chrome, socket, user Profile, website or script is touched.
+ */
+test('TASK-005/TEST-006/009/026: in-flight WebSocket proof observes native consent cancellation immediately',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\pending-ws-profile',12036);
+  const controller=new AbortController();
+  const child=Object.assign(new EventEmitter(),{
+    pid:41236,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let markHandshake:()=>void=()=>{};
+  const handshakeStarted=new Promise<void>(resolve=>{markHandshake=resolve;});
+  let cancellationObserved=false;
+  let pending:ReturnType<typeof launchApprovedIsolatedChrome>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as
+      import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41236,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',
+      (_url:string,_port:number,_version:string,signal?:AbortSignal)=>
+        new Promise<boolean>(resolve=>{
+          markHandshake();
+          const fallback=setTimeout(()=>resolve(false),400);
+          signal?.addEventListener('abort',()=>{
+            cancellationObserved=true;
+            clearTimeout(fallback);
+            resolve(false);
+          },{once:true});
+        })
+    );
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12036/devtools/browser/abcdefgh-1234'
+    })));
+    pending=launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal
+    });
+    await Promise.race([
+      handshakeStarted,
+      delay(1000).then(()=>{throw Error('SYNTHETIC_HANDSHAKE_NEVER_STARTED');})
+    ]);
+    controller.abort();
+    const timely=await Promise.race([
+      pending,
+      delay(175).then(()=>({ok:false as const,code:'HANDSHAKE_NOT_CANCELLED' as const}))
+    ]);
+    assert.deepEqual(timely,{ok:false,code:'ABORTED'},
+      'native cancellation must stop a pending CDP proof promptly');
+    assert.equal(cancellationObserved,true,
+      'the in-flight WebSocket proof must receive the native abort signal');
+    assert.equal(child.killed,true,'the launcher stops only its own synthetic child');
+  }finally{
+    controller.abort();
+    if(pending)await pending;
+    t.mock.reset();
+  }
+});
+
+test('TASK-005/TEST-006/009/026: owned child exit during pending WebSocket proof reports launch failure',async t=>{
+  // An in-memory owned child, signed-binary preflight and CDP proof only.
+  // The synthetic process exits *during* the pending identity handshake,
+  // which must be reported as LAUNCH_FAILED, not a network proof failure.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\ws-child-exit',12037);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41237,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let enteredProof:()=>void=()=>{};
+  const proofStarted=new Promise<void>(resolve=>{enteredProof=resolve;});
+  let proofCancelled=false;
+  let pending:ReturnType<typeof launchApprovedIsolatedChrome>|undefined;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41237,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',
+      (_url:string,_port:number,_version:string,signal?:AbortSignal)=>
+        new Promise<boolean>(resolve=>{
+          enteredProof();
+          const fallback=setTimeout(()=>resolve(false),400);
+          signal?.addEventListener('abort',()=>{
+            proofCancelled=true;
+            clearTimeout(fallback);
+            resolve(false);
+          },{once:true});
+        })
+    );
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12037/devtools/browser/abcdefgh-1234'
+    })));
+    pending=launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    await Promise.race([
+      proofStarted,
+      delay(1000).then(()=>{throw Error('SYNTHETIC_PROOF_NOT_STARTED');})
+    ]);
+    child.exitCode=1;
+    child.emit('exit',1);
+    const result=await Promise.race([
+      pending,
+      delay(175).then(()=>({ok:false as const,code:'CDP_TIMEOUT' as const}))
+    ]);
+    assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},
+      'an exited owned child cannot be misclassified as a mere WebSocket failure');
+    assert.equal(proofCancelled,true,
+      'the pending identity proof must observe the owned child termination');
+    assert.equal(child.killed,false,'an already exited owned child is not killed a second time');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{
+    child.emit('exit',1);
+    if(pending)await pending;
+    t.mock.reset();
+  }
+});
+
 test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake cannot register an owned browser',async t=>{
   // This synthetic child never starts a real Chrome, touches a user Profile,
   // or performs network I/O. Consent is revoked *after* the earlier abort
@@ -946,6 +1587,65 @@ test('TASK-005/TEST-006/009/026: abort during verified WebSocket handshake canno
     if(result?.ok)result.stop();
     t.mock.reset();
   }
+});
+
+test('TASK-005/TEST-006/009/026: native cancellation reaches a refused-CDP retry pause',async t=>{
+  // Entirely synthetic owned child and HTTP rejection: no Chrome, user
+  // Profile, network request, external process or user-script interaction.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const timers=require('node:timers/promises') as typeof import('node:timers/promises');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\cancelled-profile',12046);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41246,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const controller=new AbortController();
+  const pauseSignals:(AbortSignal|undefined)[]=[];
+  const stages:string[]=[];
+  let fetches=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async()=>{
+      fetches++;
+      throw Object.assign(new Error('synthetic refused request'),{code:'ECONNREFUSED'});
+    });
+    t.mock.method(timers,'setTimeout',async(
+      ms?:number,_value?:unknown,options?:{signal?:AbortSignal}
+    )=>{
+      if(ms!==250)throw Error('UNEXPECTED_SYNTHETIC_TIMER');
+      pauseSignals.push(options?.signal);
+      if(options?.signal?.aborted)
+        throw Object.assign(new Error('synthetic timer cancellation'),{name:'AbortError'});
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,signal:controller.signal,
+      onStartupStage:(stage)=>{
+        stages.push(stage);
+        if(stage==='FETCH_REFUSED')controller.abort();
+      }
+    });
+    assert.deepEqual(result,{ok:false,code:'ABORTED'});
+    assert.equal(fetches,1,'revoked consent must prevent a second CDP probe');
+    assert.equal(pauseSignals.length,1,'exactly one cancelled retry pause');
+    assert.equal(controller.signal.aborted,true,'native consent was revoked');
+    assert.equal(pauseSignals[0]?.aborted,true,
+      'combined child-exit and native consent signal must cancel retry immediately');
+    assert.deepEqual(stages,['CHROME_SPAWN_RETURNED','FETCH_REFUSED']);
+    assert.equal(child.killed,true,'cancellation must stop only the owned child');
+  }finally{t.mock.reset();}
 });
 
 test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP HTTP probe',async t=>{
@@ -1010,4 +1710,161 @@ test('TASK-005/TEST-006/009/026: native revocation aborts an in-flight owned CDP
     controller.abort();
     t.mock.reset();
   }
+});
+
+
+test('TASK-005/TEST-006/009/026: native consent revocation interrupts a stalled CDP response body',async()=>{
+  // Synthetic response stream only: no Chrome process, Profile or network.
+  // The fetch may have completed its headers before user revocation.
+  const controller=new AbortController();
+  const neverYieldingBody=new ReadableStream<Uint8Array>({
+    pull:()=>new Promise<void>(()=>{})
+  });
+  const response=new Response(neverYieldingBody,{status:200});
+  // Keep the regression compilable against the old one-argument signature;
+  // previously the second argument was ignored and the body waited 1500ms.
+  const readWithSignal=readBoundedCdpJson as unknown as
+    (response:Response,signal:AbortSignal)=>Promise<unknown|null>;
+  const pending=readWithSignal(response,controller.signal);
+  const deadline=Symbol('stalled-cdp-body-did-not-stop');
+  let watchdog:ReturnType<typeof setTimeout>|undefined;
+  try{
+    controller.abort();
+    const outcome=await Promise.race([
+      pending,
+      new Promise<typeof deadline>(resolve=>{
+        watchdog=setTimeout(()=>resolve(deadline),400);
+      })
+    ]);
+    assert.notEqual(outcome,deadline,
+      'revoked consent must stop a stalled CDP body without waiting for its separate 1500ms deadline');
+    assert.equal(outcome,null,'a revoked CDP body must never yield verified JSON');
+  }finally{
+    if(watchdog)clearTimeout(watchdog);
+  }
+});
+
+
+test('TASK-005/TEST-006/009/026: owned Chrome exit immediately cancels an in-flight CDP HTTP probe',async t=>{
+  // Controlled synthetic child only. No user Chrome, Profile, port or network.
+  // When the owned process exits during fetch, a 1500ms HTTP probe must not
+  // stay alive or be mistaken for an ordinary temporary refused connection.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12047);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41247,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let observedAborted=false,requests=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async(
+      _request:Parameters<typeof fetch>[0],init?:Parameters<typeof fetch>[1]
+    )=>{
+      requests++;
+      assert.ok(init?.signal,'the owned probe must be cancellable');
+      child.emit('exit',1);
+      observedAborted=Boolean(init.signal.aborted);
+      throw Object.assign(new Error('synthetic child closed the listener'),
+        {code:'ECONNRESET'});
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.equal(requests,1,'do not retry a terminal child');
+    assert.equal(observedAborted,true,
+      'process exit must synchronously revoke the active CDP HTTP probe');
+    assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},
+      'a dead owned Chrome is a terminal failure, not a CDP timeout');
+    assert.equal(isLiveApprovedChromeSession(result),false);
+  }finally{t.mock.reset();}
+});
+
+
+// TASK-005/TEST-006/009/026: an asynchronous WebSocket "open" event can
+// arrive AFTER the native owner revokes consent. A CONNECTING socket may
+// refuse close(); that must not permit a late Browser.getVersion command.
+test('TASK-005/TEST-006/009/026: a late CDP WebSocket open cannot send after native cancellation',async()=>{
+  const nativeWebSocket=globalThis.WebSocket;
+  const openCallbacks:Array<()=>void>=[];
+  let outboundMethods=0,closeAttempts=0;
+  class ConnectingSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:()=>void):void {
+      if(name==='open')openCallbacks.push(callback);
+    }
+    send(_data:string):void {outboundMethods++;}
+    close():void {
+      closeAttempts++;
+      // Node/native WebSocket implementations can reject close() while
+      // CONNECTING. This is a deterministic in-memory transport fixture.
+      throw Error('SYNTHETIC_CONNECTING_CLOSE_REFUSED');
+    }
+  }
+  globalThis.WebSocket=ConnectingSocket as unknown as typeof WebSocket;
+  const consent=new AbortController();
+  try{
+    const proof=verifyCdpBrowserWebSocket(
+      'ws://127.0.0.1:12048/devtools/browser/abcdefgh-1234',
+      12048,'155.0.1.1',consent.signal);
+    assert.equal(openCallbacks.length,1,'proof installed exactly one open hook');
+    consent.abort();
+    assert.equal(await proof,false,'revoked proof must fail closed immediately');
+    // A delayed socket event cannot revive the finished transport or perform
+    // a post-revocation command, even if close() could not stop CONNECTING.
+    openCallbacks[0]();
+    assert.equal(outboundMethods,0,'late open must never send a CDP command');
+    assert.equal(closeAttempts,1,'best-effort close was attempted once');
+  }finally{
+    consent.abort();
+    globalThis.WebSocket=nativeWebSocket;
+  }
+});
+
+
+// TASK-005/TEST-009/026: an unsolicited matching-id browser response must
+// not certify CDP without a client-issued Browser.getVersion request.
+test('TASK-005/TEST-009/026: unsolicited CDP WebSocket identity response is denied before request',async()=>{
+  const nativeSocket=globalThis.WebSocket;
+  const listeners=new Map<string,Array<(event?:{data?:string})=>void>>();
+  let outbound=0;
+  class UnsolicitedSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:(event?:{data?:string})=>void):void{
+      const callbacks=listeners.get(name)??[];
+      callbacks.push(callback);
+      listeners.set(name,callbacks);
+    }
+    send(_message:string):void{outbound++;}
+    close():void{}
+  }
+  globalThis.WebSocket=UnsolicitedSocket as unknown as typeof WebSocket;
+  try{
+    const pending=verifyCdpBrowserWebSocket(
+      'ws://127.0.0.1:12049/devtools/browser/abcdefgh-1234',
+      12049,'155.0.1.1');
+    const unsolicited=listeners.get('message')?.[0];
+    assert.ok(unsolicited,'native proof installed a browser message hook');
+    // An unsolicited matching id/product is NOT a response to this client.
+    unsolicited({data:JSON.stringify({
+      id:1,result:{product:'Chrome/155.0.1.1'}
+    })});
+    const outcome=await Promise.race([
+      pending,
+      delay(300).then(()=> 'UNRESOLVED' as const)
+    ]);
+    assert.equal(outcome,false,
+      'unsolicited matching-id CDP message cannot establish browser identity');
+    assert.equal(outbound,0,'no local CDP method was sent');
+  }finally{globalThis.WebSocket=nativeSocket;}
 });
