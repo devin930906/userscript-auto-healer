@@ -1,5 +1,8 @@
 # Issue #565 — Production PR round fence bootstrap and enforcement boundary
 
+> **2026-11-02 现行迁移覆盖声明：以下生产 Issue 持有者/轮次/签名/移交要求均已退出新版（4）/（7）正式开发准入。** 历史记录和两项原有 Rulesets 保留。原 `Issue coordination / stale round fence` 所需 context 为兼容 Ruleset #26307718 暂时维持同名，工作流从可信 main 运行，但检查逻辑调整为无 Issue 独占锁的 PR 头部、目标和文件冲突核验。不得将其历史名称解释为仍要求完成 Issue #565 的协调恢复，也不得将绿色检查当作绝对互斥证明。现行规范以 `AGENTS.md` 2026-11-02 小节为准。
+
+
 > Status: a **read-only** PR validation gate is being introduced. It is NOT an active protected-branch rule and it does NOT transfer or release historical Issue claims.
 
 ## What the PR fence does
