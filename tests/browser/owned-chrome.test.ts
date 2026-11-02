@@ -12,7 +12,7 @@ import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launche
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
+import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable, verifyCdpBrowserWebSocket } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
 const execFileAsync=promisify(execFile);
 
@@ -1788,4 +1788,45 @@ test('TASK-005/TEST-006/009/026: owned Chrome exit immediately cancels an in-fli
       'a dead owned Chrome is a terminal failure, not a CDP timeout');
     assert.equal(isLiveApprovedChromeSession(result),false);
   }finally{t.mock.reset();}
+});
+
+
+// TASK-005/TEST-006/009/026: an asynchronous WebSocket "open" event can
+// arrive AFTER the native owner revokes consent. A CONNECTING socket may
+// refuse close(); that must not permit a late Browser.getVersion command.
+test('TASK-005/TEST-006/009/026: a late CDP WebSocket open cannot send after native cancellation',async()=>{
+  const nativeWebSocket=globalThis.WebSocket;
+  const openCallbacks:Array<()=>void>=[];
+  let outboundMethods=0,closeAttempts=0;
+  class ConnectingSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:()=>void):void {
+      if(name==='open')openCallbacks.push(callback);
+    }
+    send(_data:string):void {outboundMethods++;}
+    close():void {
+      closeAttempts++;
+      // Node/native WebSocket implementations can reject close() while
+      // CONNECTING. This is a deterministic in-memory transport fixture.
+      throw Error('SYNTHETIC_CONNECTING_CLOSE_REFUSED');
+    }
+  }
+  globalThis.WebSocket=ConnectingSocket as unknown as typeof WebSocket;
+  const consent=new AbortController();
+  try{
+    const proof=verifyCdpBrowserWebSocket(
+      'ws://127.0.0.1:12048/devtools/browser/abcdefgh-1234',
+      12048,'155.0.1.1',consent.signal);
+    assert.equal(openCallbacks.length,1,'proof installed exactly one open hook');
+    consent.abort();
+    assert.equal(await proof,false,'revoked proof must fail closed immediately');
+    // A delayed socket event cannot revive the finished transport or perform
+    // a post-revocation command, even if close() could not stop CONNECTING.
+    openCallbacks[0]();
+    assert.equal(outboundMethods,0,'late open must never send a CDP command');
+    assert.equal(closeAttempts,1,'best-effort close was attempted once');
+  }finally{
+    consent.abort();
+    globalThis.WebSocket=nativeWebSocket;
+  }
 });
