@@ -14,6 +14,11 @@ on:
         type: boolean
         required: false
         default: false
+      chrome_boot_log:
+        description: 'Manual Windows CI only: write Chrome startup log inside disposable runner profile (never upload raw log)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
         shell: pwsh
         env:
           UAH_TEST_CHROME_CPU_PRESSURE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_cpu_pressure && 'true' || 'false' }}
+          UAH_TEST_CHROME_BOOT_LOG: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_boot_log && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
