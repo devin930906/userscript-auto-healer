@@ -198,6 +198,9 @@ test('TEST-016: invalid endpoints and unsafe configuration are rejected before n
     assert.throws(()=>new OptionalAiGateway(options(baseUrl)),/INVALID_AI_CONFIGURATION/,baseUrl);
   for(const changed of [
     {...options(),apiKey:'token\nAuthorization: bad'},
+    {...options(),apiKey:'key\tinternal'},
+    {...options(),apiKey:'key\vinternal'},
+    {...options(),apiKey:'key\x7finternal'},
     {...options(),maxRequests:9999},
     {...options(),timeoutMs:60000},
     {...options(),maxOutputTokens:4096},
