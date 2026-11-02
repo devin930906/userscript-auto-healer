@@ -1830,3 +1830,41 @@ test('TASK-005/TEST-006/009/026: a late CDP WebSocket open cannot send after nat
     globalThis.WebSocket=nativeWebSocket;
   }
 });
+
+
+// TASK-005/TEST-009/026: an unsolicited matching-id browser response must
+// not certify CDP without a client-issued Browser.getVersion request.
+test('TASK-005/TEST-009/026: unsolicited CDP WebSocket identity response is denied before request',async()=>{
+  const nativeSocket=globalThis.WebSocket;
+  const listeners=new Map<string,Array<(event?:{data?:string})=>void>>();
+  let outbound=0;
+  class UnsolicitedSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:(event?:{data?:string})=>void):void{
+      const callbacks=listeners.get(name)??[];
+      callbacks.push(callback);
+      listeners.set(name,callbacks);
+    }
+    send(_message:string):void{outbound++;}
+    close():void{}
+  }
+  globalThis.WebSocket=UnsolicitedSocket as unknown as typeof WebSocket;
+  try{
+    const pending=verifyCdpBrowserWebSocket(
+      'ws://127.0.0.1:12049/devtools/browser/abcdefgh-1234',
+      12049,'155.0.1.1');
+    const unsolicited=listeners.get('message')?.[0];
+    assert.ok(unsolicited,'native proof installed a browser message hook');
+    // An unsolicited matching id/product is NOT a response to this client.
+    unsolicited({data:JSON.stringify({
+      id:1,result:{product:'Chrome/155.0.1.1'}
+    })});
+    const outcome=await Promise.race([
+      pending,
+      delay(300).then(()=> 'UNRESOLVED' as const)
+    ]);
+    assert.equal(outcome,false,
+      'unsolicited matching-id CDP message cannot establish browser identity');
+    assert.equal(outbound,0,'no local CDP method was sent');
+  }finally{globalThis.WebSocket=nativeSocket;}
+});
