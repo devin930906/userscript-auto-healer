@@ -1,5 +1,7 @@
 name: 'Issue Coordination PR Fence'
 
+# 2026-11-02: the legacy required check name is retained for Ruleset #26307718.
+# The trusted-base script now validates PR integration safety without Issue claims.
 # Run ONLY the default-branch workflow; never execute or trust a PR-edited
 # workflow or script. No PR code is checked out or run.
 on:
