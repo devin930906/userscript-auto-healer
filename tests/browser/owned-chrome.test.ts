@@ -224,6 +224,60 @@ test('TASK-005/TEST-006/008/009: CI listener evidence reveals only bounded 0/1/?
   assert.ok(!timeline.summary().includes('54321'));
 });
 
+/** Fixed-label CDP probe stage timing for a single disposable Windows CI launch.
+ * Capture only the first/last second of each known stage, never raw errors,
+ * URLs, PIDs, ports, Chrome Profile paths or fetched browser responses.
+ * Stage windows are diagnostics, not authorization or reasons to retry.
+ */
+function createBoundedCdpStageWindows() {
+  const permitted=new Set([
+    'FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT','FETCH_RESET',
+    'CHILD_RUNNING_NO_CDP','HTTP_REJECTED','BODY_REJECTED',
+    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','PROBE_ERROR',
+    'CDP_TIMEOUT_LISTENER_PID_MATCH','CDP_TIMEOUT_LISTENER_UNAVAILABLE',
+    'CDP_TIMEOUT_LISTENER_PID_MISMATCH','CDP_TIMEOUT_LISTENER_AMBIGUOUS',
+    'CDP_TIMEOUT_PROBE_INCONCLUSIVE'
+  ]);
+  const windows=new Map<string,{first:number;last:number}>();
+  return {
+    observe(elapsedMs:number,stage:unknown):void {
+      if(!Number.isFinite(elapsedMs)||elapsedMs<0||typeof stage!=='string'||
+         !permitted.has(stage))return;
+      const second=Math.min(31,Math.floor(elapsedMs/1000));
+      const previous=windows.get(stage);
+      if(previous){previous.last=Math.max(previous.last,second);return;}
+      if(windows.size<16)windows.set(stage,{first:second,last:second});
+    },
+    summary():string {
+      return windows.size?
+        Array.from(windows,([stage,period])=>
+          stage+'=t'+period.first+'..t'+period.last).join(','):'NONE';
+    }
+  };
+}
+test('TASK-005/TEST-006/008/009: startup stage windows expose only bounded fixed-label timings',()=>{
+  const windows=createBoundedCdpStageWindows();
+  windows.observe(0,'FETCH_REFUSED');
+  windows.observe(19999,'FETCH_REFUSED');
+  windows.observe(20001,'CHILD_RUNNING_NO_CDP');
+  windows.observe(20002,'CDP_TIMEOUT_LISTENER_UNAVAILABLE');
+  const before=windows.summary();
+  assert.equal(before,
+    'FETCH_REFUSED=t0..t19,CHILD_RUNNING_NO_CDP=t20..t20,'+
+    'CDP_TIMEOUT_LISTENER_UNAVAILABLE=t20..t20');
+  for(const [elapsed,stage] of [
+    [-1,'FETCH_FAILED'],[Infinity,'FETCH_FAILED'],[1000,'PRIVATE_PORT=12345'],
+    [1000,'PROFILE=SECRET'],[NaN,'FETCH_RESET'],[1000,{code:'FETCH_FAILED'}]
+  ] as const)windows.observe(elapsed,stage);
+  assert.equal(windows.summary(),before);
+  assert.ok(!windows.summary().includes('12345'));
+  assert.ok(!windows.summary().includes('SECRET'));
+  const many=createBoundedCdpStageWindows();
+  for(let i=0;i<1000;i++)many.observe(i*10,i%2?'FETCH_REFUSED':'FETCH_RESET');
+  assert.equal(many.summary(),'FETCH_RESET=t0..t9,FETCH_REFUSED=t0..t9');
+  assert.ok(many.summary().length<200);
+});
+
 /** A bounded CI-only recovery for Chrome that has not even touched its
  * disposable test profile. Never retry PID, version, WebSocket or permission
  * failures, or a partially bootstrapped browser; each fresh attempt must still
@@ -573,11 +627,16 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   assert.deepEqual(await prepareApprovedIsolatedProfile(configForTest,true),
     {ok:false,code:'PROFILE_EXISTS'});
   const startupStages:string[]=[];
+  let startupStageWindows=createBoundedCdpStageWindows();
+  let launchBegan=0;
   // Pass through a variable so TS can compile this behavioural regression
   // against the old implementation, before the new optional hook exists.
   const launchOptions={userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
-    onStartupStage:(stage:string)=>{startupStages.push(stage);}};
+    onStartupStage:(stage:string)=>{
+      startupStages.push(stage);
+      startupStageWindows.observe(performance.now()-launchBegan,stage);
+    }};
   // This is TEST-ONLY observation of the independently owned disposable
   // directory: polling never edits Chrome, changes the launch deadline, reads
   // marker contents, queries the user profile or retries a touched browser.
@@ -587,6 +646,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const pressure=beginBoundedCiChromeCpuPressure();
     if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE=2_WORKERS_MAX_8S');
     const started=performance.now();
+    launchBegan=started;
     let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
@@ -627,6 +687,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       const secondPrepared=await prepareApprovedIsolatedProfile(configForTest,true);
       assert.equal(secondPrepared.ok,true,JSON.stringify(secondPrepared));
       startupStages.length=0;
+      startupStageWindows=createBoundedCdpStageWindows();
       timeline=createBoundedChromeBootstrapTimeline();
       listenerTimeline=createBoundedListenerPresenceTimeline();
       result=await launchWithBoundedMarkers();
@@ -638,6 +699,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const counts:Record<string,number>={};
     for(const stage of startupStages)counts[stage]=(counts[stage]??0)+1;
     t.diagnostic('CDP_STARTUP_STAGE_COUNTS='+JSON.stringify(counts));
+    t.diagnostic('CDP_STARTUP_STAGE_WINDOWS='+startupStageWindows.summary());
     t.diagnostic('CDP_BOOTSTRAP_MARKERS='+await redactedChromeBootstrapMarkers(profile));
     t.diagnostic('CDP_BOOTSTRAP_TIMELINE='+timeline.summary());
     t.diagnostic('CDP_LISTENER_PRESENCE_TIMELINE='+listenerTimeline.summary());
