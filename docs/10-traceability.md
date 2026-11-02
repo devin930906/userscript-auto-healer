@@ -85,3 +85,13 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 ## 2026-10-31 TASK-013 重试持久化状态进展追踪
 - REQ-022 / TASK-013 / TEST-022/026 → [Issue #440](https://github.com/devin930906/userscript-auto-healer/issues/440) (Open) → [PR #532](https://github.com/devin930906/userscript-auto-healer/pull/532) (Merged) → main `08f03a5dc12f2f1f74e37ad3a788063a74961d17`：修正 `QUEUED attempts=n` 可被同次 `SUCCEEDED/FAILED` 覆写的状态单调性缺口，保留合法重新尝试与取消。Windows RED [#41174961316](https://github.com/devin930906/userscript-auto-healer/actions/runs/41174961316)，PR GREEN [#41175266262](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175266262)，main GREEN [#41175855520](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175855520)。
 - #440 原始 AST Worker 间歇性故障仍未验证解决，不等于 `TEST-004/011/022` 全量通过或 Stable GATE 通过。既有 REQ/NFR/TASK/TEST/GATE 编号均不变。
+
+
+## 2026-11-02 新版（4）/（7）无独占认领迁移（现行续接依据）
+
+- PR [#602](https://github.com/devin930906/userscript-auto-healer/pull/602) 合并提交 `617fd3879f7a33ff3a5311868c1164b4e6dfb6fb`，经 Documentation Integrity 和 Required PR Fence 成功验证。此 SHA 只是当时迁移基准，不保证永远是当前 main。
+- 新指令取消 Issue 独占锁、创建认领分支、持有者签名轮次和 `HANDOFF_BLOCKED` 开发门槛。旧相关记录仍保留历史与安全证据，不能再阻止符合批准范围、依赖和 PR 规则的独立产品开发。
+- 保留原始 REQ/NFR/ADR/RISK/TEST/GATE、TASK-001..021、已经合并的产品代码、PR 与 CI；（4）历史有条件准入不重跑，旧产品阶段不重做。并行工作必须以最新 main SHA、实际文件/接口冲突、分支隔离、PR Required Checks 及合并后回归为依据。
+- 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
+- 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
+- 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
