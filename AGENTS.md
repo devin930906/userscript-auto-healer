@@ -1,5 +1,15 @@
 # 开发代理约束
 
+## 2026-11-02 现行新版（4）/（7）无 Issue 独占锁迁移（优先于以下旧协调流程）
+
+- 用户已指定新版（4）与新版（7）作为今后的执行规则。历史（4）有条件准入和已有产品代码仍有效，不重建 TASK/REQ/TEST/GATE，不回退已合并功能，也不把历史治理实验证据标记为失败。
+- **当前不要求 Issue 独占认领、轮次所有权、签名释放、原子再认领或 `HANDOFF_BLOCKED` 作为产品开发准入条件。** 单个 Issue 可以由多个对话按真实独立工作范围开发；若目标文件、共享接口或依赖发生冲突，必须暂停对应写入并协调差异，不得覆盖竞争提交。
+- 开始前重新读取默认分支最新 SHA、Issues、全部开放 PR、变更文件范围及测试。每个变更使用独立分支、PR 与 Required Checks；严格核对头部提交、基准 SHA、目标文件的远端状态及合并后检查；不得强推、抢占旧分支或绕过审查/安全授权。旧 `work/issue-*` 与 `coord/issue-*` 引用全部保留为历史，不是未来开发必须取得的锁。
+- `docs/16-cross-session-issue-claims.md`、`docs/17-owner-authorized-governance-recovery.md`、`docs/18-claim-round-coordination.md`、`docs/18-production-coordination-gates.md` 的旧认领协议、治理脚本和工作流属于历史/可选诊断，**不构成新版（7）产品 PR 的先决条件**。旧治理 Issue #565 应在完成迁移对账后按事实分类收尾，而非继续引入签名认领子任务。
+- 现存 Ruleset #26307718 要求的旧名称检查 `Issue coordination / stale round fence` 在过渡期保留同名 GitHub required context，但其脚本改为**无需认领的 PR 安全核验**：真实 PR 头部、可信基准、文件清单、其他开放 PR 同文件冲突；这是过渡兼容，绝不声称实现了跨对话绝对互斥。另一个 coord 引用非强推 Ruleset #26308886 可暂留以保护历史引用。
+- `docs/11-readiness.md` 2026-10-18 的有条件准入是历史记录，不能因旧锁未交接而永久中断今日已获准的独立产品开发；是否达到 Stable 仍只按真实 REQ/TEST/GATE、Windows 双发行和最后集中人工验收判断。
+
+
 ## 项目权威资料顺序
 用户本次明确批准的目标与 docs/00-intake.md → docs/02-requirements.md → docs/03-feasibility.md 和 docs/adr → docs/04-architecture.md → docs/06-security-risk.md → docs/07-testing.md → docs/08-release.md → docs/09-development-plan.md → docs/10-traceability.md → docs/11-readiness.md → docs/12-handoff.md → docs/13-predevelopment-admission.md。相互冲突时明确列出并核验，严禁编造批准。
 
