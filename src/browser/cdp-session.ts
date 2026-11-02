@@ -236,6 +236,9 @@ export async function verifyCdpBrowserWebSocket(
   if(signal?.aborted)return false;
   return new Promise(resolve=>{
     let client:WebSocket|undefined,settled=false;
+    // An unsolicited matching-id message is not evidence that this client
+    // actually issued Browser.getVersion. Refuse it before trusting identity.
+    let requestSent=false;
     const finish=(passed:boolean)=>{
       if(settled)return;
       settled=true;clearTimeout(timer);
@@ -254,10 +257,15 @@ export async function verifyCdpBrowserWebSocket(
         // close() may throw while the WebSocket is CONNECTING. Its late open
         // event must not send CDP commands after cancellation or timeout.
         if(settled||signal?.aborted)return;
-        try{socket.send(JSON.stringify({id:1,method:'Browser.getVersion'}));}
-        catch{finish(false);}
+        try{
+          socket.send(JSON.stringify({id:1,method:'Browser.getVersion'}));
+          requestSent=true;
+        }catch{finish(false);}
       });
       socket.addEventListener('message',event=>{
+        // No CDP command was sent: a matching id/product can only be an
+        // unsolicited server message, never an authenticated roundtrip.
+        if(!requestSent){finish(false);return;}
         try{
           const payload=JSON.parse(String(event.data)) as {
             id?:unknown;result?:{product?:unknown};error?:unknown
