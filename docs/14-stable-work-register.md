@@ -1,5 +1,8 @@
 # Stable 剩余工作登记（基线快照）
 
+> **2026-11-02 最新工作索引**：原始工作项与阶段实证继续有效；新增 Issue #603..#610 补全已批准 TASK，不代表新功能或完成验收。旧 Issue 锁交接不再是阻断，但 Windows/Chrome/Tampermonkey、安全回滚与全部 Stable GATE 仍需证据。参见 `docs/19-stable-v7-migration.md`。
+
+
 > 快照日期：2026-10-21（MYT）；仓库：`devin930906/userscript-auto-healer`；最近已核对的代码集成基线：`b161a9f0fa86be10599f57eb918a4683273aa224`（PR #200 合并；此前 PR #199、#198、#197 保留）。只登记未完成的正式 TASK，不重做 TASK-001..006；前述阶段实证不等于 Stable 产品完整验收。
 
 ## 状态判断
@@ -321,3 +324,13 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 | 持久化安全修复 | [PR #532](https://github.com/devin930906/userscript-auto-healer/pull/532) 已合并 `main@08f03a5dc12f2f1f74e37ad3a788063a74961d17`；拒绝 `QUEUED` 到同尝试次数 `SUCCEEDED/FAILED` 的不可能状态升级，保留合法重试和取消；`TASK-013/REQ-022/TEST-022/026` 的独立安全增量 | #440 原始隔离 AST Worker 偶发失败仍 Open，未确认根因或证明全量可靠性 |
 | Windows TDD 与真实主干 | RED [#41174961316](https://github.com/devin930906/userscript-auto-healer/actions/runs/41174961316) 761/759 通过/1 预期失败/1 跳过；GREEN [#41174965009](https://github.com/devin930906/userscript-auto-healer/actions/runs/41174965009)、PR [#41175266262](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175266262) 和 main [#41175855520](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175855520) 761/760 通过/0 失败/1 条件跳过，Electron smoke 通过 | 完整产品业务验收、真实用户设备与所有发布 GATE 未完成 |
 | Windows EXE 与真实 ZIP 开发候选 | [候选工作流 #41175266285](https://github.com/devin930906/userscript-auto-healer/actions/runs/41175266285) 成功，合成源 `4c8e52d632c1ffd581c4c7836736b25e659a012d`，Artifact `13032676896`；候选 EXE SHA-256 `2f1de15eeedc448e47281086115cf020d0d4c31240a31fef1304c1bed0e56eb2`；候选 ZIP SHA-256 `f6eda61b6207d325697df27faede7567f2cc5e90b1c38d7693e7d8f73d4dff23`（来自 Windows Job 日志，未另行本地复算） | 非正式 Stable 包；Artifact 外层归档哈希 `9b355a8ccf2075a9de4119f009da5924ce24cc4f570b1c748890c4f3bd5857cf` 与产品真实 ZIP 不同。尚无正式 Release 或 GATE-008/009/011 完整验收 |
+
+
+## 2026-11-02 新版（4）/（7）无独占认领迁移（现行续接依据）
+
+- PR [#602](https://github.com/devin930906/userscript-auto-healer/pull/602) 合并提交 `617fd3879f7a33ff3a5311868c1164b4e6dfb6fb`，经 Documentation Integrity 和 Required PR Fence 成功验证。此 SHA 只是当时迁移基准，不保证永远是当前 main。
+- 新指令取消 Issue 独占锁、创建认领分支、持有者签名轮次和 `HANDOFF_BLOCKED` 开发门槛。旧相关记录仍保留历史与安全证据，不能再阻止符合批准范围、依赖和 PR 规则的独立产品开发。
+- 保留原始 REQ/NFR/ADR/RISK/TEST/GATE、TASK-001..021、已经合并的产品代码、PR 与 CI；（4）历史有条件准入不重跑，旧产品阶段不重做。并行工作必须以最新 main SHA、实际文件/接口冲突、分支隔离、PR Required Checks 及合并后回归为依据。
+- 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
+- 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
+- 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
