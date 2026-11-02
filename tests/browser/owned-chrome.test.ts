@@ -1997,3 +1997,70 @@ test('TASK-005/TEST-006/009/026: pending native PID proof obeys remaining Chrome
     t.mock.reset();
   }
 });
+
+
+/** TASK-005/TEST-006/008/009: opt-in CI Chrome bootstrap diagnostics must
+ * actually enable Chromium's own log in THIS disposable headless launch.
+ * This test never reads or emits the resulting browser log.
+ */
+test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging only when opted in',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned-log',12173);
+  const saved={actions:process.env.GITHUB_ACTIONS,event:process.env.GITHUB_EVENT_NAME,
+    request:process.env.UAH_TEST_CHROME_BOOT_LOG};
+  const child=Object.assign(new EventEmitter(),{
+    pid:41273,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let observedArgs:ReadonlyArray<string>=[];
+  let session:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
+  try{
+    process.env.GITHUB_ACTIONS='true';
+    process.env.GITHUB_EVENT_NAME='workflow_dispatch';
+    process.env.UAH_TEST_CHROME_BOOT_LOG='true';
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',(_file:string,args?:ReadonlyArray<string>)=>{
+      observedArgs=Array.from(args??[]);
+      return child as unknown as import('node:child_process').ChildProcess;
+    });
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41273,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>true);
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12173/devtools/browser/abcdefgh-1234'
+    })));
+    session=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+    assert.equal(session.ok,true,JSON.stringify(session));
+    assert.ok(observedArgs.includes('--enable-logging'),
+      'opt-in diagnostic must direct Chrome logs to only its disposable Profile');
+    assert.ok(observedArgs.includes('--v=0'),
+      'avoid verbose URL/renderer instrumentation and extra resource load');
+    assert.ok(!observedArgs.some(x=>x.includes('--no-sandbox')),
+      'diagnostics must not weaken Chrome sandbox');
+  }finally{
+    if(session?.ok)session.stop();
+    t.mock.reset();
+    for(const [key,value] of [
+      ['GITHUB_ACTIONS',saved.actions],['GITHUB_EVENT_NAME',saved.event],
+      ['UAH_TEST_CHROME_BOOT_LOG',saved.request]
+    ] as const){
+      if(value===undefined)delete process.env[key];
+      else process.env[key]=value;
+    }
+  }
+});
