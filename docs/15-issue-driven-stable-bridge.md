@@ -1,5 +1,8 @@
 # Legacy → Issue-driven Stable development bridge
 
+> **2026-11-02 current correction**: the later 2026-10-31 exclusive Issue claim supplement below is historical only. The current (4)/(7) explicitly removes Issue ownership locks and signed handoffs. See `AGENTS.md` and `docs/19-stable-v7-migration.md`. Preserve all existing code, task numbering and release gates.
+
+
 > Scope: governance-only migration for `devin930906/userscript-auto-healer`, based on repository `main@e3169fc982c9703e26710eb335b36a41f0812454` (2026-10-29 UTC). This is not a new predevelopment admission, a new product specification, or proof that the current HEAD passes Stable gates.
 
 ## Purpose and authority
