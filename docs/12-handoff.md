@@ -1,5 +1,8 @@
 # 项目开发交接
 
+> **2026-11-02 最新续接**：按 `docs/19-stable-v7-migration.md`、`AGENTS.md` 新版规则和真实 GitHub 远端状态继续。以下旧版认领/签名/HANDOFF_BLOCKED 均保留为历史资料，不再是产品开发准入条件；真实产品安全和 Stable GATE 未取消。
+
+
 > 状态（2026-10-26）：**（4）准备阶段有条件准入并已交接；（7）已有持续实际工程成果**。当前主干 `c3c28451636400a4228688d7354c8f42ba0ccbca` 已具 Electron/TypeScript 应用源码，Windows 应用回归 #40272189600 为 603 项（602 通过、0 失败、1 条件跳过），旧基线 Tampermonkey 隔离矩阵 #40270144017 为 15/15 Job 通过。开发候选 EXE＋ZIP 已有阶段验证，但完整用户兼容、可信自动修复/回滚、正式 Stable GATE 和 GitHub Release 均未完成。历史“尚无源码”文字仅为准备阶段当时的快照。
 
 ## 项目身份
@@ -341,3 +344,13 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github.com/devin930906/userscript-auto-healer/actions/runs/41281277986) completed **SUCCESS** on `main@4ce1c9b55fcd1721f95b0cd9df75da21f6222bc8`: two independent runners contested a descendant of a previously released coordination ref, with HTTP 200 winner A / HTTP 422 loser B and 741ms start gap. Final verification rejected a losing sibling and an old-round replay, then recorded release and successful round-three acquisition. See `docs/16-cross-session-issue-claims.md` for exact job evidence.
 
 **Development handoff still blocked for prior eight product Issue claims:** this experimental ref mechanism is not a production owner/round authorization or protected merge/write gate; legacy `work/issue-215/440/480/486/487/488/489/510` ownership and unmatched changes remain unverified. Track full production coordinator, protected integration and individual handoffs in open [Issue #565](https://github.com/devin930906/userscript-auto-healer/issues/565). Do not infer safe product takeover from this success or start over with the former (4) preparation. Other independent, properly authorized work may continue under the existing scope and admission rules.
+
+
+## 2026-11-02 新版（4）/（7）无独占认领迁移（现行续接依据）
+
+- PR [#602](https://github.com/devin930906/userscript-auto-healer/pull/602) 合并提交 `617fd3879f7a33ff3a5311868c1164b4e6dfb6fb`，经 Documentation Integrity 和 Required PR Fence 成功验证。此 SHA 只是当时迁移基准，不保证永远是当前 main。
+- 新指令取消 Issue 独占锁、创建认领分支、持有者签名轮次和 `HANDOFF_BLOCKED` 开发门槛。旧相关记录仍保留历史与安全证据，不能再阻止符合批准范围、依赖和 PR 规则的独立产品开发。
+- 保留原始 REQ/NFR/ADR/RISK/TEST/GATE、TASK-001..021、已经合并的产品代码、PR 与 CI；（4）历史有条件准入不重跑，旧产品阶段不重做。并行工作必须以最新 main SHA、实际文件/接口冲突、分支隔离、PR Required Checks 及合并后回归为依据。
+- 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
+- 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
+- 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。

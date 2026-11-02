@@ -1,5 +1,8 @@
 # Userscript Auto Healer
 
+> **2026-11-02 现行（4）/（7）入口**：原有开发成果继续有效；新版取消 Issue 独占锁、使用独立分支／PR／最新 SHA 与 CI 检查控制并发。参见 [迁移与正式交接](docs/19-stable-v7-migration.md)。**目前仍非正式 Stable。**
+
+
 > 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007..011 有独立阶段代码成果，但真实 Tampermonkey 产品级业务验收、完整自动应用和恢复事务仍未闭环。TASK-011 的备份-only、恢复来源身份检查及原生协作式文件互斥已通过 Windows 局部测试（PR #44–53，详见 docs/07-testing.md、docs/09-development-plan.md）。**没有正式产品成品；最终 Stable 尚未完成，真实自动修复/回滚仍未交付，没有经完整验收的正式 EXE、ZIP 或 GitHub Release**。Windows runner 已构建并验证有限开发候选 EXE+真实 ZIP 的安装/解压与候选数据保留（PR #146–149；见 docs/08-release.md），不得当作正式交付。
 
 ## 项目用途
