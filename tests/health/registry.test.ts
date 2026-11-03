@@ -167,3 +167,16 @@ test('TASK-015/TEST-024/026: rejected rollback remains revoked until a new valid
  assert.equal(fresh.status,'ELEMENT_FOUND_ONLY');
  assert.equal(fresh.history.length,2);
 });
+
+test('TASK-015/TEST-024/026: throwing health clock never leaks secret error text', () => {
+  const secret = 'PRIVATE_HEALTH_CLOCK_ERROR_MUST_NOT_ESCAPE';
+  const throwClock = new LimitedHealthRegistry(() => { throw Error(secret); });
+  for (const operation of [
+    () => throwClock.record(hit()),
+    () => throwClock.snapshot(A)
+  ]) {
+    assert.throws(operation, (error: unknown) =>
+      error instanceof Error && error.message === 'INVALID_HEALTH_CLOCK');
+  }
+  assert.equal(new LimitedHealthRegistry(() => 0).snapshot(A).status, 'UNTESTED');
+});
