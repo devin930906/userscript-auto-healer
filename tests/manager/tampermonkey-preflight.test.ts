@@ -595,3 +595,31 @@ test('TASK-007/TEST-017/026: raw target URL normalization cannot change a consen
  }
  assert.equal(inspect(report,normal,'https://example.com/foo').ok,true);
 });
+
+
+test('TASK-007/TEST-017/026: extended runtime and manager reports cannot smuggle additional verification claims',()=>{
+ assert.equal(runtime.ok,true);
+ if(!runtime.ok)return;
+ // An external report may mimic the known preflight keys while also carrying
+ // extra "verified" or auto-apply capabilities. Reject the contradictory
+ // envelope rather than silently discarding those keys and returning eligible.
+ const alteredRuntime={...runtime,businessRecoveredVerified:true};
+ const alteredReport={...report,businessVerified:true};
+ const hiddenReport={...report,automaticPatchAllowed:true};
+ const unexpectedReport={...report,privilegedManagerOperation:'install'};
+ const cases=[
+  [alteredRuntime,report,'RUNTIME_NOT_OBSERVED'],
+  [runtime,alteredReport,'INVALID_INPUT'],
+  [runtime,hiddenReport,'INVALID_INPUT'],
+  [runtime,unexpectedReport,'INVALID_INPUT']
+ ] as const;
+ for(const [presence,state,code] of cases){
+  const result=inspectReportedTampermonkeyPreflight(
+   presence,state,normal,'https://example.com/foo',true);
+  assert.deepEqual(result,{
+   ok:false,status:'BLOCKED',code,gmApiVerified:false,businessVerified:false
+  });
+ }
+ assert.equal(inspect().ok,true,
+  'a legitimate unextended report remains metadata-only eligible');
+});

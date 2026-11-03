@@ -276,6 +276,27 @@ export function inspectReportedTampermonkeyPreflight(
   const safeMetadata=plainDataSnapshot(metadata);
   if(!safeRuntime||!safeReport||!safeMetadata)
    return blocked('INVALID_INPUT');
+  // The runtime hint and user-supplied manager report are separate, limited
+  // schemas. Reject extra fields (including forged "verified" or write
+  // authority claims) instead of silently ignoring them and returning an
+  // apparently eligible preflight result. A future report shape requires an
+  // explicit review before this trust boundary recognizes it.
+  const runtimeKeys=[
+   'ok','status','manager','extensionId','matchedRuntimeTargets',
+   'extensionAuthenticityVerified','versionVerified','permissionVerified',
+   'scriptInstallationVerified','scriptInjectionVerified','gmApiVerified',
+   'businessVerified'
+  ];
+  const reportKeys=[
+   'extensionId','version','enabled','userScriptsPermission',
+   'userScriptsAllowed','scriptInstalled','scriptEnabled'
+  ];
+  if(Object.keys(safeRuntime).length!==runtimeKeys.length||
+     runtimeKeys.some(key=>!Object.prototype.hasOwnProperty.call(safeRuntime,key)))
+   return blocked('RUNTIME_NOT_OBSERVED');
+  if(Object.keys(safeReport).length!==reportKeys.length||
+     reportKeys.some(key=>!Object.prototype.hasOwnProperty.call(safeReport,key)))
+   return blocked('INVALID_INPUT');
   const rawTags=plainDataSnapshot(safeMetadata.tags);
   const unknownNames=stringListSnapshot(safeMetadata.unknownNames);
   if(!rawTags||!unknownNames)return blocked('INVALID_INPUT');
