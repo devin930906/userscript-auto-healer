@@ -103,6 +103,10 @@ async function limitedJson(response:Response,signal:AbortSignal):Promise<unknown
   if(signal.aborted||!response.ok||!response.body)return discard();
   const claimed=response.headers.get('content-length');
   if(claimed!==null&&(!/^\d+$/.test(claimed)||Number(claimed)>MAX_REPLY))return discard();
+  // Header framing is not a trust receipt: accept JSON only if the
+  // actual streamed bytes match Content-Length exactly when provided.
+  // The separate MAX_REPLY cap still applies when no length is declared.
+  const declaredBytes=claimed===null?null:Number(claimed);
   const reader=response.body.getReader();
   const readBody=async():Promise<unknown|null>=>{
     const bytes:Uint8Array[]=[];let count=0;
@@ -111,12 +115,13 @@ async function limitedJson(response:Response,signal:AbortSignal):Promise<unknown
         const {done,value}=await reader.read();
         if(done)break;
         count+=value.byteLength;
-        if(count>MAX_REPLY)return null;
+        if(count>MAX_REPLY||(declaredBytes!==null&&count>declaredBytes))return null;
         // The transport may reuse its Uint8Array on the next read. Retain
         // an owned snapshot, not a view into mutable provider memory.
         bytes.push(value.slice());
       }
-      if(signal.aborted||count===0)return null;
+      if(signal.aborted||count===0||
+         (declaredBytes!==null&&count!==declaredBytes))return null;
       const data=new Uint8Array(count);let off=0;
       for(const part of bytes){data.set(part,off);off+=part.byteLength;}
       return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data)) as unknown;

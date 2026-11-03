@@ -294,6 +294,42 @@ test('TEST-016/026: response body with no chunks respects the configured request
   assert.deepEqual(result,{ok:false,code:'NETWORK_FAILED',automaticPatchAllowed:false});
 });
 
+test('TASK-014/TEST-015/016/026: AI JSON byte count must match declared Content-Length',async()=>{
+  // An otherwise valid model-list or suggestion response with truncated
+  // HTTP framing cannot become accepted model data. No model output is
+  // trusted, even when a custom transport returns syntactically valid JSON.
+  const body=JSON.stringify({data:[{id:'safe-model'}]});
+  const length=new TextEncoder().encode(body).byteLength;
+  for(const declared of [length+1,length-1,0]){
+    const gateway=new OptionalAiGateway({...options(),maxRequests:1},
+      async()=>new Response(body,{headers:{'content-length':String(declared)}}));
+    assert.equal(gateway.enable(approval()),true);
+    assert.deepEqual(await gateway.discoverModels(approval()),{
+      ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+    },'mismatched model-response byte length: '+declared);
+    assert.equal(gateway.status().remainingRequests,0,
+      'failed response must still consume request quota');
+  }
+  const exact=new OptionalAiGateway({...options(),maxRequests:1},
+    async()=>new Response(body,{headers:{'content-length':String(length)}}));
+  assert.equal(exact.enable(approval()),true);
+  assert.deepEqual(await exact.discoverModels(approval()),{
+    ok:true,status:'MODELS_DISCOVERED',models:['safe-model'],
+    manualModelAvailable:true,automaticPatchAllowed:false
+  });
+  const suggestion=JSON.stringify({choices:[{message:{
+    role:'assistant',content:'Review only; never apply automatically.'
+  }}]});
+  const declaredLength=new TextEncoder().encode(suggestion).byteLength;
+  const badSuggestion=new OptionalAiGateway({...options(),maxRequests:1},
+    async()=>new Response(suggestion,{
+      headers:{'content-length':String(declaredLength+1)}}));
+  assert.equal(badSuggestion.enable(approval()),true);
+  assert.deepEqual(await badSuggestion.suggest(approval(),evidence),{
+    ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+  });
+});
+
 test('TEST-016/026: oversized declared response body also requests nonblocking cleanup',async()=>{
  let cancelCalls=0;
  const body=new ReadableStream<Uint8Array>({
