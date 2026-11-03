@@ -101,7 +101,9 @@ function inspectReportedTampermonkeyPreflightUnchecked(
     // WHATWG URL parsing silently removes literal and percent-encoded dot
     // segments. An explicitly selected URL must not become a different
     // @match pathname merely by normalizing its raw spelling.
-    /\/(?:\.|%2e){1,2}(?=\/|[?#]|$)/i.test(targetUrl))
+    // Query values may contain /../ literally; only raw path segments are
+    // subject to URL pathname normalization. Preserve query scope matching.
+    /\/(?:\.|%2e){1,2}(?=\/|$)/i.test(targetUrl.split(/[?#]/,1)[0]))
     return blocked('INVALID_INPUT');
  if(report.extensionId!==TAMPERMONKEY_EXTENSION_ID)return blocked('WRONG_MANAGER');
  if(typeof report.version!=='string'||!/^[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}$/.test(report.version))
