@@ -60,7 +60,9 @@ function validateConfig(input:unknown):{options:Options;url:URL}{
   try{url=new URL(c.baseUrl);}catch{throw Error('INVALID_AI_CONFIGURATION');}
   const hostname=url.hostname.toLowerCase();
   const local=hostname==='127.0.0.1';
-  const publicHostname=/^(?=.{1,253}$)(?:[a-z0-9-]+\.)+[a-z]{2,63}$/.test(hostname)&&
+  // Require every DNS label to begin/end with an alphanumeric and fit 63 bytes.
+  // A WHATWG URL may parse invalid edge-hyphen hostnames as valid URL text.
+  const publicHostname=/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(hostname)&&
     !hostname.endsWith('.local')&&!hostname.endsWith('.internal')&&
     !hostname.endsWith('.localhost');
   if(!(local&&url.protocol==='http:'||publicHostname&&url.protocol==='https:')||
