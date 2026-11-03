@@ -168,8 +168,16 @@ export function classifyCdpStartupTransportFailure(error:unknown):
  }
  // AbortSignal.timeout() rejects with a native DOMException whose name
  // may be inherited, rather than an own property descriptor.
- if(typeof DOMException!=='undefined'&&error instanceof DOMException&&
-    error.name==='TimeoutError')return 'FETCH_TIMEOUT';
+ if(typeof DOMException!=='undefined'&&error instanceof DOMException){
+  // The public name property can be overridden by an untrusted accessor.
+  // Invoke only the native DOMException brand-checking getter, never user code.
+  try{
+   const nativeName=Object.getOwnPropertyDescriptor(
+    DOMException.prototype,'name')?.get;
+   if(typeof nativeName==='function'&&nativeName.call(error)==='TimeoutError')
+    return 'FETCH_TIMEOUT';
+  }catch{/* Invalid or forged exception remains unclassified. */}
+ }
  return 'FETCH_FAILED';
 }
 /** A timeout is not proof of a Chrome/port conflict. Keep the actual Windows
