@@ -371,8 +371,8 @@ test('TASK-007/TEST-017/018/026: DOM conflict reports require a real conflicting
   // A hand-edited conflict label with unchanged, matching DOM evidence is
   // impossible at comparison index zero or one. No JSON file may be written.
   for(const comparedModes of [0,1] as const){
-   const forged={...ready.report,consistency:{
-    status:'DOM_REPORT_CONFLICT' as const,comparedModes
+   const forged:typeof ready.report={...ready.report,consistency:{
+    status:'DOM_REPORT_CONFLICT',comparedModes
    }};
    assert.equal(createLimitedGmReport({...session,
     consistencySnapshot:()=>({
