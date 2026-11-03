@@ -9,7 +9,7 @@
  */
 import {lstat} from 'node:fs/promises';
 import type {BigIntStats} from 'node:fs';
-import {basename,dirname,isAbsolute,join,relative} from 'node:path';
+import {basename,dirname,isAbsolute,join,relative,resolve} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from './patch-planner';
@@ -72,9 +72,12 @@ const requestNames=[
  'replacementSelector','faultEvidenceId'
 ];
 const optionNames=['sourcePath','backupDirectory','exportDirectory','userApproved'];
+// The native UI must select an unambiguous canonical absolute spelling.
+// Drive-rooted Win32 paths and dot-segment aliases must not reach even the
+// preflight checks: consent to one file cannot silently name another alias.
 const absolute=(v:unknown):v is string=>
  typeof v==='string'&&v.length>0&&v.length<=4096&&
- !v.includes('\0')&&isAbsolute(v);
+ !v.includes('\0')&&isAbsolute(v)&&v===resolve(v);
 
 /**
  * The caller must have separately approved the scenario and selected all
