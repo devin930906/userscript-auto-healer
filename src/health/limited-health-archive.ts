@@ -255,6 +255,15 @@ export async function saveLimitedHealthArchive(
   const previous=await inspectFile(target,key);
   if(previous===null)return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const history=previous==='NOT_FOUND'?[]:previous.events;
+  // An overlapping snapshot must not launder a contradiction in already
+  // published historical evidence simply by including a matching later tail.
+  // Only the current tail's same-tick reconciliation has an explicit ordered
+  // transition rule below; older timestamps are immutable after publication.
+  if(history.length>0&&fresh.some(event=>
+    event.observedAtMs<history[history.length-1].observedAtMs&&
+    history.some(saved=>saved.observedAtMs===event.observedAtMs&&
+      saved.status!==event.status)))
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
   // A replay containing only unrelated, older observations cannot truthfully
   // claim a persisted update. Legitimate overlapping snapshots remain
   // idempotent, including retained windows that precede the current tail.
