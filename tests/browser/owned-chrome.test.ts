@@ -2009,6 +2009,52 @@ test('TASK-005/TEST-009/026: unsolicited CDP WebSocket identity response is deni
 });
 
 
+/** TASK-005 / TEST-009/026: even an apparently valid CDP identity must not
+ * be accepted from an oversized frame or coerced binary/object payload.
+ * The trusted owner/listener checks are separate prerequisites; here the
+ * WebSocket transport is entirely synthetic, with no Chrome connection.
+ */
+test('TASK-005/TEST-009/026: browser WebSocket identity frames are bounded and text-only',async()=>{
+  const nativeSocket=globalThis.WebSocket;
+  const callbacks=new Map<string,Array<(event?:{data?:unknown})=>void>>();
+  let outbound=0,coercions=0;
+  class SyntheticSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:(event?:{data?:unknown})=>void):void{
+      const existing=callbacks.get(name)??[];
+      callbacks.set(name,[...existing,callback]);
+    }
+    send(_message:string):void{outbound++;}
+    close():void{}
+  }
+  globalThis.WebSocket=SyntheticSocket as unknown as typeof WebSocket;
+  const version='155.0.1.1',port=12088;
+  const websocket='ws://127.0.0.1:'+port+'/devtools/browser/abcdefgh-1234';
+  const check=async(payload:unknown,expected:boolean)=>{
+    callbacks.clear();
+    const before=outbound;
+    const pending=verifyCdpBrowserWebSocket(websocket,port,version);
+    const opened=callbacks.get('open')?.[0];
+    assert.ok(opened,'a native getVersion request must have an open handler');
+    opened();
+    assert.equal(outbound,before+1,'the client must issue exactly one identity request');
+    const received=callbacks.get('message')?.[0];
+    assert.ok(received,'a native getVersion response handler must exist');
+    received({data:payload});
+    const outcome=await Promise.race([
+      pending,delay(300).then(()=> 'STALLED' as const)
+    ]);
+    assert.equal(outcome,expected,'identity is trusted only for bounded text frames');
+  };
+  try{
+    await check(JSON.stringify({id:1,result:{product:'Chrome/'+version}}),true);
+    await check(JSON.stringify({id:1,result:{product:'Chrome/'+version},
+      padding:'x'.repeat(20000)}),false);
+    await check({toString(){coercions++;throw Error('PRIVATE_WEBSOCKET_DATA');}},false);
+    assert.equal(coercions,0,'binary/foreign frame object must not invoke coercion');
+  }finally{globalThis.WebSocket=nativeSocket;}
+});
+
 /** TASK-005/TEST-006/009/026: the 20s owned-Chrome startup gate also
  * applies BETWEEN the native listener PID proof and any CDP WebSocket I/O.
  * A late positive PID receipt must not initiate a new browser connection.
