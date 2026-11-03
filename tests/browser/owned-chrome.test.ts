@@ -1006,6 +1006,33 @@ test('TEST-009: CDP response enforces actual streamed byte limit without Content
     headers:{'content-length':'17000'}})),null);
   assert.equal(await readBoundedCdpJson(new Response('{}',{status:403})),null);
 });
+
+test('TASK-005/TEST-009/026: declared CDP response length must match actual streamed bytes',async()=>{
+  // Fetch normally checks the HTTP framing, but this exported response parser
+  // is also a standalone security boundary. A truncated yet valid JSON body
+  // must not be accepted as an owned Chrome/CDP structural receipt.
+  const payload=JSON.stringify({Browser:'Chrome/155.0.1.1'});
+  const byteLength=new TextEncoder().encode(payload).byteLength;
+  assert.deepEqual(await readBoundedCdpJson(new Response(payload,{
+    headers:{'content-length':String(byteLength)}})),
+    {Browser:'Chrome/155.0.1.1'},'well-formed exact-length receipt remains valid');
+  for(const declared of [byteLength+1,byteLength-1,0]){
+    assert.equal(await readBoundedCdpJson(new Response(payload,{
+      headers:{'content-length':String(declared)}})),null,
+      'mismatched Content-Length must fail closed: '+declared);
+  }
+  const bytes=new TextEncoder().encode(payload);
+  const split=new Response(new ReadableStream<Uint8Array>({
+    start(controller){
+      controller.enqueue(bytes.subarray(0,7));
+      controller.enqueue(bytes.subarray(7));
+      controller.close();
+    }
+  }),{headers:{'content-length':String(byteLength)}});
+  assert.deepEqual(await readBoundedCdpJson(split),
+    {Browser:'Chrome/155.0.1.1'},'split valid bytes preserve exact-length acceptance');
+});
+
 test('TEST-009/026: oversized CDP body cannot be held hostage by a pending stream cancellation',async()=>{
  let cancelCalled=false;
  // An untrusted HTTP body may never finish cancellation. Size rejection must
