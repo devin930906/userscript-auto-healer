@@ -263,3 +263,23 @@ test('TASK-008/TEST-013/026: pending WebSocket connect and pending Page.getFrame
     assert.equal(label.includes('example.com'),false);
   }
 });
+
+
+test('TASK-008/TEST-013/026: main-frame classifier cannot silently canonicalize an unapproved raw URL',()=>{
+ const classify=moduleUnderTest.classifyMainFrameUrl;
+ assert.equal(typeof classify,'function');
+ if(!classify)return;
+ for(const malformed of [
+   'https://exa\nmple.com/fixture',
+   'https://example.com/\tfixture',
+   'https://example.com/fixture\r',
+   'https://example.com\\fixture',
+   ' https://example.com/fixture',
+   'https://example.com/fixture '
+ ]){
+   assert.equal(classify('https://example.com/fixture',malformed),
+     'MAIN_FRAME_INVALID_URL',JSON.stringify(malformed));
+ }
+ assert.equal(classify('https://EXAMPLE.com:443/fixture','https://example.com/fixture'),
+   'MAIN_FRAME_CONFIRMED');
+});

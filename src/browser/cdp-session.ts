@@ -92,8 +92,11 @@ export function inspectCdpTargetList(
   payload:unknown, expectedPort:number, expectedUrl:string,
   createdTargetId?:string
 ):CdpTargetEnvelope {
+  // Refuse raw addresses that the WHATWG URL constructor would silently
+  // trim, strip or reinterpret before comparing against a CDP tab receipt.
   if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535 ||
      typeof expectedUrl!=='string' || expectedUrl.length>4096 ||
+     expectedUrl.trim()!==expectedUrl||/[\x00-\x1f\x7f\\]/.test(expectedUrl) ||
      (createdTargetId!==undefined &&
       (typeof createdTargetId!=='string' ||
        !/^[a-zA-Z0-9_-]{8,128}$/.test(createdTargetId))))

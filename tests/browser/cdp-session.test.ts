@@ -205,3 +205,19 @@ test('TEST-009: listener netstat parsing excludes wildcard and connected remote 
   assert.deepEqual(parseWindowsLoopbackListeners(
     'TCP 127.0.0.1:9223 0.0.0.0:0 LISTENING not-a-pid',9223).length,1);
 });
+
+
+test('TASK-005/008/TEST-009/026: target inventory rejects ambiguous raw approved URLs',()=>{
+ for(const malformed of [
+   'https://exa\nmple.com/authorized-test',
+   'https://example.com/\tauthorized-test',
+   'https://example.com/authorized-test\r',
+   'https://example.com\\authorized-test',
+   ' https://example.com/authorized-test',
+   'https://example.com/authorized-test '
+ ]){
+   assert.deepEqual(inspectCdpTargetList([testPage],9223,malformed),
+     {ok:false,code:'INVALID_TARGET_INPUT'},JSON.stringify(malformed));
+ }
+ assert.equal(inspectCdpTargetList([testPage],9223,testPage.url).ok,true);
+});

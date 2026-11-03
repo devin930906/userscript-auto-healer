@@ -23,8 +23,14 @@ export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
   'MAIN_FRAME_SOCKET_PENDING'|'MAIN_FRAME_RECEIPT_PENDING'|
   'MAIN_FRAME_TRANSPORT_FAILED'|
   'UNVERIFIED_TAB_CLOSED'|'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED';
+// The URL constructor can silently remove C0 controls or reinterpret a
+// backslash as a slash. A navigation must use the exact raw approved URL.
+function unambiguousRawTarget(raw:string):boolean {
+  return raw.length<=4096&&raw.trim()===raw&&
+    !/[\x00-\x1f\x7f\\]/.test(raw);
+}
 function validTarget(raw:string):boolean {
-  if(raw.length>4096||raw.trim()!==raw)return false;
+  if(!unambiguousRawTarget(raw))return false;
   try{
     const url=new URL(raw);
     return ['http:','https:'].includes(url.protocol)&&!!url.hostname&&
@@ -50,8 +56,8 @@ export function classifyMainFramePendingPhase(phase:unknown):TargetNavigationSta
 export function classifyMainFrameUrl(actual:unknown,expected:string):TargetNavigationStage{
   if(actual==='about:blank')return 'MAIN_FRAME_ABOUT_BLANK';
   if(typeof actual!=='string'||actual.length===0)return 'MAIN_FRAME_MISSING_URL';
-  if(actual.length>4096||typeof expected!=='string'||expected.length>4096)
-    return 'MAIN_FRAME_INVALID_URL';
+  if(typeof expected!=='string'||!unambiguousRawTarget(expected)||
+     !unambiguousRawTarget(actual))return 'MAIN_FRAME_INVALID_URL';
   try{
     const found=new URL(actual),approved=new URL(expected);
     if(!['http:','https:'].includes(found.protocol)||
