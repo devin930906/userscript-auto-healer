@@ -158,6 +158,23 @@ function coherentLimitedEvidence(
      dom.broken.actionCount===0&&dom.broken.fixtureDomMatchesExpected===true&&
      dom.fixed===null;
  }
+ // A conflict is not an arbitrary diagnostic label. With valid captured
+ // DOM schemas and matching two-mode receipts, the first differing mode
+ // must exist and disagree with the reported business action or its own
+ // fixture expectation. A hand-edited report with no contradiction must
+ // never be persisted as DOM_REPORT_CONFLICT, even though it remains
+ // explicitly unverified and grants no write authority.
+ if(consistency.status==='DOM_REPORT_CONFLICT'){
+   const broken=dom.broken,fixed=dom.fixed;
+   if(consistency.comparedModes===0)
+     return broken!==null&&
+       (broken.actionCount!==0||broken.fixtureDomMatchesExpected!==true);
+   if(consistency.comparedModes===1)
+     return broken!==null&&broken.actionCount===0&&
+       broken.fixtureDomMatchesExpected===true&&fixed!==null&&
+       (fixed.actionCount!==1||fixed.fixtureDomMatchesExpected!==true);
+   return false;
+ }
  // The consistency evaluator visits 'broken' first, then 'fixed', and
  // exits before incrementing when it encounters a missing/invalid mode.
  if(consistency.comparedModes===2)return false;
