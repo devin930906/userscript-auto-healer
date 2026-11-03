@@ -219,6 +219,25 @@ test('TASK-007/TEST-017/026: raw dot-segment URL aliases never gain metadata eli
  }
 });
 
+test('TASK-007/TEST-017/026: dot segments inside a query are not path aliases',()=>{
+ const scoped=metadata({grant:['GM_getValue'],match:['https://example.com/private*']});
+ // The raw pathname stays /private; only the query contains dot segments.
+ // A query value must not be normalized into a different authorized path.
+ for(const target of [
+  'https://example.com/private?next=/../safe',
+  'https://example.com/private?next=/%2e%2e/safe',
+  'https://example.com/private?next=/./safe'
+ ]){
+  const result=inspect(report,scoped,target);
+  assert.equal(result.ok,true,target);
+  if(result.ok){
+   assert.equal(result.extensionAuthenticityVerified,false);
+   assert.equal(result.gmApiVerified,false);
+   assert.equal(result.businessVerified,false);
+  }
+ }
+});
+
 test('TEST-017: query string participates in conservative @match path matching',()=>{
  const exact=metadata({grant:['GM_getValue'],match:['https://example.com/admin']});
  assert.equal(inspect(report,exact,'https://example.com/admin').ok,true);
