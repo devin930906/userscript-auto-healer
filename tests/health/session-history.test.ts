@@ -621,3 +621,43 @@ test('TASK-015/TEST-024/026: matching current tail cannot conceal contradictory 
   assert.deepEqual(await readLimitedHealthArchive(userData,key),baseline);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: overlapping history refuses a previously unsaved interior observation',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-interior-replay-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'interior-event');
+  let clock=Date.now()-5000;
+  const saved=new LimitedHealthRegistry(()=>clock);
+  saved.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  clock+=2000;
+  saved.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,saved.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const baseline=await readLimitedHealthArchive(userData,key);
+  const later=new LimitedHealthRegistry(()=>clock);
+  clock-=2000;
+  later.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  clock+=1000;
+  later.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  clock+=1000;
+  later.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  const rejected=await saveLimitedHealthArchive(userData,later.snapshot(key));
+  assert.equal(rejected.status,'BLOCKED',
+   'a matching head and tail must not launder an unsaved interior observation');
+  assert.deepEqual(await readLimitedHealthArchive(userData,key),baseline,
+   'the original published sequence must remain unchanged');
+
+  // Valid, genuinely new future evidence remains appendable.
+  clock+=1000;
+  saved.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,saved.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const appended=await readLimitedHealthArchive(userData,key);
+  assert.equal(appended.status,'ARCHIVE_READ_UNVERIFIED');
+  if(appended.status==='ARCHIVE_READ_UNVERIFIED')
+   assert.equal(appended.events.length,3);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
