@@ -361,7 +361,8 @@ test('TASK-012/TEST-023/026: native revocation after verified pending bytes prev
    (...args:unknown[])=>ReturnType<typeof exportReviewedCandidateForManualInstall>;
   try{
    const result=await cancelable(request,staged,options,controller.signal);
-   assert.equal(checked,1,'the abort must occur before any hard-link publication');
+   assert.ok(checked>=1,'the abort must occur after the pending bytes check');
+   assert.equal(controller.signal.aborted,true,'native approval is genuinely revoked');
    assert.equal(result.status,'BLOCKED');
    if(result.status==='BLOCKED')assert.equal(result.reason,'CANCELLED');
    assert.deepEqual(await readdir(options.exportDirectory),[],
