@@ -20,7 +20,8 @@ import {
 
 type Script=Pick<ImportedScript,'bytes'|'textEncoding'>;
 type WorkerFailureReason='START_FAILED'|'REPLY_REJECTED'|
- 'WORKER_ERROR'|'EXIT_BEFORE_MESSAGE'|'DEADLINE';
+ 'WORKER_ERROR'|'EXIT_BEFORE_MESSAGE'|'DEADLINE'|
+ 'RETIREMENT_FAILED'|'RETIREMENT_DEADLINE';
 /** Only bounded internal reason codes and segment cardinality enter logs.
  * Never log worker errors, user source, selectors, paths, hashes or URLs.
  * Logging must not replace the caller's fail-closed result even if a hook throws.
@@ -318,17 +319,27 @@ async function previewImportedChunkOffMain(
    // silently increasing the AST time budget or hanging forever.
    let termination:Promise<number>;
    try{termination=worker.terminate();}
-   catch{resolve({answer,retired:false});return;}
+   catch{
+    reportWorkerFailure('RETIREMENT_FAILED',selected.length,startedAt,onlineAt,readyAt);
+    resolve({answer,retired:false});return;
+   }
    const remaining=Math.max(1,workerDeadlineMs-(performance.now()-startedAt));
    let retirementTimer:NodeJS.Timeout|undefined;
-   const retirementDeadline=new Promise<boolean>(settle=>{
-    retirementTimer=setTimeout(()=>settle(false),remaining);
+   // Resolve to a fixed code instead of logging an untrusted termination
+   // exception. A late rejection after the deadline must not double-log.
+   const retirementDeadline=new Promise<'DEADLINE'>(settle=>{
+    retirementTimer=setTimeout(()=>settle('DEADLINE'),remaining);
    });
    void Promise.race([
-    Promise.resolve(termination).then(()=>true,()=>false),retirementDeadline
-   ]).then(retired=>{
+    Promise.resolve(termination).then(
+     ()=>'RETIRED' as const,()=>'FAILED' as const),
+    retirementDeadline
+   ]).then(outcome=>{
     if(retirementTimer)clearTimeout(retirementTimer);
-    resolve({answer,retired});
+    if(outcome!=='RETIRED')
+     reportWorkerFailure(outcome==='FAILED'?'RETIREMENT_FAILED':
+      'RETIREMENT_DEADLINE',selected.length,startedAt,onlineAt,readyAt);
+    resolve({answer,retired:outcome==='RETIRED'});
    });
   };
   const cancel=()=>finish(null,true);
