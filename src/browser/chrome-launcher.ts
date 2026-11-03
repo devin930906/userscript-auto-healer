@@ -61,7 +61,11 @@ export async function preflightChrome(input:unknown):Promise<BrowserPreflight>{
     if(!profile.isDirectory())return {ok:false,code:'PROFILE_NOT_DIRECTORY'};
     // An existing active Chrome Profile is never implicitly reusable.
     const entries=await readdir(config.userDataDir);
-    if(entries.some(name=>['SingletonLock','SingletonCookie','SingletonSocket','lockfile'].includes(name)))
+    // Windows profile entries are normally case-insensitive. An existing
+    // lock/ownership marker with different casing still means this selected
+    // profile may be active; never treat it as an empty isolated profile.
+    const busyNames=new Set(['singletonlock','singletoncookie','singletonsocket','lockfile']);
+    if(entries.some(name=>busyNames.has(name.toLowerCase())))
       return {ok:false,code:'PROFILE_IN_USE'};
   }catch{return {ok:false,code:'PROFILE_NOT_FOUND'};}
   try {

@@ -37,6 +37,24 @@ test('TEST-007: denies unsafe Chrome default profiles and active locks',async t=
   const active=await preflightChrome(config(f.executable,f.profile));
   assert.deepEqual(active,{ok:false,code:'PROFILE_IN_USE'});
 });
+test('TASK-005/TEST-007/026: case-varied Chrome Profile lock markers fail closed on Windows',async t=>{
+  if(process.platform!=='win32'){
+    t.skip('Windows-only case-insensitive Profile ownership boundary');return;
+  }
+  const f=await fixture(t);
+  const names=['singletonlock','SINGLETONCOOKIE','SingletonSOCKET','LOCKFILE'];
+  for(const name of names){
+    const marker=join(f.profile,name);
+    await writeFile(marker,'possible active profile owner');
+    assert.deepEqual(await preflightChrome(config(f.executable,f.profile)),
+      {ok:false,code:'PROFILE_IN_USE'},'reject alternate casing: '+name);
+    await rm(marker);
+  }
+  const available=await preflightChrome(config(f.executable,f.profile));
+  assert.equal(available.ok,true,
+    'removing all owner markers restores only path/port preflight');
+});
+
 test('TASK-005/TEST-007: preflight refuses Chrome Beta/Dev/Canary default profiles before disk lookup',async t=>{
   if(process.platform!=='win32'){t.skip('Windows-only Chrome Profile preflight');return;}
   const f=await fixture(t);
