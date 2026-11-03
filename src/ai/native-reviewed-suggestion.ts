@@ -25,6 +25,14 @@ export class NativeAiEvidenceStore{
   private readonly salt=randomBytes(32);
   private readonly receipts=new Map<string,{evidence:Evidence;created:number}>();
   constructor(private readonly now:()=>number=Date.now){}
+  /** A native clock failure must never expose its error text or authorize a
+   * fresh review receipt. A failed lookup revokes that receipt below. */
+  private readClock():number|null{
+    try{
+      const timestamp=this.now();
+      return Number.isSafeInteger(timestamp)&&timestamp>=0?timestamp:null;
+    }catch{return null;}
+  }
   /** Call only after an owned-Chrome, consented scenario inspection succeeds. */
   record(id:unknown,scriptSha256:unknown,selector:unknown,code:unknown):boolean{
     if(typeof id!=='string'||!ID.test(id)||
@@ -32,8 +40,8 @@ export class NativeAiEvidenceStore{
        typeof selector!=='string'||!selector||selector.length>256||
        selector.trim()!==selector||/[\x00-\x1f\x7f]/.test(selector)||
        (code!=='SELECTOR_ASSERTION'&&code!=='UNKNOWN'))return false;
-    const created=this.now();
-    if(!Number.isSafeInteger(created)||created<0)return false;
+    const created=this.readClock();
+    if(created===null)return false;
     if(!this.receipts.has(id)&&this.receipts.size>=MAX_SESSION_RECORDS){
       // An expired receipt must not permanently consume a session slot.
       // Never evict a still-valid receipt just to admit a new one.
@@ -57,8 +65,8 @@ export class NativeAiEvidenceStore{
     if(typeof id!=='string'||!ID.test(id))return null;
     const receipt=this.receipts.get(id);
     if(!receipt)return null;
-    const now=this.now();
-    if(!Number.isSafeInteger(now)||now<receipt.created||
+    const now=this.readClock();
+    if(now===null||now<receipt.created||
        now-receipt.created>MAX_AGE_MS){
       this.receipts.delete(id);return null;
     }
