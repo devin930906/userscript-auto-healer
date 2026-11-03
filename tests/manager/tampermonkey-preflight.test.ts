@@ -623,3 +623,24 @@ test('TASK-007/TEST-017/026: extended runtime and manager reports cannot smuggle
  assert.equal(inspect().ok,true,
   'a legitimate unextended report remains metadata-only eligible');
 });
+
+
+test('TASK-007/TEST-017/026: unreviewed metadata envelope cannot smuggle business or write authority',()=>{
+ // Only the parser's five documented top-level fields may cross this
+ // caller-supplied metadata trust boundary. Extra keys are not attestation.
+ for(const [name,value] of [
+  ['businessVerified',true],
+  ['gmApiVerified',true],
+  ['automaticPatchAllowed',true],
+  ['businessRecoveredVerified',true],
+  ['privilegedOperation','install']
+ ] as const){
+  const forged={...normal,[name]:value};
+  const result=inspectReportedTampermonkeyPreflight(
+   runtime,report,forged,'https://example.com/foo',true);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',code:'INVALID_SCRIPT_METADATA',
+   gmApiVerified:false,businessVerified:false},name);
+ }
+ assert.equal(inspect().ok,true,
+  'the exact ordinary metadata envelope stays eligible without any attestation');
+});

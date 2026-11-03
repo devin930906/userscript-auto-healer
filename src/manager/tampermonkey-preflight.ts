@@ -297,6 +297,13 @@ export function inspectReportedTampermonkeyPreflight(
   if(Object.keys(safeReport).length!==reportKeys.length||
      reportKeys.some(key=>!Object.prototype.hasOwnProperty.call(safeReport,key)))
    return blocked('INVALID_INPUT');
+  // The metadata parser publishes precisely five top-level fields. A
+  // caller-supplied envelope carrying extra business or write-authority
+  // claims must never be accepted as an ordinary metadata-only hint.
+  const metadataKeys=['status','header','lines','tags','unknownNames'];
+  if(Object.keys(safeMetadata).length!==metadataKeys.length||
+     metadataKeys.some(key=>!Object.prototype.hasOwnProperty.call(safeMetadata,key)))
+   return blocked('INVALID_SCRIPT_METADATA');
   const rawTags=plainDataSnapshot(safeMetadata.tags);
   const unknownNames=stringListSnapshot(safeMetadata.unknownNames);
   if(!rawTags||!unknownNames)return blocked('INVALID_INPUT');
