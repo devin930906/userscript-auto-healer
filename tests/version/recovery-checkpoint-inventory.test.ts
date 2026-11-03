@@ -299,3 +299,33 @@ test('TASK-011/TEST-020/026: source-parent recovery directory must not produce a
     assert.deepEqual(await readdir(options.backupDirectory),[]);
   });
 });
+
+
+test('TASK-011/TEST-020/026: checkpoint inserted after directory snapshot during final source recheck blocks stale zero inventory',async t=>{
+ await fixture(async options=>{
+  const fingerprint=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const original=fingerprint.verifyApprovedSourceFingerprint;
+  let checks=0;
+  const late=join(options.backupDirectory,
+   'foreign-recovery.checkpoint.json');
+  t.mock.method(fingerprint,'verifyApprovedSourceFingerprint',async(
+    ...args:Parameters<typeof original>)=>{
+    const result=await original(...args);
+    if(++checks===2){
+      // A new recovery checkpoint appears after the directory's first
+      // post-enumeration timestamp snapshot, while the final source
+      // verification is awaiting disk I/O. This must not return a clean
+      // empty recovery inventory based on the stale directory snapshot.
+      await writeFile(late,'unverified late checkpoint');
+    }
+    return result;
+  });
+  const result=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+  assert.equal(checks,2,'must insert after the final directory identity check');
+  assert.equal(result.status,'BLOCKED',
+    'an unobserved late checkpoint must not be omitted from a successful inventory');
+  assert.equal(await readFile(late,'utf8'),'unverified late checkpoint');
+  assert.equal(await readFile(options.sourcePath,'utf8'),source);
+ });
+});
