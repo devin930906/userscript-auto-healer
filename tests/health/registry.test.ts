@@ -220,3 +220,43 @@ test('TASK-015/TEST-024/026: capacity never evicts fresh or future-dated evidenc
   'future-dated evidence is revoked, not reclassified as newly observed');
  assert.equal(registry.snapshot(key(1)).history.length,1);
 });
+
+
+test('TASK-015/TEST-024/026: invalid clock permanently revokes prior limited health snapshots until new observations',()=>{
+ let now=1000;
+ let throwClock=false;
+ const registry=new LimitedHealthRegistry(()=>{
+  if(throwClock)throw Error('PRIVATE_TIME_PROVIDER_FAILURE');
+  return now;
+ });
+ registry.record(hit(A));
+ registry.record(hit(B));
+ assert.equal(registry.snapshot(A).status,'ELEMENT_FOUND_ONLY');
+ assert.equal(registry.snapshot(B).status,'ELEMENT_FOUND_ONLY');
+ for(const invalid of [Number.NaN,Infinity,-1,Number.MAX_SAFE_INTEGER+1]){
+  now=invalid;
+  assert.throws(()=>registry.snapshot(A),/INVALID_HEALTH_CLOCK/);
+  now=1001;
+  assert.equal(registry.snapshot(A).status,'INDETERMINATE',
+   'invalid clock must not silently regain the old DOM status when time recovers');
+  assert.equal(registry.snapshot(B).status,'INDETERMINATE',
+   'clock failure invalidates all previously observed session-only evidence');
+ }
+ throwClock=true;
+ assert.throws(()=>registry.record(hit(A)),(error:unknown)=>
+  error instanceof Error&&error.message==='INVALID_HEALTH_CLOCK');
+ throwClock=false;
+ now=1002;
+ assert.equal(registry.snapshot(A).status,'INDETERMINATE');
+ assert.equal(registry.snapshot(B).status,'INDETERMINATE');
+ assert.equal(registry.snapshot(A).history.length,1,
+  'clock failures cannot erase previously retained history');
+ const newObservation=registry.record(hit(A));
+ assert.equal(newObservation.status,'ELEMENT_FOUND_ONLY',
+  'only a real new observation can restore the limited DOM status for its scope');
+ assert.equal(registry.snapshot(B).status,'INDETERMINATE',
+  'renewing one script cannot revive another script');
+ assert.equal(newObservation.businessVerified,false);
+ assert.equal(newObservation.automaticPatchAllowed,false);
+ assert.equal(newObservation.automaticRollbackAllowed,false);
+});
