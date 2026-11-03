@@ -1230,6 +1230,67 @@ test('TEST-006/007/008/009: signed Chrome from an independent application path',
 // A failing Windows runner must identify the transport class without leaking
 // OS errors, profile locations, URLs, ports, or private Chrome output.
 import * as ownedChromeDiagnostics from '../../src/browser/owned-chrome';
+test('TASK-005/TEST-006/008/009/026: timed-out Chrome diagnostics cannot wait forever for a native listener probe',async t=>{
+  // A timed-out owned Chrome must be retired promptly even if the read-only
+  // Windows netstat/PID diagnostic never settles. Only synthetic processes
+  // and transports are used; never touch a real Chrome or user profile.
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\fresh-profile',12064);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41264,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const prevActions=process.env.GITHUB_ACTIONS;
+  let elapsed=0,probeCalled=0;
+  const stages:string[]=[];
+  try{
+    process.env.GITHUB_ACTIONS='true';
+    t.mock.method(performance,'now',()=>elapsed);
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async()=>{
+      elapsed=20001;
+      throw Object.assign(new Error('PRIVATE_CDP_ENDPOINT'),{code:'ECONNREFUSED'});
+    });
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>{
+      probeCalled++;
+      return await new Promise<Awaited<ReturnType<typeof cdp.verifyWindowsLoopbackListenerPid>>>(()=>{});
+    });
+    const outcome=await Promise.race([
+      launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,testHeadless:true,
+        onStartupStage:(stage)=>stages.push(stage)
+      }),
+      delay(1500).then(()=> 'UNBOUNDED_TIMEOUT_DIAGNOSTIC' as const)
+    ]);
+    assert.notEqual(outcome,'UNBOUNDED_TIMEOUT_DIAGNOSTIC',
+      'read-only diagnostic cannot hold a timed-out owned Chrome alive');
+    assert.deepEqual(outcome,{ok:false,code:'CDP_TIMEOUT'});
+    assert.equal(probeCalled,1,'timeout diagnostic should be attempted once');
+    assert.equal(child.killed,true,'owned child must be retired on timeout');
+    assert.ok(stages.includes('CHILD_RUNNING_NO_CDP'));
+    assert.ok(stages.includes('CDP_TIMEOUT_PROBE_INCONCLUSIVE'));
+    assert.ok(!stages.join(',').includes('PRIVATE_CDP_ENDPOINT'));
+  }finally{
+    if(prevActions===undefined)delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS=prevActions;
+    t.mock.reset();
+  }
+});
+
 test('TASK-005/TEST-006/008/009: timeout listener status is bounded and has no PID leakage',()=>{
   const classify=(ownedChromeDiagnostics as unknown as {
     classifyCdpTimeoutListener?: (v:unknown)=>string
