@@ -64,6 +64,13 @@
       <button id="restore-inspect-inventory" type="button">批量只读核对恢复目录（不改动文件）</button>
       <p id="restore-inventory-result" role="status" aria-live="polite">尚未扫描恢复目录。</p>
     </section>
+    <section aria-labelledby="ai-heading">
+      <h2 id="ai-heading">可选 AI 模型发现（单次本机授权）</h2>
+      <p>默认完全关闭。仅在点击按钮后通过 Windows 系统选择器选取自己准备的 JSON 配置（不从网页获取文件路径），再由系统对话框确认具体服务来源，才会发送一次带 Bearer Key 的模型列表查询。配置和密钥不保存、不传给页面或任意脚本；拒绝或取消时不会联网。</p>
+      <p>配置文件应包含 baseUrl（受限的 HTTPS 服务或 127.0.0.1 本机 HTTP）、apiKey、manualModel（名称或 null）、maxRequests（1–8）、timeoutMs（500–10000）与 maxOutputTokens（32–256）。例如：<code>{"baseUrl":"https://models.example.com/v1","apiKey":"YOUR_KEY","manualModel":"example-model","maxRequests":2,"timeoutMs":1200,"maxOutputTokens":64}</code>。请自行妥善保管这个含密钥的本地文件。</p>
+      <button id="ai-model-discover" type="button">从本机配置授权查询一次模型列表</button>
+      <p id="ai-model-discovery-result" role="status" aria-live="polite">未授权，也没有执行 AI 网络请求。查询结果仅是未经验证的模型元数据，绝不表示脚本已经修复、安装或通过业务验收。</p>
+    </section>
     <section aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
       <p>先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
