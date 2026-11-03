@@ -1740,8 +1740,8 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit',()=>{
-  nativeAiDiscoveryController?.abort();
   nativeRestoreController?.abort();
+  nativeAiDiscoveryController?.abort();
   nativeImportController?.abort();
   droppedImportController?.abort();
   stopOnlyOwnedBrowser();
