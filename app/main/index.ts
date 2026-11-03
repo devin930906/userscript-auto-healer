@@ -32,8 +32,12 @@ import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restor
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {readNativeSelectedAiConfig,discoverModelsFromNativeConfig} from '../../src/ai/native-model-discovery';
 
 let mainWindow: BrowserWindow | null = null;
+// No AI credential, endpoint or provider session is stored between requests.
+let nativeAiDiscoveryBusy=false;
+let nativeAiDiscoveryController:AbortController|null=null;
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
 // No disk persistence, no manager or business authority, fresh per window.
@@ -170,6 +174,47 @@ function registerSafeIpc(): void {
   ipcMain.handle('config:validate', (event, input: unknown) => {
     authorizeSender(event);
     return validateBrowserConfig(input);
+  });
+  // TASK-014 / TEST-015/016: no renderer-supplied URL, key, path or consent.
+  // Native OS file selection is followed by a separate origin-specific OS
+  // confirmation. Both dialogs belong to the current trusted main window.
+  ipcMain.handle('ai:discover-native',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',automaticPatchAllowed:false};
+    if(nativeAiDiscoveryBusy)return {ok:false,code:'AI_BUSY',automaticPatchAllowed:false};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',automaticPatchAllowed:false};
+    nativeAiDiscoveryBusy=true;
+    const controller=new AbortController();
+    nativeAiDiscoveryController=controller;
+    const revoked=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed();
+    try{
+      const choice=await dialog.showOpenDialog(win,{
+        title:'选择本机 AI 服务 JSON 配置（含 API Key，不发送此文件）',
+        properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
+      });
+      if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
+      if(choice.canceled||choice.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
+      const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
+      if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
+      if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
+      return await discoverModelsFromNativeConfig(config,async origin=>{
+        if(revoked())return false;
+        const decision=await dialog.showMessageBox(win,{
+          type:'question',title:'确认一次性 AI 模型发现',
+          message:'是否允许向指定 AI 服务查询一次模型列表？',
+          detail:'服务来源：'+origin+'\n仅本次 GET /models；会发送此文件的 Bearer API Key。'+
+            '\n不会发送脚本、网页内容或文件路径，不保存配置，也不会安装或修复脚本。',
+          buttons:['同意查询一次','取消'],defaultId:1,cancelId:1,noLink:true
+        });
+        return decision.response===0&&!revoked();
+      },controller.signal);
+    }catch{return {ok:false,code:'DISCOVERY_FAILED',automaticPatchAllowed:false};
+    }finally{
+      if(nativeAiDiscoveryController===controller)nativeAiDiscoveryController=null;
+      nativeAiDiscoveryBusy=false;
+    }
   });
   // Chromium selection and lifecycle remain native-only. The renderer can
   // request an action, but cannot pass paths, PIDs, Chromium switches or CDP.
@@ -1184,6 +1229,7 @@ async function createMainWindow(): Promise<void> {
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
   win.on('closed', () => {
     if (mainWindow === win) {
+      nativeAiDiscoveryController?.abort();
       nativeImportController?.abort();
       droppedImportController?.abort();
       stopOnlyOwnedBrowser();
@@ -1694,6 +1740,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit',()=>{
+  nativeAiDiscoveryController?.abort();
   nativeRestoreController?.abort();
   nativeImportController?.abort();
   droppedImportController?.abort();
