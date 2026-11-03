@@ -527,3 +527,26 @@ test('TASK-007/TEST-017/026: current isolated three-GM roundtrip fixture passes 
   }
  }
 });
+
+
+test('TASK-007/TEST-017/026: raw target URL normalization cannot change a consented preflight origin or path',()=>{
+ const malformed=[
+  'https://exa\nmple.com/foo',
+  'https://example.com/\tfoo',
+  'https://example.com/foo\r',
+  ' https://example.com/foo',
+  'https://example.com/foo ',
+  'https://example.com\\foo',
+  'https://example.com/foo\u007f'
+ ].map(s=>s.replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\\r/g,'\r')
+          .replace(/\\u007f/g,'\u007f'));
+ for(const target of malformed){
+  // URL() can silently trim or remove characters and interpret backslashes.
+  // Metadata-only eligibility must be bound to the raw submitted address.
+  const result=inspect(report,normal,target);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_INPUT',gmApiVerified:false,businessVerified:false},
+   JSON.stringify(target));
+ }
+ assert.equal(inspect(report,normal,'https://example.com/foo').ok,true);
+});
