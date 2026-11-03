@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readFile,readdir,rename,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join,sep} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
 import {stageReviewedCandidateOnly} from '../../src/version/staged-candidate';
 import {exportReviewedCandidateForManualInstall} from '../../src/export/manual-candidate-export';
@@ -408,4 +408,35 @@ test('TASK-012/TEST-023/026: late cancellation must not claim two-file success o
    }finally{hook.mock.restore();}
   });
  }
+});
+
+test('TASK-012/TEST-023/026: ambiguous or noncanonical native export authorities cannot publish files',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const root=dirname(options.sourcePath);
+  const cases=[
+   {...options,sourcePath:join(root,'alias','..','fixture.user.js')},
+   {...options,backupDirectory:options.backupDirectory+sep+'..'+sep+'backups'},
+   {...options,exportDirectory:options.exportDirectory+sep+'..'+sep+'manual-exports'}
+  ];
+  // On Windows, a path rooted at the current drive (\\dir) is considered
+  // absolute by node:path, but is not a fully-qualified native authority.
+  if(process.platform==='win32'){
+   const driveRelative='\\'+options.exportDirectory.slice(3);
+   cases.push({...options,exportDirectory:driveRelative});
+   cases.push({...options,sourcePath:'\\'+options.sourcePath.slice(3)});
+   cases.push({...options,backupDirectory:'\\'+options.backupDirectory.slice(3)});
+  }
+  for(const [index,input] of cases.entries()){
+   const result=await exportReviewedCandidateForManualInstall(request,staged,input);
+   assert.equal(result.status,'BLOCKED','noncanonical path '+index);
+   if(result.status==='BLOCKED')
+    assert.equal(result.reason,'INVALID_REQUEST','reject before export I/O '+index);
+  }
+  assert.deepEqual(await readdir(options.exportDirectory),[],
+   'no ambiguous path may publish an installable userscript');
+  assert.equal(await readFile(options.sourcePath,'utf8'),source,
+   'original script remains untouched');
+ });
 });
