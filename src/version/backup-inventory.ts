@@ -123,7 +123,7 @@ export async function inspectBackupInventoryReadOnly(
        names.push(entry.name);
        if(names.length>MAX_CANDIDATES)return blocked('TOO_MANY_ENTRIES');
      }else if(entry.name.toLowerCase().startsWith(prefix.toLowerCase())&&
-       (/\.backup(?:\.|$)/i.test(entry.name.slice(prefix.length)))||
+       (/\.backup(?:\.|$)/i.test(entry.name.slice(prefix.length))||
         TRUNCATED_BACKUP_NAME.test(entry.name.slice(prefix.length)))){
        // A malformed, truncated or differently cased backup belonging to
        // THIS source is interrupted recovery evidence, not an empty clean
