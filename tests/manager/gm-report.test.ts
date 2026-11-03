@@ -500,3 +500,48 @@ test('TASK-007/TEST-017/026: two accepted mode receipts always include the faile
    'contradictory manager diagnostic must never be written');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-007/TEST-017/026: pending DOM report must match the actual missing observation at capture and save',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-pending-dom-'));
+ const at=Date.parse('2026-10-19T02:02:00.000Z');
+ try{
+  const pending=(comparedModes:0|1,observations:Partial<Record<'broken'|'fixed',ReturnType<typeof dom>>>)=>({
+   ...session,
+   consistencySnapshot:()=>({...consistency,
+     status:'AWAITING_DOM_OBSERVATIONS' as const,comparedModes}),
+   domSnapshot:()=>observations
+  });
+  // The evaluator checks broken before fixed; a fixed-only observation
+  // is allowed while broken is still absent, regardless of visit order.
+  const awaitingBroken=createLimitedGmReport(
+   pending(0,{fixed:dom('fixed',1)}),at);
+  assert.equal(awaitingBroken.status,'UNVERIFIED_REPORT_READY');
+  const awaitingFixed=createLimitedGmReport(
+   pending(1,{broken:dom('broken',0)}),at);
+  assert.equal(awaitingFixed.status,'UNVERIFIED_REPORT_READY');
+  if(awaitingFixed.status!=='UNVERIFIED_REPORT_READY')return;
+  for(const [index,item] of [
+    {count:0 as const,observations:{broken:dom('broken',0)}},
+    {count:0 as const,observations:{broken:dom('broken',0),fixed:dom('fixed',1)}},
+    {count:1 as const,observations:{broken:dom('broken',0),fixed:dom('fixed',1)}},
+    {count:1 as const,observations:{fixed:dom('fixed',1)}}
+  ].entries()){
+   const invalid=createLimitedGmReport(pending(item.count,item.observations),at);
+   assert.equal(invalid.status,'BLOCKED','contradictory capture '+index);
+  }
+  // Saved JSON is independently untrusted; revalidate even when the
+  // caller supplied a previously legitimate native report.
+  const forged=[
+    {...awaitingFixed.report,consistency:{...awaitingFixed.report.consistency,
+      comparedModes:0 as const}},
+    {...awaitingFixed.report,dom:{...awaitingFixed.report.dom,
+      fixed:{observedAt:'2026-10-19T02:00:01.000Z',
+        actionCount:1 as const,fixtureDomMatchesExpected:true}}}
+  ];
+  for(const [index,item] of forged.entries())
+   assert.equal((await saveLimitedGmReportOnly(
+     item as typeof awaitingFixed.report,join(root,'invalid-'+index+'.json'),true
+   )).status,'BLOCKED','contradictory native save '+index);
+  assert.deepEqual(await readdir(root),[]);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
