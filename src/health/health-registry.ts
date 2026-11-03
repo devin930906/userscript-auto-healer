@@ -105,8 +105,23 @@ export class LimitedHealthRegistry {
     const observation = validObservation(input);
     const timestamp = this.time();
     const prior = this.entries.get(observation.scriptHash);
-    if (!prior && this.entries.size >= MAX_SCRIPTS)
-      throw Error('HEALTH_CAPACITY_EXCEEDED');
+    if (!prior && this.entries.size >= MAX_SCRIPTS) {
+      // A long-lived monitor must not become permanently full of expired
+      // session-only observations. Reclaim stale entries only at capacity:
+      // live records are never evicted to make room for another script.
+      // A future-dated entry during clock rollback is NOT eligible for
+      // eviction; its timing is uncertain and must remain fail-closed.
+      for (const [key, events] of this.entries) {
+        const latest = events[events.length - 1];
+        if (latest && timestamp >= latest.observedAtMs &&
+            timestamp - latest.observedAtMs > FRESHNESS_MS) {
+          this.entries.delete(key);
+          this.staleEvidence.delete(key);
+        }
+      }
+      if (this.entries.size >= MAX_SCRIPTS)
+        throw Error('HEALTH_CAPACITY_EXCEEDED');
+    }
     if (prior && prior.length && timestamp < prior[prior.length - 1].observedAtMs) {
       this.staleEvidence.add(observation.scriptHash);
       throw Error('HEALTH_CLOCK_ROLLBACK');
