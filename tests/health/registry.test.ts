@@ -180,3 +180,43 @@ test('TASK-015/TEST-024/026: throwing health clock never leaks secret error text
   }
   assert.equal(new LimitedHealthRegistry(() => 0).snapshot(A).status, 'UNTESTED');
 });
+
+test('TASK-015/TEST-024: session health capacity reclaims only expired observations',()=>{
+ let clock=1000;
+ const registry=new LimitedHealthRegistry(()=>clock);
+ const key=(n:number)=>n.toString(16).padStart(64,'0');
+ for(let i=1;i<=1000;i++)
+  assert.equal(registry.record(hit(key(i))).status,'ELEMENT_FOUND_ONLY');
+ assert.throws(()=>registry.record(hit(A)),/HEALTH_CAPACITY_EXCEEDED/,
+  'the 1000 live-script limit must remain enforced');
+ clock+=600000;
+ assert.throws(()=>registry.record(hit(A)),/HEALTH_CAPACITY_EXCEEDED/,
+  'a record exactly at the ten-minute boundary is still retained');
+ assert.equal(registry.snapshot(key(1)).status,'ELEMENT_FOUND_ONLY');
+ clock++;
+ const newcomer=registry.record(hit(A));
+ assert.equal(newcomer.status,'ELEMENT_FOUND_ONLY',
+  'expired limited histories must no longer permanently block monitoring');
+ assert.equal(newcomer.businessVerified,false);
+ assert.equal(newcomer.automaticPatchAllowed,false);
+ assert.equal(newcomer.automaticRollbackAllowed,false);
+ assert.equal(registry.snapshot(key(1)).status,'UNTESTED',
+  'reclaimed session-only evidence must never reappear as fresh health');
+ for(let i=1001;i<2000;i++)
+  assert.equal(registry.record(unknown(key(i))).status,'INDETERMINATE');
+ assert.throws(()=>registry.record(hit(B)),/HEALTH_CAPACITY_EXCEEDED/,
+  'once refilled with live entries, the registry remains bounded');
+});
+
+test('TASK-015/TEST-024/026: capacity never evicts fresh or future-dated evidence after clock rollback',()=>{
+ let clock=1000;
+ const registry=new LimitedHealthRegistry(()=>clock);
+ const key=(n:number)=>n.toString(16).padStart(64,'0');
+ for(let i=1;i<=1000;i++)registry.record(hit(key(i)));
+ clock=0;
+ assert.throws(()=>registry.record(hit(A)),/HEALTH_CAPACITY_EXCEEDED/,
+  'a reversed wall clock cannot reclaim observations from the future');
+ assert.equal(registry.snapshot(key(1)).status,'INDETERMINATE',
+  'future-dated evidence is revoked, not reclassified as newly observed');
+ assert.equal(registry.snapshot(key(1)).history.length,1);
+});
