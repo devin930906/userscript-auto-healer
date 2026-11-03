@@ -505,7 +505,7 @@ test('TASK-007/TEST-017/026: pending DOM report must match the actual missing ob
  const root=await mkdtemp(join(tmpdir(),'uah-gm-pending-dom-'));
  const at=Date.parse('2026-10-19T02:02:00.000Z');
  try{
-  const pending=(comparedModes:0|1,observations:object)=>({
+  const pending=(comparedModes:0|1,observations:Partial<Record<'broken'|'fixed',ReturnType<typeof dom>>>)=>({
    ...session,
    consistencySnapshot:()=>({...consistency,
      status:'AWAITING_DOM_OBSERVATIONS' as const,comparedModes}),
