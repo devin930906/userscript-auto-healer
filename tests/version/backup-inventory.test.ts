@@ -385,3 +385,25 @@ test('TASK-011/TEST-020: unrelated and other-feature source artifacts remain out
    assert.deepEqual(result.candidates,[]);
  });
 });
+
+
+test('TASK-011/TEST-020/026: truncated native backup suffix cannot appear as a clean empty inventory',async()=>{
+ const uuid='00000000-0000-4000-8000-000000000001';
+ for(const ending of ['.backu','.back','.bac']){
+  await withFixture(async(source,backupDirectory)=>{
+   const damaged=join(backupDirectory,backupPrefix(source)+'.'+uuid+ending);
+   await writeFile(damaged,fixtureBytes);
+   const result=await inspectBackupInventoryReadOnly({
+    sourcePath:source,backupDirectory,userApproved:true
+   });
+   assert.deepEqual(result,{
+    status:'BLOCKED',reason:'UNSAFE_BACKUP',
+    automaticPatchAllowed:false,automaticRollbackAllowed:false,
+    tampermonkeyVerified:false,businessVerified:false
+   },'truncated backup evidence must not be ignored: '+ending);
+   assert.deepEqual(await readFile(damaged),fixtureBytes,
+     'read-only inventory never deletes stranded recovery evidence');
+   assert.deepEqual(await readFile(source),fixtureBytes);
+  });
+ }
+});
