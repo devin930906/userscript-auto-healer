@@ -203,6 +203,19 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
          entry.file.nlink!==last.nlink)
         return deny('UNSAFE_CHECKPOINT');
     }
+    // The final source digest and per-checkpoint inode checks above yield
+    // filesystem control after dirAfter was captured. Another process can
+    // insert/remove a checkpoint in that interval, including for an empty
+    // inventory. Refuse a stale snapshot instead of returning an incomplete
+    // list of recovery evidence. This is not a cross-process filesystem lock.
+    if(await hasUnsafePathLink(options.backupDirectory))
+      return deny('UNSAFE_PATH');
+    const dirAtReceipt=await lstat(options.backupDirectory,{bigint:true});
+    if(!dirAtReceipt.isDirectory()||dirAtReceipt.isSymbolicLink()||
+       !sameDir(dirBefore,dirAtReceipt)||
+       dirBefore.mtimeNs!==dirAtReceipt.mtimeNs||
+       dirBefore.ctimeNs!==dirAtReceipt.ctimeNs)
+      return deny('UNSAFE_PATH');
     return Object.freeze({
       status:'OBSERVED_CHECKPOINTS_READ_ONLY' as const,
       checkpoints:Object.freeze(observed),...noAuthority
