@@ -70,6 +70,9 @@
       <p>配置文件应包含 baseUrl（受限的 HTTPS 服务或 127.0.0.1 本机 HTTP）、apiKey、manualModel（名称或 null）、maxRequests（1–8）、timeoutMs（500–10000）与 maxOutputTokens（32–256）。例如：<code>{"baseUrl":"https://models.example.com/v1","apiKey":"YOUR_KEY","manualModel":"example-model","maxRequests":2,"timeoutMs":1200,"maxOutputTokens":64}</code>。请自行妥善保管这个含密钥的本地文件。</p>
       <button id="ai-model-discover" type="button">从本机配置授权查询一次模型列表</button>
       <p id="ai-model-discovery-result" role="status" aria-live="polite">未授权，也没有执行 AI 网络请求。查询结果仅是未经验证的模型元数据，绝不表示脚本已经修复、安装或通过业务验收。</p>
+      <p>仅对已经在独立 Chrome 完成原生授权和真实只读检查的已登记场景，允许查询一次 AI 文字建议。先在场景检查区选定场景；会再次选择本地 JSON 配置，并在系统对话框看到将外发的三项随机密钥加盐摘要及服务来源。必须在配置中填写 manualModel；不发送脚本、DOM、URL、文件路径、原始选择器，也不自动应用 AI 建议。</p>
+      <button id="ai-reviewed-suggest" type="button">人工授权：对已检查场景请求一次 AI 文字建议</button>
+      <p id="ai-reviewed-result" role="status" aria-live="polite">尚未请求任何 AI 建议；所有输出均未经实际脚本验证。</p>
     </section>
     <section aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
