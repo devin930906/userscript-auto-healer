@@ -416,7 +416,7 @@ test('TASK-012/TEST-023/026: ambiguous or noncanonical native export authorities
   if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
   const root=dirname(options.sourcePath);
   const cases=[
-   {...options,sourcePath:join(root,'alias','..','fixture.user.js')},
+   {...options,sourcePath:root+sep+'alias'+sep+'..'+sep+'fixture.user.js'},
    {...options,backupDirectory:options.backupDirectory+sep+'..'+sep+'backups'},
    {...options,exportDirectory:options.exportDirectory+sep+'..'+sep+'manual-exports'}
   ];
