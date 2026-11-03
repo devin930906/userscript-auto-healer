@@ -32,6 +32,10 @@ interface NativeImportProgress {
 interface Window {
   healer: {
     getStatus(): Promise<{ shell: string; automaticRepairAvailable: boolean; aiEnabled: boolean; automaticApplyEnabled: boolean }>;
+    discoverNativeAiModels():Promise<{ok:boolean;code?:string;
+      status?:'MODELS_DISCOVERED'|'MANUAL_MODEL_FALLBACK';
+      models?:readonly string[];manualModelAvailable?:boolean;
+      automaticPatchAllowed:false}>;
     chooseFiles(): Promise<ImportResponse>;
     chooseFolder(): Promise<ImportResponse>;
     cancelNativeImport(): Promise<{ok:boolean;code?:string;status?:string}>;
@@ -1000,3 +1004,32 @@ gmStopButton?.addEventListener('click',()=>{
  }).finally(()=>{gmStopInProgress=false;browserControls();});
 });
 browserControls();
+
+const aiDiscoveryButton=document.getElementById('ai-model-discover') as HTMLButtonElement|null;
+const aiDiscoveryResult=document.getElementById('ai-model-discovery-result');
+let aiDiscoveryPending=false;
+aiDiscoveryButton?.addEventListener('click',()=>{
+  if(aiDiscoveryPending)return;
+  aiDiscoveryPending=true;
+  aiDiscoveryButton.disabled=true;
+  if(aiDiscoveryResult)aiDiscoveryResult.textContent='正在等待本机文件选择与系统权限确认；未授权不会发起请求。';
+  void window.healer.discoverNativeAiModels().then(result=>{
+    if(!aiDiscoveryResult)return;
+    if(!result.ok){
+      aiDiscoveryResult.textContent='未完成模型列表查询：'+(result.code??'UNKNOWN')+
+        '。未授权时不联网；不会安装或修改任何用户脚本。';
+      return;
+    }
+    const models=(result.models??[]).slice(0,15).join('、');
+    aiDiscoveryResult.textContent=result.status==='MANUAL_MODEL_FALLBACK'
+      ?'该服务不提供 /models 列表，允许已配置模型名称作人工后续选择；尚未请求建议或安装脚本。'
+      :'已获取模型标识 '+(result.models?.length??0)+' 项：'+(models||'（空列表）')+
+        ((result.models?.length??0)>15?'……':'')+
+        '。这只是未经验证的服务模型列表，不代表脚本修复或安全授权。';
+  }).catch(()=>{
+    if(aiDiscoveryResult)aiDiscoveryResult.textContent='模型发现受阻：DISCOVERY_FAILED。无脚本修改。';
+  }).finally(()=>{
+    aiDiscoveryPending=false;
+    aiDiscoveryButton.disabled=false;
+  });
+});
