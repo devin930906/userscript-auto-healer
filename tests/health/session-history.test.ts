@@ -661,3 +661,38 @@ test('TASK-015/TEST-024/026: overlapping history refuses a previously unsaved in
    assert.equal(appended.events.length,3);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: unavailable or overflowing native clock blocks archive reads and writes',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-clock-invalid-'));
+ const originalNow=Date.now;
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const existingKey=limitedScenarioHistoryKey(A,'existing-clock');
+  const newKey=limitedScenarioHistoryKey(A,'new-clock');
+  const original=new LimitedHealthRegistry(()=>originalNow()-1000);
+  original.record({scriptHash:existingKey,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,original.snapshot(existingKey))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const toSave=new LimitedHealthRegistry(()=>originalNow()-1000);
+  toSave.record({scriptHash:newKey,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const candidate=toSave.snapshot(newKey);
+  for(const invalid of [NaN,Infinity,-1,Number.MAX_SAFE_INTEGER]){
+   Date.now=()=>invalid;
+   assert.equal((await readLimitedHealthArchive(userData,existingKey)).status,'BLOCKED',
+    'invalid clock cannot certify a stored timeline: '+String(invalid));
+   assert.equal((await saveLimitedHealthArchive(userData,candidate)).status,'BLOCKED',
+    'invalid clock cannot authorize publication: '+String(invalid));
+   Date.now=originalNow;
+   assert.equal((await readLimitedHealthArchive(userData,newKey)).status,'NOT_FOUND',
+    'clock rejection must not publish candidate history');
+  }
+  assert.equal((await readLimitedHealthArchive(userData,existingKey)).status,
+   'ARCHIVE_READ_UNVERIFIED','valid clock still permits existing unverified archive');
+ }finally{
+  Date.now=originalNow;
+  await rm(home,{recursive:true,force:true});
+ }
+});
