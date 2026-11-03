@@ -185,6 +185,10 @@ test('TEST-015: reject forbidden raw payload, malformed IDs and accessors withou
 test('TEST-016: invalid endpoints and unsafe configuration are rejected before network',()=>{
   const invalid=[
     'http://api.example.test/v1',
+    // Invalid DNS label boundaries must never become approved outbound origins.
+    'https://-api.example.com/v1',
+    'https://api-.example.com/v1',
+    'https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.com/v1',
     'http://192.168.1.40/v1',
     'http://localhost:4444/v1',
     'https://user:password@api.example.com/v1',
