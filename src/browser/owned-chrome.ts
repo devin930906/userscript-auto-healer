@@ -489,8 +489,16 @@ export async function launchApprovedIsolatedChrome(
       if(checked.testHeadless===true&&process.env.GITHUB_ACTIONS==='true'){
         let stage:ChromeStartupStage='CDP_TIMEOUT_PROBE_INCONCLUSIVE';
         try{
-          stage=classifyCdpTimeoutListener(
-            await verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid));
+          // This diagnostic starts AFTER the 20-second launch deadline.
+          // A blocked native netstat/PID probe is not permission to keep
+          // the owned child alive indefinitely or extend CDP verification.
+          // A revoked consent or owned child exit also ends this read-only
+          // wait; absence of a completed probe remains inconclusive.
+          const diagnostic=await awaitPrelaunchCheckOrRevocation(
+            verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid),
+            AbortSignal.any([activeSignal,AbortSignal.timeout(1000)]));
+          if(!diagnostic.aborted)
+            stage=classifyCdpTimeoutListener(diagnostic.value);
         }catch{/* Never publish OS error text or change the failure result. */}
         emitStage(stage);
       }
