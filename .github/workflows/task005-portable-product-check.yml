@@ -19,6 +19,11 @@ on:
         type: boolean
         required: false
         default: false
+      chrome_full_suite_compare:
+        description: 'Manual diagnostic only: isolated owned Chrome, full registered suite, then isolated Chrome again on one Windows runner'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -47,6 +52,7 @@ jobs:
         env:
           UAH_TEST_CHROME_CPU_PRESSURE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_cpu_pressure && 'true' || 'false' }}
           UAH_TEST_CHROME_BOOT_LOG: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_boot_log && 'true' || 'false' }}
+          UAH_TEST_CHROME_FULL_SUITE_COMPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_full_suite_compare && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -85,7 +91,31 @@ jobs:
           # Explicit manual CPU diagnostics compare baseline and controlled load
           # on the SAME ephemeral Windows runner and source SHA; no global CI
           # concurrency change, timeout increase or raw Chrome log publication.
-          if ($env:UAH_TEST_CHROME_CPU_PRESSURE -eq 'true' -and
+          if ($env:UAH_TEST_CHROME_FULL_SUITE_COMPARE -eq 'true' -and
+              $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            # This diagnostic answers a different question from the existing
+            # two-worker stress experiment. Disable synthetic CPU pressure so
+            # the only deliberate change is full registered suite workload.
+            # Always record all THREE exits before failing the workflow. Raw
+            # Chrome logs remain confined to the disposable native Profile.
+            $env:UAH_TEST_CHROME_CPU_PRESSURE = 'false'
+            $PSNativeCommandUseErrorActionPreference = $false
+            Write-Output 'TASK005_FULLSUITE_ISOLATED_BEFORE_BEGIN'
+            node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+            $beforeExit = $LASTEXITCODE
+            Write-Output "TASK005_FULLSUITE_ISOLATED_BEFORE_EXIT=$beforeExit"
+            Write-Output 'TASK005_FULLSUITE_REGISTERED_BEGIN'
+            npm test
+            $suiteExit = $LASTEXITCODE
+            Write-Output "TASK005_FULLSUITE_REGISTERED_EXIT=$suiteExit"
+            Write-Output 'TASK005_FULLSUITE_ISOLATED_AFTER_BEGIN'
+            node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+            $afterExit = $LASTEXITCODE
+            Write-Output "TASK005_FULLSUITE_ISOLATED_AFTER_EXIT=$afterExit"
+            if ($beforeExit -ne 0 -or $suiteExit -ne 0 -or $afterExit -ne 0) {
+              throw 'TASK-005 full-suite differential failed; preserve all phase outcomes'
+            }
+          } elseif ($env:UAH_TEST_CHROME_CPU_PRESSURE -eq 'true' -and
               $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $env:UAH_TEST_CHROME_CPU_PRESSURE = 'false'
             Write-Output 'TASK005_PAIRED_BASELINE_BEGIN'
