@@ -526,6 +526,53 @@ try {
   if($failedOwnerSnapshot -cne 'live=unknown unknownPath=unknown query=failed') {
     throw 'Failed process query incorrectly reported no candidate owners'
   }
+  # ISSUE-215 / TEST-028: the failure-time owner count must use the
+  # identical corroboration as the pre-move gate. An unrelated namesake
+  # with a hidden CIM path is NOT an unknown owner once PID/start/image
+  # independently agree. Unknown observations still stay unknown.
+  $snapshotStarted=[datetime]::UtcNow.AddMinutes(-3)
+  $snapshotForeign=(Join-Path $env:SystemRoot 'System32\notepad.exe')
+  $snapshotOwned=$ownedExe
+  $snapshotCases=@(
+    @{ label='foreign'; candidate=$snapshotForeign; start=$snapshotStarted; unavailable=$false; expected='live=0 unknownPath=0 query=ok' },
+    @{ label='owned'; candidate=$snapshotOwned; start=$snapshotStarted; unavailable=$false; expected='live=1 unknownPath=0 query=ok' },
+    @{ label='start-mismatch'; candidate=$snapshotForeign; start=$snapshotStarted.AddMinutes(2); unavailable=$false; expected='live=0 unknownPath=1 query=ok' },
+    @{ label='unavailable'; candidate=$snapshotForeign; start=$snapshotStarted; unavailable=$true; expected='live=0 unknownPath=1 query=ok' }
+  )
+  foreach($snapshotCase in $snapshotCases) {
+    $script:snapshotFixture=$snapshotCase
+    $script:snapshotCimStart=$snapshotStarted
+    $actual=& {
+      function Get-CimInstance {
+        param([string]$ClassName,[string]$Filter,[object]$ErrorAction)
+        [pscustomobject]@{
+          Name='UserscriptAutoHealer.exe'
+          ExecutablePath=$null
+          ProcessId=424243
+          CreationDate=$script:snapshotCimStart
+        }
+      }
+      function Get-Process {
+        param([int]$Id,[object]$ErrorAction)
+        if($Id -ne 424243 -or $script:snapshotFixture.unavailable) {
+          throw 'SIMULATED_PROCESS_UNREADABLE'
+        }
+        [pscustomobject]@{
+          Id=$Id
+          StartTime=$script:snapshotFixture.start
+          Path=$script:snapshotFixture.candidate
+        }
+      }
+      Get-CandidatePortableRelocationOwnerSummary $snapshotOwned
+    }
+    if($actual -cne $snapshotCase.expected) {
+      throw ("TEST-028: owner snapshot failed {0}: expected={1} got={2}" -f
+        $snapshotCase.label,$snapshotCase.expected,$actual)
+    }
+  }
+  Remove-Variable snapshotFixture,snapshotCimStart -Scope Script -ErrorAction SilentlyContinue
+  Write-Output 'PASS: final-denial owner summary corroborates foreign, owned and unknown CIM identities'
+
   Write-Output 'PASS: final-denial owner snapshot handles exact, opaque and failed CIM identity'
 
   # ISSUE-215 / TEST-028: a same-parent rename of a fresh EMPTY disposable
