@@ -100,3 +100,24 @@ test('TASK-014/TEST-015/016: malformed, missing, or no-manual-model scope never 
   assert.equal(calls,0);
   assert.equal(approvals,0);
 });
+
+test('TASK-014/TEST-015/026: expired evidence frees bounded session capacity without evicting live receipts',()=>{
+  let now=10000;
+  const store=new NativeAiEvidenceStore(()=>now);
+  for(let index=0;index<100;index++)
+    assert.equal(store.record('slot_'+index,A,'p','UNKNOWN'),true);
+  assert.equal(store.record('overflow',A,'p','UNKNOWN'),false,
+    'valid receipts must not be evicted when the store is full');
+  now+=300000;
+  assert.equal(store.record('still_full',A,'p','UNKNOWN'),false,
+    'receipts at the exact maximum age remain valid');
+  now+=1;
+  assert.equal(store.record('fresh',A,'p','UNKNOWN'),true,
+    'expired receipts are reclaimed even if their IDs were never resolved');
+  assert.equal(store.resolve('slot_0'),null);
+  assert.equal(store.resolve('fresh')?.diagnosticCode,'UNKNOWN');
+  for(let index=0;index<99;index++)
+    assert.equal(store.record('new_'+index,A,'p','UNKNOWN'),true);
+  assert.equal(store.record('new_overflow',A,'p','UNKNOWN'),false,
+    'reclamation must preserve the original maximum live receipt limit');
+});

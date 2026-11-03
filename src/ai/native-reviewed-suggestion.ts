@@ -31,10 +31,18 @@ export class NativeAiEvidenceStore{
        typeof scriptSha256!=='string'||!HASH.test(scriptSha256)||
        typeof selector!=='string'||!selector||selector.length>256||
        selector.trim()!==selector||/[\x00-\x1f\x7f]/.test(selector)||
-       (code!=='SELECTOR_ASSERTION'&&code!=='UNKNOWN')||
-       (!this.receipts.has(id)&&this.receipts.size>=MAX_SESSION_RECORDS))return false;
+       (code!=='SELECTOR_ASSERTION'&&code!=='UNKNOWN'))return false;
     const created=this.now();
     if(!Number.isSafeInteger(created)||created<0)return false;
+    if(!this.receipts.has(id)&&this.receipts.size>=MAX_SESSION_RECORDS){
+      // An expired receipt must not permanently consume a session slot.
+      // Never evict a still-valid receipt just to admit a new one.
+      for(const [key,receipt] of this.receipts){
+        if(created<receipt.created||created-receipt.created>MAX_AGE_MS)
+          this.receipts.delete(key);
+      }
+      if(this.receipts.size>=MAX_SESSION_RECORDS)return false;
+    }
     const digest=(label:string,value:string)=>createHmac('sha256',this.salt)
       .update(label+'\n'+value).digest('hex');
     const evidence=Object.freeze({
