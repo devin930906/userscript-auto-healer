@@ -20,6 +20,9 @@ import {verifyBackupRecoverySource} from './recovery-source';
 const MAX_DIRECTORY_ENTRIES=512;
 const MAX_CANDIDATES=64;
 const UUID_V4=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.backup\.user\.js$/;
+// A crash-truncated source-bound ".backup" publication is recovery evidence,
+// not an unrelated file to omit from a clean inventory.
+const TRUNCATED_BACKUP_NAME=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.b(?:a(?:c(?:k(?:u(?:p)?)?)?)?)?$/i;
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'INVALID_PATH'|
   'SOURCE_CHANGED'|'SOURCE_SIZE_LIMIT'|'BACKUP_DIRECTORY_INVALID'|'TOO_MANY_ENTRIES'|
   'UNSAFE_BACKUP'|'IO_FAILURE';
@@ -120,7 +123,8 @@ export async function inspectBackupInventoryReadOnly(
        names.push(entry.name);
        if(names.length>MAX_CANDIDATES)return blocked('TOO_MANY_ENTRIES');
      }else if(entry.name.toLowerCase().startsWith(prefix.toLowerCase())&&
-       /\.backup(?:\.|$)/i.test(entry.name.slice(prefix.length))){
+       (/\.backup(?:\.|$)/i.test(entry.name.slice(prefix.length)))||
+        TRUNCATED_BACKUP_NAME.test(entry.name.slice(prefix.length)))){
        // A malformed, truncated or differently cased backup belonging to
        // THIS source is interrupted recovery evidence, not an empty clean
        // inventory. Do not touch the file; require native manual review.
