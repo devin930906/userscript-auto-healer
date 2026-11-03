@@ -266,14 +266,17 @@ export async function startIsolatedTampermonkeyGmProbe(
    if(req.headers['content-type']!=='application/json'){
      res.writeHead(415).end();return;
    }
-   let body='';
+   // Preserve exact HTTP bytes across chunks; a chunk may split UTF-8.
+   // Validate both the raw byte budget and strict UTF-8 before JSON parsing.
+   const chunks:Buffer[]=[];
+   let bodyBytes=0;
    let oversized=false;
    let disconnected=false;
    // A peer may disconnect after headers but before Content-Length bytes.
    // IncomingMessage then emits 'aborted' and may emit 'error' (ECONNRESET).
    // Without an error listener, an incomplete loopback POST can terminate the
    // privileged Electron main process. Never accept a partially read receipt.
-   const abandon=()=>{disconnected=true;body='';};
+   const abandon=()=>{disconnected=true;chunks.length=0;bodyBytes=0;};
    req.on('aborted',abandon);
    req.on('error',abandon);
    res.on('close',()=>{
@@ -281,10 +284,12 @@ export async function startIsolatedTampermonkeyGmProbe(
    });
    req.on('data',(chunk:Buffer)=>{
      if(oversized||disconnected)return;
-     if(Buffer.byteLength(body)+chunk.length>MAX_BODY_BYTES){
-       oversized=true;res.writeHead(413).end();return;
+     if(bodyBytes+chunk.length>MAX_BODY_BYTES){
+       oversized=true;chunks.length=0;bodyBytes=0;
+       res.writeHead(413).end();return;
      }
-     body+=chunk.toString('utf8');
+     chunks.push(Buffer.from(chunk));
+     bodyBytes+=chunk.length;
    });
    req.on('end',()=>{
      if(disconnected||oversized||res.destroyed||res.writableEnded)return;
@@ -292,7 +297,11 @@ export async function startIsolatedTampermonkeyGmProbe(
      // the consented probe interval merely because headers arrived in time.
      if(expired()){res.writeHead(403).end();return;}
      let input:unknown;
-     try{input=JSON.parse(body);}catch{res.writeHead(400).end();return;}
+     try{
+       const text=new TextDecoder('utf-8',{fatal:true}).decode(
+         Buffer.concat(chunks,bodyBytes));
+       input=JSON.parse(text);
+     }catch{res.writeHead(400).end();return;}
      if(!isObject(input)||input.token!==token||
        (input.mode!=='broken'&&input.mode!=='fixed')||
        typeof input.gmDefaultMatched!=='boolean'||
