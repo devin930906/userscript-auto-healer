@@ -318,8 +318,13 @@ export class OptionalAiGateway {
       return failure('INVALID_RESPONSE');
     const message=item.message as Record<string,unknown>;
     const content=message.content;
+    // Model text is untrusted display data. Disallow terminal controls and
+    // Unicode direction overrides/isolates that can spoof a reviewed label;
+    // ordinary line breaks and tabs remain available for readable guidance.
+    const unsafeDisplay=typeof content==='string'&&
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(content);
     if(message.role!=='assistant'||typeof content!=='string'||!content.trim()||
-       content.length>4096||message.tool_calls!==undefined||
+       content.length>4096||unsafeDisplay||message.tool_calls!==undefined||
        message.function_call!==undefined)return failure('INVALID_RESPONSE');
     return Object.freeze({ok:true,status:'UNTRUSTED_AI_TEXT_ONLY' as const,
       candidateText:content,model:this.options.manualModel,tampermonkeyVerified:false as const,
