@@ -270,7 +270,15 @@ export async function verifyCdpBrowserWebSocket(
         // unsolicited server message, never an authenticated roundtrip.
         if(!requestSent){finish(false);return;}
         try{
-          const payload=JSON.parse(String(event.data)) as {
+          // Browser.getVersion uses a tiny JSON text response. Never coerce
+          // arbitrary WebSocket event payload objects or parse an unbounded
+          // loopback peer frame, even after a real client-issued request.
+          const frame:unknown=event.data;
+          if(typeof frame!=='string'||frame.length>16384||
+             Buffer.byteLength(frame,'utf8')>16384){
+            finish(false);return;
+          }
+          const payload=JSON.parse(frame) as {
             id?:unknown;result?:{product?:unknown};error?:unknown
           };
           if(payload.id!==1)return;
