@@ -97,7 +97,11 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  // raw input ambiguities before they can expand a consented scope check.
  if(!report||typeof report!=='object'||Array.isArray(report)||
     typeof targetUrl!=='string'||targetUrl.length>4096||
-    targetUrl.trim()!==targetUrl||/[\x00-\x1f\x7f\\]/.test(targetUrl))
+    targetUrl.trim()!==targetUrl||/[\x00-\x1f\x7f\\]/.test(targetUrl)||
+    // WHATWG URL parsing silently removes literal and percent-encoded dot
+    // segments. An explicitly selected URL must not become a different
+    // @match pathname merely by normalizing its raw spelling.
+    /\/(?:\.|%2e){1,2}(?=\/|[?#]|$)/i.test(targetUrl))
     return blocked('INVALID_INPUT');
  if(report.extensionId!==TAMPERMONKEY_EXTENSION_ID)return blocked('WRONG_MANAGER');
  if(typeof report.version!=='string'||!/^[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}$/.test(report.version))
