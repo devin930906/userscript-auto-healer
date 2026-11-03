@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { access, lstat, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,6 +16,31 @@ import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
 const execFileAsync=promisify(execFile);
+
+/** The dedicated Chrome test has repeatedly passed while the same Chrome
+ * case intermittently fails late in the 800+-case application suite.
+ * Manual CI must measure isolated-before, full-suite and isolated-after
+ * on the SAME Windows runner / SHA, even when one phase fails. Never weaken
+ * the original 20-second native Chrome safety deadline or emit raw logs.
+ */
+test('TASK-005/TEST-006/008/009: manual same-runner full-suite differential retains every exit code',()=>{
+  const workflow=readFileSync(join(process.cwd(),
+    '.github/workflows/task005-portable-product-check.yml'),'utf8');
+  assert.match(workflow,/chrome_full_suite_compare:\s*\n\s*description:/);
+  assert.match(workflow,/UAH_TEST_CHROME_FULL_SUITE_COMPARE:/);
+  assert.match(workflow,/if \(\$env:UAH_TEST_CHROME_FULL_SUITE_COMPARE -eq 'true' -and/);
+  assert.match(workflow,/TASK005_FULLSUITE_ISOLATED_BEFORE_BEGIN/);
+  assert.match(workflow,/TASK005_FULLSUITE_REGISTERED_BEGIN/);
+  assert.match(workflow,/TASK005_FULLSUITE_ISOLATED_AFTER_BEGIN/);
+  assert.match(workflow,/TASK005_FULLSUITE_ISOLATED_BEFORE_EXIT=\$beforeExit/);
+  assert.match(workflow,/TASK005_FULLSUITE_REGISTERED_EXIT=\$suiteExit/);
+  assert.match(workflow,/TASK005_FULLSUITE_ISOLATED_AFTER_EXIT=\$afterExit/);
+  assert.match(workflow,/node --test --test-concurrency=1 dist\/tests\/browser\/owned-chrome\.test\.js/);
+  assert.match(workflow,/npm test/);
+  assert.match(workflow,/if \(\$beforeExit -ne 0 -or \$suiteExit -ne 0 -or \$afterExit -ne 0\)/);
+  // A diagnostic result can never change the native user's launch contract.
+  assert.doesNotMatch(workflow,/UAH_.*TIMEOUT_OVERRIDE|SKIP_CHROME_OWNERSHIP/);
+});
 
 function config(executablePath:string,userDataDir:string,port=9223) {
   return {executablePath,userDataDir,remoteDebuggingPort:port,bindAddress:'127.0.0.1'};
