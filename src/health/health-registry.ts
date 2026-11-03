@@ -89,7 +89,14 @@ export class LimitedHealthRegistry {
     if (typeof now !== 'function') throw Error('INVALID_HEALTH_CLOCK');
   }
   private time(): number {
-    const time = this.now();
+    // A clock provider can throw arbitrary text. Keep errors inside this
+    // boundary instead of exposing potentially sensitive exception messages.
+    let time: number;
+    try {
+      time = this.now();
+    } catch {
+      throw Error('INVALID_HEALTH_CLOCK');
+    }
     if (!Number.isSafeInteger(time) || time < 0) throw Error('INVALID_HEALTH_CLOCK');
     return time;
   }
