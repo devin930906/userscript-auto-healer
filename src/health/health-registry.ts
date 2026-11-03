@@ -89,15 +89,23 @@ export class LimitedHealthRegistry {
     if (typeof now !== 'function') throw Error('INVALID_HEALTH_CLOCK');
   }
   private time(): number {
-    // A clock provider can throw arbitrary text. Keep errors inside this
-    // boundary instead of exposing potentially sensitive exception messages.
+    // A failed clock reading makes the freshness of EVERY previously recorded
+    // session-only observation unknowable. Revoke their limited status now,
+    // not just during the failing call: recovering the system clock must not
+    // silently revive the same old observations. A NEW valid observation may
+    // restore its own scope; no historical bytes or events are rewritten.
+    const invalidateClock = ():never => {
+      for (const hash of this.entries.keys()) this.staleEvidence.add(hash);
+      throw Error('INVALID_HEALTH_CLOCK');
+    };
     let time: number;
     try {
       time = this.now();
     } catch {
-      throw Error('INVALID_HEALTH_CLOCK');
+      // Never expose arbitrary exception text from a caller-supplied clock.
+      return invalidateClock();
     }
-    if (!Number.isSafeInteger(time) || time < 0) throw Error('INVALID_HEALTH_CLOCK');
+    if (!Number.isSafeInteger(time) || time < 0) return invalidateClock();
     return time;
   }
   /** No user-supplied timestamp or claim of verified recovery is accepted. */
