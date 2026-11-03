@@ -43,6 +43,7 @@ export function recordLimitedScenarioInspection(
     const values = Object.create(null) as Record<string,unknown>;
     for (const key of keys) values[key] = descriptors[key].value;
     if (typeof values.scriptHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(values.scriptHash) ||
         !Number.isSafeInteger(values.checkedAssertions) ||
         (values.checkedAssertions as number) < 1 ||
         (values.checkedAssertions as number) > 2 ||
