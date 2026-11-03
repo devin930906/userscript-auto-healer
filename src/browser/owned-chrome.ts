@@ -29,6 +29,10 @@ export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):
   if(length!==null &&
      (!/^[0-9]+$/.test(length) || !Number.isSafeInteger(Number(length)) ||
       Number(length)>limit))return rejectUnread();
+  // The declared Content-Length is a byte-level framing claim, not just a
+  // resource budget. A premature EOF with otherwise valid JSON is truncated
+  // CDP evidence and must never become an accepted browser receipt.
+  const declaredBytes=length===null?null:Number(length);
   if(!response.body)return null;
   const reader=response.body.getReader();
   const decoder=new TextDecoder('utf-8',{fatal:true});
@@ -45,7 +49,7 @@ export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):
         const {done,value}=await reader.read();
         if(done)break;
         bytes+=value.byteLength;
-        if(bytes>limit){
+        if(bytes>limit||(declaredBytes!==null&&bytes>declaredBytes)){
           // Never await an untrusted cancellation implementation.
           try{void reader.cancel().catch(()=>undefined);}catch{}
           return null;
@@ -53,6 +57,7 @@ export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):
         body+=decoder.decode(value,{stream:true});
       }
       body+=decoder.decode();
+      if(declaredBytes!==null&&bytes!==declaredBytes)return null;
       return bytes>0?JSON.parse(body) as unknown:null;
     }catch{return null;}
   };
