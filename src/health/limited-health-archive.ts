@@ -37,6 +37,16 @@ const MAX_BYTES=8192;
 // new consented observations from entering the bounded timeline.
 // This remains clock-sanity checking, NOT authentication of old evidence.
 const MAX_FUTURE_SKEW_MS=5*60*1000;
+/** An unavailable or overflowing wall clock cannot bound future-dated evidence.
+ * Invalid time must refuse persistence/readback, never bypass comparisons with NaN.
+ * This does not make a local clock an authority for business verification.
+ */
+function archiveFutureCutoff():number|null{
+ const now=Date.now();
+ return Number.isSafeInteger(now)&&now>=0&&
+   now<=Number.MAX_SAFE_INTEGER-MAX_FUTURE_SKEW_MS
+   ?now+MAX_FUTURE_SKEW_MS:null;
+}
 const SHA=/^[0-9a-f]{64}$/;
 const dirName='limited-health-history-v1';
 const same=(a:BigIntStats,b:BigIntStats)=>a.dev===b.dev&&a.ino===b.ino&&
@@ -104,7 +114,8 @@ async function inspectFile(path:string,key:string):Promise<Entry|'NOT_FOUND'|nul
       !Array.isArray(data.events)||data.events.length===0||data.events.length>32||
       text!==JSON.stringify(parsed)+'\n')return null;
    const events:ArchiveEvent[]=[];
-   const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
+   const maxObservedAtMs=archiveFutureCutoff();
+   if(maxObservedAtMs===null)return null;
    for(const entry of data.events){
     if(!entry||typeof entry!=='object'||Array.isArray(entry))return null;
     const e=entry as Record<string,unknown>;
@@ -172,7 +183,8 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
      !Array.isArray(snapshot.history)||snapshot.history.length===0||
      snapshot.history.length>32)return null;
   const result:ArchiveEvent[]=[];
-  const maxObservedAtMs=Date.now()+MAX_FUTURE_SKEW_MS;
+  const maxObservedAtMs=archiveFutureCutoff();
+   if(maxObservedAtMs===null)return null;
   for(let i=0;i<snapshot.history.length;i++){
    const event=snapshot.history[i];
    if((event.kind!=='LIMITED_DOM_OBSERVATION'&&event.kind!=='INSUFFICIENT_EVIDENCE')||
