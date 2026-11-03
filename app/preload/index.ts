@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   getStatus: (): Promise<unknown> => ipcRenderer.invoke('app:status'),
   // Native picker and permission dialog only: no path, URL, key or consent args.
   discoverNativeAiModels: (): Promise<unknown> => ipcRenderer.invoke('ai:discover-native'),
+  // Only the ID of a previously staged/inspected scenario, never evidence or secrets.
+  requestNativeAiReview: (id: string): Promise<unknown> => ipcRenderer.invoke('ai:review-native',id),
   validateConfig: (config: unknown): Promise<unknown> => ipcRenderer.invoke('config:validate', config),
   chooseFiles: (): Promise<unknown> => ipcRenderer.invoke('import:files'),
   chooseFolder: (): Promise<unknown> => ipcRenderer.invoke('import:folder'),
