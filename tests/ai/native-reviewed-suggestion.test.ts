@@ -36,8 +36,8 @@ test('TASK-014/TEST-015/026: only current native DOM receipts become unlinkable,
 
 test('TASK-014/TEST-015/016: no native consent or revoked approval sends zero network traffic',async()=>{
   const store=new NativeAiEvidenceStore();
-  assert.equal(store.record('review',A,'p','SELECTOR_ASSERTION'),true);
-  const evidence=store.resolve('review');
+  assert.equal(store.record('private_scope_934',A,'p','SELECTOR_ASSERTION'),true);
+  const evidence=store.resolve('private_scope_934');
   let sent=0;
   const transport:typeof fetch=async()=>{sent++;return response();};
   assert.deepEqual(await requestNativeReviewedAiSuggestion(config(),evidence,async()=>false,undefined,transport),
@@ -51,8 +51,8 @@ test('TASK-014/TEST-015/016: no native consent or revoked approval sends zero ne
 
 test('TASK-014/TEST-015/016: approved suggestion sends hashes only; response never gains patch authority',async()=>{
   const store=new NativeAiEvidenceStore();
-  assert.equal(store.record('review',A,'#secret-selector','SELECTOR_ASSERTION'),true);
-  const evidence=store.resolve('review');
+  assert.equal(store.record('private_scope_934',A,'#secret-selector','SELECTOR_ASSERTION'),true);
+  const evidence=store.resolve('private_scope_934');
   const approvals:string[]=[];
   const calls:{url:string;authorization:string;body:string}[]=[];
   const transport:typeof fetch=async(input,init)=>{
@@ -75,7 +75,7 @@ test('TASK-014/TEST-015/016: approved suggestion sends hashes only; response nev
   assert.equal(JSON.stringify(result).includes('native-private-review-key'),false);
   assert.equal(calls[0].body.includes('#secret-selector'),false);
   assert.equal(calls[0].body.includes(A),false);
-  assert.equal(calls[0].body.includes('review'),false);
+  assert.equal(calls[0].body.includes('private_scope_934'),false);
 });
 
 test('TASK-014/TEST-015/016: malformed, missing, or no-manual-model scope never reaches provider',async()=>{
