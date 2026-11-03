@@ -272,6 +272,15 @@ export async function saveLimitedHealthArchive(
      !fresh.some(event=>history.some(saved=>
       saved.observedAtMs===event.observedAtMs&&saved.status===event.status)))
     return Object.freeze({status:'BLOCKED',...emptyAuthority});
+  // A snapshot that overlaps the stored tail cannot silently insert an
+  // unsaved observation BETWEEN already published timestamps. Append-only
+  // history has no authority to rewrite a past interval or claim that event
+  // was durably saved; allow earlier-than-retained-window overlap only.
+  if(history.length>0&&fresh.some(event=>
+    event.observedAtMs>=history[0].observedAtMs&&
+    event.observedAtMs<history[history.length-1].observedAtMs&&
+    !history.some(saved=>saved.observedAtMs===event.observedAtMs)))
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const all=[...history];
   for(const event of fresh){
    const latest=all[all.length-1];
