@@ -1,3 +1,36 @@
+# TASK-020 / ISSUE-215 / TEST-028: independently corroborate an opaque CIM
+# process identity without treating an unreadable process as exited. Only a
+# SECOND trusted Windows process observation with the same PID and creation
+# time may supply a missing executable path. Never terminate a process.
+function Resolve-CandidatePortableProcessExecutablePath([object]$process) {
+  try {
+    $primary=[string]$process.ExecutablePath
+    if(-not [string]::IsNullOrWhiteSpace($primary)) {
+      return [IO.Path]::GetFullPath($primary)
+    }
+    # PID alone can be reused. Require a creation-time witness so a different
+    # process acquired after the CIM snapshot cannot authorize relocation.
+    $pidValue=[int]$process.ProcessId
+    if($pidValue -le 0 -or $null -eq $process.CreationDate) { return $null }
+    $created=[datetime]$process.CreationDate
+    if($created -eq [datetime]::MinValue) { return $null }
+    $secondary=Get-Process -Id $pidValue -ErrorAction Stop
+    if($null -eq $secondary -or [int]$secondary.Id -ne $pidValue) { return $null }
+    $started=[datetime]$secondary.StartTime
+    # Both APIs observe the same OS process start time. A mismatched time,
+    # missing path or exception is still UNKNOWN, not a foreign-process proof.
+    if($started -eq [datetime]::MinValue -or
+       [math]::Abs(($started.ToUniversalTime()-
+          $created.ToUniversalTime()).TotalMilliseconds) -gt 1000) {
+      return $null
+    }
+    $image=[string]$secondary.Path
+    if([string]::IsNullOrWhiteSpace($image) -or
+       -not [IO.Path]::IsPathFullyQualified($image)) { return $null }
+    return [IO.Path]::GetFullPath($image)
+  } catch { return $null }
+}
+
 # TASK-020 / ISSUE-215: a successful parent Electron shell smoke receipt
 # does not certify that its utility/renderer subprocesses have released DLLs.
 # Only inspect this run's disposable candidate EXE under RUNNER_TEMP. Never
@@ -36,17 +69,18 @@ function Wait-CandidatePortableProcessExit(
     # the exact candidate has exited. Refuse relocation without a trustworthy
     # disambiguation, even if the opaque process is unrelated.
     $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop)
+    $matches=@()
     foreach($process in $processes) {
-      if([string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) {
+      $image=Resolve-CandidatePortableProcessExecutablePath $process
+      if([string]::IsNullOrWhiteSpace($image)) {
         throw [InvalidOperationException]::new(
           'Candidate process executable path unavailable; relocation refused')
       }
+      if([string]::Equals($image,$exact,
+         [StringComparison]::OrdinalIgnoreCase)) {
+        $matches+=,$process
+      }
     }
-    $matches=@($processes | Where-Object {
-      [string]::Equals(
-        [IO.Path]::GetFullPath([string]$_.ExecutablePath),$exact,
-        [StringComparison]::OrdinalIgnoreCase)
-    })
     if($matches.Count -eq 0) { return $check }
     # A caller's WarningPreference=Stop must not replace our bounded,
     # authoritative live-process refusal with a diagnostic warning exception.
