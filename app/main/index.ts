@@ -117,6 +117,8 @@ const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as c
   businessVerified:false as const,automaticPatchAllowed:false as const};
 
 function stopOnlyOwnedBrowser():void {
+  nativeAiReviewEvidence.clear();
+  nativeAiDiscoveryController?.abort();
   cancelScenarioObservation();
   stopOnlyGmProbe();
   launchAbort?.abort();
