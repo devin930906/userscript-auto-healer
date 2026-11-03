@@ -148,6 +148,16 @@ function coherentLimitedEvidence(
      fixed.actionCount===1&&fixed.fixtureDomMatchesExpected===true&&
      broken.observedAt!==fixed.observedAt;
  }
+ // Missing DOM observations have a precise partial-order meaning: the
+ // evaluator checks broken first. Comparing zero means broken is absent;
+ // comparing one means broken is valid and fixed is absent. Do not export
+ // contradictory "awaiting" receipts with both samples already present.
+ if(consistency.status==='AWAITING_DOM_OBSERVATIONS'){
+   if(consistency.comparedModes===0)return dom.broken===null;
+   return consistency.comparedModes===1&&dom.broken!==null&&
+     dom.broken.actionCount===0&&dom.broken.fixtureDomMatchesExpected===true&&
+     dom.fixed===null;
+ }
  // The consistency evaluator visits 'broken' first, then 'fixed', and
  // exits before incrementing when it encounters a missing/invalid mode.
  if(consistency.comparedModes===2)return false;
