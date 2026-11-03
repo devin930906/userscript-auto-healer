@@ -18,7 +18,7 @@ import {verifyStagedCandidateReadOnly} from '../version/staged-candidate-recheck
 import {verifyExactCandidateBytesReadOnly} from '../version/candidate-bytes';
 import {hasUnsafePathLink} from '../version/path-boundary';
 
-type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'REVIEW_REJECTED'|
+type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'CANCELLED'|'REVIEW_REJECTED'|
  'RECHECK_FAILED'|'UNSAFE_DESTINATION'|'EXPORT_FAILED';
 const noAuthority={
  automaticPatchAllowed:false as const,
@@ -60,6 +60,21 @@ function plain(input:unknown,names:readonly string[]):Record<string,unknown>|nul
  for(const name of names)out[name]=desc[name].value;
  return out;
 }
+/** A native export cancellation is not a renderer-owned consent claim.
+ * Read AbortSignal's built-in slots only, without invoking hostile accessors
+ * or Proxy traps. A forged object must never cancel or authorize any write.
+ */
+function nativeExportAbortSignal(value:unknown):value is AbortSignal{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==AbortSignal.prototype||
+     ['aborted','addEventListener','removeEventListener'].some(key=>
+      Object.prototype.hasOwnProperty.call(value,key)))return false;
+  const getter=Object.getOwnPropertyDescriptor(
+   AbortSignal.prototype,'aborted')?.get;
+  return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+ }catch{return false;}
+}
 function absolute(value:unknown):value is string{
  return typeof value==='string'&&value.length>0&&value.length<=4096&&
    !value.includes('\0')&&isAbsolute(value);
@@ -94,7 +109,8 @@ export function insideProtectedBackup(backup:string,destination:string):boolean{
  * its behavior inside the real Tampermonkey environment.
  */
 export async function exportReviewedCandidateForManualInstall(
- untrustedRequest:unknown,untrustedReceipt:unknown,untrustedOptions:unknown
+ untrustedRequest:unknown,untrustedReceipt:unknown,untrustedOptions:unknown,
+ nativeSignal?:AbortSignal
 ):Promise<ManualCandidateExportResult>{
  try{
   const raw=plain(untrustedOptions,optionNames);
@@ -106,6 +122,9 @@ export async function exportReviewedCandidateForManualInstall(
      !/^[^\\/\u0000-\u001f]+\.user\.js$/i.test(basename(raw.sourcePath))||
      typeof raw.userApproved!=='boolean')return block('INVALID_REQUEST');
   if(!raw.userApproved)return block('NOT_AUTHORIZED');
+  if(nativeSignal!==undefined&&!nativeExportAbortSignal(nativeSignal))
+   return block('INVALID_REQUEST');
+  if(nativeSignal?.aborted)return block('CANCELLED');
   const options:Options={
     sourcePath:raw.sourcePath,backupDirectory:raw.backupDirectory,
     exportDirectory:raw.exportDirectory,userApproved:true
@@ -122,6 +141,7 @@ export async function exportReviewedCandidateForManualInstall(
     backupDirectory:options.backupDirectory,userApproved:true
   };
   const before=await verifyStagedCandidateReadOnly(request,receipt,nativeOptions);
+  if(nativeSignal?.aborted)return block('CANCELLED');
   if(before.status!=='CANDIDATE_RECHECKED_READ_ONLY')
     return block('RECHECK_FAILED');
   if(before.candidateSha256!==proposal.candidateSha256||
@@ -139,6 +159,7 @@ export async function exportReviewedCandidateForManualInstall(
   if(!exportBefore.isDirectory()||exportBefore.isSymbolicLink()||
      sameDir(exportBefore,backupDir)||sameDir(exportBefore,sourceDir))
     return block('UNSAFE_DESTINATION');
+  if(nativeSignal?.aborted)return block('CANCELLED');
   const name='UAH-Reviewed-'+proposal.candidateSha256.slice(0,12)+'-'+
     randomUUID()+'.user.js';
   const pending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
@@ -153,13 +174,15 @@ export async function exportReviewedCandidateForManualInstall(
       pendingIdentity=await handle.stat({bigint:true});
     }
     finally{await handle.close();}
-    if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
-      return block('EXPORT_FAILED');
+    const pendingCheck=await verifyExactCandidateBytesReadOnly(pending,bytes);
+    if(nativeSignal?.aborted)return block('CANCELLED');
+    if(pendingCheck!=='MATCH')return block('EXPORT_FAILED');
     if(await hasUnsafePathLink(options.exportDirectory))
       return block('UNSAFE_DESTINATION');
     const beforePublish=await lstat(options.exportDirectory,{bigint:true});
     if(!sameDir(exportBefore,beforePublish)||beforePublish.isSymbolicLink())
       return block('UNSAFE_DESTINATION');
+    if(nativeSignal?.aborted)return block('CANCELLED');
     // No overwrite, never rename over an unknown file; unsupported hard links
     // cause a conservative failure instead of an unsafe fallback.
     await link(pending,final);
@@ -170,6 +193,9 @@ export async function exportReviewedCandidateForManualInstall(
         pending,pendingIdentity,exportBefore,final))
       return block('EXPORT_FAILED');
     pendingExists=false;
+    // After publication, never delete the already-visible candidate merely
+    // because consent was revoked. It remains unverified for reconciliation.
+    if(nativeSignal?.aborted)return block('CANCELLED');
     if(await verifyExactCandidateBytesReadOnly(final,bytes)!=='MATCH')
       return block('EXPORT_FAILED');
     if(!pendingIdentity)return block('EXPORT_FAILED');
@@ -183,6 +209,7 @@ export async function exportReviewedCandidateForManualInstall(
       return block('UNSAFE_DESTINATION');
     const after=await verifyStagedCandidateReadOnly(
       request,receipt,nativeOptions);
+    if(nativeSignal?.aborted)return block('CANCELLED');
     if(after.status!=='CANDIDATE_RECHECKED_READ_ONLY'||
        after.candidateSha256!==proposal.candidateSha256)
       return block('RECHECK_FAILED');
@@ -202,6 +229,7 @@ export async function exportReviewedCandidateForManualInstall(
       return block('RECHECK_FAILED');
     const recoveryName='UAH-Original-'+proposal.originalSha256.slice(0,12)+'-'+
       randomUUID()+'.user.js';
+    if(nativeSignal?.aborted)return block('CANCELLED');
     const recoveryPending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
     const recoveryFinal=join(options.exportDirectory,recoveryName);
     let recoveryPendingExists=false;
@@ -214,13 +242,16 @@ export async function exportReviewedCandidateForManualInstall(
         recoveryPendingIdentity=await handle.stat({bigint:true});
       }
       finally{await handle.close();}
-      if(await verifyExactCandidateBytesReadOnly(recoveryPending,originalBytes)!=='MATCH')
-        return block('EXPORT_FAILED');
+      const recoveryPendingCheck=await verifyExactCandidateBytesReadOnly(
+        recoveryPending,originalBytes);
+      if(nativeSignal?.aborted)return block('CANCELLED');
+      if(recoveryPendingCheck!=='MATCH')return block('EXPORT_FAILED');
       if(await hasUnsafePathLink(options.exportDirectory))
         return block('UNSAFE_DESTINATION');
       const recoveryDirBefore=await lstat(options.exportDirectory,{bigint:true});
       if(!sameDir(exportBefore,recoveryDirBefore)||
          recoveryDirBefore.isSymbolicLink())return block('UNSAFE_DESTINATION');
+      if(nativeSignal?.aborted)return block('CANCELLED');
       // Hard-link publication is no-clobber and keeps the previously staged
       // candidate intact even if this recovery export fails.
       await link(recoveryPending,recoveryFinal);
@@ -228,6 +259,7 @@ export async function exportReviewedCandidateForManualInstall(
           recoveryPending,recoveryPendingIdentity,exportBefore,recoveryFinal))
         return block('EXPORT_FAILED');
       recoveryPendingExists=false;
+      if(nativeSignal?.aborted)return block('CANCELLED');
       if(await verifyExactCandidateBytesReadOnly(recoveryFinal,originalBytes)!=='MATCH')
         return block('EXPORT_FAILED');
       if(!recoveryPendingIdentity)return block('EXPORT_FAILED');
@@ -236,6 +268,7 @@ export async function exportReviewedCandidateForManualInstall(
         return block('EXPORT_FAILED');
       const afterRecovery=await verifyStagedCandidateReadOnly(
         request,receipt,nativeOptions);
+      if(nativeSignal?.aborted)return block('CANCELLED');
       if(afterRecovery.status!=='CANDIDATE_RECHECKED_READ_ONLY'||
          afterRecovery.candidateSha256!==proposal.candidateSha256||
          afterRecovery.originalSha256!==proposal.originalSha256)
@@ -255,6 +288,7 @@ export async function exportReviewedCandidateForManualInstall(
       if(!samePublishedReceipt(finalCandidate,publishedCandidate)||
          !samePublishedReceipt(finalRecovery,publishedRecovery))
         return block('EXPORT_FAILED');
+      if(nativeSignal?.aborted)return block('CANCELLED');
     }finally{
       if(recoveryPendingExists&&recoveryPendingIdentity)
         await removeOwnedStagingPending(
@@ -262,6 +296,7 @@ export async function exportReviewedCandidateForManualInstall(
       // Unknown replacements and published but unverified files remain for
       // explicit reconciliation; pathname alone grants no cleanup authority.
     }
+    if(nativeSignal?.aborted)return block('CANCELLED');
     return Object.freeze({
       status:'EXPORTED_RUNTIME_UNVERIFIED' as const,
       exportFileName:name,recoveryExportFileName:recoveryName,

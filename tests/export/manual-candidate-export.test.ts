@@ -291,3 +291,121 @@ test('TEST-023/026: an externally replaced byte-identical published export canno
   });
  }
 });
+
+
+/** TASK-012 / TEST-023/026: an actual native abort request has to be honored
+ * before native output publication. This does NOT grant renderer controls over
+ * the original script or Tampermonkey manager state.
+ */
+test('TASK-012/TEST-023/026: cancelled native manual export creates no files and never reports installation',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const controller=new AbortController();
+  controller.abort();
+  // Compile RED against the existing three-argument API; old implementation
+  // ignores the signal, proving the test catches an actual behavior gap.
+  const cancelable=exportReviewedCandidateForManualInstall as
+   (...args:unknown[])=>ReturnType<typeof exportReviewedCandidateForManualInstall>;
+  const result=await cancelable(request,staged,options,controller.signal);
+  assert.deepEqual(result,{
+   status:'BLOCKED',reason:'CANCELLED',
+   automaticPatchAllowed:false,automaticRollbackAllowed:false,
+   tampermonkeyVerified:false,managerInstalled:false,businessVerified:false
+  });
+  assert.deepEqual(await readdir(options.exportDirectory),[]);
+  assert.deepEqual(await readFile(options.sourcePath,'utf8'),source);
+ });
+});
+
+test('TASK-012/TEST-023/026: forged or Proxy abort signal is refused without running getters',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const cancelable=exportReviewedCandidateForManualInstall as
+   (...args:unknown[])=>ReturnType<typeof exportReviewedCandidateForManualInstall>;
+  let reads=0,traps=0;
+  const getter=Object.defineProperty({},'aborted',{get(){reads++;return false;}});
+  const proxy=new Proxy({aborted:false},{
+   getPrototypeOf(){traps++;throw Error('PRIVATE_SIGNAL_PROXY');},
+   get(){traps++;throw Error('PRIVATE_SIGNAL_PROXY');}
+  });
+  for(const forged of [getter,proxy,new AbortController()]){
+   const result=await cancelable(request,staged,options,forged);
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'INVALID_REQUEST');
+  }
+  assert.equal(reads,0);
+  assert.equal(traps,0);
+  assert.deepEqual(await readdir(options.exportDirectory),[]);
+ });
+});
+
+test('TASK-012/TEST-023/026: native revocation after verified pending bytes prevents candidate publication',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const controller=new AbortController();
+  const bytesApi=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const original=bytesApi.verifyExactCandidateBytesReadOnly;
+  let checked=0;
+  const hook=mock.method(bytesApi,'verifyExactCandidateBytesReadOnly',
+   async(...args:Parameters<typeof original>)=>{
+    const result=await original(...args);
+    // The first exact-bytes check observes only the app-owned .pending.
+    if(++checked===1){assert.equal(result,'MATCH');controller.abort();}
+    return result;
+   });
+  const cancelable=exportReviewedCandidateForManualInstall as
+   (...args:unknown[])=>ReturnType<typeof exportReviewedCandidateForManualInstall>;
+  try{
+   const result=await cancelable(request,staged,options,controller.signal);
+   assert.ok(checked>=1,'the abort must occur after the pending bytes check');
+   assert.equal(controller.signal.aborted,true,'native approval is genuinely revoked');
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'CANCELLED');
+   assert.deepEqual(await readdir(options.exportDirectory),[],
+    'only our unpublished staging file may be safely removed');
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+  }finally{hook.mock.restore();}
+ });
+});
+
+test('TASK-012/TEST-023/026: late cancellation must not claim two-file success or delete a published candidate',async()=>{
+ for(const stageName of ['after-candidate','after-recovery'] as const){
+  await fixture(async options=>{
+   const {staged}=await stage(options);
+   if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+   const controller=new AbortController();
+   const checker=require('../../src/version/staged-candidate-recheck') as
+    typeof import('../../src/version/staged-candidate-recheck');
+   const original=checker.verifyStagedCandidateReadOnly;
+   let checks=0;
+   const hook=mock.method(checker,'verifyStagedCandidateReadOnly',
+    async(...args:Parameters<typeof original>)=>{
+     const result=await original(...args);
+     checks++;
+     if(checks===(stageName==='after-candidate'?2:3)){
+      assert.equal(result.status,'CANDIDATE_RECHECKED_READ_ONLY');
+      controller.abort();
+     }
+     return result;
+    });
+   const cancelable=exportReviewedCandidateForManualInstall as
+    (...args:unknown[])=>ReturnType<typeof exportReviewedCandidateForManualInstall>;
+   try{
+    const result=await cancelable(request,staged,options,controller.signal);
+    assert.equal(checks,stageName==='after-candidate'?2:3);
+    assert.equal(result.status,'BLOCKED');
+    if(result.status==='BLOCKED')assert.equal(result.reason,'CANCELLED');
+    const files=await readdir(options.exportDirectory);
+    assert.equal(files.filter(f=>f.startsWith('UAH-Reviewed-')).length,1);
+    assert.equal(files.filter(f=>f.startsWith('UAH-Original-')).length,
+     stageName==='after-candidate'?0:1);
+    assert.equal(files.some(f=>f.endsWith('.pending')),false);
+    assert.equal(await readFile(options.sourcePath,'utf8'),source);
+   }finally{hook.mock.restore();}
+  });
+ }
+});
