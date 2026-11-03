@@ -121,3 +121,30 @@ test('TASK-014/TEST-015/026: expired evidence frees bounded session capacity wit
   assert.equal(store.record('new_overflow',A,'p','UNKNOWN'),false,
     'reclamation must preserve the original maximum live receipt limit');
 });
+
+
+test('TASK-014/TEST-015/026: native AI evidence clock failures fail closed without private error text',()=>{
+ const secret='PRIVATE_NATIVE_AI_CLOCK_EXCEPTION_MUST_NOT_ESCAPE';
+ let now=1000;
+ let failing=false;
+ const store=new NativeAiEvidenceStore(()=>{
+  if(failing)throw Error(secret);
+  return now;
+ });
+ assert.equal(store.record('existing',A,'#private','UNKNOWN'),true);
+ assert.ok(store.resolve('existing'));
+ failing=true;
+ assert.doesNotThrow(()=>{
+  assert.equal(store.resolve('existing'),null,
+   'an unreadable clock must revoke existing evidence, not return a live receipt');
+  assert.equal(store.record('new',A,'#private','UNKNOWN'),false,
+   'an unreadable clock must not authorize creation of review evidence');
+ });
+ failing=false;
+ now++;
+ assert.equal(store.resolve('existing'),null,
+  'revoked evidence cannot reappear when the native clock resumes');
+ assert.equal(store.record('new',A,'#private','UNKNOWN'),true,
+  'a fresh genuine inspection can create a new bounded receipt');
+ assert.ok(store.resolve('new'));
+});
