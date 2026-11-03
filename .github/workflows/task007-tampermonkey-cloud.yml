@@ -23,9 +23,12 @@ on:
 permissions:
   contents: read
 
+# TASK-007 uses a signed-CRX acquisition gate and up to 16 isolated Windows
+# cases. A second dispatch on the same ref must not terminate an in-flight
+# matrix or discard its verification evidence. Queue instead of canceling.
 concurrency:
   group: task007-tampermonkey-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # Download and verify the vendor package ONCE. Without this gate each of
