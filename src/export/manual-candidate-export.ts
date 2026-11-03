@@ -8,7 +8,7 @@
  */
 import {createHash,randomUUID} from 'node:crypto';
 import {link,lstat,open} from 'node:fs/promises';
-import {basename,dirname,isAbsolute,join,relative,sep} from 'node:path';
+import {basename,dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {removeOwnedStagingPending} from '../version/staging-pending-ownership';
@@ -76,8 +76,11 @@ function nativeExportAbortSignal(value:unknown):value is AbortSignal{
  }catch{return false;}
 }
 function absolute(value:unknown):value is string{
+ // On Windows, isAbsolute('\\folder') can be true even though the path
+ // still depends on the process's current drive. Reject all cwd/drive-relative
+ // and dot-segment aliases before binding the native export authority.
  return typeof value==='string'&&value.length>0&&value.length<=4096&&
-   !value.includes('\0')&&isAbsolute(value);
+   !value.includes('\0')&&isAbsolute(value)&&value===resolve(value);
 }
 function sameDir(a:BigIntStats,b:BigIntStats):boolean{
  return a.isDirectory()&&b.isDirectory()&&a.dev===b.dev&&a.ino===b.ino;
