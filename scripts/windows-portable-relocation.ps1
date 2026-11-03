@@ -104,15 +104,16 @@ function Get-CandidatePortableRelocationOwnerSummary([string]$candidateExe) {
     $unknownPath=0
     $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop)
     foreach($process in $processes) {
-      $image=[string]$process.ExecutablePath
+      # Use the same read-only, PID/start-time corroboration as the
+      # pre-move gate. A proven foreign namesake is not an unknown owner;
+      # missing or conflicting evidence is NEVER counted as clear.
+      $image=Resolve-CandidatePortableProcessExecutablePath $process
       if([string]::IsNullOrWhiteSpace($image)) {
         $unknownPath++
         continue
       }
-      try {
-        if([string]::Equals([IO.Path]::GetFullPath($image),$exact,
-           [StringComparison]::OrdinalIgnoreCase)) { $live++ }
-      } catch { $unknownPath++ }
+      if([string]::Equals($image,$exact,
+         [StringComparison]::OrdinalIgnoreCase)) { $live++ }
     }
     return "live=$live unknownPath=$unknownPath query=ok"
   } catch {
