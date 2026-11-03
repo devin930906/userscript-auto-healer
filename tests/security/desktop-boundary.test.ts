@@ -268,16 +268,16 @@ test('TASK-014/TEST-015/016/026: AI model discovery uses native picker and disti
   const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
   const renderer=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
-  assert.match(main,/ipcMain\\.handle\\('ai:discover-native',async\\(event,\\.\\.\\.args:unknown\\[\\]\\)=>/);
-  assert.match(main,/readNativeSelectedAiConfig\\(choice\\.filePaths\\[0\\]\\)/);
-  assert.match(main,/discoverModelsFromNativeConfig\\(config,async origin=>/);
-  assert.match(main,/dialog\\.showMessageBox\\(win,/);
-  assert.match(main,/nativeAiDiscoveryController\\?\\.abort\\(\\)/);
-  assert.match(preload,/discoverNativeAiModels: \\(\\): Promise<unknown> => ipcRenderer\\.invoke\\('ai:discover-native'\\)/);
-  assert.match(renderer,/window\\.healer\\.discoverNativeAiModels\\(\\)/);
+  assert.match(main,/ipcMain\.handle\('ai:discover-native',async\(event,\.\.\.args:unknown\[\]\)=>/);
+  assert.match(main,/readNativeSelectedAiConfig\(choice\.filePaths\[0\]\)/);
+  assert.match(main,/discoverModelsFromNativeConfig\(config,async origin=>/);
+  assert.match(main,/dialog\.showMessageBox\(win,/);
+  assert.match(main,/nativeAiDiscoveryController\?\.abort\(\)/);
+  assert.match(preload,/discoverNativeAiModels: \(\): Promise<unknown> => ipcRenderer\.invoke\('ai:discover-native'\)/);
+  assert.match(renderer,/window\.healer\.discoverNativeAiModels\(\)/);
   assert.match(html,/id="ai-model-discover"/);
   assert.doesNotMatch(preload,/apiKey|baseUrl|manualModel|selectedConfigPath/);
-  assert.doesNotMatch(main,/ipcMain\\.handle\\('ai:discover-native',async\\(event,(?:path|url|key|config|consent)/);
+  assert.doesNotMatch(main,/ipcMain\.handle\('ai:discover-native',async\(event,(?:path|url|key|config|consent)/);
 });
 
 test('TASK-011/TEST-020/026: desktop reconciles restore intent only after native picks, without write authority',()=>{
