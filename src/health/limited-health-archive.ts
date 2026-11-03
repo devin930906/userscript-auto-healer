@@ -255,6 +255,14 @@ export async function saveLimitedHealthArchive(
   const previous=await inspectFile(target,key);
   if(previous===null)return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const history=previous==='NOT_FOUND'?[]:previous.events;
+  // A replay containing only unrelated, older observations cannot truthfully
+  // claim a persisted update. Legitimate overlapping snapshots remain
+  // idempotent, including retained windows that precede the current tail.
+  if(history.length>0&&
+     fresh.every(event=>event.observedAtMs<history[history.length-1].observedAtMs)&&
+     !fresh.some(event=>history.some(saved=>
+      saved.observedAtMs===event.observedAtMs&&saved.status===event.status)))
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const all=[...history];
   for(const event of fresh){
    const latest=all[all.length-1];

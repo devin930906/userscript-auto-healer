@@ -569,3 +569,24 @@ test('TASK-015/TEST-024/026: limited archive refuses forged or inconsistent top-
    'ARCHIVE_READ_UNVERIFIED');
  }finally{await rm(userData,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024/026: wholly stale unrelated history cannot claim a successful archive save',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-stale-replay-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'stale');
+  const current=new LimitedHealthRegistry(()=>Date.now()-1000);
+  current.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,current.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const baseline=await readLimitedHealthArchive(userData,key);
+  const stale=new LimitedHealthRegistry(()=>Date.now()-5000);
+  stale.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  assert.equal((await saveLimitedHealthArchive(userData,stale.snapshot(key))).status,
+   'BLOCKED','a stale unrelated event must not receive a misleading save receipt');
+  assert.deepEqual(await readLimitedHealthArchive(userData,key),baseline);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
