@@ -28,6 +28,87 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # ISSUE-215 / TEST-028: an opaque CIM path may refer to an unrelated
+  # namesake process. A second native read-only observation may disambiguate
+  # it ONLY if the PID and creation time identify the same process.
+  # An absent, inconsistent or candidate-owned image must remain fail-closed.
+  $opaqueScope=Join-Path $root 'opaque-process-identity'
+  New-Item -ItemType Directory -Path $opaqueScope | Out-Null
+  $candidateOpaque=Join-Path $opaqueScope 'UserscriptAutoHealer.exe'
+  [IO.File]::WriteAllText($candidateOpaque,'disposable-image-identity')
+  $createdOpaque=[datetime]::UtcNow.AddMinutes(-2)
+  $script:opaqueFallbackPath=(Join-Path $env:SystemRoot 'System32\notepad.exe')
+  $script:opaqueFallbackTime=$createdOpaque
+  $script:opaqueFallbackUnavailable=$false
+  $script:opaqueCim= [pscustomobject]@{
+    Name='UserscriptAutoHealer.exe';ProcessId=424242;
+    CreationDate=$createdOpaque;ExecutablePath=$null
+  }
+  $priorCim=(Get-Item Function:\Get-CimInstance -ErrorAction SilentlyContinue)
+  $priorGetProcess=(Get-Item Function:\Get-Process -ErrorAction SilentlyContinue)
+  try {
+    Set-Item Function:\Get-CimInstance -Value {
+      param([string]$ClassName,[string]$Filter,[object]$ErrorAction)
+      return @($script:opaqueCim)
+    }
+    Set-Item Function:\Get-Process -Value {
+      param([int]$Id,[object]$ErrorAction)
+      if($Id -ne 424242 -or $script:opaqueFallbackUnavailable) {
+        throw 'SIMULATED_OPAQUE_PROCESS'
+      }
+      return [pscustomobject]@{
+        Id=$Id;StartTime=$script:opaqueFallbackTime;
+        Path=$script:opaqueFallbackPath
+      }
+    }
+    $foreignChecks=Wait-CandidatePortableProcessExit $candidateOpaque 1 0
+    if($foreignChecks -ne 1) {
+      throw 'TEST-028: independent foreign image was not distinguished from candidate'
+    }
+    $script:opaqueFallbackPath=$candidateOpaque
+    $ownedRejected=$false
+    try { Wait-CandidatePortableProcessExit $candidateOpaque 1 0 | Out-Null }
+    catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*did not exit before relocation*') { throw }
+      $ownedRejected=$true
+    }
+    if(-not $ownedRejected) {
+      throw 'TEST-028: a live candidate image was incorrectly cleared'
+    }
+    $script:opaqueFallbackPath=(Join-Path $env:SystemRoot 'System32\notepad.exe')
+    $script:opaqueFallbackTime=$createdOpaque.AddMinutes(1)
+    $mismatchRejected=$false
+    try { Wait-CandidatePortableProcessExit $candidateOpaque 1 0 | Out-Null }
+    catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*path unavailable*') { throw }
+      $mismatchRejected=$true
+    }
+    if(-not $mismatchRejected) {
+      throw 'TEST-028: mismatched process creation time bypassed identity gate'
+    }
+    $script:opaqueFallbackTime=$createdOpaque
+    $script:opaqueFallbackUnavailable=$true
+    $unknownRejected=$false
+    try { Wait-CandidatePortableProcessExit $candidateOpaque 1 0 | Out-Null }
+    catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*path unavailable*') { throw }
+      $unknownRejected=$true
+    }
+    if(-not $unknownRejected) {
+      throw 'TEST-028: unavailable secondary identity bypassed process gate'
+    }
+    Write-Output 'PASS: opaque CIM identity corroboration distinguishes foreign, live and unknown namesakes'
+  } finally {
+    if($null -ne $priorCim) {
+      Set-Item Function:\Get-CimInstance -Value $priorCim.ScriptBlock
+    } else { Remove-Item Function:\Get-CimInstance -ErrorAction SilentlyContinue }
+    if($null -ne $priorGetProcess) {
+      Set-Item Function:\Get-Process -Value $priorGetProcess.ScriptBlock
+    } else { Remove-Item Function:\Get-Process -ErrorAction SilentlyContinue }
+    Remove-Variable opaqueFallbackPath,opaqueFallbackTime,opaqueFallbackUnavailable,opaqueCim -Scope Script -ErrorAction SilentlyContinue
+  }
+
+
   # TASK-020 / TEST-028: Only FACILITY_WIN32 access errors authorize the
   # bounded move retry. An IOException from an unrelated HRESULT facility
   # can share the low 16-bit value 5/32/33; do not label it Win32 or retry.
