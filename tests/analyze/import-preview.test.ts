@@ -847,3 +847,50 @@ test('TASK-013/TEST-022/NFR-009: valid AST reply with failed Worker retirement m
   !x.automaticPatchAllowed&&!x.businessVerified&&!x.tampermonkeyVerified));
  assert.equal(JSON.stringify(results).includes('private-retirement-failure'),false);
 });
+
+
+test('TASK-013/TEST-022/026: unretired AST worker reports bounded failure reason without source',async()=>{
+ const scripts=Array.from({length:17},(_,i)=>imported(
+  header+`document.querySelector("#private-retire-code-${i}");`
+ ));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ const originalWarn=console.warn;
+ try{
+  for(const mode of ['throws','rejects'] as const){
+   let started=0;
+   const reports:string[]=[];
+   workers.Worker=class extends EventEmitter{
+    constructor(_filename:string,options:{workerData:typeof scripts}){
+     super();started++;
+     setImmediate(()=>{
+      this.emit('online');
+      this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
+     });
+    }
+    terminate():Promise<number>{
+     if(mode==='throws')throw Error('PRIVATE_RETIREMENT_EXCEPTION');
+     return Promise.reject(Error('PRIVATE_RETIREMENT_REJECTION'));
+    }
+   } as unknown as typeof native;
+   console.warn=(...args:unknown[])=>reports.push(args.map(String).join(' '));
+   const result=await previewImportedBatchOffMain(scripts);
+   assert.equal(started,1,'a nonretired Worker must stop later segments');
+   assert.deepEqual(result.map(item=>item.status),
+    Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
+   assert.ok(result.every(item=>item.metadataStatus==='NOT_CHECKED'&&
+    !item.tampermonkeyVerified&&!item.businessVerified&&!item.automaticPatchAllowed));
+   assert.equal(reports.length,1,'one bounded retirement failure receipt per Worker');
+   assert.match(reports[0],
+    /^UAH_AST_WORKER_UNAVAILABLE reason=RETIREMENT_FAILED count=16 phase=POST_ONLINE /);
+   assert.equal(reports[0].includes('PRIVATE_'),false,
+    'exception details or imported source must never enter diagnostics');
+   assert.equal(reports[0].includes('private-retire-code'),false);
+  }
+ }finally{
+  workers.Worker=native;
+  console.warn=originalWarn;
+ }
+});
