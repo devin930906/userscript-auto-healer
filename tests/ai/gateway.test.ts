@@ -381,3 +381,25 @@ test('TEST-016/026: streamed model discovery preserves chunks from a reused tran
     models:['buffer-reused-model'],manualModelAvailable:true,automaticPatchAllowed:false
   });
 });
+
+
+test('TASK-014/TEST-015/026: untrusted AI text cannot carry terminal or bidi display controls',async()=>{
+  const invalid=[
+    '\u001b[31mclaimed verified\u001b[0m',
+    'safe\u0000hidden',
+    'safe\u202ereversed',
+    'safe\u2066isolate\u2069'
+  ];
+  let reply='plain text';
+  const gateway=new OptionalAiGateway(options(),async()=>Response.json({choices:[{
+    message:{role:'assistant',content:reply}
+  }]}));
+  assert.equal(gateway.enable(approval()),true);
+  for(const value of invalid){
+    reply=value;
+    assert.deepEqual(await gateway.suggest(approval(),evidence),{
+      ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+    },'reject model-origin presentation control characters');
+  }
+  assert.equal(gateway.status().remainingRequests,0);
+});
