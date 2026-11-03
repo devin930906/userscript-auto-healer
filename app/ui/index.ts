@@ -32,6 +32,9 @@ interface NativeImportProgress {
 interface Window {
   healer: {
     getStatus(): Promise<{ shell: string; automaticRepairAvailable: boolean; aiEnabled: boolean; automaticApplyEnabled: boolean }>;
+    requestNativeAiReview(id:string):Promise<{ok:boolean;code?:string;
+      status?:'UNTRUSTED_AI_TEXT_ONLY';candidateText?:string;model?:string;
+      automaticPatchAllowed:false;automaticRollbackAllowed?:false}>;
     discoverNativeAiModels():Promise<{ok:boolean;code?:string;
       status?:'MODELS_DISCOVERED'|'MANUAL_MODEL_FALLBACK';
       models?:readonly string[];manualModelAvailable?:boolean;
