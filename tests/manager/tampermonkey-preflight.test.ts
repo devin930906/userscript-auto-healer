@@ -193,6 +193,32 @@ test('TEST-017: malformed target URL, credentials and fragment fail closed',()=>
  }
 });
 
+test('TASK-007/TEST-017/026: raw dot-segment URL aliases never gain metadata eligibility',()=>{
+ const privateOnly=metadata({grant:['GM_getValue'],match:['https://example.com/private']});
+ const aliases=[
+  'https://example.com/admin/../private',
+  'https://example.com/admin/./../private',
+  'https://example.com/admin/%2e%2e/private',
+  'https://example.com/admin/.%2E/private',
+  'https://example.com/%2e/private',
+  'https://example.com/admin/%2E%2e/private?source=ambiguous'
+ ];
+ for(const target of aliases){
+  const result=inspect(report,privateOnly,target);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_INPUT',gmApiVerified:false,businessVerified:false},target);
+ }
+ // Ordinary canonical URLs must remain eligible for a matching script;
+ // URL preflight is still only an unverified metadata hint.
+ const valid=inspect(report,privateOnly,'https://example.com/private');
+ assert.equal(valid.ok,true);
+ if(valid.ok){
+  assert.equal(valid.scriptInstallationVerified,false);
+  assert.equal(valid.gmApiVerified,false);
+  assert.equal(valid.businessVerified,false);
+ }
+});
+
 test('TEST-017: query string participates in conservative @match path matching',()=>{
  const exact=metadata({grant:['GM_getValue'],match:['https://example.com/admin']});
  assert.equal(inspect(report,exact,'https://example.com/admin').ok,true);
