@@ -16,7 +16,7 @@ const allowed = {
 /** Exact IPC inventory: cancel-only drag/drop analysis expands the native
  * contract by precisely one channel, not by an arbitrary renderer gateway. */
 const approvedIpcChannels=[
- 'ai:discover-native','app:status','browser:choose-chrome','browser:choose-profile',
+ 'ai:discover-native','ai:review-native','app:status','browser:choose-chrome','browser:choose-profile',
  'browser:create-profile','browser:start','browser:stop',
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
@@ -278,6 +278,25 @@ test('TASK-014/TEST-015/016/026: AI model discovery uses native picker and disti
   assert.match(html,/id="ai-model-discover"/);
   assert.doesNotMatch(preload,/apiKey|baseUrl|manualModel|selectedConfigPath/);
   assert.doesNotMatch(main,/ipcMain\.handle\('ai:discover-native',async\(event,(?:path|url|key|config|consent)/);
+});
+
+test('TASK-014/TEST-015/016/026: native AI review only accepts a staged scenario ID and distinct OS approval',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+  const renderer=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+  assert.ok(main.includes("ipcMain.handle('ai:review-native',async(event,id:unknown,...args:unknown[])"));
+  assert.ok(main.includes('nativeAiReviewEvidence.resolve(id)'));
+  assert.ok(main.includes('readNativeSelectedAiConfig(choice.filePaths[0])'));
+  assert.ok(main.includes('requestNativeReviewedAiSuggestion(config,evidence,async(origin,review)=>'));
+  assert.ok(main.includes("nativeAiReviewEvidence.record(selected.scenario.id,selected.scenario.scriptSha256,"));
+  assert.ok(main.includes('nativeAiReviewEvidence.clear()'));
+  assert.ok(preload.includes("requestNativeAiReview: (id: string): Promise<unknown> => ipcRenderer.invoke('ai:review-native',id)"));
+  assert.ok(renderer.includes('window.healer.requestNativeAiReview(id)'));
+  assert.ok(renderer.includes("aiReviewResult.textContent='未经验证的 AI 文字建议"));
+  assert.ok(html.includes('id="ai-reviewed-suggest"'));
+  assert.doesNotMatch(preload,/apiKey|baseUrl|manualModel|scriptSource|selectorHash|scenarioHash/);
+  assert.doesNotMatch(main,/ipcMain\.handle\('ai:review-native',async\(event,(?:url|source|hash|consent|config|prompt)/);
 });
 
 test('TASK-011/TEST-020/026: desktop reconciles restore intent only after native picks, without write authority',()=>{

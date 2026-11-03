@@ -32,6 +32,9 @@ interface NativeImportProgress {
 interface Window {
   healer: {
     getStatus(): Promise<{ shell: string; automaticRepairAvailable: boolean; aiEnabled: boolean; automaticApplyEnabled: boolean }>;
+    requestNativeAiReview(id:string):Promise<{ok:boolean;code?:string;
+      status?:'UNTRUSTED_AI_TEXT_ONLY';candidateText?:string;model?:string;
+      automaticPatchAllowed:false;automaticRollbackAllowed?:false}>;
     discoverNativeAiModels():Promise<{ok:boolean;code?:string;
       status?:'MODELS_DISCOVERED'|'MANUAL_MODEL_FALLBACK';
       models?:readonly string[];manualModelAvailable?:boolean;
@@ -1032,4 +1035,35 @@ aiDiscoveryButton?.addEventListener('click',()=>{
     aiDiscoveryPending=false;
     aiDiscoveryButton.disabled=false;
   });
+});
+
+
+const aiReviewButton=document.getElementById('ai-reviewed-suggest') as HTMLButtonElement|null;
+const aiReviewResult=document.getElementById('ai-reviewed-result');
+let aiReviewPending=false;
+aiReviewButton?.addEventListener('click',()=>{
+  if(aiReviewPending)return;
+  // Only an already-staged scenario ID; no renderer-authored evidence is sent.
+  const id=scenarioInspectId?.value??'';
+  if(!id){
+    if(aiReviewResult)aiReviewResult.textContent='尚未选择已登记的只读场景。先完成本机只读场景检查。';
+    return;
+  }
+  aiReviewPending=true;
+  aiReviewButton.disabled=true;
+  if(aiReviewResult)aiReviewResult.textContent='请选择本地 AI 配置并在原生窗口确认具体外发字段；未同意不联网。';
+  void window.healer.requestNativeAiReview(id).then(result=>{
+    if(!aiReviewResult)return;
+    if(!result.ok){
+      aiReviewResult.textContent='本次 AI 文字建议未取得：'+(result.code??'UNKNOWN')+
+        '。不会修改或安装任何脚本。';
+      return;
+    }
+    // Never use innerHTML: returned provider strings are untrusted.
+    aiReviewResult.textContent='未经验证的 AI 文字建议（'+(result.model??'未指定模型')+'）：'+
+      (result.candidateText??'')+
+      '。仅供人工复核，未验证 Tampermonkey 或业务功能；不具备脚本写入权限。';
+  }).catch(()=>{
+    if(aiReviewResult)aiReviewResult.textContent='本次 AI 请求受阻，未产生任何可信修复结果。';
+  }).finally(()=>{aiReviewPending=false;aiReviewButton.disabled=false;});
 });
