@@ -391,7 +391,7 @@ test('TASK-014/TEST-015/026: untrusted AI text cannot carry terminal or bidi dis
     'safe\u2066isolate\u2069'
   ];
   let reply='plain text';
-  const gateway=new OptionalAiGateway(options(),async()=>Response.json({choices:[{
+  const gateway=new OptionalAiGateway({...options(),maxRequests:4},async()=>Response.json({choices:[{
     message:{role:'assistant',content:reply}
   }]}));
   assert.equal(gateway.enable(approval()),true);
