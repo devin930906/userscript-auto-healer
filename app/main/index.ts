@@ -128,6 +128,8 @@ function readOwnedBrowser(){
   if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser)){
     // Defensive fallback when a child exits before its lifecycle notification.
     ownedBrowser=null;
+    nativeAiReviewEvidence.clear();
+    nativeAiDiscoveryController?.abort();
     cancelScenarioObservation();
     stopOnlyGmProbe();
   }
