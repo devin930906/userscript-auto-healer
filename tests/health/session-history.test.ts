@@ -590,3 +590,34 @@ test('TASK-015/TEST-024/026: wholly stale unrelated history cannot claim a succe
   assert.deepEqual(await readLimitedHealthArchive(userData,key),baseline);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: matching current tail cannot conceal contradictory archived past',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-contradictory-history-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'conflict');
+  let clock=Date.now()-4000;
+  const registry=new LimitedHealthRegistry(()=>clock);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  clock+=2000;
+  registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+  const authentic=registry.snapshot(key);
+  assert.equal((await saveLimitedHealthArchive(userData,authentic)).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const baseline=await readLimitedHealthArchive(userData,key);
+  // The tail overlaps exactly, while an earlier timestamp rewrites a
+  // previously recorded DOM observation as insufficient evidence.
+  // A partial replay must never silently disregard that disagreement.
+  const conflicting={...authentic,history:[
+   {...authentic.history[0],kind:'INSUFFICIENT_EVIDENCE' as const,
+    evidenceHash:null,status:'INDETERMINATE' as const},
+   authentic.history[1]
+  ]};
+  const attempted=await saveLimitedHealthArchive(userData,conflicting);
+  assert.equal(attempted.status,'BLOCKED',
+   'a matching latest entry cannot launder a conflicting older event');
+  assert.deepEqual(await readLimitedHealthArchive(userData,key),baseline);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
