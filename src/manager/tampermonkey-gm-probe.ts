@@ -191,14 +191,24 @@ export async function startIsolatedTampermonkeyGmProbe(
  // The absolute expiry remains embedded in the disposable userscript, but
  // Windows wall-clock rollback must not extend the server's consent TTL.
  const begunAt=performance.now();
- const expiresAt=Date.now()+ttlMs;
- // An observed expiry revokes loopback HTTP access irreversibly. A Windows
- // wall-clock rollback before the monotonic deadline must not reopen fixture
- // pages, the temporary install endpoint, or self-reported receipt intake.
+ const wallStart=Date.now();
+ // An invalid native wall/monotonic clock cannot establish a bounded
+ // consent lease. Reject it BEFORE creating a loopback listener or source.
+ if(!Number.isFinite(begunAt)||begunAt<0||
+    !Number.isSafeInteger(wallStart)||wallStart<0||
+    wallStart>Number.MAX_SAFE_INTEGER-ttlMs)
+   return {ok:false,code:'INVALID_OPTIONS'};
+ const expiresAt=wallStart+ttlMs;
+ // Once a time source fails, or the original deadline has passed, revoke
+ // the whole fixture irreversibly. Comparisons with NaN must not grant access.
  let consentRevoked=false;
  const expired=()=>{
    if(consentRevoked)return true;
-   if(Date.now()>=expiresAt||performance.now()-begunAt>=ttlMs)
+   const wallNow=Date.now();
+   const elapsed=performance.now()-begunAt;
+   if(!Number.isSafeInteger(wallNow)||wallNow<0||
+      !Number.isFinite(elapsed)||elapsed<0||
+      wallNow>=expiresAt||elapsed>=ttlMs)
      consentRevoked=true;
    return consentRevoked;
  };
@@ -378,6 +388,10 @@ export async function startIsolatedTampermonkeyGmProbe(
  // Independently bound by real elapsed time AND the wall-clock expiry.
  // A backward system clock correction during async bind cannot extend it.
  const remaining=Math.min(expiresAt-Date.now(),ttlMs-(performance.now()-begunAt));
+ if(!Number.isFinite(remaining)||remaining<=0||expired()){
+   await stop();
+   return {ok:false,code:'SESSION_EXPIRED'};
+ }
  expiryTimer=setTimeout(()=>{void stop();},Math.max(1,remaining));
  expiryTimer.unref();
  return {ok:true,session:{
