@@ -440,3 +440,24 @@ test('TASK-012/TEST-023/026: ambiguous or noncanonical native export authorities
    'original script remains untouched');
  });
 });
+
+
+test('TASK-012/TEST-023: manual export refuses the original script directory without publishing files',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const originalDirectory=dirname(options.sourcePath);
+  const before=(await readdir(originalDirectory)).sort();
+  const denied=await exportReviewedCandidateForManualInstall(request,staged,{
+   ...options,exportDirectory:originalDirectory
+  });
+  assert.equal(denied.status,'BLOCKED');
+  if(denied.status==='BLOCKED')assert.equal(denied.reason,'UNSAFE_DESTINATION');
+  assert.deepEqual((await readdir(originalDirectory)).sort(),before,
+   'export must not create reviewed or original recovery scripts beside the source');
+  assert.deepEqual(await readdir(options.exportDirectory),[],
+   'rejected export must not write to the separately selected export directory');
+  assert.equal(await readFile(options.sourcePath,'utf8'),source,
+   'the original userscript must retain its exact bytes');
+ });
+});
