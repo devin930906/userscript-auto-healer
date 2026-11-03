@@ -1614,7 +1614,7 @@ async function createMainWindow(): Promise<void> {
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,createProfile,discoverNativeAiModels,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
