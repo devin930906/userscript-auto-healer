@@ -99,3 +99,19 @@ test('TEST-024/026: valid-looking Proxy receipts cannot execute traps or enter h
     /INVALID_LIMITED_INSPECTION/);
   assert.equal(history.snapshot(A).status,'UNTESTED');
 });
+
+
+test('TASK-015/TEST-024/026: reject malformed and oversized health scope before evidence hashing',()=>{
+  const history=new LimitedHealthRegistry(()=>1200);
+  const invalidHashes=['g'.repeat(64),'A'.repeat(64),'a'.repeat(63),
+    'a'.repeat(65536),'a'.repeat(64)+'\\nprivate'];
+  for(const scriptHash of invalidHashes){
+    assert.throws(()=>recordLimitedScenarioInspection(history,{
+      ...valid(),scriptHash
+    }), (error:unknown)=>error instanceof Error &&
+      error.message==='INVALID_LIMITED_INSPECTION',
+    'invalid script IDs must be rejected at the inspection input boundary');
+  }
+  assert.equal(history.snapshot(A).status,'UNTESTED');
+  assert.equal(history.snapshot(A).history.length,0);
+});
