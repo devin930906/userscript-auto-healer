@@ -26,7 +26,7 @@ test('TASK-014/TEST-015/026: only current native DOM receipts become unlinkable,
   assert.notEqual(store.resolve('safe_1')?.scenarioHash,same.resolve('safe_1')?.scenarioHash);
   assert.equal(store.record('../unsafe',A,'div','UNKNOWN'),false);
   assert.equal(store.record('safe_2','a'.repeat(63),'div','UNKNOWN'),false);
-  assert.equal(store.record('safe_2',A,'\\nsecret','UNKNOWN'),false);
+  assert.equal(store.record('safe_2',A,'\nsecret','UNKNOWN'),false);
   assert.equal(store.record('safe_2',A,'div','CAN_APPLY' as 'UNKNOWN'),false);
   now+=300001;
   assert.equal(store.resolve('safe_1'),null,'expired receipts cannot be reused');
