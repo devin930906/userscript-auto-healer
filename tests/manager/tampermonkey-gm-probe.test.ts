@@ -1161,3 +1161,49 @@ test('TASK-007/TEST-017/018/026: expired receipt snapshot revokes cached fixture
   'expired snapshot must irreversibly revoke the fixture session');
  assert.equal((await fetch(probe.origin+'/?mode=broken')).status,403);
 });
+
+
+test('TASK-007/TEST-017/026: invalid native startup wall clocks refuse a GM listener',async t=>{
+ const initial=Date.now();
+ let simulated=Number.NaN;
+ t.mock.method(Date,'now',()=>simulated);
+ for(const clock of [Number.NaN,Infinity,-1,Number.MAX_SAFE_INTEGER]){
+  simulated=clock;
+  const result=await startIsolatedTampermonkeyGmProbe(true,1000);
+  if(result.ok)await result.session.stop();
+  assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'},
+   'invalid clock must refuse consented fixture setup, not advertise a session');
+ }
+ simulated=initial;
+ const valid=await startIsolatedTampermonkeyGmProbe(true,1000);
+ assert.equal(valid.ok,true,'clock recovery must allow fresh explicit consent');
+ if(valid.ok)await valid.session.stop();
+});
+
+test('TASK-007/TEST-017/026: invalid live wall clock irreversibly revokes a GM fixture session',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+ assert.ok(token);
+ const response=await fetch(probe.origin+'/receipt',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
+   gmStorageRoundtripMatched:true,businessAction:false})
+ });
+ assert.equal(response.status,204);
+ assert.equal(probe.receiptSnapshot().broken?.status,'SELF_REPORTED_FIXTURE_ONLY');
+ const original=Date.now();
+ let simulated=Number.NaN;
+ t.mock.method(Date,'now',()=>simulated);
+ assert.deepEqual(probe.receiptSnapshot(),{},
+  'an invalid clock must revoke rather than expose cached diagnostic reports');
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,403,
+  'invalid time cannot authorize any further loopback fixture access');
+ simulated=original;
+ assert.deepEqual(probe.receiptSnapshot(),{},
+  'recovering system time must not revive a revoked probe');
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,403);
+});
