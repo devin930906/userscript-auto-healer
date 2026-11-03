@@ -1341,6 +1341,26 @@ test('TASK-005/TEST-006: bounded CDP startup transport failure labels are useful
 
 
 
+test('TASK-005/TEST-009/026: native DOMException classification never executes overwritten name getters',()=>{
+  const classify=(ownedChromeDiagnostics as unknown as {
+    classifyCdpStartupTransportFailure:(error:unknown)=>string
+  }).classifyCdpStartupTransportFailure;
+  let getters=0;
+  const nativeTimeout=Object.defineProperty(
+    new DOMException('private browser path','TimeoutError'),'name',{
+      configurable:true,get(){getters++;throw Error('PRIVATE_GETTER_EXECUTED');}
+    });
+  assert.equal(classify(nativeTimeout),'FETCH_TIMEOUT',
+    'genuine native DOMException brand retains timeout classification without user getter');
+  const spoofedAbort=Object.defineProperty(
+    new DOMException('user cancelled','AbortError'),'name',{
+      configurable:true,get(){getters++;return 'TimeoutError';}
+    });
+  assert.equal(classify(spoofedAbort),'FETCH_FAILED',
+    'an overwritten name must not promote a cancellation to a transport timeout');
+  assert.equal(getters,0,'native transport diagnostics must not evaluate caller getters');
+});
+
 test('TASK-005/TEST-006/008/009: bundled native fetch refusals remain redacted and distinguishable',()=>{
   const classify=(ownedChromeDiagnostics as unknown as {
     classifyCdpStartupTransportFailure:(error:unknown)=>string
