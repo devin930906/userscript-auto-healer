@@ -2,7 +2,7 @@
 import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,rm,stat,symlink,truncate,utimes,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,mkdtemp,readFile,readdir,rm,stat,symlink,truncate,utimes,writeFile} from 'node:fs/promises';
 import {promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -10,6 +10,7 @@ import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
+import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
 import {hasPriorPublishedRestoreIntentForSource,hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
 const original=Buffer.from('// ==UserScript==\n// @name old\n// ==/UserScript==\n');
 const updated=Buffer.from('// ==UserScript==\n// @name new\n// ==/UserScript==\n');
@@ -525,4 +526,24 @@ test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as 
   assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),false,
    'malformed journal bytes must require review, never a valid native intent');
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('TASK-011/TEST-020/021/026: recovery-store staging cannot be exempted by a claimed owned pending inode',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-restore-unpublished-'));
+ const ownPending='.uah-restore-'+randomUUID()+'.pending';
+ const staged=join(home,ownPending);
+ try{
+  await writeFile(staged,Buffer.from('unpublished recovery intent'));
+  const owned=await lstat(staged,{bigint:true});
+  // Only an already independently checked source-parent staging inode is
+  // eligible for the exception; a recovery-store intent remains crash evidence.
+  assert.equal(await hasInterruptedRestoreStaging(
+    home,ownPending,owned,'source-parent'),false);
+  assert.equal(await hasInterruptedRestoreStaging(
+    home,ownPending,owned,'recovery-store'),true,
+    'unpublished recovery-store intent may not be hidden as own staging');
+  assert.deepEqual(await readFile(staged),Buffer.from('unpublished recovery intent'));
+  assert.deepEqual(await readdir(home),[ownPending]);
+ }finally{await rm(home,{recursive:true,force:true});}
 });

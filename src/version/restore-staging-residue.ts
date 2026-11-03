@@ -43,6 +43,8 @@ export async function hasInterruptedRestoreStaging(
  // The exemption is only for a staging inode independently verified by
  // its native owning transaction at the last pre-rename boundary. Never
  // exempt an arbitrary filename, backup-store intent, or another restore.
+ // Even a correct inode for a recovery-store .pending remains unpublished
+ // recovery intent: ownership only exempts source-parent staging.
  if((verifiedOwnPendingName!==undefined&&
      !RESTORE_PENDING.test(verifiedOwnPendingName))||
     (verifiedOwnPendingIdentity!==undefined&&verifiedOwnPendingName===undefined))
@@ -94,7 +96,8 @@ export async function hasInterruptedRestoreStaging(
    }
    continue;
   }
-  if(entry.name!==verifiedOwnPendingName||!verifiedOwnPendingIdentity){
+  if(namespace==='recovery-store'||
+     entry.name!==verifiedOwnPendingName||!verifiedOwnPendingIdentity){
    pending=true;continue;
   }
   // The sole exemption must still identify the same pre-verified inode.

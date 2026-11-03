@@ -1449,12 +1449,12 @@ test('TASK-011/TEST-020/026: genuine staged inode is exempt, same-name replaceme
   const contents='same bytes, different file owner';
   await writeFile(pending,contents);
   const owned=await lstat(pending,{bigint:true});
-  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),false,
-   'a separately verified single-link staging inode is exempt');
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned,'source-parent'),false,
+   'a separately verified source-parent staging inode is exempt');
   const retired=join(root,'retired-staging');
   await rename(pending,retired);
   await writeFile(pending,contents);
-  assert.equal(await hasInterruptedRestoreStaging(root,name,owned),true,
+  assert.equal(await hasInterruptedRestoreStaging(root,name,owned,'source-parent'),true,
    'a replacement at the identical filename and length is not owned');
   assert.equal(await readFile(pending,'utf8'),contents);
   assert.equal(await readFile(retired,'utf8'),contents);
