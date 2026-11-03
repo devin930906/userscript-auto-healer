@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rename,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {dirname,join} from 'node:path';
+import {dirname,join,sep,win32} from 'node:path';
 import type {LiteralPatchRequest} from '../../src/repair/patch-planner';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import {prepareManualRepairExportOnly} from '../../src/repair/manual-repair-flow';
@@ -188,6 +188,41 @@ test('TEST-019/023/026: manual repair rejects Proxy patch/options without reflec
   assert.deepEqual(await readdir(opts.backupDirectory),[]);
   assert.deepEqual(await readdir(opts.exportDirectory),[]);
   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+ });
+});
+
+test('TASK-009/TEST-019/023/026: manual native selection refuses noncanonical paths before staging',async()=>{
+ await fixture(async opts=>{
+  const root=dirname(opts.sourcePath);
+  const cases=[
+   {sourcePath:root+sep+'alias'+sep+'..'+sep+'fixture.user.js'},
+   {backupDirectory:opts.backupDirectory+sep+'..'+sep+'backups'},
+   {exportDirectory:opts.exportDirectory+sep+'..'+sep+'manual-exports'}
+  ];
+  // On Windows, a path rooted at the current drive is reported absolute
+  // by isAbsolute but depends on the process drive. Reject it explicitly.
+  if(process.platform==='win32'){
+   const driveRelative=win32.parse(opts.sourcePath).root.replace(/^[A-Za-z]:/,'');
+   cases.push({sourcePath:driveRelative+
+     opts.sourcePath.slice(win32.parse(opts.sourcePath).root.length)});
+   cases.push({backupDirectory:win32.parse(opts.backupDirectory).root.replace(/^[A-Za-z]:/,'')+
+     opts.backupDirectory.slice(win32.parse(opts.backupDirectory).root.length)});
+  }
+  for(const options of cases){
+   const result=await prepareManualRepairExportOnly(
+    patch,scenario,samples(),{...opts,...options});
+   assert.equal(result.status,'BLOCKED',JSON.stringify(options));
+   if(result.status==='BLOCKED')
+    assert.equal(result.reason,'INVALID_REQUEST',
+     'ambiguous native path authority must be refused at the input boundary');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.managerInstalled,false);
+   assert.deepEqual(await readdir(opts.backupDirectory),[],
+    'reject aliases before any backup or staging artifact is published');
+   assert.deepEqual(await readdir(opts.exportDirectory),[]);
+   assert.equal(await readFile(opts.sourcePath,'utf8'),source);
+  }
  });
 });
 
