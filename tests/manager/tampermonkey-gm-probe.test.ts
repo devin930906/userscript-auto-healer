@@ -328,6 +328,37 @@ test('TASK-007/TEST-017/018/026: impossible broken-mode success cannot become a 
  assert.equal(receipt?.businessVerified,false);
 });
 
+test('TASK-007/TEST-017/018/026: malformed UTF-8 receipt bytes fail before parsing or accepting evidence',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+ assert.ok(token);
+ const encoded=Buffer.from(JSON.stringify({token,mode:'broken',
+   gmDefaultMatched:true,gmStorageRoundtripMatched:false,businessAction:false}),'utf8');
+ const tokenOffset=encoded.indexOf(token);
+ assert.ok(tokenOffset>=0);
+ encoded[tokenOffset]=0xff; // Invalid UTF-8, never a valid token or receipt.
+ const status=await new Promise<number>((resolve,reject)=>{
+  const req=request(probe.origin,{method:'POST',path:'/receipt',
+   headers:{'Content-Type':'application/json'}},response=>{
+    response.resume();response.on('end',()=>resolve(response.statusCode??0));
+   });
+  req.on('error',reject);req.end(encoded);
+ });
+ assert.equal(status,400,'reject malformed wire bytes before JSON/identity checks');
+ assert.deepEqual(probe.receiptSnapshot(),{});
+ // A refused malformed request must not occupy the first receipt slot.
+ const valid=await fetch(probe.origin+'/receipt',{method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
+   gmStorageRoundtripMatched:false,businessAction:false})});
+ assert.equal(valid.status,204);
+ assert.equal(probe.receiptSnapshot().broken?.businessVerified,false);
+});
+
 test('TEST-018 stage: untrusted posted receipts never become manager/GM/business VERIFIED',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
