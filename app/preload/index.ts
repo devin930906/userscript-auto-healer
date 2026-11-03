@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
     isolated: isolatedProcess.contextIsolated === true
   }),
   getStatus: (): Promise<unknown> => ipcRenderer.invoke('app:status'),
+  // Native picker and permission dialog only: no path, URL, key or consent args.
+  discoverNativeAiModels: (): Promise<unknown> => ipcRenderer.invoke('ai:discover-native'),
   validateConfig: (config: unknown): Promise<unknown> => ipcRenderer.invoke('config:validate', config),
   chooseFiles: (): Promise<unknown> => ipcRenderer.invoke('import:files'),
   chooseFolder: (): Promise<unknown> => ipcRenderer.invoke('import:folder'),
