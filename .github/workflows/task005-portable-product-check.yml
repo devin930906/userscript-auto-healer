@@ -81,4 +81,26 @@ jobs:
             throw 'Copied Chrome signature untrusted'
           }
           $env:UAH_TEST_PORTABLE_CHROME = $binary
-          node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+          # Normal PR/push and ordinary manual runs remain one strict test suite.
+          # Explicit manual CPU diagnostics compare baseline and controlled load
+          # on the SAME ephemeral Windows runner and source SHA; no global CI
+          # concurrency change, timeout increase or raw Chrome log publication.
+          if ($env:UAH_TEST_CHROME_CPU_PRESSURE -eq 'true' -and
+              $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $env:UAH_TEST_CHROME_CPU_PRESSURE = 'false'
+            Write-Output 'TASK005_PAIRED_BASELINE_BEGIN'
+            node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+            $baselineExit = $LASTEXITCODE
+            Write-Output "TASK005_PAIRED_BASELINE_EXIT=$baselineExit"
+            $env:UAH_TEST_CHROME_CPU_PRESSURE = 'true'
+            Write-Output 'TASK005_PAIRED_PRESSURE_BEGIN'
+            node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+            $pressureExit = $LASTEXITCODE
+            Write-Output "TASK005_PAIRED_PRESSURE_EXIT=$pressureExit"
+            if ($baselineExit -ne 0 -or $pressureExit -ne 0) {
+              throw 'TASK-005 paired Chrome baseline/pressure validation failed; preserve both outcomes'
+            }
+          } else {
+            node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+            if ($LASTEXITCODE -ne 0) { throw 'TASK-005 Chrome product validation failed' }
+          }
