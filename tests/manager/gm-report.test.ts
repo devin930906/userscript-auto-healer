@@ -361,6 +361,52 @@ test('TEST-017/026: coherent report semantics are required at capture and native
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TASK-007/TEST-017/018/026: DOM conflict reports require a real conflicting mode',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-gm-conflict-invariants-'));
+ const at=Date.parse('2026-10-19T02:02:00.000Z');
+ try{
+  const ready=createLimitedGmReport(session,at);
+  assert.equal(ready.status,'UNVERIFIED_REPORT_READY');
+  if(ready.status!=='UNVERIFIED_REPORT_READY')return;
+  // A hand-edited conflict label with unchanged, matching DOM evidence is
+  // impossible at comparison index zero or one. No JSON file may be written.
+  for(const comparedModes of [0,1] as const){
+   const forged={...ready.report,consistency:{
+    status:'DOM_REPORT_CONFLICT' as const,comparedModes
+   }};
+   assert.equal(createLimitedGmReport({...session,
+    consistencySnapshot:()=>({
+     ...consistency,status:'DOM_REPORT_CONFLICT' as const,comparedModes
+    })},at).status,'BLOCKED','capture false conflict '+comparedModes);
+   assert.equal((await saveLimitedGmReportOnly(forged,
+    join(root,'forged-'+comparedModes+'.json'),true)).status,
+    'BLOCKED','save false conflict '+comparedModes);
+  }
+  // The browser can legitimately disagree with a self-reported action.
+  // Preserve this failure evidence, but never convert it to verified GM
+  // execution, a verified business fix or automatic patch authority.
+  const actualConflict={...session,
+   consistencySnapshot:()=>({
+    ...consistency,status:'DOM_REPORT_CONFLICT' as const,comparedModes:1 as const
+   }),
+   domSnapshot:()=>({broken:dom('broken',0),fixed:{
+    ...dom('fixed',1),actionCount:0 as const,fixtureDomMatchesExpected:false
+   }})
+  };
+  const conflicted=createLimitedGmReport(actualConflict,at);
+  assert.equal(conflicted.status,'UNVERIFIED_REPORT_READY');
+  if(conflicted.status==='UNVERIFIED_REPORT_READY'){
+   assert.equal(conflicted.report.verdict,'NOT_VERIFIED');
+   assert.equal(conflicted.report.businessVerified,false);
+   assert.equal(conflicted.report.automaticPatchAllowed,false);
+   const saved=await saveLimitedGmReportOnly(
+    conflicted.report,join(root,'real-conflict.json'),true);
+   assert.equal(saved.status,'REPORT_SAVED_UNVERIFIED_ONLY');
+  }
+  assert.deepEqual(await readdir(root),['real-conflict.json']);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TEST-017/026: report chronology rejects future DOM and post-expiry evidence at capture and save',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-gm-timeline-'));
  try{
