@@ -44,7 +44,11 @@ function validSelector(input:unknown):input is string {
   return typeof input==='string' && input.trim().length>0 && input.length<=512;
 }
 function normalizeUrl(input:unknown):string|null {
-  if(typeof input!=='string' || !input.trim() || input.length>4096) return null;
+  // WHATWG URL() may trim C0 controls/whitespace and reinterpret special-scheme
+  // backslashes as path delimiters. Consent must never be normalized from
+  // a different raw address into an apparently approved navigation target.
+  if(typeof input!=='string'||!input||input.length>4096||
+     input.trim()!==input||/[\\x00-\\x1f\\x7f\\\\]/.test(input))return null;
   try {
     const url=new URL(input);
     if(!['http:','https:'].includes(url.protocol) || !url.hostname ||
