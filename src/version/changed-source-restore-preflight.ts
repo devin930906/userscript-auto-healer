@@ -32,6 +32,25 @@ async function nativeRestorePathMutexPresent(sourcePath:string):Promise<boolean>
  catch(error){return (error as NodeJS.ErrnoException).code!=='ENOENT';}
 }
 
+/** Native backup and staging transactions use a DIFFERENT cooperative
+ * .uah-source-lock-* mutex, keyed by the selected source's dev/ino.
+ * Do not claim a clean restore preflight while that inode is owned by
+ * another operation. An abandoned lock requires manual reconciliation.
+ */
+async function nativeSourceInodeMutexPresent(sourcePath:string):Promise<boolean>{
+ const parent=dirname(sourcePath);
+ try{
+  const current=await lstat(sourcePath,{bigint:true});
+  if(!current.isFile()||current.isSymbolicLink()||current.nlink!==1n)
+   return true;
+  const key=createHash('sha256').update(
+   current.dev.toString()+':'+current.ino.toString()).digest('hex');
+  const path=join(parent,'.uah-source-lock-'+key);
+  try{await lstat(path);return true;}
+  catch(error){return (error as NodeJS.ErrnoException).code!=='ENOENT';}
+ }catch{return true;}
+}
+
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
  'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'UNSAFE_PATH'|'RECOVERY_REVIEW_REQUIRED'|'IO_FAILURE';
 const flags={
@@ -136,6 +155,7 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   // A valid published intent or an outstanding same-source native mutex
   // requires manual reconciliation even when both source and backup match.
   if(await nativeRestorePathMutexPresent(options.sourcePath)||
+     await nativeSourceInodeMutexPresent(options.sourcePath)||
      await hasPriorPublishedRestoreIntentForSource(
       options.sourcePath,options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
@@ -180,6 +200,7 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   // acquires the mutex or publishes a journal without leaving .pending.
   // Never issue a stale clean observation in that case.
   if(await nativeRestorePathMutexPresent(options.sourcePath)||
+     await nativeSourceInodeMutexPresent(options.sourcePath)||
      await hasPriorPublishedRestoreIntentForSource(
       options.sourcePath,options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
