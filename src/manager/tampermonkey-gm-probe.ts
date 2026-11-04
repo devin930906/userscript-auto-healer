@@ -44,6 +44,8 @@ export interface GmProbeSession {
  readonly installUrl:string;
  readonly expiresAt:number;
  readonly receiptSnapshot:()=>Readonly<Partial<Record<GmProbeMode,GmProbeReceipt>>>;
+ /** Bounded native fixture reachability only; never proves CDP, GM or userscript behavior. */
+ readonly pageServedCount:()=>number;
  readonly stop:()=>Promise<void>;
 }
 export type GmProbeStartResult=
@@ -213,6 +215,7 @@ export async function startIsolatedTampermonkeyGmProbe(
    return consentRevoked;
  };
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
+ let pageServed=0;
  let server:Server;
  server=createServer((req,res)=>{
    res.setHeader('Cache-Control','no-store');
@@ -264,6 +267,7 @@ export async function startIsolatedTampermonkeyGmProbe(
    // browser-supplied Origin as manager or GM attestation.
    if(req.method==='GET'&&url.pathname==='/'&&
        (url.search===''||url.search==='?mode=broken'||url.search==='?mode=fixed')){
+     pageServed=Math.min(128,pageServed+1);
      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
      res.end('<!doctype html><html><head><title>Isolated GM probe</title></head>'+
        '<body><main><div id="current-target">Authorized test fixture</div>'+
@@ -403,6 +407,9 @@ export async function startIsolatedTampermonkeyGmProbe(
     // cached diagnostic summary must perform the SAME irreversible deadline
     // check as the HTTP listener, including after a wall-clock rollback.
     receiptSnapshot:()=>Object.freeze(expired()?{}:{...receipts}),
+    // Read-only local diagnostic for distinguishing Chrome navigation from
+    // missing CDP main-frame readiness. No URL, PID, token or request body.
+    pageServedCount:()=>pageServed,
    stop
  }};
 }
