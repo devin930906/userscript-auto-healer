@@ -111,7 +111,12 @@ export function inspectCdpTargetList(
   if(!targets)return {ok:false,code:'INVALID_TARGET_LIST'};
   const matches: Array<{id:string;websocketUrl:string}> = [];
   for(const target of targets) {
-    if(target.type!=='page'||typeof target.url!=='string')continue;
+    // A CDP list is only a read-only structural hint. WHATWG URL() strips
+    // C0 controls/whitespace and normalizes backslashes before comparison;
+    // never let an altered raw list URL appear to match an approved target.
+    if(target.type!=='page'||typeof target.url!=='string'||
+       target.url.length>4096||target.url.trim()!==target.url||
+       /[\x00-\x1f\x7f\\]/.test(target.url))continue;
     let actual:URL;
     try {actual=new URL(target.url);}
     catch {continue;}
