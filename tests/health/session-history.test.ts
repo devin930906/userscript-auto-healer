@@ -696,3 +696,31 @@ test('TASK-015/TEST-024/026: unavailable or overflowing native clock blocks arch
   await rm(home,{recursive:true,force:true});
  }
 });
+
+
+test('TASK-015/TEST-024/026: pending native archive save pins validated script scope before filesystem awaits',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-scope-race-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'first');
+  const otherKey=limitedScenarioHistoryKey(B,'first');
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  // Native callers should snapshot inputs, but this exported asynchronous
+  // boundary must not silently persist A's validated events under B's key.
+  const observation=registry.snapshot(key);
+  const mutable={...observation,scriptHash:key,history:[...observation.history]};
+  const saving=saveLimitedHealthArchive(userData,mutable);
+  mutable.scriptHash=otherKey;
+  const result=await saving;
+  assert.equal(result.status,'ARCHIVE_SAVED_UNVERIFIED',JSON.stringify(result));
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,
+   'ARCHIVE_READ_UNVERIFIED','validated original scope must survive asynchronous input changes');
+  assert.equal((await readLimitedHealthArchive(userData,otherKey)).status,'NOT_FOUND',
+   'mutated input must never redirect a validated native history write');
+  assert.deepEqual(await readdir(join(userData,'limited-health-history-v1')),
+   ['health-'+key+'.json']);
+ }finally{await rm(home,{recursive:true,force:true});}
+});

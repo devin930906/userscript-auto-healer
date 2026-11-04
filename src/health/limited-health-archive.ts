@@ -250,9 +250,15 @@ export async function saveLimitedHealthArchive(
 ):Promise<ArchiveSave>{
  const fresh=newEvents(snapshot);
  if(!fresh||!validRoot(userData))return Object.freeze({status:'BLOCKED',...emptyAuthority});
+ // Pin every validated caller-controlled value BEFORE the first filesystem
+ // await. A native caller can mutate its object while baseDir() is pending;
+ // validated events must never be published under a different script scope.
+ const key=snapshot.scriptHash;
+ const originalObservations=snapshot.history.map(event=>Object.freeze({
+  observedAtMs:event.observedAtMs,status:event.status
+ }));
  const dir=await baseDir(userData,true);
  if(!dir)return Object.freeze({status:'BLOCKED',...emptyAuthority});
- const key=snapshot.scriptHash;
  const target=join(dir,'health-'+key+'.json');
  const mutex=join(dir,'.health-'+key+'.lock');
  const pending=join(dir,'.health-'+randomUUID()+'.pending');
@@ -302,7 +308,7 @@ export async function saveLimitedHealthArchive(
      // status followed by the contradictory same-tick observation can
      // reconcile that timestamp. A separate session's single conflicting
      // report must never rewrite previously published archive evidence.
-     const inTick=snapshot.history.filter(
+     const inTick=originalObservations.filter(
       entry=>entry.observedAtMs===latest.observedAtMs);
      const prior=inTick.findIndex(entry=>entry.status===latest.status);
      if(prior<0||!inTick.slice(prior+1).some(
