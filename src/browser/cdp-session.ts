@@ -77,7 +77,8 @@ export function inspectCdpVersion(payload:unknown,expectedPort:number):CdpEnvelo
     return {ok:false,code:'UNSAFE_WEBSOCKET'};
   let ws:URL;
   try {ws=new URL(data.webSocketDebuggerUrl);}catch{return {ok:false,code:'UNSAFE_WEBSOCKET'};}
-  if(ws.protocol!=='ws:' || ws.hostname!=='127.0.0.1' ||
+  if(ws.href!==data.webSocketDebuggerUrl ||
+     ws.protocol!=='ws:' || ws.hostname!=='127.0.0.1' ||
      Number(ws.port)!==expectedPort || ws.username || ws.password ||
      ws.search || ws.hash)
     return {ok:false,code:'UNSAFE_WEBSOCKET'};
@@ -137,7 +138,8 @@ export function inspectCdpTargetList(
     let ws:URL;
     try {ws=new URL(target.webSocketDebuggerUrl);}
     catch {return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};}
-    if(ws.protocol!=='ws:'||ws.hostname!=='127.0.0.1' ||
+    if(ws.href!==target.webSocketDebuggerUrl ||
+       ws.protocol!=='ws:'||ws.hostname!=='127.0.0.1' ||
        Number(ws.port)!==expectedPort || ws.username||ws.password ||
        ws.search||ws.hash || ws.pathname!=="/devtools/page/"+target.id)
       return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};
