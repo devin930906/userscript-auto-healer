@@ -199,8 +199,8 @@ function redactedLocalListenerFromNetstat(output:unknown,port:number):'0'|'1'|'?
     return '?';
   // An empty/truncated/unrecognizable netstat receipt cannot prove that
   // the loopback listener is absent. This is CI diagnosis, not CDP authority.
-  if(!output.split(/\\r?\\n/).some(line=>
-    /^\\s*TCP\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\d+\\s*$/i.test(line)))return '?';
+  if(!output.split(/\r?\n/).some(line=>
+    /^\s*TCP\s+\S+\s+\S+\s+\S+\s+\d+\s*$/i.test(line)))return '?';
   const pids=parseWindowsLoopbackListeners(output,port);
   // Invalid listener PID fields cannot become a confident presence signal.
   if(pids.some(pid=>!Number.isSafeInteger(pid)||pid<1))return '?';
