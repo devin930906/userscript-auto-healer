@@ -325,3 +325,24 @@ test('TASK-007/TEST-017/026: mixed or extended CDP envelopes fail closed',()=>{
   id:2,result:{targetInfos},method:'Target.targetCreated'
  })),undefined,'other command IDs remain unrelated, not fatal errors');
 });
+
+test('TASK-007/TEST-017/026: raw extension target URLs must not become hints through URL normalization',()=>{
+ const canonical='chrome-extension://'+TAMPERMONKEY_EXTENSION_ID+'/background.js';
+ assert.equal(inspectTampermonkeyTargetHints([{
+  ...worker,url:canonical
+ }]).ok,true,'legitimate extension target remains a limited hint');
+ const normalizedAliases=[
+  canonical+'\\n',
+  '\\t'+canonical,
+  canonical+'\\r',
+  canonical.replace('/background.js','/back\\\\ground.js'),
+  canonical.replace('/background.js','/./background.js'),
+  canonical+'#redirected',
+  canonical+'?credential=private'
+ ];
+ for(const raw of normalizedAliases){
+  assert.deepEqual(inspectTampermonkeyTargetHints([{...worker,url:raw}]),
+   {ok:false,code:'RUNTIME_NOT_OBSERVED'},
+   'ambiguous raw target must not be accepted after URL constructor normalization');
+ }
+});
