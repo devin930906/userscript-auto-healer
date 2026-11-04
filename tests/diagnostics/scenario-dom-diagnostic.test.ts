@@ -418,6 +418,10 @@ test('TEST-013: Windows owned Chrome yields limited selector triage without a sc
   const counts:Record<string,number>={};
   for(const stage of navigationStages)counts[stage]=(counts[stage]??0)+1;
   t.diagnostic('CDP_TARGET_STAGE_COUNTS='+JSON.stringify(counts));
+  // A server-side aggregate separates HTTP fixture navigation failure from
+  // a browser frame receipt that remains unconfirmed after HTTP was served.
+  // Never print the disposable localhost URL, port or response content.
+  t.diagnostic('CDP_FIXTURE_PAGE_SERVED='+(probe.session.pageServedCount()>0?'YES':'NO'));
  }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
