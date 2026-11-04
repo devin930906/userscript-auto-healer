@@ -4,6 +4,7 @@
  * is not an authorization: the actual transaction must obtain fresh native
  * consent and revalidate every source/backup identity under its path lock.
  */
+import {lstat} from 'node:fs/promises';
 import {basename,dirname,resolve} from 'node:path';
 import {importApprovedPaths} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
@@ -31,6 +32,13 @@ export async function prepareManualOriginalRestoreSelection(
   // A backup is only eligible when this project's native source-bound
   // backup verifier recognizes the name and independently verifies bytes.
   if(!name.endsWith('.backup.user.js'))return deny('INVALID_SELECTION');
+  // A matching SHA must not present consent for a different underlying file.
+  // Take the identity before the first source read; recheck after the final
+  // independent backup/source verification. This is a snapshot only, not a
+  // cross-process exclusive filesystem lock.
+  const sourceStart=await lstat(selectedSource,{bigint:true});
+  if(!sourceStart.isFile()||sourceStart.isSymbolicLink()||
+     sourceStart.nlink!==1n)return deny('SOURCE_UNVERIFIED');
   const current=await importApprovedPaths([selectedSource]);
   if(current.errors.length||current.scripts.length!==1||
      current.scripts[0].sourcePath!==selectedSource)
@@ -79,6 +87,16 @@ export async function prepareManualOriginalRestoreSelection(
   if((await verifyApprovedSourceFingerprint({
    sourcePath:selectedSource,expectedSha256:sourceSha,userApproved:true
   })).status!=='MATCHED_READ_ONLY')return deny('SOURCE_UNVERIFIED');
+  const sourceAtReceipt=await lstat(selectedSource,{bigint:true});
+  if(!sourceAtReceipt.isFile()||sourceAtReceipt.isSymbolicLink()||
+     sourceAtReceipt.nlink!==1n||
+     sourceAtReceipt.dev!==sourceStart.dev||
+     sourceAtReceipt.ino!==sourceStart.ino||
+     sourceAtReceipt.size!==sourceStart.size||
+     sourceAtReceipt.mtimeNs!==sourceStart.mtimeNs||
+     sourceAtReceipt.ctimeNs!==sourceStart.ctimeNs||
+     sourceAtReceipt.mode!==sourceStart.mode)
+   return deny('SOURCE_UNVERIFIED');
   return Object.freeze({
    status:'AWAITING_NATIVE_RESTORE_CONSENT' as const,
    sourcePath:selectedSource,backupDirectory,backupFileName:name,
