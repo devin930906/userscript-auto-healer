@@ -2,6 +2,8 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
+import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
 import {link,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -259,8 +261,12 @@ test('TASK-011/TEST-020/021: existing published same-source restore intent block
    originalBackupFileName:opts.backupFileName,
    displacedBackupFileName:displaced.backupFileName,
    automaticPatchAllowed:false,automaticRollbackAllowed:false
-  })+'\\n';
+  })+'\n';
   await writeFile(journalPath,journal,'utf8');
+  assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journalPath),true,
+   'fixture must represent a canonical published native restore intent');
+  assert.equal(await hasInterruptedRestoreStaging(backupDirectory),false,
+   'existing staging scan must not treat a valid journal as pending residue');
   const entries=await readdir(backupDirectory);
   const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
