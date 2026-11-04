@@ -161,3 +161,22 @@ test('TASK-016/TEST-025/026: compatibility definition and preview reject Proxy t
   assert.equal(layer.snapshot().preview,null);
   assert.equal(trapped,0);
 });
+
+test('TASK-016/TEST-025/026: bidi formatting cannot disguise a shared selector in offline preview',()=>{
+  const disguised=['#target\\u202ejs','[data-name="ok\\u2066x"]',
+    '.status\\u2028hidden'].map(s=>s.replace(/\\u([0-9a-f]{4})/gi,
+      (_full,hex:string)=>String.fromCharCode(parseInt(hex,16))));
+  for(const selector of disguised){
+    const candidate={...newer,bindings:[
+      {...newer.bindings[0],selector},newer.bindings[1]]};
+    assert.throws(()=>new LimitedCompatibilityLayer({
+      ...initial,bindings:[{...initial.bindings[0],selector},initial.bindings[1]]
+    }),/INVALID_COMPAT_BINDING/,
+    'directional or line-format controls cannot become active locators');
+    const layer=new LimitedCompatibilityLayer(initial);
+    const result=layer.previewUpgrade(candidate,checks);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+  }
+});
