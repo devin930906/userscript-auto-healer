@@ -805,3 +805,48 @@ test('TASK-015/TEST-024: a strictly newer native observation may show limited DO
  assert.equal(merged.businessVerified,false);
  assert.equal(merged.automaticPatchAllowed,false);
 });
+
+test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrary view fields',()=>{
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>2001);
+ assert.equal(stage(session,'safe-projection',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'safe-projection');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const readonly=readLimitedSessionHistory(session,history,'safe-projection');
+ if(!readonly.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:Object.freeze([{observedAtMs:2000,status:'INDETERMINATE' as const}]),
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ // Simulate a future native caller supplying a structurally compatible view
+ // with unexpected own fields. Return types are not runtime security checks.
+ const forged=Object.assign({},readonly,{
+  tampermonkeyVerified:true,businessVerified:true,
+  automaticPatchAllowed:true,automaticRollbackAllowed:true,
+  rawScript:'PRIVATE_SCRIPT_BYTES',externalAuthority:'VERIFIED'
+ }) as unknown as Extract<typeof readonly,{ok:true}>;
+ const merged=mergeLimitedSessionArchive(forged,archive);
+ assert.equal(merged.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.deepEqual(merged.events,[
+  {observedAtMs:2000,status:'INDETERMINATE'},
+  {observedAtMs:2001,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ assert.equal(merged.tampermonkeyVerified,false);
+ assert.equal(merged.businessVerified,false);
+ assert.equal(merged.automaticPatchAllowed,false);
+ assert.equal(merged.automaticRollbackAllowed,false);
+ assert.equal(Object.hasOwn(merged,'rawScript'),false);
+ assert.equal(Object.hasOwn(merged,'externalAuthority'),false);
+ assert.deepEqual(Object.keys(merged).sort(),[
+  'archiveRetained','automaticPatchAllowed','automaticRollbackAllowed',
+  'businessVerified','currentStatus','events','ok','status',
+  'tampermonkeyVerified'
+ ].sort());
+ assert.ok(Object.isFrozen(merged));
+ assert.ok(Object.isFrozen(merged.events));
+ assert.ok(Object.isFrozen(merged.events[0]));
+ assert.equal(JSON.stringify(merged).includes('PRIVATE_SCRIPT_BYTES'),false);
+});
