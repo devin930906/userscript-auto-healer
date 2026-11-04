@@ -40,6 +40,9 @@
       <label for="scenario-inspect-id">只读检查已登记场景：</label>
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
       <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
+      <button id="scenario-recheck-start" type="button" disabled>开始三轮定时只读复检（间隔一分钟，每轮重新授权）</button>
+      <button id="scenario-recheck-stop" type="button" disabled>停止后续复检／取消当前检查</button>
+      <p id="scenario-recheck-status" role="status" aria-live="polite">定时复检未启动；只有本窗口打开并主动启动时运行。每轮需再次确认原生授权，拒绝或失败将停止后续轮次。</p>
       <button id="scenario-history" type="button" disabled>查看此场景脚本的当前会话观察历史</button>
       <p id="scenario-history-summary" role="status" aria-live="polite">尚未查询观察历史；此功能不需要启动 Chrome。</p>
       <ol id="scenario-history-entries" aria-live="polite"></ol>
