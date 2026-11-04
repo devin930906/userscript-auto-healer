@@ -28,7 +28,7 @@ test('TEST-009: spoofed or non-loopback CDP addresses rejected',()=>{
 test('TASK-018/TEST-009/026: reject parser-normalized CDP browser websocket URLs',()=>{
   const url=envelope.webSocketDebuggerUrl;
   for(const forged of [
-    ' '+url,url+' ',url+'\${ch}',url+'\${ch}',
+    ' '+url,url+' ',url+'\n',url+'\r',
     url.replace('ws://','ws:\\\\'),
     url.replace('/devtools/','\\\\devtools/')
   ]){
@@ -78,7 +78,7 @@ test('TASK-008/TEST-009/013/026: CDP list URL must not silently normalize to app
 test('TASK-018/TEST-009/026: reject parser-normalized CDP page websocket URLs',()=>{
   const url=testPage.webSocketDebuggerUrl;
   for(const forged of [
-    ' '+url,url+' ',url+'\${ch}',url+'\${ch}',
+    ' '+url,url+' ',url+'\t',undefined,
     url.replace('ws://','ws:\\\\'),
     url.replace('/devtools/','\\\\devtools/')
   ]){
