@@ -75,8 +75,14 @@ export function mergeLimitedSessionArchive(
  const currentLast=current.events[current.events.length-1]?.observedAtMs;
  // Equal timestamps cannot establish ordering across a retained archive and
  // this independent session. Never promote an archived INDETERMINATE row.
- const currentStatus=currentLast!==undefined&&currentLast>oldLast?
+ // Runtime callers can misstate a TypeScript-only discriminant. Historical
+ // DOM observations never authorize VERIFIED/BROKEN/RECOVERED business state,
+ // even when their timestamp is newer than the last archive record.
+ const limitedCurrent=current.currentStatus==='ELEMENT_FOUND_ONLY'||
+  current.currentStatus==='INDETERMINATE'?
   current.currentStatus:'INDETERMINATE' as const;
+ const currentStatus=currentLast!==undefined&&currentLast>oldLast?
+  limitedCurrent:'INDETERMINATE' as const;
  // Do not spread the caller's view: the archive merge is a projection of
  // fixed unverified fields, not a way to carry arbitrary renderer-visible
  // properties or forged authorization flags into a native health response.
