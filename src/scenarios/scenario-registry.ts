@@ -48,7 +48,7 @@ function normalizeUrl(input:unknown):string|null {
   // backslashes as path delimiters. Consent must never be normalized from
   // a different raw address into an apparently approved navigation target.
   if(typeof input!=='string'||!input||input.length>4096||
-     input.trim()!==input||/[\\x00-\\x1f\\x7f\\\\]/.test(input))return null;
+     input.trim()!==input||/[\x00-\x1f\x7f\\]/.test(input))return null;
   try {
     const url=new URL(input);
     if(!['http:','https:'].includes(url.protocol) || !url.hostname ||
