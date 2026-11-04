@@ -1001,6 +1001,13 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
 // and can stop only the exact child tracked by the privileged main process.
 stopButton?.addEventListener('click',()=>{
  if(stopInProgress||(!browserBusy&&!browserConnected))return;
+ // Browser shutdown must revoke a pending scheduled recheck immediately.
+ // A failed native stop never grants permission for another inspection.
+ if(recheckRunning){
+  revokeBoundedRechecks();
+  if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
+   '已请求停止浏览器；复检计划已取消，不再自动启动下一轮。';
+ }
  stopInProgress=true;browserControls();
  void window.healer.stopBrowser().then(result=>{
   if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
