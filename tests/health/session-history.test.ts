@@ -743,7 +743,7 @@ test('TASK-015/TEST-024/026: read-only health archive refuses history while its 
   assert.equal(during.status,'BLOCKED',JSON.stringify(during));
   assert.equal(during.automaticPatchAllowed,false);
   assert.equal(during.businessVerified,false);
-  await rm(lock,{recursive:false});
+  await rm(lock,{recursive:true});
   const restored=await readLimitedHealthArchive(userData,key);
   assert.equal(restored.status,'ARCHIVE_READ_UNVERIFIED');
   if(restored.status==='ARCHIVE_READ_UNVERIFIED'){
