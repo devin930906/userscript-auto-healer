@@ -152,6 +152,12 @@ export async function verifyStagedCandidateReadOnly(
      if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
        return deny('BACKUP_UNVERIFIED');
      const path=join(options.backupDirectory,receipt.candidateFileName);
+     // The candidate must remain the SAME published native file across
+     // independent asynchronous byte checks. A different inode containing
+     // byte-identical source is not the reviewed staged publication.
+     const candidateBefore=await lstat(path,{bigint:true});
+     if(!candidateBefore.isFile()||candidateBefore.isSymbolicLink()||
+        candidateBefore.nlink!==1n)return deny('CANDIDATE_CHANGED');
      const checked=await verifyExactCandidateBytesReadOnly(path,candidate);
      if(checked==='CHANGED')return deny('CANDIDATE_CHANGED');
      if(checked==='MISMATCH')return deny('CANDIDATE_MISMATCH');
@@ -179,6 +185,16 @@ export async function verifyStagedCandidateReadOnly(
      const finalCandidate=await verifyExactCandidateBytesReadOnly(path,candidate);
      if(finalCandidate==='CHANGED')return deny('CANDIDATE_CHANGED');
      if(finalCandidate==='MISMATCH')return deny('CANDIDATE_MISMATCH');
+     const candidateAfter=await lstat(path,{bigint:true});
+     if(!candidateAfter.isFile()||candidateAfter.isSymbolicLink()||
+        candidateAfter.nlink!==1n||
+        candidateBefore.dev!==candidateAfter.dev||
+        candidateBefore.ino!==candidateAfter.ino||
+        candidateBefore.size!==candidateAfter.size||
+        candidateBefore.mtimeNs!==candidateAfter.mtimeNs||
+        candidateBefore.ctimeNs!==candidateAfter.ctimeNs||
+        candidateBefore.mode!==candidateAfter.mode)
+       return deny('CANDIDATE_CHANGED');
      return Object.freeze({
        status:'CANDIDATE_RECHECKED_READ_ONLY' as const,
        originalSha256:receipt.originalSha256,
