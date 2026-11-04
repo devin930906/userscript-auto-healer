@@ -332,10 +332,10 @@ test('TASK-007/TEST-017/026: raw extension target URLs must not become hints thr
   ...worker,url:canonical
  }]).ok,true,'legitimate extension target remains a limited hint');
  const normalizedAliases=[
-  canonical+'\\n',
-  '\\t'+canonical,
-  canonical+'\\r',
-  canonical.replace('/background.js','/back\\\\ground.js'),
+  canonical+'\n',
+  '\t'+canonical,
+  canonical+'\r',
+  canonical.replace('/background.js','/back\\ground.js'),
   canonical.replace('/background.js','/./background.js'),
   canonical+'#redirected',
   canonical+'?credential=private'
