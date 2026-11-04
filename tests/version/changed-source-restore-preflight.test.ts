@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
 import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
-import {link,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
+import {link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -278,5 +278,26 @@ test('TASK-011/TEST-020/021: existing published same-source restore intent block
   assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
   assert.equal(await readFile(join(backupDirectory,displaced.backupFileName),'utf8'),changed);
   assert.deepEqual((await readdir(backupDirectory)).sort(),entries.sort());
+ });
+});
+
+test('TASK-011/TEST-020/026: native inode source mutex blocks changed-source recovery preflight',async()=>{
+ await fixture(async ({root,sourcePath,backupDirectory,opts})=>{
+  const selected=await lstat(sourcePath,{bigint:true});
+  const sourceLockName='.uah-source-lock-'+sha(
+   selected.dev.toString()+':'+selected.ino.toString());
+  const nativeLock=join(root,sourceLockName);
+  await mkdir(nativeLock);
+  const entriesBefore=await readdir(root);
+  const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'RECOVERY_REVIEW_REQUIRED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(result.businessVerified,false);
+  assert.equal(await readFile(sourcePath,'utf8'),changed);
+  assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
+  assert.deepEqual((await readdir(root)).sort(),entriesBefore.sort(),
+   'read-only preflight must not remove a live or stranded native inode mutex');
  });
 });
