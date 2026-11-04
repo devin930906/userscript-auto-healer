@@ -836,3 +836,35 @@ test('TASK-007/TEST-017/026: desktop GM fixture status cannot revive after nativ
     assert.equal(getStatus({expiresAt:expiry,isActive:()=>{throw Error('revoked');}}),false);
   }finally{Date.now=originalNow;}
 });
+
+
+test('TASK-007/TEST-017/026: desktop diagnostic lease lookup never invokes hostile accessors or proxy traps',()=>{
+ const {isCurrentManualDiagnosticSession:check}=require('../../src/manager/tampermonkey-diagnostic') as typeof import('../../src/manager/tampermonkey-diagnostic');
+ const expiresAt=Date.now()+60000;
+ let getterCalls=0,trapCalls=0,callbackCalls=0;
+ const guarded={expiresAt,isActive:()=>{callbackCalls++;return true;}};
+ const getter=Object.defineProperty({...guarded},'expiresAt',{
+  get(){getterCalls++;return expiresAt;}
+ });
+ const methodGetter=Object.defineProperty({...guarded},'isActive',{
+  get(){getterCalls++;return guarded.isActive;}
+ });
+ const throwingProxy=new Proxy(guarded,{
+  get(){trapCalls++;throw Error('untrusted read');},
+  getPrototypeOf(){trapCalls++;throw Error('untrusted prototype');},
+  ownKeys(){trapCalls++;throw Error('untrusted keys');}
+ });
+ const functionProxy=new Proxy(guarded.isActive,{
+  apply(){trapCalls++;throw Error('untrusted callback');}
+ });
+ const revoked=Proxy.revocable(guarded,{});revoked.revoke();
+ for(const candidate of [getter,methodGetter,throwingProxy,
+  {...guarded,isActive:functionProxy},revoked.proxy]){
+  assert.equal(check(candidate),false,'hostile lease must fail closed');
+ }
+ assert.equal(getterCalls,0,'accessors must not execute');
+ assert.equal(trapCalls,0,'proxy traps must not execute');
+ assert.equal(callbackCalls,0,'hostile inputs must not invoke the lease callback');
+ assert.equal(check(guarded),true,'native active lease stays supported');
+ assert.equal(callbackCalls,1);
+});
