@@ -78,7 +78,14 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     if(!acceptedTypes.has(type))continue;
     let url:URL;
     try{url=new URL(urlText);}catch{continue;}
-    if(url.protocol!=='chrome-extension:'||url.hostname!==TAMPERMONKEY_EXTENSION_ID||
+    // A raw CDP target URL can contain whitespace/control characters, a
+    // backslash, or dot segments that URL() silently normalizes away. Such
+    // ambiguous original metadata is not a trustworthy runtime presence hint.
+    // Requiring exact canonical spelling is stricter than origin matching;
+    // even this accepted hint NEVER proves extension identity or GM execution.
+    if(/[\\x00-\\x1f\\x7f\\\\]/.test(urlText)||url.href!==urlText||
+       url.search||url.hash||
+       url.protocol!=='chrome-extension:'||url.hostname!==TAMPERMONKEY_EXTENSION_ID||
        url.username||url.password||url.port)continue;
     count++;
   }
