@@ -93,6 +93,16 @@ function sameFile(a:BigIntStats,b:BigIntStats):boolean{
  return sameDirectory(a,b)&&a.size===b.size&&
   a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
 }
+/** A verified hash cannot authorize replacement by a different native inode. */
+async function sameRecoveryInode(path:string,identity:BigIntStats):Promise<boolean>{
+ try{
+  if(await hasUnsafePathLink(path))return false;
+  const now=await lstat(path,{bigint:true});
+  return identity.isFile()&&!identity.isSymbolicLink()&&identity.nlink===1n&&
+   now.isFile()&&!now.isSymbolicLink()&&now.nlink===1n&&
+   sameFile(identity,now)&&identity.mode===now.mode;
+ }catch{return false;}
+}
 /**
  * A cooperative path mutex cannot protect against an external process that
  * removes or replaces its directory. Before touching the selected original,
@@ -443,8 +453,13 @@ export async function restoreVerifiedOriginalNativeOnly(
   };
   const current=await verifyApprovedSourceFingerprint(sourceInput);
   if(current.status!=='MATCHED_READ_ONLY')return block('SOURCE_UNVERIFIED');
+  // Bind the independently selected ORIGINAL backup to its native identity
+  // before the first verification; identical replacement bytes are not it.
+  const originalBackupPath=join(opts.backupDirectory,opts.backupFileName);
+  const originalBackupIdentity=await lstat(originalBackupPath,{bigint:true});
   const backup=await verifyBackupRecoverySource(originalInput);
-  if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY')
+  if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
+     !await sameRecoveryInode(originalBackupPath,originalBackupIdentity))
    return block('BACKUP_UNVERIFIED');
 
   if(signal?.aborted)return block('CANCELLED');
@@ -456,6 +471,9 @@ export async function restoreVerifiedOriginalNativeOnly(
   });
   if(displaced.status!=='BACKUP_ONLY')
    return block('RECOVERY_SAFETY_FAILED');
+  // The newly retained DISPLACED version must remain the exact same backup.
+  const displacedBackupPath=join(opts.backupDirectory,displaced.backupFileName);
+  const displacedBackupIdentity=await lstat(displacedBackupPath,{bigint:true});
   const displacedInput={
    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
    backupFileName:displaced.backupFileName,
@@ -560,6 +578,12 @@ export async function restoreVerifiedOriginalNativeOnly(
    return block('BACKUP_UNVERIFIED');
   if(await verifyExactCandidateBytesReadOnly(pending,bytes)!=='MATCH')
    return block('RECOVERY_SAFETY_FAILED');
+  // Both independent versions must remain the verified native inodes BEFORE
+  // irreversible source rename. Neither digest alone proves that identity.
+  if(!await sameRecoveryInode(originalBackupPath,originalBackupIdentity))
+   return block('BACKUP_UNVERIFIED');
+  if(!await sameRecoveryInode(displacedBackupPath,displacedBackupIdentity))
+   return block('RECOVERY_SAFETY_FAILED');
   const lastSource=await lstat(opts.sourcePath,{bigint:true});
   if(!sameFile(sourceStart,lastSource))return block('SOURCE_UNVERIFIED');
   // The acquired path mutex might have been removed or replaced during
@@ -620,6 +644,9 @@ export async function restoreVerifiedOriginalNativeOnly(
   // cooperative, bounded check, not an exclusive Windows handle guarantee.
   // If it fails the source MAY already contain original bytes: leave both
   // recovery backups and the journal for explicit native reconciliation.
+  if(!await sameRecoveryInode(originalBackupPath,originalBackupIdentity)||
+     !await sameRecoveryInode(displacedBackupPath,displacedBackupIdentity))
+   return block('RECOVERY_SAFETY_FAILED');
   if(restored.status!=='MATCHED_READ_ONLY'||
      restoredMode.isSymbolicLink()||!restoredMode.isFile()||
      (restoredMode.mode&0o777n)!==(sourceStart.mode&0o777n)||
@@ -648,6 +675,9 @@ export async function restoreVerifiedOriginalNativeOnly(
    sourcePath:opts.sourcePath,expectedSha256:opts.expectedOriginalSha256,
    userApproved:true
   });
+  if(!await sameRecoveryInode(originalBackupPath,originalBackupIdentity)||
+     !await sameRecoveryInode(displacedBackupPath,displacedBackupIdentity))
+   return block('RECOVERY_SAFETY_FAILED');
   if(finalRestored.status!=='MATCHED_READ_ONLY')
    return block('RECOVERY_SAFETY_FAILED');
   const finalRestoredStat=await lstat(opts.sourcePath,{bigint:true});
@@ -788,6 +818,11 @@ export async function restoreVerifiedOriginalNativeOnly(
      !await stillOwnPublishedRestoreIntent(
       receiptJournal.path,publishedJournalIdentity,journalParentIdentity)||
      !await restorePathUnclaimed(lock))
+   return block('RECOVERY_SAFETY_FAILED');
+  // Final read-only receipt boundary after lock release and all awaits:
+  // do not return success for backup names now referring to new inodes.
+  if(!await sameRecoveryInode(originalBackupPath,originalBackupIdentity)||
+     !await sameRecoveryInode(displacedBackupPath,displacedBackupIdentity))
    return block('RECOVERY_SAFETY_FAILED');
   // Revocation can arrive after an irreversible source rename while
   // post-rename evidence is still being checked. Retain both backups and
