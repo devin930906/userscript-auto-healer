@@ -253,10 +253,12 @@ export function isCurrentManualDiagnosticSession(
   const fields=Object.getOwnPropertyDescriptors(session);
   const expiresAt=fields.expiresAt,isActive=fields.isActive;
   if(!expiresAt||!Object.prototype.hasOwnProperty.call(expiresAt,'value')||
-     !isActive||!Object.prototype.hasOwnProperty.call(isActive,'value')||
-     !Number.isSafeInteger(expiresAt.value)||expiresAt.value<0||
+     !isActive||!Object.prototype.hasOwnProperty.call(isActive,'value'))
+   return false;
+  const deadline:unknown=expiresAt.value;
+  if(typeof deadline!=='number'||!Number.isSafeInteger(deadline)||deadline<0||
      typeof isActive.value!=='function'||isProxy(isActive.value)||
-     Date.now()>=expiresAt.value)return false;
+     Date.now()>=deadline)return false;
   return isActive.value()===true;
  }catch{return false;}
 }
