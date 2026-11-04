@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {strict as assert} from 'node:assert';
 import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
-import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
+import {limitedScenarioHistoryKey,readLimitedSessionHistory,mergeLimitedSessionArchive} from '../../src/health/session-history';
 
 const A='a'.repeat(64), B='b'.repeat(64), E='e'.repeat(64);
 const stage=(session:DesktopScenarioSession,id:string,hash:string)=>{
@@ -751,4 +751,57 @@ test('TASK-015/TEST-024/026: read-only health archive refuses history while its 
    assert.deepEqual(restored.events,[{observedAtMs:1000,status:'ELEMENT_FOUND_ONLY'}]);
   }
  }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-015/TEST-024/026: same-tick conflicting archive evidence stays indeterminate after session merge',()=>{
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>1000);
+ assert.equal(stage(session,'same-tick',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'same-tick');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(session,history,'same-tick');
+ assert.equal(current.ok,true);
+ if(!current.ok)return;
+ assert.equal(current.currentStatus,'ELEMENT_FOUND_ONLY');
+ const archived={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:Object.freeze([{observedAtMs:1000,status:'INDETERMINATE' as const}]),
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merged=mergeLimitedSessionArchive(current,archived);
+ assert.equal(merged.archiveRetained,true);
+ assert.deepEqual(merged.events,[{observedAtMs:1000,status:'INDETERMINATE'}]);
+ assert.equal(merged.currentStatus,'INDETERMINATE',
+  'a same-clock-tick observation cannot promote an archived uncertain state');
+ assert.equal(merged.businessVerified,false);
+ assert.equal(merged.automaticPatchAllowed,false);
+});
+
+test('TASK-015/TEST-024: a strictly newer native observation may show limited DOM status without inheriting archive authority',()=>{
+ let clock=1000;
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>clock);
+ assert.equal(stage(session,'newer-tick',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'newer-tick');
+ clock=1001;
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(session,history,'newer-tick');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archived={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,currentStatus:'INDETERMINATE' as const,
+  events:Object.freeze([{observedAtMs:1000,status:'INDETERMINATE' as const}]),
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merged=mergeLimitedSessionArchive(current,archived);
+ assert.equal(merged.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.deepEqual(merged.events,[
+  {observedAtMs:1000,status:'INDETERMINATE'},
+  {observedAtMs:1001,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ assert.equal(merged.tampermonkeyVerified,false);
+ assert.equal(merged.businessVerified,false);
+ assert.equal(merged.automaticPatchAllowed,false);
 });

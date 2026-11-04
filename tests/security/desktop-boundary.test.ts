@@ -435,7 +435,9 @@ test('TASK-015/017 TEST-024/026: native-only archive has no arbitrary renderer p
  assert.match(main,/ipcMain\.handle\('scenario:history',async\(event,id:unknown\)=>/);
  assert.match(main,/readLimitedHealthArchive\(app\.getPath\('userData'\),key\)/);
  assert.match(main,/saveLimitedHealthArchive\(app\.getPath\('userData'\),snapshot\)/);
- assert.match(main,/archiveRetained:true/);
+ assert.match(main,/mergeLimitedSessionArchive\(current,stored\)/);
+ const history=readFileSync(join(process.cwd(),'src/health/session-history.ts'),'utf8');
+ assert.match(history,/archiveRetained:true/);
  assert.match(main,/重新启动后历史不会成为当前健康认证/);
  assert.match(ui,/本机持久的未验证历史/);
  assert.match(preload,/readScenarioHistory: \(id: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:history',id\)/);

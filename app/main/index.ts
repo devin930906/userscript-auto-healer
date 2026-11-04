@@ -25,7 +25,7 @@ import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exce
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
 import {readLimitedHealthArchive,saveLimitedHealthArchive} from '../../src/health/limited-health-archive';
-import {limitedScenarioHistoryKey,readLimitedSessionHistory} from '../../src/health/session-history';
+import {limitedScenarioHistoryKey,readLimitedSessionHistory,mergeLimitedSessionArchive} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
@@ -1015,14 +1015,7 @@ function registerSafeIpc(): void {
       if(stored.status==='BLOCKED')return current.events.length?current:
         {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};
       if(stored.status!=='ARCHIVE_READ_UNVERIFIED')return current;
-      const oldLast=stored.events[stored.events.length-1].observedAtMs;
-      const recent=current.events.filter(event=>event.observedAtMs>oldLast);
-      const events=Object.freeze([...stored.events,...recent].slice(-32).map(
-        event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
-      const currentLast=current.events[current.events.length-1]?.observedAtMs;
-      const currentStatus=currentLast!==undefined&&currentLast>=oldLast?
-        current.currentStatus:'INDETERMINATE' as const;
-      return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
+      return mergeLimitedSessionArchive(current,stored);
     }catch{return current.events.length?current:
       {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};}
   });
