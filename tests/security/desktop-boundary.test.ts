@@ -498,3 +498,28 @@ test('TASK-007/011 / TEST-017/018/020/023: real isolated manager handoff require
  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('restore:checkpoint-apply'/);
 });
+
+test('TASK-015/017 TEST-024/026: bounded scheduled read-only rechecks preserve native consent and opt-in UI',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.match(html,/<button id="scenario-recheck-start" type="button" disabled>/);
+ assert.match(html,/<button id="scenario-recheck-stop" type="button" disabled>/);
+ assert.match(html,/id="scenario-recheck-status" role="status" aria-live="polite"/);
+ assert.match(html,/每轮重新授权/);
+ assert.match(ui,/const RECHECK_MAX_ROUNDS=3/);
+ assert.match(ui,/const RECHECK_INTERVAL_MS=60_000/);
+ assert.match(ui,/for\(let round=1;round<=RECHECK_MAX_ROUNDS;round\+\+\)/);
+ assert.match(ui,/result=await window\.healer\.inspectScenario\(id\)/);
+ assert.match(ui,/if\(!result\.ok\|\|result\.status!=='LIMITED_DOM_SIGNAL_ONLY'\)/);
+ assert.match(ui,/if\(round<RECHECK_MAX_ROUNDS\)await waitRecheckInterval\(\)/);
+ assert.match(ui,/revokeBoundedRechecks\(\)/);
+ assert.match(ui,/window\.healer\.cancelScenarioInspection\(\)/);
+ assert.match(main,/ipcMain\.handle\('scenario:inspect',async\(event,id:unknown\)=>/);
+ assert.match(main,/const consent=await dialog\.showMessageBox\(win,/);
+ assert.match(main,/consent\.response!==0\|\|controller\.signal\.aborted/);
+ assert.match(preload,/inspectScenario: \(id: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:inspect',id\)/);
+ assert.doesNotMatch(preload,/scenario:recheck|recheckPlan/);
+ assert.doesNotMatch(ui,/automaticPatchAllowed\s*:\s*true|businessVerified\s*:\s*true/);
+});
