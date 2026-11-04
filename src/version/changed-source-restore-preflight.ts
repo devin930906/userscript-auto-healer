@@ -161,9 +161,12 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
    return deny('RECOVERY_REVIEW_REQUIRED');
   const sourceBefore=await lstat(options.sourcePath,{bigint:true});
   const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
+  const backupBefore=await lstat(join(options.backupDirectory,options.backupFileName),{bigint:true});
   if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
      sourceBefore.nlink!==1n||!directoryBefore.isDirectory()||
      directoryBefore.isSymbolicLink())return deny('UNSAFE_PATH');
+  if(!backupBefore.isFile()||backupBefore.isSymbolicLink()||backupBefore.nlink!==1n)
+   return deny('BACKUP_UNVERIFIED');
   const before=await verifyApprovedSourceFingerprint(sourceInput);
   if(before.status!=='MATCHED_READ_ONLY')return deny('SOURCE_UNVERIFIED');
   const verifiedBackup=await verifyBackupRecoverySource(backupInput);
@@ -183,12 +186,19 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
    return deny('UNSAFE_PATH');
   const sourceAfter=await lstat(options.sourcePath,{bigint:true});
   const directoryAfter=await lstat(options.backupDirectory,{bigint:true});
+  const backupAfter=await lstat(join(options.backupDirectory,options.backupFileName),{bigint:true});
   if(!sourceAfter.isFile()||sourceAfter.isSymbolicLink()||
      sourceAfter.nlink!==1n||!sameSource(sourceBefore,sourceAfter))
    return deny('SOURCE_UNVERIFIED');
   if(!directoryAfter.isDirectory()||directoryAfter.isSymbolicLink()||
      !sameDirectory(directoryBefore,directoryAfter))
    return deny('UNSAFE_PATH');
+  // Identical backup bytes on a DIFFERENT inode are not the selected
+  // independently verified recovery source. Hash-only checks can miss a
+  // same-content rename/recreate during two awaited verification reads.
+  if(!backupAfter.isFile()||backupAfter.isSymbolicLink()||
+     backupAfter.nlink!==1n||!sameSource(backupBefore,backupAfter))
+   return deny('BACKUP_UNVERIFIED');
   // A different restore may stage a crash artifact while the independent
   // source and backup rechecks await I/O. Revalidate before a clean receipt;
   // this remains observational and never permits automated writes.
