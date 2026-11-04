@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       matrix_case:
-        description: 'Select a single approved diagnostic case, or preserve the full 16-case matrix'
+        description: 'Select an approved focused case, original/candidate pair, or full 16-case matrix'
         required: true
         type: choice
         default: all
