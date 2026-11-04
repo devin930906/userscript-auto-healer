@@ -1,5 +1,15 @@
 # 开发代理约束
 
+
+## 2026-11-05 新版（4）/（7）界面专项接入（补充现行迁移）
+
+- 新提交的新版（4）/（7）相较仓库 2026-11-02 已完成的迁移，增加 **Impeccable Web** 作为适用 UI/UX 设计与体验质量专项。GitHub 插件（远端操作首选）、GitHub MCP（必要补充）、Superpowers（开发和验证流程）、ECC Web（技术专项）原有职责不变；Impeccable Web 只在实际界面任务中参与源码/视觉/交互分析，不独立取得仓库写入或真实 Windows 运行权限。
+- 现有 Electron/TypeScript GUI 源码位于 `app/ui/index.html`、`app/ui/index.ts`；涉及主进程/预加载器的改动须维持 `app/main/index.ts`、`app/preload/index.ts` 的权限隔离。优先继承 `docs/05-experience.md` 与已有代码/TEST/GATE，不把缺少 `PRODUCT.md`、`DESIGN.md` 判为必须重建界面的理由。
+- 相关正式任务继续采用 `TASK-017` / [Issue #607](https://github.com/devin930906/userscript-auto-healer/issues/607)；必要时关联已有导入、Chrome、备份/恢复及安全 TASK。严禁另建平行 UI 需求/规划/Issues、扩大自动修复权限、仅为美化而把未批准功能加入 Stable。
+- 有 GUI 变更时可按需使用 Impeccable Web 的 `critique`、`audit`、`harden`、`clarify`、`layout`、`adapt` 或适用的其他当前技能。必须分清：静态源码分析、实际代码更改、CI 结果、真实 Windows/Electron 交互和最终人工 UI 验收；未执行的项目不能记为通过。
+- 本补充仅落实最新版指令中的 UI/UX 协作与资料续接，不撤销以下 2026-11-02 **无 Issue 独占锁**规则，不改变已批准 REQ/NFR/ADR/RISK/TEST/GATE/TASK、分支与 PR/Required Checks、EXE + 真 ZIP 或最终集中人工验证要求。迁移依据见 `docs/19-stable-v7-migration.md`。
+
+
 ## 2026-11-02 现行新版（4）/（7）无 Issue 独占锁迁移（优先于以下旧协调流程）
 
 - 用户已指定新版（4）与新版（7）作为今后的执行规则。历史（4）有条件准入和已有产品代码仍有效，不重建 TASK/REQ/TEST/GATE，不回退已合并功能，也不把历史治理实验证据标记为失败。
