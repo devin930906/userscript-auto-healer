@@ -114,7 +114,7 @@ function parseDefinition(input:unknown):CompatibilityVersion {
       keys.has(binding.key)||typeof binding.selector!=='string'||
       binding.selector.length===0||binding.selector.length>256||
       binding.selector.trim()!==binding.selector||
-      /[\x00-\x1f\x7f]/.test(binding.selector)||
+      // Reject invisible line and bidirectional formatting controls so a\n      // shared selector cannot be visually disguised in an offline review.\n      /[\x00-\x1f\x7f\u2028-\u202e\u2066-\u2069]/.test(binding.selector)||
       !Number.isSafeInteger(binding.attempts)||
       (binding.attempts as number)<1||(binding.attempts as number)>5||
       !Number.isSafeInteger(binding.delayMs)||
