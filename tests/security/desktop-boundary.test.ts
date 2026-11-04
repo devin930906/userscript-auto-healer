@@ -536,3 +536,25 @@ test('TASK-015/017 TEST-024/026: stopping owned Chrome revokes pending scheduled
   handler.indexOf('window.healer.stopBrowser()'),
   'recheck schedule must be revoked before awaiting a native browser stop result');
 });
+
+test('TASK-015/017 TEST-024/026: pending Chrome stop cannot re-enable a new native observation',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const controls=ui.slice(ui.indexOf('function browserControls():void{'),
+  ui.indexOf('async function browserAction('));
+ assert.match(controls,/const controlsBusy=browserBusy\|\|stopInProgress;/,
+  'pending browser shutdown must keep all new browser action controls disabled');
+ for(const name of ['launchButton','inspectButton','scenarioInspectButton',
+  'scenarioRecheckStartButton','gmStartButton']){
+  const section=controls.slice(controls.indexOf('if('+name+')'),controls.indexOf('if('+name+')')+180);
+  assert.match(section,/controlsBusy/,
+   name+' must stay disabled when recheck finally clears browserBusy before native stop returns');
+ }
+ const browserAction=ui.slice(ui.indexOf('async function browserAction('),
+  ui.indexOf("scenarioHistoryButton?.addEventListener"));
+ assert.match(browserAction,/if\(browserBusy\|\|stopInProgress\)return;/,
+  'event delivery must not bypass disabled DOM controls during pending stop');
+ const recheckStart=ui.slice(ui.indexOf("scenarioRecheckStartButton?.addEventListener('click'"),
+  ui.indexOf("scenarioRecheckStopButton?.addEventListener"));
+ assert.match(recheckStart,/if\(recheckRunning\|\|browserBusy\|\|stopInProgress\|\|!browserConnected\)return;/,
+  'a recheck cannot be restarted while browser stop IPC has not settled');
+});
