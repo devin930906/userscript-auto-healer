@@ -6,6 +6,7 @@
 import {createHash} from 'node:crypto';
 import {DesktopScenarioSession} from '../scenarios/desktop-session';
 import {LimitedHealthRegistry,type LimitedHealthStatus} from './health-registry';
+import type {ArchiveRead} from './limited-health-archive';
 
 const noAuthority=Object.freeze({
  tampermonkeyVerified:false as const,
@@ -56,4 +57,23 @@ export function readLimitedSessionHistory(
   return Object.freeze({ok:false as const,
     code:'HISTORY_UNAVAILABLE' as const,...noAuthority});
  }
+}
+
+/** TASK-015 / TEST-024: Merge separately persisted, always-unverified
+ * historical observations with this window's limited in-memory history.
+ * A matching timestamp is not proof of a newly observed session event:
+ * this helper does not grant any business, manager or recovery authority.
+ */
+export function mergeLimitedSessionArchive(
+ current:Extract<LimitedHistoryView,{ok:true}>,
+ stored:Extract<ArchiveRead,{status:'ARCHIVE_READ_UNVERIFIED'}>
+):Extract<LimitedHistoryView,{ok:true}>&Readonly<{archiveRetained:true}>{
+ const oldLast=stored.events[stored.events.length-1].observedAtMs;
+ const recent=current.events.filter(event=>event.observedAtMs>oldLast);
+ const events=Object.freeze([...stored.events,...recent].slice(-32).map(
+  event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
+ const currentLast=current.events[current.events.length-1]?.observedAtMs;
+ const currentStatus=currentLast!==undefined&&currentLast>=oldLast?
+  current.currentStatus:'INDETERMINATE' as const;
+ return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
 }
