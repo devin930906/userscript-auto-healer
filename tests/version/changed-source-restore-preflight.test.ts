@@ -301,3 +301,36 @@ test('TASK-011/TEST-020/026: native inode source mutex blocks changed-source rec
    'read-only preflight must not remove a live or stranded native inode mutex');
  });
 });
+
+test('TASK-011/TEST-020/026: identical backup bytes on a new inode cannot pass preflight',async()=>{
+ await fixture(async ({sourcePath,backupDirectory,opts})=>{
+  const backupPath=join(backupDirectory,opts.backupFileName);
+  const before=await lstat(backupPath,{bigint:true});
+  const recovery=require('../../src/version/recovery-source') as typeof import('../../src/version/recovery-source');
+  const originalVerify=recovery.verifyBackupRecoverySource;
+  let calls=0;
+  (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=async input=>{
+   calls++;
+   if(calls===2){
+    await rename(backupPath,backupPath+'.old');
+    await writeFile(backupPath,source,'utf8');
+   }
+   return originalVerify(input);
+  };
+  try{
+   const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+   assert.equal(calls,2,'fixture must replace backup between independent checks');
+   const after=await lstat(backupPath,{bigint:true});
+   assert.notEqual(after.ino,before.ino,'replacement must be a distinct backup inode');
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_UNVERIFIED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(await readFile(sourcePath,'utf8'),changed);
+   assert.equal(await readFile(backupPath,'utf8'),source);
+   assert.equal(await readFile(backupPath+'.old','utf8'),source);
+  }finally{
+   (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=originalVerify;
+  }
+ });
+});
