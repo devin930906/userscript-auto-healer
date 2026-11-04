@@ -850,3 +850,34 @@ test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrar
  assert.ok(Object.isFrozen(merged.events[0]));
  assert.equal(JSON.stringify(merged).includes('PRIVATE_SCRIPT_BYTES'),false);
 });
+
+test('TASK-015/TEST-024/026: forged newer current health status never gains verification authority',()=>{
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>3001);
+ assert.equal(stage(session,'status-boundary',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'status-boundary');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const view=readLimitedSessionHistory(session,history,'status-boundary');
+ if(!view.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archived={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,currentStatus:'INDETERMINATE' as const,
+  events:Object.freeze([{observedAtMs:3000,status:'INDETERMINATE' as const}]),
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ // TypeScript view types alone cannot reject forged status at runtime.
+ for(const forgedStatus of ['RECOVERED_VERIFIED','BROKEN_VERIFIED','UNTESTED'] as const){
+  const input={...view,currentStatus:forgedStatus} as unknown as typeof view;
+  const merged=mergeLimitedSessionArchive(input,archived);
+  assert.equal(merged.currentStatus,'INDETERMINATE',forgedStatus);
+  assert.equal(merged.businessVerified,false);
+  assert.equal(merged.tampermonkeyVerified,false);
+  assert.equal(merged.automaticPatchAllowed,false);
+  assert.equal(merged.automaticRollbackAllowed,false);
+  assert.equal(JSON.stringify(merged).includes(forgedStatus),false);
+  assert.equal(merged.events[1]?.status,'ELEMENT_FOUND_ONLY');
+ }
+ // Real post-restart native DOM observation is still permitted, unverified.
+ assert.equal(mergeLimitedSessionArchive(view,archived).currentStatus,
+  'ELEMENT_FOUND_ONLY');
+});
