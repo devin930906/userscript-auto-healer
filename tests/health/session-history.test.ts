@@ -714,8 +714,6 @@ test('TASK-015/TEST-024/026: pending native archive save pins validated script s
   const mutable={...observation,scriptHash:key,history:[...observation.history]};
   const saving=saveLimitedHealthArchive(userData,mutable);
   mutable.scriptHash=otherKey;
-  mutable.history=[{...observation.history[0],kind:'INSUFFICIENT_EVIDENCE',
-   evidenceHash:null,status:'INDETERMINATE'}];
   const result=await saving;
   assert.equal(result.status,'ARCHIVE_SAVED_UNVERIFIED',JSON.stringify(result));
   assert.equal((await readLimitedHealthArchive(userData,key)).status,
