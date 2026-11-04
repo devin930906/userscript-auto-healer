@@ -558,3 +558,10 @@ test('TASK-015/017 TEST-024/026: pending Chrome stop cannot re-enable a new nati
  assert.match(recheckStart,/if\(recheckRunning\|\|browserBusy\|\|stopInProgress\|\|!browserConnected\)return;/,
   'a recheck cannot be restarted while browser stop IPC has not settled');
 });
+
+
+test('TASK-017/TEST-022: destructive restore control exposes its local risk explanation', () => {
+  const html = readFileSync(join(__dirname, '..', '..', '..', 'app', 'ui', 'index.html'), 'utf8');
+  assert.match(html, /<p\s+id="manual-restore-risk"[^>]*>[^<]*将严格比对两者身份与字节/);
+  assert.match(html, /<button\s+id="restore-manual-original"\s+type="button"\s+aria-describedby="manual-restore-risk"/);
+});
