@@ -201,3 +201,26 @@ test('TASK-011/TEST-020/021: relocated backup cannot pass changed-source restore
   assert.deepEqual((await readdir(root)).sort(),before.sort());
  });
 });
+
+
+test('TASK-011/TEST-020/021: interrupted native restore staging blocks read-only preflight',async()=>{
+ for(const location of ['source-parent','recovery-store'] as const){
+  await fixture(async ({root,sourcePath,backupDirectory,opts})=>{
+   const pending=join(location==='source-parent'?root:backupDirectory,
+    '.uah-restore-12345678-1234-4123-8123-123456789abc.pending');
+   await writeFile(pending,'interrupted native recovery evidence');
+   const before=await readFile(pending);
+   const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+   assert.equal(result.status,'BLOCKED',JSON.stringify({location,result}));
+   if(result.status==='BLOCKED')
+    assert.equal(result.reason,'RECOVERY_REVIEW_REQUIRED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.businessVerified,false);
+   assert.equal(await readFile(sourcePath,'utf8'),changed);
+   assert.deepEqual(await readFile(pending),before,
+    'a read-only preflight must preserve crash evidence for manual review');
+   assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
+  });
+ }
+});
