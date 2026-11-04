@@ -7,7 +7,7 @@ import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
-import { openApprovedTarget } from '../../src/browser/cdp-target';
+import { openApprovedTarget, type TargetNavigationStage } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
@@ -642,6 +642,47 @@ test('TEST-006: executable masquerading as Chrome cannot be launched',async t=>{
   assert.deepEqual(await launchApprovedIsolatedChrome(config(executable,profile,port),
     {userApproved:true}),{ok:false,code:'BINARY_NOT_VERIFIED'});
 });
+/** Fixed-label, capped target lifecycle receipt for intermittent TEST-013
+ * navigation failures. No URL, target ID, tab content or native error text.
+ * This is CI diagnostics only: it cannot authorize or retry a target.
+ */
+function createBoundedTargetNavigationStageCounts(){
+ const permitted=new Set<TargetNavigationStage>([
+  'TAB_CREATED','TAB_CREATION_FAILED',
+  'LIST_TRANSPORT_FAILED','LIST_INVALID','LIST_NOT_MATCHED',
+  'TARGET_ID_MISMATCH','MAIN_FRAME_PENDING','MAIN_FRAME_CONFIRMED',
+  'MAIN_FRAME_ABOUT_BLANK','MAIN_FRAME_MISSING_URL',
+  'MAIN_FRAME_INVALID_URL','MAIN_FRAME_URL_MISMATCH',
+  'MAIN_FRAME_CDP_REJECTED','MAIN_FRAME_RESPONSE_INVALID',
+  'MAIN_FRAME_SOCKET_PENDING','MAIN_FRAME_RECEIPT_PENDING',
+  'MAIN_FRAME_TRANSPORT_FAILED','UNVERIFIED_TAB_CLOSED',
+  'UNVERIFIED_TAB_CLEANUP_UNCONFIRMED'
+ ]);
+ const counts:Partial<Record<TargetNavigationStage,number>>=Object.create(null);
+ return {
+  observe(stage:unknown):void{
+   if(typeof stage!=='string'||!permitted.has(stage as TargetNavigationStage))return;
+   const key=stage as TargetNavigationStage;
+   counts[key]=Math.min(99,(counts[key]??0)+1);
+  },
+  summary():string{return JSON.stringify(counts);}
+ };
+}
+
+test('TASK-008/TEST-013: target stage diagnostics only emit capped fixed labels',()=>{
+ const stages=createBoundedTargetNavigationStageCounts();
+ stages.observe('TAB_CREATED');
+ for(let i=0;i<150;i++)stages.observe('MAIN_FRAME_SOCKET_PENDING');
+ for(const unsafe of ['PRIVATE_URL=https://secret.invalid/','LIST_TRANSPORT_FAILED:12345',
+   {toString(){throw Error('LEAK');}},null,undefined]){
+  stages.observe(unsafe);
+ }
+ assert.equal(stages.summary(),
+  '{"TAB_CREATED":1,"MAIN_FRAME_SOCKET_PENDING":99}');
+ assert.equal(stages.summary().includes('secret.invalid'),false);
+ assert.equal(stages.summary().includes('12345'),false);
+});
+
 test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',async t=>{
   if(process.platform!=='win32')return;
   let chrome:string|undefined;
@@ -795,8 +836,16 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const site='http://127.0.0.1:'+address.port+'/';
     assert.deepEqual(await openApprovedTarget(result,site,false),
       {ok:false,code:'NOT_AUTHORIZED'});
-    const target=await openApprovedTarget(result,site,true);
+    const targetStages=createBoundedTargetNavigationStageCounts();
+    const target=await openApprovedTarget(result,site,true,undefined,
+      stage=>targetStages.observe(stage));
+    if(!target.ok)
+      t.diagnostic('CDP_TARGET_NAV_STAGE_COUNTS='+targetStages.summary());
     assert.equal(target.ok,true,JSON.stringify(target));
+    assert.ok(targetStages.summary().includes('"TAB_CREATED":1'),
+      'owned target creation must have a fixed diagnostic stage');
+    assert.ok(targetStages.summary().includes('"MAIN_FRAME_CONFIRMED":1'),
+      'successful target must confirm the main frame without retrying navigation');
     if(target.ok){
       assert.equal(target.status,'TARGET_ID_AND_URL_MATCH_ONLY');
       assert.equal(target.businessVerified,false);
