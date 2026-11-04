@@ -461,3 +461,41 @@ test('TASK-012/TEST-023: manual export refuses the original script directory wit
    'the original userscript must retain its exact bytes');
  });
 });
+
+test('TASK-012/TEST-023/026: cancel during recovery pending verification retains reviewed export only',async()=>{
+ await fixture(async options=>{
+  const {staged}=await stage(options);
+  if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+  const controller=new AbortController();
+  const bytesApi=require('../../src/version/candidate-bytes') as
+   typeof import('../../src/version/candidate-bytes');
+  const original=bytesApi.verifyExactCandidateBytesReadOnly;
+  let recoveryPendingChecked=false;
+  const hook=mock.method(bytesApi,'verifyExactCandidateBytesReadOnly',
+   async(...args:Parameters<typeof original>)=>{
+    const result=await original(...args);
+    const pathname=String(args[0]);
+    if(!recoveryPendingChecked&&pathname.endsWith('.pending')&&
+       result==='MATCH'&&digest(await readFile(pathname))===digest(source)){
+      recoveryPendingChecked=true;
+      controller.abort();
+    }
+    return result;
+   });
+  try{
+   const result=await exportReviewedCandidateForManualInstall(
+    request,staged,options,controller.signal);
+   assert.equal(recoveryPendingChecked,true,'recovery pending file must be independently checked');
+   assert.equal(result.status,'BLOCKED');
+   if(result.status==='BLOCKED')assert.equal(result.reason,'CANCELLED');
+   const files=await readdir(options.exportDirectory);
+   assert.equal(files.filter(name=>name.startsWith('UAH-Reviewed-')).length,1,
+    'already published reviewed candidate is not silently deleted');
+   assert.equal(files.filter(name=>name.startsWith('UAH-Original-')).length,0,
+    'cancelled recovery file is never published');
+   assert.equal(files.some(name=>name.endsWith('.pending')),false,
+    'owned unpublished recovery staging is retired');
+   assert.equal(await readFile(options.sourcePath,'utf8'),source);
+  }finally{hook.mock.restore();}
+ });
+});
