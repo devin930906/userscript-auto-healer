@@ -197,7 +197,14 @@ test('TASK-005/TEST-006/008/009/026: profile readiness evidence is bounded, mono
 function redactedLocalListenerFromNetstat(output:unknown,port:number):'0'|'1'|'?'{
   if(typeof output!=='string'||!Number.isInteger(port)||port<1024||port>65535)
     return '?';
-  return parseWindowsLoopbackListeners(output,port).length?'1':'0';
+  // An empty/truncated/unrecognizable netstat receipt cannot prove that
+  // the loopback listener is absent. This is CI diagnosis, not CDP authority.
+  if(!output.split(/\r?\n/).some(line=>
+    /^\s*TCP\s+\S+\s+\S+\s+\S+\s+\d+\s*$/i.test(line)))return '?';
+  const pids=parseWindowsLoopbackListeners(output,port);
+  // Invalid listener PID fields cannot become a confident presence signal.
+  if(pids.some(pid=>!Number.isSafeInteger(pid)||pid<1))return '?';
+  return pids.length?'1':'0';
 }
 async function readTestOnlyLocalListenerPresence(port:number):Promise<'0'|'1'|'?'>{
   if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true')return '?';
@@ -235,6 +242,13 @@ test('TASK-005/TEST-006/008/009: CI listener evidence reveals only bounded 0/1/?
     '  TCP 0.0.0.0:54321 0.0.0.0:0 LISTENING 987654',port),'0');
   assert.equal(redactedLocalListenerFromNetstat(matched,0),'?');
   assert.equal(redactedLocalListenerFromNetstat({},port),'?');
+  assert.equal(redactedLocalListenerFromNetstat('',port),'?',
+    'empty netstat output is an inconclusive diagnostic, not no listener');
+  assert.equal(redactedLocalListenerFromNetstat('unexpected tool output',port),'?',
+    'unrecognizable output must not be interpreted as a negative listener probe');
+  assert.equal(redactedLocalListenerFromNetstat(
+    '  TCP    127.0.0.1:54321   0.0.0.0:0   LISTENING  invalid-pid',port),'?',
+    'malformed listener identity must remain unknown');
   const timeline=createBoundedListenerPresenceTimeline();
   timeline.observe(0,'0');
   timeline.observe(300,'0');
