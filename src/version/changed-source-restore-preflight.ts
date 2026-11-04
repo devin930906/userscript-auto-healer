@@ -8,15 +8,29 @@
  * restore must hold its own transaction lock and revalidate every byte.
  * Native-only: no arbitrary filesystem path IPC is provided to the renderer.
  */
+import {createHash} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import {types as utilTypes} from 'node:util';
 import {lstat} from 'node:fs/promises';
-import {basename,dirname,isAbsolute} from 'node:path';
+import {basename,dirname,isAbsolute,join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
 import {verifyBackupRecoverySource} from './recovery-source';
 import {hasUnsafePathLink} from './path-boundary';
 import {hasInterruptedRestoreStaging} from './restore-staging-residue';
+import {hasPriorPublishedRestoreIntentForSource} from './restore-intent-inspection';
+
+/** A cooperating restore may hold this path mutex without leaving any
+ * .pending residue. A stranded mutex is deliberate manual-review evidence.
+ * This observational check is not an exclusive OS reservation.
+ */
+async function nativeRestorePathMutexPresent(sourcePath:string):Promise<boolean>{
+ const identity=process.platform==='win32'?sourcePath.toLowerCase():sourcePath;
+ const path=join(dirname(sourcePath),'.uah-restore-path-'+
+  createHash('sha256').update(identity,'utf8').digest('hex'));
+ try{await lstat(path);return true;}
+ catch(error){return (error as NodeJS.ErrnoException).code!=='ENOENT';}
+}
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
  'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'UNSAFE_PATH'|'RECOVERY_REVIEW_REQUIRED'|'IO_FAILURE';
@@ -119,6 +133,12 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
        undefined,undefined,'source-parent')||
      await hasInterruptedRestoreStaging(options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
+  // A valid published intent or an outstanding same-source native mutex
+  // requires manual reconciliation even when both source and backup match.
+  if(await nativeRestorePathMutexPresent(options.sourcePath)||
+     await hasPriorPublishedRestoreIntentForSource(
+      options.sourcePath,options.backupDirectory))
+   return deny('RECOVERY_REVIEW_REQUIRED');
   const sourceBefore=await lstat(options.sourcePath,{bigint:true});
   const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
   if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
@@ -155,6 +175,13 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   if(await hasInterruptedRestoreStaging(dirname(options.sourcePath),
        undefined,undefined,'source-parent')||
      await hasInterruptedRestoreStaging(options.backupDirectory))
+   return deny('RECOVERY_REVIEW_REQUIRED');
+  // Earlier backup/source awaits can overlap a new native restore that
+  // acquires the mutex or publishes a journal without leaving .pending.
+  // Never issue a stale clean observation in that case.
+  if(await nativeRestorePathMutexPresent(options.sourcePath)||
+     await hasPriorPublishedRestoreIntentForSource(
+      options.sourcePath,options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
   return Object.freeze({
    status:'RESTORE_PREFLIGHT_READ_ONLY' as const,

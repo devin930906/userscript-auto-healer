@@ -1,6 +1,9 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
+import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
+import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
 import {link,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -223,4 +226,57 @@ test('TASK-011/TEST-020/021: interrupted native restore staging blocks read-only
    assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
   });
  }
+});
+
+test('TASK-011/TEST-020/021: an occupied native restore path mutex blocks read-only preflight',async()=>{
+ await fixture(async ({root,sourcePath,backupDirectory,opts})=>{
+  const key=sha(process.platform==='win32'?sourcePath.toLowerCase():sourcePath);
+  const lock=join(root,'.uah-restore-path-'+key);
+  await mkdir(lock);
+  const before=await readdir(root);
+  const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'RECOVERY_REVIEW_REQUIRED');
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.deepEqual((await readdir(root)).sort(),before.sort());
+  assert.equal(await readFile(sourcePath,'utf8'),changed);
+  assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
+ });
+});
+
+test('TASK-011/TEST-020/021: existing published same-source restore intent blocks preflight',async()=>{
+ await fixture(async ({sourcePath,backupDirectory,opts})=>{
+  const displaced=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(changed),userApproved:true
+  });
+  assert.equal(displaced.status,'BACKUP_ONLY',JSON.stringify(displaced));
+  if(displaced.status!=='BACKUP_ONLY')return;
+  const journalPath=join(backupDirectory,
+   '.uah-restore-12345678-1234-4123-8123-123456789abc.journal.json');
+  const journal=JSON.stringify({
+   schema:1,state:'RESTORE_INTENT_UNVERIFIED',
+   sourcePathSha256:sha(sourcePath),
+   originalSha256:sha(source),displacedSha256:sha(changed),
+   originalBackupFileName:opts.backupFileName,
+   displacedBackupFileName:displaced.backupFileName,
+   automaticPatchAllowed:false,automaticRollbackAllowed:false
+  })+'\n';
+  await writeFile(journalPath,journal,'utf8');
+  assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journalPath),true,
+   'fixture must represent a canonical published native restore intent');
+  assert.equal(await hasInterruptedRestoreStaging(backupDirectory),false,
+   'existing staging scan must not treat a valid journal as pending residue');
+  const entries=await readdir(backupDirectory);
+  const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+  assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+  if(result.status==='BLOCKED')assert.equal(result.reason,'RECOVERY_REVIEW_REQUIRED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(await readFile(journalPath,'utf8'),journal);
+  assert.equal(await readFile(sourcePath,'utf8'),changed);
+  assert.equal(await readFile(join(backupDirectory,opts.backupFileName),'utf8'),source);
+  assert.equal(await readFile(join(backupDirectory,displaced.backupFileName),'utf8'),changed);
+  assert.deepEqual((await readdir(backupDirectory)).sort(),entries.sort());
+ });
 });
