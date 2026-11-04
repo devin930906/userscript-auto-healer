@@ -40,6 +40,26 @@ test('TEST-009: requested tab shape is not a verified owned session',()=>{
     assert.equal(result.targetId,pageId);
   }
 });
+test('TASK-008/TEST-009/013/026: CDP list URL must not silently normalize to approved target',()=>{
+  // Chrome's target inventory is a structure-only navigation hint, never a
+  // replacement for an exact raw approved URL or a main-frame receipt.
+  const malformed=[
+    ' '+testPage.url,
+    testPage.url+' ',
+    'https://exam\nple.com/authorized-test',
+    'https://example.com\\authorized-test',
+    testPage.url+'\u0000'
+  ];
+  for(const raw of malformed){
+    const forged={...testPage,url:raw};
+    const inspected=inspectCdpTargetList([forged],9223,testPage.url,pageId);
+    assert.deepEqual(inspected,{ok:false,code:'TARGET_NOT_FOUND'},
+      'parser-normalized CDP strings cannot be considered a created tab match');
+  }
+  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true,
+    'valid exact CDP target inventory still works');
+});
+
 test('TEST-009: a newly created target ID is selectable despite a pre-existing identical URL tab',()=>{
   // An ordinary owned Chrome can already contain another tab at the same URL.
   // The target ID is returned by this specific Target.createTarget command,
