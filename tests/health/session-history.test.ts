@@ -724,3 +724,31 @@ test('TASK-015/TEST-024/026: pending native archive save pins validated script s
    ['health-'+key+'.json']);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('TASK-015/TEST-024/026: read-only health archive refuses history while its native save mutex is present',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-archive-read-lock-'));
+ const userData=join(home,'user-data');
+ const key=limitedScenarioHistoryKey(A,'lock-scenario');
+ try{
+  await mkdir(userData);
+  const registry=new LimitedHealthRegistry(()=>1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED');
+  const lock=join(userData,'limited-health-history-v1','.health-'+key+'.lock');
+  await mkdir(lock);
+  const during=await readLimitedHealthArchive(userData,key);
+  assert.equal(during.status,'BLOCKED',JSON.stringify(during));
+  assert.equal(during.automaticPatchAllowed,false);
+  assert.equal(during.businessVerified,false);
+  await rm(lock,{recursive:false});
+  const restored=await readLimitedHealthArchive(userData,key);
+  assert.equal(restored.status,'ARCHIVE_READ_UNVERIFIED');
+  if(restored.status==='ARCHIVE_READ_UNVERIFIED'){
+   assert.equal(restored.currentStatus,'INDETERMINATE');
+   assert.deepEqual(restored.events,[{observedAtMs:1000,status:'ELEMENT_FOUND_ONLY'}]);
+  }
+ }finally{await rm(home,{recursive:true,force:true});}
+});
