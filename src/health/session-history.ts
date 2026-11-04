@@ -73,7 +73,9 @@ export function mergeLimitedSessionArchive(
  const events=Object.freeze([...stored.events,...recent].slice(-32).map(
   event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
  const currentLast=current.events[current.events.length-1]?.observedAtMs;
- const currentStatus=currentLast!==undefined&&currentLast>=oldLast?
+ // Equal timestamps cannot establish ordering across a retained archive and
+ // this independent session. Never promote an archived INDETERMINATE row.
+ const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   current.currentStatus:'INDETERMINATE' as const;
  return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
 }
