@@ -25,6 +25,13 @@ test('TEST-009: spoofed or non-loopback CDP addresses rejected',()=>{
 });
 
 
+test('TASK-018/TEST-009/026: browser websocket path dot-segments cannot silently normalize',()=>{
+  const forged=envelope.webSocketDebuggerUrl.replace('/devtools/','/hidden/../devtools/');
+  assert.deepEqual(inspectCdpVersion({...envelope,webSocketDebuggerUrl:forged},9223),
+    {ok:false,code:'UNSAFE_WEBSOCKET'});
+  assert.equal(inspectCdpVersion(envelope,9223).ok,true);
+});
+
 test('TASK-018/TEST-009/026: reject parser-normalized CDP browser websocket URLs',()=>{
   const url=envelope.webSocketDebuggerUrl;
   for(const forged of [
@@ -74,6 +81,14 @@ test('TASK-008/TEST-009/013/026: CDP list URL must not silently normalize to app
     'valid exact CDP target inventory still works');
 });
 
+
+test('TASK-018/TEST-009/026: page websocket path dot-segments cannot silently normalize',()=>{
+  const forged=testPage.webSocketDebuggerUrl.replace('/devtools/','/hidden/../devtools/');
+  assert.deepEqual(inspectCdpTargetList(
+    [{...testPage,webSocketDebuggerUrl:forged}],9223,testPage.url,pageId),
+    {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'});
+  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true);
+});
 
 test('TASK-018/TEST-009/026: reject parser-normalized CDP page websocket URLs',()=>{
   const url=testPage.webSocketDebuggerUrl;
