@@ -47,6 +47,24 @@ test('TEST-005: unsafe URL or invalid assertions rejected independently',()=>{
   assert.equal(unknown.state,'UNKNOWN');
   assert.ok(unknown.issues.includes('MISSING_ASSERTIONS'));
 });
+test('TASK-018/TEST-005/026: approved scenario URLs cannot silently change under WHATWG parsing',()=>{
+ const approved={...bare,userApproved:true,requiresLogin:false,
+   targetUrl:'https://example.test/app'};
+ assert.equal(preflightScenario(approved).state,'READY_TO_TEST');
+ // URL() trims controls and accepts backslashes as slash separators for
+ // special schemes. An approval must never be minted for a different
+ // canonical address than the exact text the caller provided.
+ for(const targetUrl of [
+   ' https://example.test/app','https://example.test/app ',
+   '\thttps://example.test/app','https://example.test/app\n',
+   'https://example.test\\\\app','https://example.test/app\u0000'
+ ]){
+   const result=preflightScenario({...approved,targetUrl});
+   assert.equal(result.state,'INVALID','unsafe raw target cannot become an authorized URL');
+   assert.ok(result.issues.includes('INVALID_URL'));
+ }
+});
+
 test('TEST-005/026: lower-level scenario flags must be actual booleans, never coerced',()=>{
   // Native workflows also use preflightScenario directly, not only the desktop
   // IPC wrapper. Invalid requiresLogin must never become an approved no-login
