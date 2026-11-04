@@ -77,5 +77,11 @@ export function mergeLimitedSessionArchive(
  // this independent session. Never promote an archived INDETERMINATE row.
  const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   current.currentStatus:'INDETERMINATE' as const;
- return Object.freeze({...current,currentStatus,events,archiveRetained:true as const});
+ // Do not spread the caller's view: the archive merge is a projection of
+ // fixed unverified fields, not a way to carry arbitrary renderer-visible
+ // properties or forged authorization flags into a native health response.
+ return Object.freeze({
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus,events,archiveRetained:true as const,...noAuthority
+ });
 }
