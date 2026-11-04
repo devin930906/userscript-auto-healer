@@ -105,6 +105,43 @@ test('TEST-020: candidate modified during final source verification must fail cl
   }
  });
 });
+test('TASK-011/TEST-020/026: identical-byte candidate inode replacement during recheck is refused',async()=>{
+ await setup(async(p,stage)=>{
+  // The initial content check succeeds, then a separate actor atomically
+  // replaces its path with a different inode containing identical bytes.
+  // A hash-only second check would incorrectly bless the new publication.
+  const sourceModule=require('../../src/version/source-snapshot') as
+    typeof import('../../src/version/source-snapshot');
+  const originalVerify=sourceModule.verifyApprovedSourceFingerprint;
+  const candidatePath=join(p.backupDirectory,stage.candidateFileName);
+  const replacement=join(p.backupDirectory,'same-bytes-replacement.tmp');
+  const {rename,lstat}=await import('node:fs/promises');
+  let calls=0;
+  let oldInode:bigint|undefined;
+  let newInode:bigint|undefined;
+  try{
+   sourceModule.verifyApprovedSourceFingerprint=async input=>{
+    const outcome=await originalVerify(input);
+    if(++calls===2){
+     oldInode=(await lstat(candidatePath,{bigint:true})).ino;
+     await writeFile(replacement,await readFile(candidatePath));
+     newInode=(await lstat(replacement,{bigint:true})).ino;
+     assert.notEqual(oldInode,newInode);
+     await rename(replacement,candidatePath);
+    }
+    return outcome;
+   };
+   const result=await verifyStagedCandidateReadOnly(request,stage,args(p));
+   assert.equal(calls,2);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'CANDIDATE_CHANGED');
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.deepEqual(await readFile(p.sourcePath),Buffer.from(original));
+  }finally{
+   sourceModule.verifyApprovedSourceFingerprint=originalVerify;
+  }
+ });
+});
 test('TEST-020: changed backup or original blocks candidate even when candidate bytes are intact',async()=>{
  for(const part of ['source','backup'] as const){
   await setup(async(p,stage)=>{
