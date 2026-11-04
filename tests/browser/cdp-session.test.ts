@@ -25,6 +25,20 @@ test('TEST-009: spoofed or non-loopback CDP addresses rejected',()=>{
 });
 
 
+test('TASK-018/TEST-009/026: reject parser-normalized CDP browser websocket URLs',()=>{
+  const url=envelope.webSocketDebuggerUrl;
+  for(const forged of [
+    ' '+url,url+' ',url+'\\n',url+'\\r',
+    url.replace('ws://','ws:\\\\'),
+    url.replace('/devtools/','\\\\devtools/')
+  ]){
+    assert.deepEqual(inspectCdpVersion({...envelope,webSocketDebuggerUrl:forged},9223),
+      {ok:false,code:'UNSAFE_WEBSOCKET'},JSON.stringify(forged));
+  }
+  assert.equal(inspectCdpVersion(envelope,9223).ok,true);
+});
+
+
 import { inspectCdpTargetList } from '../../src/browser/cdp-session';
 const pageId='a69ab247520b42f3981863911ab1b251';
 const testPage={
@@ -58,6 +72,21 @@ test('TASK-008/TEST-009/013/026: CDP list URL must not silently normalize to app
   }
   assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true,
     'valid exact CDP target inventory still works');
+});
+
+
+test('TASK-018/TEST-009/026: reject parser-normalized CDP page websocket URLs',()=>{
+  const url=testPage.webSocketDebuggerUrl;
+  for(const forged of [
+    ' '+url,url+' ',url+'\\t',url+'\\n',
+    url.replace('ws://','ws:\\\\'),
+    url.replace('/devtools/','\\\\devtools/')
+  ]){
+    const item={...testPage,webSocketDebuggerUrl:forged};
+    assert.deepEqual(inspectCdpTargetList([item],9223,testPage.url,pageId),
+      {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'},JSON.stringify(forged));
+  }
+  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true);
 });
 
 test('TEST-009: a newly created target ID is selectable despite a pre-existing identical URL tab',()=>{
