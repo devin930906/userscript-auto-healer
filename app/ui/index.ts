@@ -642,42 +642,44 @@ function setBrowserStatus(value:string):void{
  if(browserStatus)browserStatus.textContent=value;
 }
 function browserControls():void{
- if(chooseChromeButton)chooseChromeButton.disabled=browserBusy||browserConnected;
- if(chooseProfileButton)chooseProfileButton.disabled=browserBusy||browserConnected;
- if(createProfileButton)createProfileButton.disabled=browserBusy||browserConnected||!chromeSelected;
- if(portInput)portInput.disabled=browserBusy||browserConnected;
- if(launchButton)launchButton.disabled=browserBusy||browserConnected||
+ // Keep new browser actions disabled until native stop IPC has settled.
+ const controlsBusy=browserBusy||stopInProgress;
+ if(chooseChromeButton)chooseChromeButton.disabled=controlsBusy||browserConnected;
+ if(chooseProfileButton)chooseProfileButton.disabled=controlsBusy||browserConnected;
+ if(createProfileButton)createProfileButton.disabled=controlsBusy||browserConnected||!chromeSelected;
+ if(portInput)portInput.disabled=controlsBusy||browserConnected;
+ if(launchButton)launchButton.disabled=controlsBusy||browserConnected||
    !chromeSelected||!profileSelected;
- if(inspectButton)inspectButton.disabled=browserBusy||!browserConnected;
+ if(inspectButton)inspectButton.disabled=controlsBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
- if(scenarioInspectId)scenarioInspectId.disabled=!browserConnected||browserBusy||
+ if(scenarioInspectId)scenarioInspectId.disabled=!browserConnected||controlsBusy||
    (scenarioInspectId.options.length<=1);
- if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
+ if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||controlsBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioRecheckStartButton)scenarioRecheckStartButton.disabled=
-   recheckRunning||!browserConnected||browserBusy||
+   recheckRunning||!browserConnected||controlsBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioRecheckStopButton)scenarioRecheckStopButton.disabled=!recheckRunning;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
  if(scenarioHistoryButton)scenarioHistoryButton.disabled=scenarioHistoryBusy||
    (scenarioInspectId?.options.length??0)<=1;
- if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||browserBusy||
+ if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
- if(gmStartButton)gmStartButton.disabled=browserBusy||!browserConnected||gmProbeActive;
- if(gmRunAtSelect)gmRunAtSelect.disabled=browserBusy||gmProbeActive;
- if(gmStatusButton)gmStatusButton.disabled=browserBusy||!gmProbeActive;
- if(gmReportButton)gmReportButton.disabled=browserBusy||!gmProbeActive;
+ if(gmStartButton)gmStartButton.disabled=controlsBusy||!browserConnected||gmProbeActive;
+ if(gmRunAtSelect)gmRunAtSelect.disabled=controlsBusy||gmProbeActive;
+ if(gmStatusButton)gmStatusButton.disabled=controlsBusy||!gmProbeActive;
+ if(gmReportButton)gmReportButton.disabled=controlsBusy||!gmProbeActive;
  for(const button of Object.values(gmVisitButtons))
-  if(button)button.disabled=browserBusy||!gmProbeActive;
+  if(button)button.disabled=controlsBusy||!gmProbeActive;
  for(const button of Object.values(gmObserveButtons))
-  if(button)button.disabled=browserBusy||!gmProbeActive;
+  if(button)button.disabled=controlsBusy||!gmProbeActive;
  // Native stop can revoke an in-flight GM start before the fixture exists.
  // Do not gate it behind browserAction's busy flag or an active fixture.
  if(gmStopButton)gmStopButton.disabled=gmStopInProgress||
    (!gmProbeStarting&&!gmProbeActive);
 }
 async function browserAction(fn:()=>Promise<void>):Promise<void>{
- if(browserBusy)return;
+ if(browserBusy||stopInProgress)return;
  browserBusy=true;browserControls();
  try{await fn();}
  catch{setBrowserStatus('浏览器操作受阻；没有获得验证成功的结果。');}
@@ -716,7 +718,7 @@ scenarioHistoryButton?.addEventListener('click',()=>{
 // owned-browser check and read-only IPC. A refusal, failure, cancellation,
 // browser stop or lost window stops the remainder of the plan.
 scenarioRecheckStartButton?.addEventListener('click',()=>{
- if(recheckRunning||browserBusy||!browserConnected)return;
+ if(recheckRunning||browserBusy||stopInProgress||!browserConnected)return;
  const id=scenarioInspectId?.value??'';
  if(!id){
   if(scenarioRecheckStatus)scenarioRecheckStatus.textContent='先选择已登记场景。';
