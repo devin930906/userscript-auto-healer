@@ -78,7 +78,7 @@ test('TASK-008/TEST-009/013/026: CDP list URL must not silently normalize to app
 test('TASK-018/TEST-009/026: reject parser-normalized CDP page websocket URLs',()=>{
   const url=testPage.webSocketDebuggerUrl;
   for(const forged of [
-    ' '+url,url+' ',url+'\t',undefined,
+    ' '+url,url+' ',url+'\t',url+'\n',
     url.replace('ws://','ws:\\\\'),
     url.replace('/devtools/','\\\\devtools/')
   ]){
