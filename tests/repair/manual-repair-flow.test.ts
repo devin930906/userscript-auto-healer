@@ -451,3 +451,60 @@ test('TASK-011/012 TEST-020/021/023: source edited during final manual export ch
   }finally{interception.mock.restore();checkpointInterception.mock.restore();}
  });
 });
+
+
+test('TASK-011/012 TEST-020/021/023/026: an export changed during final source validation cannot be declared ready',async()=>{
+ for(const mutation of ['candidate-changed','recovery-replaced-same-bytes'] as const){
+  await fixture(async opts=>{
+   const checkpointModule=require('../../src/version/recovery-checkpoint') as
+    typeof import('../../src/version/recovery-checkpoint');
+   const originalInspect=checkpointModule.inspectRecoveryCheckpointReadOnly;
+   let checkpointRechecks=0;
+   const checkpoints=mock.method(checkpointModule,'inspectRecoveryCheckpointReadOnly',
+    async (...args:Parameters<typeof originalInspect>)=>{
+     const result=await originalInspect(...args);
+     if(result.status==='CHECKPOINT_RECHECKED_READ_ONLY')checkpointRechecks++;
+     return result;
+    });
+   const sourceModule=require('../../src/version/source-snapshot') as
+    typeof import('../../src/version/source-snapshot');
+   const originalVerify=sourceModule.verifyApprovedSourceFingerprint;
+   let changed=false;
+   const sourceCheck=mock.method(sourceModule,'verifyApprovedSourceFingerprint',
+    async (...args:Parameters<typeof originalVerify>)=>{
+     const result=await originalVerify(...args);
+     if(!changed&&checkpointRechecks===2&&result.status==='MATCHED_READ_ONLY'){
+      const names=await readdir(opts.exportDirectory);
+      const prefix=mutation==='candidate-changed'?'UAH-Reviewed-':'UAH-Original-';
+      const found=names.filter(name=>name.startsWith(prefix));
+      assert.equal(found.length,1,'both reviewed and original exports must exist');
+      const target=join(opts.exportDirectory,found[0]);
+      if(mutation==='candidate-changed'){
+       await writeFile(target,'// edited after both export checks\\n');
+      }else{
+       const identical=await readFile(target);
+       const renamed=join(opts.exportDirectory,'replacement.tmp');
+       await writeFile(renamed,identical);
+       await rename(renamed,target);
+      }
+      changed=true;
+     }
+     return result;
+    });
+   try{
+    const result=await prepareManualRepairExportOnly(patch,scenario,samples(),opts);
+    assert.equal(checkpointRechecks,2,'both persisted checkpoint inspections must complete');
+    assert.equal(changed,true,'external mutation must occur after last export-byte check');
+    assert.deepEqual(result,{
+     status:'BLOCKED',reason:'EXPORT_BLOCKED',
+     automaticPatchAllowed:false,automaticRollbackAllowed:false,
+     tampermonkeyVerified:false,managerInstalled:false,businessVerified:false
+    },'source verification must not validate a subsequently altered export');
+    assert.equal(await readFile(opts.sourcePath,'utf8'),source,
+     'never mutate original userscript during manual export');
+    assert.equal((await readdir(opts.exportDirectory)).length,2,
+     'published files remain for native reconciliation on failed receipt');
+   }finally{sourceCheck.mock.restore();checkpoints.mock.restore();}
+  });
+ }
+});
