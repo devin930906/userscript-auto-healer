@@ -11,14 +11,15 @@
 import type {BigIntStats} from 'node:fs';
 import {types as utilTypes} from 'node:util';
 import {lstat} from 'node:fs/promises';
-import {basename,isAbsolute} from 'node:path';
+import {basename,dirname,isAbsolute} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {verifyApprovedSourceFingerprint} from './source-snapshot';
 import {verifyBackupRecoverySource} from './recovery-source';
 import {hasUnsafePathLink} from './path-boundary';
+import {hasInterruptedRestoreStaging} from './restore-staging-residue';
 
 type Reason='INVALID_REQUEST'|'NOT_AUTHORIZED'|'SOURCE_UNCHANGED'|
- 'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'UNSAFE_PATH'|'IO_FAILURE';
+ 'SOURCE_UNVERIFIED'|'BACKUP_UNVERIFIED'|'UNSAFE_PATH'|'RECOVERY_REVIEW_REQUIRED'|'IO_FAILURE';
 const flags={
  automaticPatchAllowed:false as const,
  automaticRollbackAllowed:false as const,
@@ -111,6 +112,13 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   if(await hasUnsafePathLink(options.sourcePath)||
      await hasUnsafePathLink(options.backupDirectory))
    return deny('UNSAFE_PATH');
+  // Crash residue is not an independently reviewed restore source. Never
+  // describe the selected pair as ready while an earlier native transaction
+  // may have left staging evidence in either filesystem namespace.
+  if(await hasInterruptedRestoreStaging(dirname(options.sourcePath),
+       undefined,undefined,'source-parent')||
+     await hasInterruptedRestoreStaging(options.backupDirectory))
+   return deny('RECOVERY_REVIEW_REQUIRED');
   const sourceBefore=await lstat(options.sourcePath,{bigint:true});
   const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
   if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
@@ -141,6 +149,13 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   if(!directoryAfter.isDirectory()||directoryAfter.isSymbolicLink()||
      !sameDirectory(directoryBefore,directoryAfter))
    return deny('UNSAFE_PATH');
+  // A different restore may stage a crash artifact while the independent
+  // source and backup rechecks await I/O. Revalidate before a clean receipt;
+  // this remains observational and never permits automated writes.
+  if(await hasInterruptedRestoreStaging(dirname(options.sourcePath),
+       undefined,undefined,'source-parent')||
+     await hasInterruptedRestoreStaging(options.backupDirectory))
+   return deny('RECOVERY_REVIEW_REQUIRED');
   return Object.freeze({
    status:'RESTORE_PREFLIGHT_READ_ONLY' as const,
    currentSha256:before.sha256,originalSha256:verifiedBackup.sha256,
