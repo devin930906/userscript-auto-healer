@@ -1791,3 +1791,41 @@ test('TASK-011/TEST-020/021/026: an unlisted Windows 8.3 direct parent cannot by
   assert.deepEqual(await readFile(sourcePath),original);
  }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/026: native restore refuses original-backup inode swap with identical bytes',async()=>{
+ await fixture(async opts=>{
+  const recovery=require('../../src/version/recovery-source') as typeof import('../../src/version/recovery-source');
+  const originalVerify=recovery.verifyBackupRecoverySource;
+  const backupPath=join(opts.backupDirectory,opts.backupFileName);
+  const oldIdentity=await lstat(backupPath,{bigint:true});
+  let checkedOriginal=0;
+  (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=async input=>{
+   const selected=input as {backupFileName?:string};
+   if(selected.backupFileName===opts.backupFileName){
+    checkedOriginal++;
+    if(checkedOriginal===2){
+     await rename(backupPath,backupPath+'.retired');
+     await writeFile(backupPath,original);
+    }
+   }
+   return originalVerify(input);
+  };
+  try{
+   const result=await restoreVerifiedOriginalNativeOnly(opts);
+   assert.ok(checkedOriginal>=2,'fixture must replace original backup between separate native verification passes');
+   const currentIdentity=await lstat(backupPath,{bigint:true});
+   assert.notEqual(currentIdentity.ino,oldIdentity.ino,
+    'the same byte digest cannot establish the identity of a replaced backup');
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'BACKUP_UNVERIFIED');
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.deepEqual(await readFile(opts.sourcePath),changed,
+    'restore must refuse the new backup identity BEFORE the original-file rename');
+   assert.deepEqual(await readFile(backupPath),original);
+   assert.deepEqual(await readFile(backupPath+'.retired'),original);
+  }finally{
+   (recovery as {verifyBackupRecoverySource:typeof originalVerify}).verifyBackupRecoverySource=originalVerify;
+  }
+ });
+});
