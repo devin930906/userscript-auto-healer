@@ -57,7 +57,7 @@ function cdpPlainTargetRows(payload:unknown):Record<string,unknown>[]|null{
  * normalize. This is only a structure guard, never browser/tab ownership. */
 function unambiguousCdpWebSocket(raw:string):boolean{
   return raw.length>0&&raw.length<=4096&&raw.trim()===raw&&
-    !/[\\x00-\\x1f\\x7f\\\\]/.test(raw);
+    !/[\x00-\x1f\x7f\\]/.test(raw);
 }
 
 export type CdpEnvelope =
