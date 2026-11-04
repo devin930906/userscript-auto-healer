@@ -1,7 +1,7 @@
 import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {lstat,mkdtemp,mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {basename,join} from 'node:path';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
@@ -177,6 +177,36 @@ test('TASK-011 TEST-020/021/026: external source edit after final backup verific
     'preflight must preserve independently edited original bytes');
    assert.deepEqual(await readFile(backupFile),original,
     'preflight must not touch independently verified recovery backup');
+  }finally{intercepted.mock.restore();}
+ });
+});
+
+test('TASK-011/TEST-020/026: same-byte replacement inode cannot keep native restore preflight consent',async()=>{
+ await fixture(async({source,backupFile})=>{
+  const recovery=require('../../src/version/recovery-source') as
+   typeof import('../../src/version/recovery-source');
+  const originalVerifier=recovery.verifyBackupRecoverySource;
+  const before=await lstat(source,{bigint:true});
+  let swaps=0;
+  const intercepted=mock.method(recovery,'verifyBackupRecoverySource',
+   async(...args:Parameters<typeof originalVerifier>)=>{
+    const receipt=await originalVerifier(...args);
+    if(receipt.status==='RECOVERY_SOURCE_VERIFIED_READ_ONLY'&&++swaps===1){
+     const replacement=source+'.independent-editor';
+     await writeFile(replacement,changed);
+     await rename(replacement,source);
+     const after=await lstat(source,{bigint:true});
+     assert.notEqual(after.ino,before.ino,
+       'test must replace the original inode without changing source bytes');
+    }
+    return receipt;
+   });
+  try{
+   const result=await prepareManualOriginalRestoreSelection(source,backupFile);
+   assert.equal(swaps,2,'both independent backup checks must actually complete');
+   assert.deepEqual(result,{status:'BLOCKED',reason:'SOURCE_UNVERIFIED'},
+    'matching SHA is not consent for a different underlying file');
+   assert.deepEqual(await readFile(source),changed,'preflight is read-only');
   }finally{intercepted.mock.restore();}
  });
 });
