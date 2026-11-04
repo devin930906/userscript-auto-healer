@@ -320,6 +320,12 @@ export async function restoreVerifiedOriginalNativeOnly(
  let receiptSource:BigIntStats|undefined;
  let receiptJournal:Readonly<{path:string;bytes:Buffer}>|undefined;
  let receiptDisplaced:Readonly<{fileName:string;byteLength:number}>|undefined;
+ // Snapshots must outlive the transaction's try/finally to protect the
+ // post-lock-release receipt against same-byte native backup replacement.
+ const originalBackupPath=join(opts.backupDirectory,opts.backupFileName);
+ let originalBackupIdentity:BigIntStats|undefined;
+ let displacedBackupPath:string|undefined;
+ let displacedBackupIdentity:BigIntStats|undefined;
  let pending:string|undefined;
  let journalPending:string|undefined;
  let pendingIdentity:BigIntStats|undefined;
@@ -455,8 +461,7 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(current.status!=='MATCHED_READ_ONLY')return block('SOURCE_UNVERIFIED');
   // Bind the independently selected ORIGINAL backup to its native identity
   // before the first verification; identical replacement bytes are not it.
-  const originalBackupPath=join(opts.backupDirectory,opts.backupFileName);
-  const originalBackupIdentity=await lstat(originalBackupPath,{bigint:true});
+  originalBackupIdentity=await lstat(originalBackupPath,{bigint:true});
   const backup=await verifyBackupRecoverySource(originalInput);
   if(backup.status!=='RECOVERY_SOURCE_VERIFIED_READ_ONLY'||
      !await sameRecoveryInode(originalBackupPath,originalBackupIdentity))
@@ -472,8 +477,8 @@ export async function restoreVerifiedOriginalNativeOnly(
   if(displaced.status!=='BACKUP_ONLY')
    return block('RECOVERY_SAFETY_FAILED');
   // The newly retained DISPLACED version must remain the exact same backup.
-  const displacedBackupPath=join(opts.backupDirectory,displaced.backupFileName);
-  const displacedBackupIdentity=await lstat(displacedBackupPath,{bigint:true});
+  displacedBackupPath=join(opts.backupDirectory,displaced.backupFileName);
+  displacedBackupIdentity=await lstat(displacedBackupPath,{bigint:true});
   const displacedInput={
    sourcePath:opts.sourcePath,backupDirectory:opts.backupDirectory,
    backupFileName:displaced.backupFileName,
@@ -724,7 +729,8 @@ export async function restoreVerifiedOriginalNativeOnly(
  // Never acknowledge restoration if the path lock failed to release. The
  // original MAY already contain restored bytes: keep backups and journal.
  if(!completedRestore||!lockReleased||!receiptSource||
-    !receiptJournal||!receiptDisplaced)
+    !receiptJournal||!receiptDisplaced||!originalBackupIdentity||
+    !displacedBackupPath||!displacedBackupIdentity)
   return block('RECOVERY_SAFETY_FAILED');
  // Once rmdir frees our owned mutex, a competing native restore may claim
  // the same source path before this asynchronous verification starts.
