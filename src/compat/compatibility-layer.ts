@@ -116,7 +116,7 @@ function parseDefinition(input:unknown):CompatibilityVersion {
       binding.selector.trim()!==binding.selector||
       // Reject invisible line and bidirectional formatting controls so a
       // shared selector cannot be visually disguised in an offline review.
-      /[\x00-\x1f\x7f\u2028-\u202e\u2066-\u2069]/.test(binding.selector)||
+      /[\x00-\x1f\x7f\u200b-\u200d\u2028-\u202e\u2060\u2066-\u2069\ufeff]/.test(binding.selector)||
       !Number.isSafeInteger(binding.attempts)||
       (binding.attempts as number)<1||(binding.attempts as number)>5||
       !Number.isSafeInteger(binding.delayMs)||

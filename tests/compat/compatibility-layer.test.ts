@@ -180,3 +180,20 @@ test('TASK-016/TEST-025/026: bidi formatting cannot disguise a shared selector i
     assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   }
 });
+
+
+test('TASK-016/TEST-025/026: zero-width formatting is rejected in shared locator review',()=>{
+  const invisible=['\u200b','\u200c','\u200d','\u2060','\ufeff'];
+  for(const mark of invisible){
+    const selector='#submit'+mark;
+    assert.throws(()=>new LimitedCompatibilityLayer({...initial,bindings:[
+      {...initial.bindings[0],selector},initial.bindings[1]
+    ]}),/INVALID_COMPAT_BINDING/);
+    const layer=new LimitedCompatibilityLayer(initial);
+    assert.equal(layer.previewUpgrade({...newer,bindings:[
+      {...newer.bindings[0],selector},newer.bindings[1]
+    ]},checks).status,'BLOCKED');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+  }
+});
