@@ -53,6 +53,13 @@ function cdpPlainTargetRows(payload:unknown):Record<string,unknown>[]|null{
  }catch{return null;}
 }
 
+/** Reject raw CDP websocket spellings that URL() would silently trim or
+ * normalize. This is only a structure guard, never browser/tab ownership. */
+function unambiguousCdpWebSocket(raw:string):boolean{
+  return raw.length>0&&raw.length<=4096&&raw.trim()===raw&&
+    !/[\x00-\x1f\x7f\\]/.test(raw);
+}
+
 export type CdpEnvelope =
   | {readonly ok:true; readonly status:'STRUCTURE_ONLY'; readonly browser:string;
      readonly websocketUrl:string;readonly path:string;readonly owned:false}
@@ -66,6 +73,8 @@ export function inspectCdpVersion(payload:unknown,expectedPort:number):CdpEnvelo
   if(typeof data.Browser!=='string' || !/^(?:HeadlessChrome|Chrome)\/\d+(?:\.\d+){1,4}$/.test(data.Browser))
     return {ok:false,code:'UNEXPECTED_BROWSER'};
   if(typeof data.webSocketDebuggerUrl!=='string')return {ok:false,code:'INVALID_SHAPE'};
+  if(!unambiguousCdpWebSocket(data.webSocketDebuggerUrl))
+    return {ok:false,code:'UNSAFE_WEBSOCKET'};
   let ws:URL;
   try {ws=new URL(data.webSocketDebuggerUrl);}catch{return {ok:false,code:'UNSAFE_WEBSOCKET'};}
   if(ws.protocol!=='ws:' || ws.hostname!=='127.0.0.1' ||
@@ -122,7 +131,8 @@ export function inspectCdpTargetList(
     catch {continue;}
     if(actual.href!==wanted.href)continue;
     if(typeof target.id!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(target.id) ||
-       typeof target.webSocketDebuggerUrl!=='string')
+       typeof target.webSocketDebuggerUrl!=='string'||
+       !unambiguousCdpWebSocket(target.webSocketDebuggerUrl))
       return {ok:false,code:'UNSAFE_TARGET_WEBSOCKET'};
     let ws:URL;
     try {ws=new URL(target.webSocketDebuggerUrl);}
