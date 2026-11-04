@@ -257,9 +257,13 @@ export function isCurrentManualDiagnosticSession(
    return false;
   const deadline:unknown=expiresAt.value;
   if(typeof deadline!=='number'||!Number.isSafeInteger(deadline)||deadline<0||
-     typeof isActive.value!=='function'||isProxy(isActive.value)||
-     Date.now()>=deadline)return false;
-  return isActive.value()===true;
+     typeof isActive.value!=='function'||isProxy(isActive.value))
+   return false;
+  // Always consult the native monotonic lease before the wall-clock check.
+  // Its expiry is sticky: skipping it at the deadline could allow a later
+  // clock rollback to revive an already expired consent window.
+  const nativeActive=isActive.value()===true;
+  return nativeActive&&Date.now()<deadline;
  }catch{return false;}
 }
 
