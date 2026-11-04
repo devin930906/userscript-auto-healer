@@ -243,8 +243,21 @@ export function isCurrentManualDiagnosticSession(
  session:Pick<ManualTampermonkeyDiagnosticSession,'expiresAt'|'isActive'>|null
 ):boolean{
  try{
-  return session!==null&&session.isActive()===true&&
-   Number.isFinite(session.expiresAt)&&Date.now()<session.expiresAt;
+  // Status reads must never invoke a caller-owned getter or Proxy trap.
+  // This guard is not an authority source: the native lease still decides
+  // whether the app-owned, explicitly consented diagnostic remains active.
+  if(!session||typeof session!=='object'||isProxy(session)||Array.isArray(session))
+   return false;
+  const proto=Object.getPrototypeOf(session);
+  if(proto!==Object.prototype&&proto!==null)return false;
+  const fields=Object.getOwnPropertyDescriptors(session);
+  const expiresAt=fields.expiresAt,isActive=fields.isActive;
+  if(!expiresAt||!Object.prototype.hasOwnProperty.call(expiresAt,'value')||
+     !isActive||!Object.prototype.hasOwnProperty.call(isActive,'value')||
+     !Number.isSafeInteger(expiresAt.value)||expiresAt.value<0||
+     typeof isActive.value!=='function'||isProxy(isActive.value)||
+     Date.now()>=expiresAt.value)return false;
+  return isActive.value()===true;
  }catch{return false;}
 }
 
