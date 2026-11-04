@@ -222,6 +222,18 @@ function marshal(key:string,events:readonly ArchiveEvent[]):Buffer{
   tampermonkeyVerified:false,businessVerified:false};
  return Buffer.from(JSON.stringify(data)+'\n','utf8');
 }
+/** A writer may have replaced an archive or be about to publish one.
+ * Its cooperative native mutex is crash evidence, not permission to read a
+ * stable timeline. A lost/unknown lstat must fail closed. Neither check
+ * provides an exclusive OS lock against independent writers. */
+async function archiveWriteOutstanding(dir:string,key:string):Promise<boolean>{
+ try{
+  await lstat(join(dir,'.health-'+key+'.lock'));
+  return true;
+ }catch(error){
+  return (error as NodeJS.ErrnoException).code!=='ENOENT';
+ }
+}
 export async function readLimitedHealthArchive(userData:string,key:string):Promise<ArchiveRead>{
  if(!validRoot(userData)||typeof key!=='string'||!SHA.test(key))return blocked();
  const dir=await baseDir(userData,false);
@@ -237,8 +249,12 @@ export async function readLimitedHealthArchive(userData:string,key:string):Promi
     Object.freeze({status:'NOT_FOUND' as const,...emptyAuthority}):blocked();}
   }catch{return blocked();}
  }
+ // Avoid issuing an apparently complete archive receipt while a
+ // cooperating writer is active or a crashed writer left its mutex behind.
+ if(await archiveWriteOutstanding(dir,key))return blocked();
  const file=join(dir,'health-'+key+'.json');
  const result=await inspectFile(file,key);
+ if(await archiveWriteOutstanding(dir,key))return blocked();
  if(result==='NOT_FOUND')return Object.freeze({status:'NOT_FOUND' as const,...emptyAuthority});
  if(!result)return blocked();
  return Object.freeze({status:'ARCHIVE_READ_UNVERIFIED' as const,
