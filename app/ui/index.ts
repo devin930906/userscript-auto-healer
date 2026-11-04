@@ -152,6 +152,33 @@ const scenarioRegister = document.getElementById('scenario-register') as HTMLBut
 const scenarioStatus = document.getElementById('scenario-status');
 const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTMLSelectElement | null;
 const scenarioInspectButton = document.getElementById('scenario-inspect') as HTMLButtonElement | null;
+const scenarioRecheckStartButton = document.getElementById('scenario-recheck-start') as HTMLButtonElement | null;
+const scenarioRecheckStopButton = document.getElementById('scenario-recheck-stop') as HTMLButtonElement | null;
+const scenarioRecheckStatus = document.getElementById('scenario-recheck-status');
+let recheckRunning=false;
+let recheckCancelled=false;
+let recheckNativeActive=false;
+let recheckTimer:ReturnType<typeof setTimeout>|null=null;
+let recheckWake:(()=>void)|null=null;
+const RECHECK_INTERVAL_MS=60_000;
+const RECHECK_MAX_ROUNDS=3;
+function revokeBoundedRechecks():void{
+ recheckCancelled=true;
+ if(recheckTimer!==null){clearTimeout(recheckTimer);recheckTimer=null;}
+ const wake=recheckWake;
+ recheckWake=null;
+ wake?.();
+}
+function waitRecheckInterval():Promise<void>{
+ return new Promise(resolve=>{
+  recheckWake=resolve;
+  recheckTimer=setTimeout(()=>{
+   recheckTimer=null;
+   recheckWake=null;
+   resolve();
+  },RECHECK_INTERVAL_MS);
+ });
+}
 const scenarioHistoryButton = document.getElementById('scenario-history') as HTMLButtonElement | null;
 const scenarioHistorySummary = document.getElementById('scenario-history-summary');
 const scenarioHistoryEntries = document.getElementById('scenario-history-entries');
@@ -627,6 +654,10 @@ function browserControls():void{
    (scenarioInspectId.options.length<=1);
  if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||browserBusy||
    (scenarioInspectId?.options.length??0)<=1;
+ if(scenarioRecheckStartButton)scenarioRecheckStartButton.disabled=
+   recheckRunning||!browserConnected||browserBusy||
+   (scenarioInspectId?.options.length??0)<=1;
+ if(scenarioRecheckStopButton)scenarioRecheckStopButton.disabled=!recheckRunning;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
  if(scenarioHistoryButton)scenarioHistoryButton.disabled=scenarioHistoryBusy||
    (scenarioInspectId?.options.length??0)<=1;
@@ -679,6 +710,78 @@ scenarioHistoryButton?.addEventListener('click',()=>{
  }).catch(()=>{
   if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史读取失败；不推断脚本状态。';
  }).finally(()=>{scenarioHistoryBusy=false;browserControls();});
+});
+// Explicitly user-started bounded monitoring, never unattended background
+// authority. Each round re-enters the existing main-process native dialog,
+// owned-browser check and read-only IPC. A refusal, failure, cancellation,
+// browser stop or lost window stops the remainder of the plan.
+scenarioRecheckStartButton?.addEventListener('click',()=>{
+ if(recheckRunning||browserBusy||!browserConnected)return;
+ const id=scenarioInspectId?.value??'';
+ if(!id){
+  if(scenarioRecheckStatus)scenarioRecheckStatus.textContent='先选择已登记场景。';
+  return;
+ }
+ recheckRunning=true;
+ recheckCancelled=false;
+ browserBusy=true;
+ browserControls();
+ void (async()=>{
+  let stoppedByFailure=false;
+  let finished=false;
+  try{
+   for(let round=1;round<=RECHECK_MAX_ROUNDS;round++){
+    if(recheckCancelled||!browserConnected)break;
+    if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
+     '第 '+round+'/'+RECHECK_MAX_ROUNDS+
+     ' 轮：等待本次独立原生授权；未授权不访问页面。';
+    recheckNativeActive=true;
+    let result:Awaited<ReturnType<typeof window.healer.inspectScenario>>;
+    try{result=await window.healer.inspectScenario(id);}
+    finally{recheckNativeActive=false;}
+    if(recheckCancelled)break;
+    if(!result.ok||result.status!=='LIMITED_DOM_SIGNAL_ONLY'){
+     stoppedByFailure=true;
+     if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
+      '第 '+round+' 轮未通过：'+(result.code??'UNKNOWN')+
+      '。后续复检已停止，未取得业务或管理器健康验证。';
+     break;
+    }
+    if(round===RECHECK_MAX_ROUNDS)finished=true;
+    if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
+     '第 '+round+'/'+RECHECK_MAX_ROUNDS+' 轮：仅取得未验证 DOM 信号；'+
+     '本机脱敏记录'+(result.localArchiveStatus==='SAVED_UNVERIFIED'?'已保存':'保存未确认')+
+     '。不代表 Tampermonkey、GM 或业务恢复。'+
+     (round<RECHECK_MAX_ROUNDS?'下轮间隔 60 秒，仍须重新原生授权。':'三轮结束。');
+    if(round<RECHECK_MAX_ROUNDS)await waitRecheckInterval();
+   }
+  }catch{
+   stoppedByFailure=true;
+   if(!recheckCancelled&&scenarioRecheckStatus)
+    scenarioRecheckStatus.textContent='复检请求失败；后续轮次已停止，结果未知。';
+  }finally{
+   const interrupted=recheckCancelled||!browserConnected;
+   revokeBoundedRechecks();
+   recheckRunning=false;
+   recheckNativeActive=false;
+   browserBusy=false;
+   if(interrupted&&!stoppedByFailure&&!finished&&scenarioRecheckStatus)
+    scenarioRecheckStatus.textContent='复检计划已停止；不再发起后续访问。';
+   browserControls();
+  }
+ })();
+});
+scenarioRecheckStopButton?.addEventListener('click',()=>{
+ if(!recheckRunning)return;
+ const cancelNative=recheckNativeActive;
+ revokeBoundedRechecks();
+ if(scenarioRecheckStatus)
+  scenarioRecheckStatus.textContent='停止已请求；后续复检不会启动。'+
+   (cancelNative?'正在撤销当前原生检查。':'当前没有进行中的网页访问。');
+ if(cancelNative)void window.healer.cancelScenarioInspection().catch(()=>{
+  if(scenarioRecheckStatus)
+   scenarioRecheckStatus.textContent='当前检查的取消状态无法确认；后续轮次已停止。';
+ });
 });
 scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const id=scenarioInspectId?.value??'';
