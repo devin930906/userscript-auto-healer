@@ -523,3 +523,16 @@ test('TASK-015/017 TEST-024/026: bounded scheduled read-only rechecks preserve n
  assert.doesNotMatch(preload,/scenario:recheck|recheckPlan/);
  assert.doesNotMatch(ui,/automaticPatchAllowed\s*:\s*true|businessVerified\s*:\s*true/);
 });
+
+test('TASK-015/017 TEST-024/026: stopping owned Chrome revokes pending scheduled rechecks immediately',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("stopButton?.addEventListener('click',()=>{");
+ assert.notEqual(start,-1,'native Chrome stop control must remain registered');
+ const end=ui.indexOf("chooseChromeButton?.addEventListener",start);
+ const handler=ui.slice(start,end>start?end:start+1500);
+ assert.match(handler,/revokeBoundedRechecks\(\)/,
+  'stopping Chrome must interrupt the 60-second recheck wait even when native stop fails');
+ assert.ok(handler.indexOf('revokeBoundedRechecks()')<
+  handler.indexOf('window.healer.stopBrowser()'),
+  'recheck schedule must be revoked before awaiting a native browser stop result');
+});
