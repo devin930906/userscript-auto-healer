@@ -27,6 +27,23 @@ test('TEST-017: only supported GM injection timing values can be requested',asyn
      true,30000,invalid as 'document-start'),{ok:false,code:'INVALID_OPTIONS'});
  }
 });
+test('TASK-008/TEST-013: fixture reports served page GET counts without leaking target details',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const fixture=started.session;
+ t.after(()=>fixture.stop());
+ assert.equal(fixture.pageServedCount(),0);
+ const response=await fetch(fixture.origin+'/?mode=fixed');
+ assert.equal(response.status,200);
+ await response.text();
+ assert.equal(fixture.pageServedCount(),1);
+ const rejected=await fetch(fixture.origin+'/not-a-test-page');
+ assert.equal(rejected.status,404);
+ assert.equal(fixture.pageServedCount(),1);
+ await fixture.stop();
+ assert.equal(fixture.pageServedCount(),1,'stopped diagnostic retains aggregate evidence only');
+});
 test('TEST-017: separate temporary sessions never reuse a Tampermonkey userscript identity',async t=>{
  const first=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(first.ok,true);
