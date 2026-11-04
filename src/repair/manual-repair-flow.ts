@@ -226,6 +226,27 @@ export async function prepareManualRepairExportOnly(
   if(finalSource.status!=='MATCHED_READ_ONLY'||
      finalSource.sha256!==staged.originalSha256)
     return block('SOURCE_CHANGED');
+  // The final source-fingerprint check above awaits native filesystem I/O.
+  // An independent editor can change either already-published manual export
+  // during that wait, after the earlier two-export byte and inode checks.
+  // Never issue an export-ready receipt for stale or replaced publication
+  // identities; this is a bounded snapshot, not a cross-process file lock.
+  if(await verifyExactCandidateBytesReadOnly(
+       exportedCandidatePath,Buffer.from(candidate.candidateSource,'utf8'))!=='MATCH'||
+     await verifyExactCandidateBytesReadOnly(
+       exportedOriginalPath,Buffer.from(p.source as string,'utf8'))!=='MATCH')
+    return block('EXPORT_BLOCKED');
+  try{
+    const finalExports=await Promise.all([
+      lstat(directory,{bigint:true}),lstat(exportedCandidatePath,{bigint:true}),
+      lstat(exportedOriginalPath,{bigint:true})
+    ]);
+    if(!sameExportDirectory(beforeExport[0],finalExports[0])||
+       !sameExport(beforeExport[1],finalExports[1])||
+       !sameExport(beforeExport[2],finalExports[2])||
+       await hasUnsafePathLink(directory))
+      return block('EXPORT_BLOCKED');
+  }catch{return block('EXPORT_BLOCKED');}
   return Object.freeze({
     status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED' as const,
     backupFileName:staged.backupFileName,
