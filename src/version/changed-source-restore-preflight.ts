@@ -160,10 +160,12 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
       options.sourcePath,options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
   const sourceBefore=await lstat(options.sourcePath,{bigint:true});
+  const sourceParentBefore=await lstat(dirname(options.sourcePath),{bigint:true});
   const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
   const backupBefore=await lstat(join(options.backupDirectory,options.backupFileName),{bigint:true});
   if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
-     sourceBefore.nlink!==1n||!directoryBefore.isDirectory()||
+     sourceBefore.nlink!==1n||!sourceParentBefore.isDirectory()||
+     sourceParentBefore.isSymbolicLink()||!directoryBefore.isDirectory()||
      directoryBefore.isSymbolicLink())return deny('UNSAFE_PATH');
   if(!backupBefore.isFile()||backupBefore.isSymbolicLink()||backupBefore.nlink!==1n)
    return deny('BACKUP_UNVERIFIED');
@@ -185,11 +187,15 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
      await hasUnsafePathLink(options.backupDirectory))
    return deny('UNSAFE_PATH');
   const sourceAfter=await lstat(options.sourcePath,{bigint:true});
+  const sourceParentAfter=await lstat(dirname(options.sourcePath),{bigint:true});
   const directoryAfter=await lstat(options.backupDirectory,{bigint:true});
   const backupAfter=await lstat(join(options.backupDirectory,options.backupFileName),{bigint:true});
   if(!sourceAfter.isFile()||sourceAfter.isSymbolicLink()||
      sourceAfter.nlink!==1n||!sameSource(sourceBefore,sourceAfter))
    return deny('SOURCE_UNVERIFIED');
+  if(!sourceParentAfter.isDirectory()||sourceParentAfter.isSymbolicLink()||
+     !sameDirectory(sourceParentBefore,sourceParentAfter))
+   return deny('UNSAFE_PATH');
   if(!directoryAfter.isDirectory()||directoryAfter.isSymbolicLink()||
      !sameDirectory(directoryBefore,directoryAfter))
    return deny('UNSAFE_PATH');
@@ -214,6 +220,30 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
      await hasPriorPublishedRestoreIntentForSource(
       options.sourcePath,options.backupDirectory))
    return deny('RECOVERY_REVIEW_REQUIRED');
+  // The final path-lock/journal scans above await native I/O. An external
+  // editor may replace either version (or its parent) AFTER earlier hashes
+  // and inode checks but BEFORE this ready receipt. Pin a final read-only
+  // identity snapshot to the approved source, source parent and backup.
+  // This is not an atomic OS lock and does not authorize a future restore.
+  if(await hasUnsafePathLink(options.sourcePath)||
+     await hasUnsafePathLink(options.backupDirectory))
+   return deny('UNSAFE_PATH');
+  const sourceFinal=await lstat(options.sourcePath,{bigint:true});
+  const sourceParentFinal=await lstat(dirname(options.sourcePath),{bigint:true});
+  const directoryFinal=await lstat(options.backupDirectory,{bigint:true});
+  const backupFinal=await lstat(join(options.backupDirectory,options.backupFileName),
+   {bigint:true});
+  if(!sourceFinal.isFile()||sourceFinal.isSymbolicLink()||
+     sourceFinal.nlink!==1n||!sameSource(sourceBefore,sourceFinal))
+   return deny('SOURCE_UNVERIFIED');
+  if(!sourceParentFinal.isDirectory()||sourceParentFinal.isSymbolicLink()||
+     !sameDirectory(sourceParentBefore,sourceParentFinal)||
+     !directoryFinal.isDirectory()||directoryFinal.isSymbolicLink()||
+     !sameDirectory(directoryBefore,directoryFinal))
+   return deny('UNSAFE_PATH');
+  if(!backupFinal.isFile()||backupFinal.isSymbolicLink()||
+     backupFinal.nlink!==1n||!sameSource(backupBefore,backupFinal))
+   return deny('BACKUP_UNVERIFIED');
   return Object.freeze({
    status:'RESTORE_PREFLIGHT_READ_ONLY' as const,
    currentSha256:before.sha256,originalSha256:verifiedBackup.sha256,
