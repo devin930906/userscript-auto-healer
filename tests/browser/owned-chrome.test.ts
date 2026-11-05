@@ -683,6 +683,48 @@ test('TASK-008/TEST-013: target stage diagnostics only emit capped fixed labels'
  assert.equal(stages.summary().includes('12345'),false);
 });
 
+/** Issue #480: a missing main-frame URL could be caused by a page that
+ * never reached its disposable HTTP fixture, or by a frame receipt lagging
+ * behind a served page. Report only YES/NO on target-confirmation failure.
+ * This is diagnostic evidence, never proof of page, GM or script readiness.
+ */
+function createBoundedOwnedFixtureServeCounter(){
+ let served=0;
+ return {
+  observe(method:unknown,route:unknown):void{
+   if(method==='GET'&&route==='/')served=Math.min(128,served+1);
+  },
+  summary():string{return served>0?'YES':'NO';}
+ };
+}
+
+test('TASK-008/TEST-013: owned Chrome target fixture diagnostics remain bounded and failure-only',()=>{
+ const source=readFileSync(join(process.cwd(),'tests/browser/owned-chrome.test.ts'),'utf8');
+ assert.match(source,/function createBoundedOwnedFixtureServeCounter\(\)/);
+ // Search ONLY the real Windows fixture test, not this test's own quoted
+ // source snippets (which appear earlier in the same test file).
+ const fixtureStart=source.lastIndexOf(
+  "test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only'"
+ );
+ assert.ok(fixtureStart>=0);
+ const diagnostic=source.slice(
+  source.indexOf("const target=await openApprovedTarget(result,site,true,undefined,",fixtureStart),
+  source.indexOf("assert.equal(target.ok,true,JSON.stringify(target));",fixtureStart)
+ );
+ assert.match(diagnostic,/if\(!target.ok\)\s*\{/);
+ assert.match(diagnostic,/CDP_TARGET_NAV_STAGE_COUNTS/);
+ assert.match(diagnostic,/CDP_FIXTURE_PAGE_SERVED/);
+ const tracker=createBoundedOwnedFixtureServeCounter();
+ assert.equal(tracker.summary(),'NO');
+ tracker.observe('GET','/robots.txt');
+ tracker.observe('POST','/');
+ tracker.observe('GET','/?private=should-not-log');
+ assert.equal(tracker.summary(),'NO');
+ for(let i=0;i<150;i++)tracker.observe('GET','/');
+ assert.equal(tracker.summary(),'YES');
+ assert.ok(!tracker.summary().includes('private'));
+});
+
 test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',async t=>{
   if(process.platform!=='win32')return;
   let chrome:string|undefined;
@@ -823,7 +865,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     assert.ok(Object.isFrozen(result));
     assert.ok(result.pid>0);
     assert.match(result.chromeVersion,/^\d+\.\d+\.\d+\.\d+$/);
-    const fixture=createServer((_req,res)=>{
+    const fixtureServed=createBoundedOwnedFixtureServeCounter();
+    const fixture=createServer((req,res)=>{
+      fixtureServed.observe(req.method,req.url);
       res.writeHead(200,{'Content-Type':'text/html'});
       res.end('<!doctype html><title>Approved local test</title><main id="approved-ready">ok</main>');
     });
@@ -839,8 +883,10 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const targetStages=createBoundedTargetNavigationStageCounts();
     const target=await openApprovedTarget(result,site,true,undefined,
       stage=>targetStages.observe(stage));
-    if(!target.ok)
+    if(!target.ok){
       t.diagnostic('CDP_TARGET_NAV_STAGE_COUNTS='+targetStages.summary());
+      t.diagnostic('CDP_FIXTURE_PAGE_SERVED='+fixtureServed.summary());
+    }
     assert.equal(target.ok,true,JSON.stringify(target));
     assert.ok(targetStages.summary().includes('"TAB_CREATED":1'),
       'owned target creation must have a fixed diagnostic stage');
