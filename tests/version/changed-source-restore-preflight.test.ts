@@ -334,3 +334,44 @@ test('TASK-011/TEST-020/026: identical backup bytes on a new inode cannot pass p
   }
  });
 });
+
+test('TASK-011/TEST-020/021/026: final async intent scan cannot return a stale restore-ready receipt',async()=>{
+ for(const target of ['source','backup'] as const){
+  await fixture(async({sourcePath,backupDirectory,opts})=>{
+   const intent=require('../../src/version/restore-intent-inspection') as
+    typeof import('../../src/version/restore-intent-inspection');
+   const original=intent.hasPriorPublishedRestoreIntentForSource;
+   const backupPath=join(backupDirectory,opts.backupFileName);
+   let scans=0;
+   (intent as {hasPriorPublishedRestoreIntentForSource:typeof original})
+    .hasPriorPublishedRestoreIntentForSource=async(...args)=>{
+     const result=await original(...args);
+     scans++;
+     // Run the native independent-editor mutation only after the LAST
+     // approved intent scan, when the older preflight did no further stat.
+     if(scans===2){
+      if(target==='source'){
+       await writeFile(sourcePath,changed+'// late external edit\\n','utf8');
+      }else{
+       await rename(backupPath,backupPath+'.replaced');
+       await writeFile(backupPath,source,'utf8');
+      }
+     }
+     return result;
+    };
+   try{
+    const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+    assert.equal(scans,2,'fixture must mutate during the final awaited scan');
+    assert.equal(result.status,'BLOCKED',
+     'native restore preflight must never issue a clean receipt after '+target+' changes');
+    if(result.status==='BLOCKED')
+     assert.equal(result.reason,target==='source'?'SOURCE_UNVERIFIED':'BACKUP_UNVERIFIED');
+    assert.equal(result.automaticRollbackAllowed,false);
+    assert.equal(result.automaticPatchAllowed,false);
+   }finally{
+    (intent as {hasPriorPublishedRestoreIntentForSource:typeof original})
+     .hasPriorPublishedRestoreIntentForSource=original;
+   }
+  });
+ }
+});
