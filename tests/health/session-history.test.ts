@@ -930,3 +930,51 @@ test('TASK-015/TEST-024/026: merged archive refuses forged event status and acce
  ]);
 });
 
+
+
+/** TASK-015 / TEST-024/026: the exported native archive merge must not
+ * access outer record getters/Proxy traps just to discover its event rows.
+ * The IPC caller cannot make a TypeScript assertion into native authority.
+ */
+test('TASK-015/TEST-024/026: archive merge refuses top-level getters and Proxy traps',()=>{
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>2001);
+ assert.equal(stage(session,'outer-record',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'outer-record');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(session,history,'outer-record');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archived={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ let getterReads=0,proxyReads=0;
+ const getter=()=>{getterReads++;throw Error('PRIVATE_OUTER_GETTER');};
+ const proxy=(value:object)=>new Proxy(value,{
+  get(){proxyReads++;throw Error('PRIVATE_OUTER_PROXY');},
+  getOwnPropertyDescriptor(){proxyReads++;throw Error('PRIVATE_OUTER_PROXY');}
+ });
+ const merge=(view:unknown,archive:unknown)=>mergeLimitedSessionArchive(
+  view as typeof current,
+  archive as Parameters<typeof mergeLimitedSessionArchive>[1]
+ );
+ for(const forged of [
+  Object.defineProperty({...archived},'events',{get:getter}),
+  Object.defineProperty({...archived},'currentStatus',{get:getter}),
+  proxy(archived)
+ ])assert.throws(()=>merge(current,forged),/INVALID_LIMITED_HISTORY_EVENTS/);
+ for(const forged of [
+  Object.defineProperty({...current},'events',{get:getter}),
+  Object.defineProperty({...current},'currentStatus',{get:getter}),
+  proxy(current)
+ ])assert.throws(()=>merge(forged,archived),/INVALID_LIMITED_HISTORY_EVENTS/);
+ assert.equal(getterReads,0,'native outer getters must never run');
+ assert.equal(proxyReads,0,'native outer Proxy traps must never run');
+ assert.deepEqual(merge(current,archived).events,[
+  {observedAtMs:2000,status:'INDETERMINATE'},
+  {observedAtMs:2001,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+});
