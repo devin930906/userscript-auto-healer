@@ -565,3 +565,10 @@ test('TASK-017/TEST-022: destructive restore control exposes its local risk expl
   assert.match(html, /<p\s+id="manual-restore-risk"[^>]*>[^<]*将严格比对两者身份与字节/);
   assert.match(html, /<button\s+id="restore-manual-original"\s+type="button"\s+aria-describedby="manual-restore-risk"/);
 });
+
+
+test('TASK-017/TEST-022: manual candidate export control exposes its consent and write-risk explanation', () => {
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+  assert.match(html,/<button\s+id="scenario-export-manual"\s+type="button"\s+disabled\s+aria-describedby="scenario-export-risk"/);
+  assert.match(html,/<p\s+id="scenario-export-risk"[^>]*>[^<]*独立备份目录持久保存恢复检查点/);
+});
