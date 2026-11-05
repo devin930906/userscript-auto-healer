@@ -243,8 +243,27 @@ export function isCurrentManualDiagnosticSession(
  session:Pick<ManualTampermonkeyDiagnosticSession,'expiresAt'|'isActive'>|null
 ):boolean{
  try{
-  return session!==null&&session.isActive()===true&&
-   Number.isFinite(session.expiresAt)&&Date.now()<session.expiresAt;
+  // Status reads must never invoke a caller-owned getter or Proxy trap.
+  // This guard is not an authority source: the native lease still decides
+  // whether the app-owned, explicitly consented diagnostic remains active.
+  if(!session||typeof session!=='object'||isProxy(session)||Array.isArray(session))
+   return false;
+  const proto=Object.getPrototypeOf(session);
+  if(proto!==Object.prototype&&proto!==null)return false;
+  const fields=Object.getOwnPropertyDescriptors(session);
+  const expiresAt=fields.expiresAt,isActive=fields.isActive;
+  if(!expiresAt||!Object.prototype.hasOwnProperty.call(expiresAt,'value')||
+     !isActive||!Object.prototype.hasOwnProperty.call(isActive,'value'))
+   return false;
+  const deadline:unknown=expiresAt.value;
+  if(typeof deadline!=='number'||!Number.isSafeInteger(deadline)||deadline<0||
+     typeof isActive.value!=='function'||isProxy(isActive.value))
+   return false;
+  // Always consult the native monotonic lease before the wall-clock check.
+  // Its expiry is sticky: skipping it at the deadline could allow a later
+  // clock rollback to revive an already expired consent window.
+  const nativeActive=isActive.value()===true;
+  return nativeActive&&Date.now()<deadline;
  }catch{return false;}
 }
 
