@@ -151,6 +151,13 @@ const scenarioApprove = document.getElementById('scenario-approve') as HTMLInput
 const scenarioRegister = document.getElementById('scenario-register') as HTMLButtonElement | null;
 const scenarioStatus = document.getElementById('scenario-status');
 const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTMLSelectElement | null;
+const aiReviewButton=document.getElementById('ai-reviewed-suggest') as HTMLButtonElement|null;
+const aiReviewResult=document.getElementById('ai-reviewed-result');
+let aiReviewPending=false;
+// A renderer hint only: the native gateway separately checks its own
+// authorized observation receipt and still asks for consent before network.
+const observedScenarioIds=new Set<string>();
+scenarioInspectId?.addEventListener('change',()=>browserControls());
 const scenarioInspectButton = document.getElementById('scenario-inspect') as HTMLButtonElement | null;
 const scenarioRecheckStartButton = document.getElementById('scenario-recheck-start') as HTMLButtonElement | null;
 const scenarioRecheckStopButton = document.getElementById('scenario-recheck-stop') as HTMLButtonElement | null;
@@ -694,6 +701,8 @@ function browserControls():void{
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
+ if(aiReviewButton)aiReviewButton.disabled=aiReviewPending||controlsBusy||
+   scenarioInspectionBusy||!observedScenarioIds.has(scenarioInspectId?.value??'');
  if(gmStartButton)gmStartButton.disabled=controlsBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=controlsBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=controlsBusy||!gmProbeActive;
@@ -778,6 +787,8 @@ scenarioRecheckStartButton?.addEventListener('click',()=>{
       '。后续复检已停止，未取得业务或管理器健康验证。';
      break;
     }
+    observedScenarioIds.add(id);
+    browserControls();
     if(round===RECHECK_MAX_ROUNDS)finished=true;
     if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
      '第 '+round+'/'+RECHECK_MAX_ROUNDS+' 轮：仅取得未验证 DOM 信号；'+
@@ -854,6 +865,8 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
       '仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
    :'场景检查未通过：'+(result.code??'UNKNOWN')+
       '。没有获得 Tampermonkey 或业务验证结果。';
+  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY')
+   observedScenarioIds.add(id);
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
  }finally{scenarioInspectionBusy=false;browserControls();}
 }));
@@ -1179,14 +1192,11 @@ aiDiscoveryButton?.addEventListener('click',()=>{
 });
 
 
-const aiReviewButton=document.getElementById('ai-reviewed-suggest') as HTMLButtonElement|null;
-const aiReviewResult=document.getElementById('ai-reviewed-result');
-let aiReviewPending=false;
 aiReviewButton?.addEventListener('click',()=>{
-  if(aiReviewPending)return;
-  // Only an already-staged scenario ID; no renderer-authored evidence is sent.
+  if(aiReviewPending||browserBusy||stopInProgress||scenarioInspectionBusy)return;
+  // Native still independently checks the selected scenario's observation.
   const id=scenarioInspectId?.value??'';
-  if(!id){
+  if(!id||!observedScenarioIds.has(id)){
     if(aiReviewResult)aiReviewResult.textContent='尚未选择已登记的只读场景。先完成本机只读场景检查。';
     return;
   }
@@ -1206,5 +1216,5 @@ aiReviewButton?.addEventListener('click',()=>{
       '。仅供人工复核，未验证 Tampermonkey 或业务功能；不具备脚本写入权限。';
   }).catch(()=>{
     if(aiReviewResult)aiReviewResult.textContent='本次 AI 请求受阻，未产生任何可信修复结果。';
-  }).finally(()=>{aiReviewPending=false;aiReviewButton.disabled=false;});
+  }).finally(()=>{aiReviewPending=false;browserControls();});
 });
