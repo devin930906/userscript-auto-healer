@@ -1310,6 +1310,22 @@ async function createMainWindow(): Promise<void> {
   });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
+    // TASK-017/TEST-002/026: real renderer navigation must retain the exact
+    // file URL; changing its fragment would invalidate every future IPC sender.
+    const navResult = await win.webContents.executeJavaScript(
+      "(async()=>{const original=location.href;" +
+      "const controls=Array.from(document.querySelectorAll('nav[aria-label=\\\"工作区导航\\\"] button[data-workspace-target]'));" +
+      "if(controls.length!==5)return {ok:false};" +
+      "for(const button of controls){" +
+      "button.click();" +
+      "if(location.href!==original)return {ok:false};" +
+      "const id=button.getAttribute('data-workspace-target');" +
+      "if(document.activeElement?.id!==id)return {ok:false};" +
+      "const status=await window.healer.getStatus();" +
+      "if(status.shell!=='development-skeleton')return {ok:false};" +
+      "}return {ok:true};})()"
+    );
+    if(navResult?.ok!==true)throw new Error('WORKSPACE_NAV_IPC_SMOKE_FAILED');
     // Fixture files live solely inside the disposable Windows Actions runner.
     const fixtureDir = mkdtempSync(join(tmpdir(), 'uah-task002-e2e-'));
     const disposableProfile=join(fixtureDir,'isolated-profile');
