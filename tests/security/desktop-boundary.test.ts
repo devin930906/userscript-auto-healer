@@ -590,3 +590,22 @@ test('TASK-017/TEST-022: native import progress ignores stale batches and out-of
  assert.match(ui,/next\.processed!<current\.processed!/);
  assert.match(ui,/shouldAcceptNativeImportProgress\(liveNativeImportProgress,result\)/);
 });
+
+test('TASK-014/017 TEST-015/022: AI review stays disabled until a real read-only scenario observation',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(html,/<button id="ai-reviewed-suggest" type="button" disabled>/,
+  'uninspected scenarios must not offer an AI network action on first render');
+ assert.match(ui,/const observedScenarioIds=new Set<string>\(\)/);
+ assert.match(ui,/result\.ok&&result\.status==='LIMITED_DOM_SIGNAL_ONLY'/);
+ assert.match(ui,/observedScenarioIds\.add\(id\)/);
+ assert.match(ui,/scenarioInspectId\?\.addEventListener\('change',\(\)=>browserControls\(\)\)/);
+ const controls=ui.slice(ui.indexOf('function browserControls():void{'),
+  ui.indexOf('async function browserAction('));
+ assert.match(controls,/aiReviewButton\.disabled=aiReviewPending\|\|/);
+ assert.match(controls,/!observedScenarioIds\.has\(scenarioInspectId\?\.value\?\?''\)/);
+ const handler=ui.slice(ui.indexOf("aiReviewButton?.addEventListener('click'"));
+ assert.match(handler,/!observedScenarioIds\.has\(id\)/,
+  'the disabled property alone is not an authority barrier');
+ assert.match(handler,/aiReviewPending=false;browserControls\(\)/);
+});
