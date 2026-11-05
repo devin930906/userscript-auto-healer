@@ -683,6 +683,27 @@ test('TASK-008/TEST-013: target stage diagnostics only emit capped fixed labels'
  assert.equal(stages.summary().includes('12345'),false);
 });
 
+test('TASK-008/TEST-013: owned Chrome target fixture diagnostics remain bounded and failure-only',()=>{
+ const source=readFileSync(join(process.cwd(),'tests/browser/owned-chrome.test.ts'),'utf8');
+ assert.match(source,/function createBoundedOwnedFixtureServeCounter\(\)/);
+ const diagnostic=source.slice(
+  source.indexOf("const target=await openApprovedTarget(result,site,true,undefined,"),
+  source.indexOf("assert.equal(target.ok,true,JSON.stringify(target));")
+ );
+ assert.match(diagnostic,/if\(!target.ok\)\s*\{/);
+ assert.match(diagnostic,/CDP_TARGET_NAV_STAGE_COUNTS/);
+ assert.match(diagnostic,/CDP_FIXTURE_PAGE_SERVED/);
+ const tracker=createBoundedOwnedFixtureServeCounter();
+ assert.equal(tracker.summary(),'NO');
+ tracker.observe('GET','/robots.txt');
+ tracker.observe('POST','/');
+ tracker.observe('GET','/?private=should-not-log');
+ assert.equal(tracker.summary(),'NO');
+ for(let i=0;i<150;i++)tracker.observe('GET','/');
+ assert.equal(tracker.summary(),'YES');
+ assert.ok(!tracker.summary().includes('private'));
+});
+
 test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',async t=>{
   if(process.platform!=='win32')return;
   let chrome:string|undefined;
