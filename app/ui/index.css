@@ -1,0 +1,83 @@
+/* TASK-017 / TEST-002/022: readable, CSP-safe Electron workspace.
+ * Layout only. No user consent, persistence, IPC or script behavior is altered.
+ */
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  background: #f7f8fa;
+  color: #1d2732;
+  line-height: 1.55;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; min-width: 0; }
+main {
+  width: min(100% - 2rem, 78rem);
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
+}
+h1 { margin: 0 0 1rem; font-size: 1.65rem; line-height: 1.25; }
+h2 { margin: 0 0 0.75rem; font-size: 1.25rem; line-height: 1.35; }
+h3 { font-size: 1.05rem; }
+p { max-width: 75ch; margin: 0.8rem 0; }
+nav[aria-label="工作区导航"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: #fff;
+  border: 1px solid #dce2e8;
+  border-radius: 0.5rem;
+}
+section {
+  margin: 1.25rem 0;
+  padding: 1.5rem;
+  border: 1px solid #dce2e8;
+  background: #fff;
+  border-radius: 0.5rem;
+  min-width: 0;
+}
+section:focus { outline: 2px solid #1760a8; outline-offset: 2px; }
+button, input, select { font: inherit; color: inherit; }
+button {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #9ba9b8;
+  border-radius: 0.35rem;
+  background: #f8fafc;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+button:hover:not(:disabled) { background: #eaf1f8; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+:focus-visible { outline: 3px solid #1760a8; outline-offset: 3px; }
+section > button, #drop-area > button { margin: 0.35rem 0.4rem 0.35rem 0; }
+label[for] { display: block; margin-top: 1rem; margin-bottom: 0.3rem; }
+label:has(input[type="checkbox"]) { display: block; margin: 0.65rem 0; }
+input:not([type="checkbox"]), select {
+  width: min(100%, 42rem);
+  max-width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #9ba9b8;
+  border-radius: 0.3rem;
+  background: #fff;
+}
+input[type="file"] { display: block; }
+[role="status"] {
+  max-width: none;
+  min-width: 0;
+  padding: 0.65rem 0.8rem;
+  background: #f3f6f9;
+  border: 1px solid #e0e5eb;
+  border-radius: 0.3rem;
+  overflow-wrap: anywhere;
+}
+ul, ol, li, p, code { overflow-wrap: anywhere; }
+code { font-family: Consolas, "Cascadia Mono", monospace; }
+@media (max-width: 640px) {
+  main { width: min(100% - 1rem, 78rem); padding-top: 0.75rem; }
+  section { padding: 0.85rem; }
+  nav[aria-label="工作区导航"] button { flex: 1 1 calc(50% - 0.5rem); }
+  button, input, select { min-height: 2.4rem; }
+}
