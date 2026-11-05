@@ -9,8 +9,16 @@
 <body>
   <main>
     <h1>Userscript Auto Healer</h1>
+    <nav aria-label="工作区导航">
+      <button type="button" data-workspace-target="import-workspace">导入脚本</button> ·
+      <button type="button" data-workspace-target="scenario-workspace">测试场景</button> ·
+      <button type="button" data-workspace-target="restore-workspace">手动恢复</button> ·
+      <button type="button" data-workspace-target="ai-workspace">AI 模型</button> ·
+      <button type="button" data-workspace-target="browser-workspace">Chrome 诊断</button>
+    </nav>
     <p>当前支持只读导入、静态选择器分析与获授权的独立 Chrome/CDP 连接；默认不修改原始脚本或自动安装脚本。只有在单独的原生手动恢复流程中，经过两次系统确认才会尝试替换用户选定的本地脚本。只有经过独立原生授权的双选择器场景才可生成新的人工审核候选文件。静态结果或管理器运行目标提示不代表 Tampermonkey、GM API 或真实业务恢复验证，自动修复尚未开放。</p>
-    <section id="drop-area" aria-label="油猴脚本导入区">
+    <section id="import-workspace" tabindex="-1" aria-label="油猴脚本导入区">
+      <div id="drop-area">
       <button id="choose-files" type="button">选择 .user.js 文件（多选）</button>
       <button id="choose-folder" type="button">选择脚本文件夹</button>
       <label for="select-files">也可选择或拖放 .user.js 文件：</label>
@@ -18,8 +26,9 @@
       <button id="cancel-import" type="button" disabled>取消当前批次（完成当前文件后停止）</button>
       <p id="import-summary" role="status" aria-live="polite">尚未导入脚本。</p>
       <ul id="import-list" aria-live="polite"></ul>
+      </div>
     </section>
-    <section aria-labelledby="scenario-heading">
+    <section id="scenario-workspace" tabindex="-1" aria-labelledby="scenario-heading">
       <h2 id="scenario-heading">导入脚本的测试场景登记（当前会话）</h2>
       <p>仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
       <label for="scenario-script">已导入脚本：</label>
@@ -55,7 +64,7 @@
       <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
       <ul id="scenario-list" aria-live="polite"></ul>
     </section>
-    <section aria-labelledby="manual-restore-heading">
+    <section id="restore-workspace" tabindex="-1" aria-labelledby="manual-restore-heading">
       <h2 id="manual-restore-heading">手动恢复原始脚本（需要两次系统确认）</h2>
       <p id="manual-restore-risk">此功能仅供已拥有本工具生成的、与当前脚本完整路径绑定的独立 .backup.user.js 备份时使用。先选择需要恢复的本地 .user.js，再选择原始备份；将严格比对两者身份与字节。最终确认后，程序先独立备份当前被替换版本，再写恢复意图并尝试原子替换。操作不能被视为脚本自动修复，也不更新 Tampermonkey 已安装版本。</p>
       <button id="restore-manual-original" type="button" aria-describedby="manual-restore-risk">独立授权手动恢复原版（将改写所选文件）</button>
@@ -67,7 +76,7 @@
       <button id="restore-inspect-inventory" type="button">批量只读核对恢复目录（不改动文件）</button>
       <p id="restore-inventory-result" role="status" aria-live="polite">尚未扫描恢复目录。</p>
     </section>
-    <section aria-labelledby="ai-heading">
+    <section id="ai-workspace" tabindex="-1" aria-labelledby="ai-heading">
       <h2 id="ai-heading">可选 AI 模型发现（单次本机授权）</h2>
       <p>默认完全关闭。仅在点击按钮后通过 Windows 系统选择器选取自己准备的 JSON 配置（不从网页获取文件路径），再由系统对话框确认具体服务来源，才会发送一次带 Bearer Key 的模型列表查询。配置和密钥不保存、不传给页面或任意脚本；拒绝或取消时不会联网。</p>
       <p>配置文件应包含 baseUrl（受限的 HTTPS 服务或 127.0.0.1 本机 HTTP）、apiKey、manualModel（名称或 null）、maxRequests（1–8）、timeoutMs（500–10000）与 maxOutputTokens（32–256）。例如：<code>{"baseUrl":"https://models.example.com/v1","apiKey":"YOUR_KEY","manualModel":"example-model","maxRequests":2,"timeoutMs":1200,"maxOutputTokens":64}</code>。请自行妥善保管这个含密钥的本地文件。</p>
@@ -77,7 +86,7 @@
       <button id="ai-reviewed-suggest" type="button" disabled>人工授权：对已检查场景请求一次 AI 文字建议</button>
       <p id="ai-reviewed-result" role="status" aria-live="polite">尚未请求任何 AI 建议；所有输出均未经实际脚本验证。</p>
     </section>
-    <section aria-labelledby="browser-heading">
+    <section id="browser-workspace" tabindex="-1" aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
       <p>先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
       <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>

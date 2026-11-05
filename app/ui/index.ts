@@ -1218,3 +1218,23 @@ aiReviewButton?.addEventListener('click',()=>{
     if(aiReviewResult)aiReviewResult.textContent='本次 AI 请求受阻，未产生任何可信修复结果。';
   }).finally(()=>{aiReviewPending=false;browserControls();});
 });
+
+/** Work-area buttons scroll and move keyboard focus without modifying the
+ * file:// frame URL. The main process verifies that exact URL for every IPC.
+ * Do not use fragment links or history updates for in-app navigation.
+ */
+const workAreaIds=[
+  'import-workspace','scenario-workspace','restore-workspace',
+  'ai-workspace','browser-workspace'
+] as const;
+for(const id of workAreaIds){
+  const button=document.querySelector<HTMLButtonElement>(
+    'nav[aria-label="工作区导航"] button[data-workspace-target="'+id+'"]'
+  );
+  button?.addEventListener('click',()=>{
+    const area=document.getElementById(id);
+    if(!area)return;
+    area.scrollIntoView({block:'start'});
+    area.focus({preventScroll:true});
+  });
+}
