@@ -610,8 +610,9 @@ test('TASK-014/017 TEST-015/022: AI review stays disabled until a real read-only
  assert.match(handler,/aiReviewPending=false;browserControls\(\)/);
 });
 
-test('TASK-017/TEST-002: desktop work areas have discoverable keyboard navigation', () => {
+test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC frame URL', () => {
   const html = readFileSync(join(process.cwd(), 'app', 'ui', 'index.html'), 'utf8');
+  const ui = readFileSync(join(process.cwd(), 'app', 'ui', 'index.ts'), 'utf8');
   const targets = [
     ['import-workspace', '导入脚本'],
     ['scenario-workspace', '测试场景'],
@@ -619,13 +620,21 @@ test('TASK-017/TEST-002: desktop work areas have discoverable keyboard navigatio
     ['ai-workspace', 'AI 模型'],
     ['browser-workspace', 'Chrome 诊断']
   ] as const;
-  assert.match(html, /<nav\b[^>]*aria-label="工作区导航"[^>]*>/);
+  assert.match(html, /<nav\\b[^>]*aria-label="工作区导航"[^>]*>/);
   for (const [id, label] of targets) {
     assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) ?? []).length, 1,
-      'each keyboard target must be unique: ' + id);
-    assert.ok(html.includes('href="#' + id + '">' + label + '</a>'),
-      'navigation must name and target the existing work area: ' + label);
+      'each focus target must be unique: ' + id);
+    assert.ok(html.includes('data-workspace-target="' + id + '">' + label + '</button>'),
+      'navigation must use a button instead of a fragment link: ' + label);
+    assert.match(html, new RegExp('id="' + id + '"[^>]*tabindex="-1"'),
+      'each work area needs a programmatic keyboard focus destination');
+    assert.ok(!html.includes('href="#' + id + '"'),
+      'fragment navigation would change trustedMainFrame sender URL');
+    assert.ok(ui.includes("'" + id + "'"),
+      'renderer must recognize each approved work-area ID');
   }
+  assert.match(ui, /scrollIntoView\\(/);
+  assert.match(ui, /\\.focus\\(\\{preventScroll:true\\}\\)/);
   assert.ok(html.indexOf('aria-label="工作区导航"') < html.indexOf('id="drop-area"'),
     'navigation must precede the long first workflow');
 });
