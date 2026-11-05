@@ -99,6 +99,23 @@ function validLimitedEventRows(value:unknown,allowSameTick:boolean,allowEmpty:bo
  }catch{return false;}
 }
 
+/** Extract only own data descriptor values from a native merge input.
+ * Never execute top-level accessors or Proxy traps when finding event arrays.
+ * Unexpected extra own fields are ignored; only the listed properties cross.
+ */
+function nativeHistoryMergeField(source:unknown,key:string):{
+ readonly accepted:true;readonly value:unknown
+}|null{
+ try{
+  if(!source||typeof source!=='object'||nodeTypes.isProxy(source)||
+     Array.isArray(source))return null;
+  const descriptor=Object.getOwnPropertyDescriptor(source,key);
+  if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))
+   return null;
+  return {accepted:true,value:descriptor.value};
+ }catch{return null;}
+}
+
 /** TASK-015 / TEST-024: Merge separately persisted, always-unverified
  * historical observations with this window's limited in-memory history.
  * A matching timestamp is not proof of a newly observed session event:
@@ -110,22 +127,32 @@ export function mergeLimitedSessionArchive(
 ):Extract<LimitedHistoryView,{ok:true}>&Readonly<{archiveRetained:true}>{
  // Refuse forged or malformed event data even if a caller supplied a
  // TypeScript-only valid archive/session discriminant.
- if(!validLimitedEventRows(stored.events,false,false)||
-    !validLimitedEventRows(current.events,true,true))
+ // The validated own-data descriptors below also guard the outer records.
+ // Do not evaluate stored.events or current.events before those checks.
+ const storedRows=nativeHistoryMergeField(stored,'events');
+ const sessionRows=nativeHistoryMergeField(current,'events');
+ const sessionStatus=nativeHistoryMergeField(current,'currentStatus');
+ const archiveStatus=nativeHistoryMergeField(stored,'currentStatus');
+ if(!storedRows||!sessionRows||!sessionStatus||!archiveStatus||
+    !validLimitedEventRows(storedRows.value,false,false)||
+    !validLimitedEventRows(sessionRows.value,true,true))
   throw Error('INVALID_LIMITED_HISTORY_EVENTS');
- const oldLast=stored.events[stored.events.length-1].observedAtMs;
- const recent=current.events.filter(event=>event.observedAtMs>oldLast);
- const events=Object.freeze([...stored.events,...recent].slice(-32).map(
+ const archived=storedRows.value as readonly Readonly<{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}>[];
+ const observed=sessionRows.value as
+  readonly Readonly<{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}>[];
+ const oldLast=archived[archived.length-1].observedAtMs;
+ const recent=observed.filter(event=>event.observedAtMs>oldLast);
+ const events=Object.freeze([...archived,...recent].slice(-32).map(
   event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
- const currentLast=current.events[current.events.length-1]?.observedAtMs;
+ const currentLast=observed[observed.length-1]?.observedAtMs;
  // Equal timestamps cannot establish ordering across a retained archive and
  // this independent session. Never promote an archived INDETERMINATE row.
  // Runtime callers can misstate a TypeScript-only discriminant. Historical
  // DOM observations never authorize VERIFIED/BROKEN/RECOVERED business state,
  // even when their timestamp is newer than the last archive record.
- const limitedCurrent=current.currentStatus==='ELEMENT_FOUND_ONLY'||
-  current.currentStatus==='INDETERMINATE'?
-  current.currentStatus:'INDETERMINATE' as const;
+ const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'||
+  sessionStatus.value==='INDETERMINATE'?
+  sessionStatus.value:'INDETERMINATE' as const;
  const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   limitedCurrent:'INDETERMINATE' as const;
  // Do not spread the caller's view: the archive merge is a projection of
