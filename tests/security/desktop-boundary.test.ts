@@ -609,3 +609,23 @@ test('TASK-014/017 TEST-015/022: AI review stays disabled until a real read-only
   'the disabled property alone is not an authority barrier');
  assert.match(handler,/aiReviewPending=false;browserControls\(\)/);
 });
+
+test('TASK-017/TEST-002: desktop work areas have discoverable keyboard navigation', () => {
+  const html = readFileSync(join(process.cwd(), 'app', 'ui', 'index.html'), 'utf8');
+  const targets = [
+    ['import-workspace', '导入脚本'],
+    ['scenario-workspace', '测试场景'],
+    ['restore-workspace', '手动恢复'],
+    ['ai-workspace', 'AI 模型'],
+    ['browser-workspace', 'Chrome 诊断']
+  ] as const;
+  assert.match(html, /<nav\\b[^>]*aria-label="工作区导航"[^>]*>/);
+  for (const [id, label] of targets) {
+    assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) ?? []).length, 1,
+      'each keyboard target must be unique: ' + id);
+    assert.ok(html.includes('href="#' + id + '">' + label + '</a>'),
+      'navigation must name and target the existing work area: ' + label);
+  }
+  assert.ok(html.indexOf('aria-label="工作区导航"') < html.indexOf('id="drop-area"'),
+    'navigation must precede the long first workflow');
+});
