@@ -4,6 +4,7 @@
  * recovery, or repair attestation; never expose raw hashes or evidence data.
  */
 import {createHash} from 'node:crypto';
+import {types as nodeTypes} from 'node:util';
 import {DesktopScenarioSession} from '../scenarios/desktop-session';
 import {LimitedHealthRegistry,type LimitedHealthStatus} from './health-registry';
 import type {ArchiveRead} from './limited-health-archive';
@@ -59,6 +60,45 @@ export function readLimitedSessionHistory(
  }
 }
 
+/** TypeScript discriminants cannot authenticate records provided directly to
+ * this exported merge helper. Reject untrusted event arrays before reading
+ * any event fields; never run Proxy traps, accessors or user iterators.
+ * Archive timestamps are strictly ordered. Current-session events may share
+ * a millisecond, but neither source may introduce verified business states.
+ */
+function validLimitedEventRows(value:unknown,allowSameTick:boolean,allowEmpty:boolean):boolean{
+ try{
+  if(!Array.isArray(value)||nodeTypes.isProxy(value)||
+     Object.getPrototypeOf(value)!==Array.prototype)return false;
+  const descriptors=Object.getOwnPropertyDescriptors(value);
+  const size=Object.getOwnPropertyDescriptor(value,'length')?.value;
+  if(!Number.isSafeInteger(size)||size<0||size>32||
+     (!allowEmpty&&size===0)||Reflect.ownKeys(descriptors).length!==size+1)
+   return false;
+  let last=-1;
+  for(let i=0;i<size;i++){
+   const slot=descriptors[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return false;
+   const entry:unknown=slot.value;
+   if(!entry||typeof entry!=='object'||Array.isArray(entry)||
+      nodeTypes.isProxy(entry))return false;
+   const proto=Object.getPrototypeOf(entry);
+   if(proto!==Object.prototype&&proto!==null)return false;
+   const fields=Object.getOwnPropertyDescriptors(entry);
+   if(Reflect.ownKeys(fields).length!==2)return false;
+   const time=fields.observedAtMs,status=fields.status;
+   if(!time||!status||
+      !Object.prototype.hasOwnProperty.call(time,'value')||
+      !Object.prototype.hasOwnProperty.call(status,'value')||
+      !Number.isSafeInteger(time.value)||time.value<0||
+      (status.value!=='ELEMENT_FOUND_ONLY'&&status.value!=='INDETERMINATE')||
+      (allowSameTick?time.value<last:time.value<=last))return false;
+   last=time.value;
+  }
+  return true;
+ }catch{return false;}
+}
+
 /** TASK-015 / TEST-024: Merge separately persisted, always-unverified
  * historical observations with this window's limited in-memory history.
  * A matching timestamp is not proof of a newly observed session event:
@@ -68,6 +108,11 @@ export function mergeLimitedSessionArchive(
  current:Extract<LimitedHistoryView,{ok:true}>,
  stored:Extract<ArchiveRead,{status:'ARCHIVE_READ_UNVERIFIED'}>
 ):Extract<LimitedHistoryView,{ok:true}>&Readonly<{archiveRetained:true}>{
+ // Refuse forged or malformed event data even if a caller supplied a
+ // TypeScript-only valid archive/session discriminant.
+ if(!validLimitedEventRows(stored.events,false,false)||
+    !validLimitedEventRows(current.events,true,true))
+  throw Error('INVALID_LIMITED_HISTORY_EVENTS');
  const oldLast=stored.events[stored.events.length-1].observedAtMs;
  const recent=current.events.filter(event=>event.observedAtMs>oldLast);
  const events=Object.freeze([...stored.events,...recent].slice(-32).map(

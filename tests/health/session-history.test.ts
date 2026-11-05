@@ -881,3 +881,52 @@ test('TASK-015/TEST-024/026: forged newer current health status never gains veri
  assert.equal(mergeLimitedSessionArchive(view,archived).currentStatus,
   'ELEMENT_FOUND_ONLY');
 });
+
+/** A type assertion is not an evidence validator at the exported native
+ * merge boundary. Runtime-forged records may never mint recovery status or
+ * invoke script-owned getters, even when called outside the Electron handler.
+ */
+test('TASK-015/TEST-024/026: merged archive refuses forged event status and accessors',()=>{
+ const session=new DesktopScenarioSession();
+ const registry=new LimitedHealthRegistry(()=>2001);
+ assert.equal(stage(session,'malformed-merge',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'malformed-merge');
+ registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(session,registry,'malformed-merge');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const validArchive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merge=(now:unknown,old:unknown)=>mergeLimitedSessionArchive(
+  now as typeof current,
+  old as Parameters<typeof mergeLimitedSessionArchive>[1]
+ );
+ const forged={
+  ...validArchive,events:[{observedAtMs:2000,status:'RECOVERED_VERIFIED'}]
+ };
+ assert.throws(()=>merge(current,forged),/INVALID_LIMITED_HISTORY_EVENTS/);
+ let getterReads=0,proxyReads=0;
+ const accessor=Object.defineProperty({},'observedAtMs',{get(){
+  getterReads++;throw Error('PRIVATE_HISTORY_GETTER');
+ }});
+ const proxy=new Proxy({observedAtMs:2000,status:'INDETERMINATE'},{
+  getPrototypeOf(){proxyReads++;throw Error('PRIVATE_HISTORY_PROXY');}
+ });
+ for(const bad of [accessor,proxy]){
+  assert.throws(()=>merge(current,{...validArchive,events:[bad]}),
+   /INVALID_LIMITED_HISTORY_EVENTS/);
+  assert.throws(()=>merge({...current,events:[bad]},validArchive),
+   /INVALID_LIMITED_HISTORY_EVENTS/);
+ }
+ assert.equal(getterReads,0);
+ assert.equal(proxyReads,0);
+ assert.deepEqual(merge(current,validArchive).events,[
+  {observedAtMs:2000,status:'INDETERMINATE'},
+  {observedAtMs:2001,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+});
+
