@@ -638,3 +638,23 @@ test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC fra
   assert.ok(html.indexOf('aria-label="工作区导航"') < html.indexOf('id="drop-area"'),
     'navigation must precede the long first workflow');
 });
+
+test('TASK-017/TEST-002/022: packaged desktop workspace styling preserves focus and narrow windows',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
+ const assets=readFileSync(join(process.cwd(),'scripts/copy-assets.cjs'),'utf8');
+ assert.match(html,/<link rel="stylesheet" href="\.\/index\.css">/,
+  'CSP-safe styles must load from the local packaged renderer');
+ assert.match(assets,/copyFileSync\(join\(__dirname, '\.\.', 'app', 'ui', 'index\.css'\), join\(target, 'index\.css'\)\)/,
+  'the packaged Electron renderer must include its stylesheet');
+ assert.match(css,/:focus-visible\s*\{/,
+  'keyboard focus must be visually apparent');
+ assert.match(css,/:disabled\b/,
+  'disabled operations must remain distinguishable from active actions');
+ assert.match(css, /@media\s*\(max-width:\s*640px\)/,
+  'narrow desktop windows must preserve reachable controls');
+ assert.match(css,/overflow-wrap:\s*anywhere/,
+  'opaque evidence and long text must not create horizontal overflow');
+ assert.doesNotMatch(html,/<style\b|\sstyle=/,
+  'keep the renderer CSP free from inline styling');
+});
