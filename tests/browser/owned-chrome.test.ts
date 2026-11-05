@@ -701,9 +701,15 @@ function createBoundedOwnedFixtureServeCounter(){
 test('TASK-008/TEST-013: owned Chrome target fixture diagnostics remain bounded and failure-only',()=>{
  const source=readFileSync(join(process.cwd(),'tests/browser/owned-chrome.test.ts'),'utf8');
  assert.match(source,/function createBoundedOwnedFixtureServeCounter\(\)/);
+ // Search ONLY the real Windows fixture test, not this test's own quoted
+ // source snippets (which appear earlier in the same test file).
+ const fixtureStart=source.indexOf(
+  "test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only'"
+ );
+ assert.ok(fixtureStart>=0);
  const diagnostic=source.slice(
-  source.indexOf("const target=await openApprovedTarget(result,site,true,undefined,"),
-  source.indexOf("assert.equal(target.ok,true,JSON.stringify(target));")
+  source.indexOf("const target=await openApprovedTarget(result,site,true,undefined,",fixtureStart),
+  source.indexOf("assert.equal(target.ok,true,JSON.stringify(target));",fixtureStart)
  );
  assert.match(diagnostic,/if\(!target.ok\)\s*\{/);
  assert.match(diagnostic,/CDP_TARGET_NAV_STAGE_COUNTS/);
