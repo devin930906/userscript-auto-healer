@@ -619,7 +619,7 @@ test('TASK-017/TEST-002: desktop work areas have discoverable keyboard navigatio
     ['ai-workspace', 'AI 模型'],
     ['browser-workspace', 'Chrome 诊断']
   ] as const;
-  assert.match(html, /<nav\\b[^>]*aria-label="工作区导航"[^>]*>/);
+  assert.match(html, /<nav\b[^>]*aria-label="工作区导航"[^>]*>/);
   for (const [id, label] of targets) {
     assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) ?? []).length, 1,
       'each keyboard target must be unique: ' + id);
