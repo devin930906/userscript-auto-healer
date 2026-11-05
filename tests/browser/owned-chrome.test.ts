@@ -703,7 +703,7 @@ test('TASK-008/TEST-013: owned Chrome target fixture diagnostics remain bounded 
  assert.match(source,/function createBoundedOwnedFixtureServeCounter\(\)/);
  // Search ONLY the real Windows fixture test, not this test's own quoted
  // source snippets (which appear earlier in the same test file).
- const fixtureStart=source.indexOf(
+ const fixtureStart=source.lastIndexOf(
   "test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only'"
  );
  assert.ok(fixtureStart>=0);
