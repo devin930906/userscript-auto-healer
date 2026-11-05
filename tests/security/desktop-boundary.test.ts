@@ -572,3 +572,21 @@ test('TASK-017/TEST-022: manual candidate export control exposes its consent and
   assert.match(html,/<button\s+id="scenario-export-manual"\s+type="button"\s+disabled\s+aria-describedby="scenario-export-risk"/);
   assert.match(html,/<p\s+id="scenario-export-risk"[^>]*>[^<]*独立备份目录持久保存恢复检查点/);
 });
+
+
+test('TASK-017/TEST-022: native import progress ignores stale batches and out-of-order phase receipts',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ // Each native batch owns a generation; old in-flight IPC replies must not
+ // alter the next batch when its busy flags become true again.
+ assert.match(ui,/let nativeImportGeneration=0;/);
+ assert.match(ui,/const generation=\+\+nativeImportGeneration;/);
+ assert.match(ui,/if\(!activeImport\|\|!nativeImportMode\|\|generation!==nativeImportGeneration\)return;/);
+ assert.match(ui,/finally\s*\{\s*nativeImportGeneration\+\+;\s*window\.clearInterval\(poll\)/);
+ // Import counters restart at 0 on ANALYZING; compare only within the
+ // same phase, and reject late IMPORTING responses after analysis begins.
+ assert.match(ui,/const phaseRank:Record<NonNullable<NativeImportProgress\['phase'\]>,number>/);
+ assert.match(ui,/if\(incomingRank<currentRank\)return false;/);
+ assert.match(ui,/if\(incomingRank===currentRank&&/);
+ assert.match(ui,/next\.processed!<current\.processed!/);
+ assert.match(ui,/shouldAcceptNativeImportProgress\(liveNativeImportProgress,result\)/);
+});
