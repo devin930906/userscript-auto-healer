@@ -55,3 +55,20 @@ test('TASK-007/TEST-017/026: manager page classifications are bounded and contai
  }
  assert.equal(classifyTampermonkeyPageUrl('not a URL'),'OTHER_PAGE');
 });
+
+test('TASK-007/TEST-017: transient MV3 worker absence cannot replace real GM and business assertions',()=>{
+ // A Chrome MV3 service worker may be suspended while the extension card
+ // still exists. A fixed waitForEvent timeout then fails the ORIGINAL half
+ // before the real manager/GM/product assertions can run. Do not change
+ // product permissions, suppress final assertions, or retry until green.
+ assert.doesNotMatch(source,/context\.waitForEvent\('serviceworker'/,
+  'a worker event is not a mandatory manager-authenticity or GM receipt');
+ assert.match(source,/serviceWorkerObserved:Boolean\(managerWorker\)/,
+  'report the instantaneous worker observation as a hint, not an authority');
+ assert.match(source,/const managerWorker=context\.serviceWorkers\(\)\.find\(/);
+ assert.match(source,/assert\.deepEqual\(\{\s*injected:broken\.injected/);
+ assert.match(source,/assert\.deepEqual\(\{\s*injected:fixed\.injected/);
+ assert.match(source,/gmDefault:'true'/);
+ assert.match(source,/business:'missing-target'/);
+ assert.match(source,/business:'recovered'/);
+});

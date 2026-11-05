@@ -525,17 +525,21 @@ async function main(){
   assert.ok(manager,'Official-hosted Tampermonkey package did not register in isolated Chromium: '+JSON.stringify(cards));
   assert.match(manager.id,/^[a-p]{32}$/);
   const id=manager.id;
-  const workers=context.serviceWorkers();
-  const sw=workers.find(x=>x.url().startsWith('chrome-extension://'+id+'/'))||
-    await context.waitForEvent('serviceworker',{timeout:20000});
-  assert.ok(sw.url().startsWith('chrome-extension://'+id+'/'),
-    'Tampermonkey service worker not registered for installed runtime');
+  // MV3 service workers are event-driven and may already have suspended.
+  // A missing worker at THIS instant is neither proof of a broken extension
+  // nor of a valid manager installation. Record a bounded observation only;
+  // the independent real GM/injection/business assertions below MUST pass.
+  // Do not add launch retries or extend test deadlines to conceal failures.
+  const managerWorker=context.serviceWorkers().find(x=>
+    x.url().startsWith('chrome-extension://'+id+'/'));
   // Unpacked extension IDs can differ from signed Chrome Web Store IDs.
   // Explicitly record this distinction; vendor download alone is not a
   // cryptographic attestation of a store-signed installation.
   console.log('ISOLATED_TAMPERMONKEY_RUNTIME '+JSON.stringify({
    managerName:manager.name,version:manifest.version,manifest:manifest.manifest_version,
-   runtimeId:id,officialStoreIdMatch:id===EXPECTED_ID,chromeVersion:context.browser()?.version()
+   runtimeId:id,officialStoreIdMatch:id===EXPECTED_ID,
+   serviceWorkerObserved:Boolean(managerWorker),
+   chromeVersion:context.browser()?.version()
   }));
   const toggles=await optIn(context,id);
   console.log('DISPOSABLE_USER_SCRIPTS_OPT_IN '+JSON.stringify(toggles));
