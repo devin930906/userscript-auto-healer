@@ -180,6 +180,9 @@ export async function inspectApprovedTampermonkeyRuntime(
     ws.search||ws.hash||!/^\/devtools\/browser\/[a-zA-Z0-9-]{8,128}$/.test(ws.pathname))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
  const owned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+ // A user can revoke consent while Windows listener ownership is pending.
+ // Report cancellation before a stale PID result and never start CDP afterward.
+ if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!owned.ok||!isLiveApprovedChromeSession(session))
    return {ok:false,code:'UNOWNED_LISTENER'};
  const payload=await readBoundedTargets(session.browserWebsocket,signal);
