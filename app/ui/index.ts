@@ -195,6 +195,31 @@ let busy = false;
 let activeImport = false;
 let nativeImportMode = false;
 let liveNativeImportProgress:NativeImportProgress|null=null;
+// Independent renderer-side lifetime marker: an old IPC progress receipt
+// must never overwrite a newer native picker batch's visible state.
+let nativeImportGeneration=0;
+const phaseRank:Record<NonNullable<NativeImportProgress['phase']>,number>={
+ PICKING:0,SCANNING:1,IMPORTING:2,ANALYZING:3
+};
+/** The native producer starts analysis counters at zero after import.
+ * Preserve phase ordering while accepting only forward counts inside a phase.
+ * This affects UI presentation only, not IPC authority or imported bytes.
+ */
+function shouldAcceptNativeImportProgress(
+ current:NativeImportProgress|null,next:NativeImportProgress
+):boolean{
+ if(!current?.active)return true;
+ const incomingRank=phaseRank[next.phase!];
+ const currentRank=phaseRank[current.phase!];
+ if(incomingRank<currentRank)return false;
+ if(incomingRank===currentRank&&(
+   next.processed!<current.processed!||
+   next.accepted!<current.accepted!||
+   next.duplicates!<current.duplicates!||
+   next.failed!<current.failed!
+ ))return false;
+ return true;
+}
 let cancelRequested = false;
 let dropScanController: AbortController | null = null;
 // Session-only counters: no script bytes, paths or account data enter history.
@@ -278,8 +303,10 @@ async function locked(task: () => Promise<void>): Promise<void> {
 }
 
 async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
+  const generation=++nativeImportGeneration;
   activeImport = true;
   nativeImportMode = true;
+  liveNativeImportProgress=null;
   cancelRequested = false;
   if (cancelImport) cancelImport.disabled = false;
   updateImportSummary();
@@ -288,12 +315,13 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
   const refresh=async()=>{
     try {
       const result=await window.healer.getNativeImportProgress();
-      if(!activeImport||!nativeImportMode)return;
+      if(!activeImport||!nativeImportMode||generation!==nativeImportGeneration)return;
       if(result.active&&typeof result.phase==='string'&&
          ['PICKING','SCANNING','IMPORTING','ANALYZING'].includes(result.phase)&&
          [result.processed,result.total,result.accepted,result.duplicates,result.failed]
            .every(v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=1000)&&
-         result.processed! <= result.total!){
+         result.processed! <= result.total!&&
+         shouldAcceptNativeImportProgress(liveNativeImportProgress,result)){
         liveNativeImportProgress=result;
         updateImportSummary();
       }
@@ -317,6 +345,7 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       logLine('原生选择导入已取消；已经完成的只读结果仍保留。');
     }
   } finally {
+    nativeImportGeneration++;
     window.clearInterval(poll);
     liveNativeImportProgress=null;
     nativeImportMode = false;
