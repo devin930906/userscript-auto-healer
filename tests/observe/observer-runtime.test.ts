@@ -20,6 +20,20 @@ async function availablePort():Promise<number>{
  if(!a||typeof a==='string')throw Error('NO_TEST_PORT');
  return a.port;
 }
+/** Fixed-label fixture receipt for Issue #480's real Windows failure path.
+ * Never expose URL, port, request headers, frame content or process identity.
+ */
+function fixturePageServedLabel(count:number):'YES'|'NO' {
+ return Number.isSafeInteger(count)&&count>0?'YES':'NO';
+}
+test('TASK-008/TEST-013: observer fixture page-served receipt remains a bounded label',()=>{
+ assert.equal(fixturePageServedLabel(0),'NO');
+ assert.equal(fixturePageServedLabel(1),'YES');
+ assert.equal(fixturePageServedLabel(128),'YES');
+ assert.equal(fixturePageServedLabel(-1),'NO');
+ assert.equal(fixturePageServedLabel(Number.NaN),'NO');
+});
+
 test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscript verification)',async t=>{
  if(process.platform!=='win32'){t.skip('Requires real Windows Chrome');return;}
  let chrome:string|undefined;
@@ -42,6 +56,7 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
  if(!subAddr||typeof subAddr==='string')throw Error('NO_SUBFRAME');
  const subUrl='http://127.0.0.1:'+subAddr.port+'/frame';
  let signalDynamicChange=false;
+ let servedMainPageCount=0;
  const main=createServer((req,res)=>{
    if(req.url==='/trigger'){
      res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});
@@ -57,6 +72,7 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
      'history.pushState({},"","/route-next");},850);return}}catch(e){}'+
      'setTimeout(poll,120)}poll()</script>'+
      '</body></html>');
+   if(req.url==='/')servedMainPageCount=Math.min(128,servedMainPageCount+1);
  });
  await new Promise<void>((resolve,reject)=>{main.once('error',reject);main.listen(0,'127.0.0.1',resolve);});
  t.after(()=>new Promise<void>(resolve=>main.close(()=>resolve())));
@@ -79,6 +95,9 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
   const counts:Record<string,number>={};
   for(const stage of navigationStages)counts[stage]=(counts[stage]??0)+1;
   t.diagnostic('CDP_TARGET_STAGE_COUNTS='+JSON.stringify(counts));
+  // Distinguish a never-served HTTP fixture from a served page whose CDP
+  // top-frame receipt never became trustworthy; neither grants authority.
+  t.diagnostic('CDP_FIXTURE_PAGE_SERVED='+fixturePageServedLabel(servedMainPageCount));
  }
  assert.equal(tab.ok,true,JSON.stringify(tab));
  if(!tab.ok)return;
