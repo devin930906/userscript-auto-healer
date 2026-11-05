@@ -620,7 +620,7 @@ test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC fra
     ['ai-workspace', 'AI 模型'],
     ['browser-workspace', 'Chrome 诊断']
   ] as const;
-  assert.match(html, /<nav\\b[^>]*aria-label="工作区导航"[^>]*>/);
+  assert.match(html, /<nav\b[^>]*aria-label="工作区导航"[^>]*>/);
   for (const [id, label] of targets) {
     assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) ?? []).length, 1,
       'each focus target must be unique: ' + id);
@@ -633,8 +633,8 @@ test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC fra
     assert.ok(ui.includes("'" + id + "'"),
       'renderer must recognize each approved work-area ID');
   }
-  assert.match(ui, /scrollIntoView\\(/);
-  assert.match(ui, /\\.focus\\(\\{preventScroll:true\\}\\)/);
+  assert.match(ui, /scrollIntoView\(/);
+  assert.match(ui, /\.focus\(\{preventScroll:true\}\)/);
   assert.ok(html.indexOf('aria-label="工作区导航"') < html.indexOf('id="drop-area"'),
     'navigation must precede the long first workflow');
 });
