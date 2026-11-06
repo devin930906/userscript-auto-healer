@@ -978,3 +978,36 @@ test('TASK-015/TEST-024/026: archive merge refuses top-level getters and Proxy t
   {observedAtMs:2001,status:'ELEMENT_FOUND_ONLY'}
  ]);
 });
+
+test('TASK-015/TEST-024/026: native history merge refuses far-future session and archive observations',()=>{
+ const now=Date.now();
+ const scenario=new DesktopScenarioSession();
+ const health=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(scenario,'future-merge',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'future-merge');
+ health.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(scenario,health,'future-merge');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merge=(recent:unknown,old:unknown)=>mergeLimitedSessionArchive(
+  recent as typeof current,old as Parameters<typeof mergeLimitedSessionArchive>[1]);
+ const impossible=now+24*60*60*1000;
+ assert.throws(()=>merge(current,{...archive,
+  events:[{observedAtMs:impossible,status:'INDETERMINATE'}]
+ }),/INVALID_LIMITED_HISTORY_EVENTS/,
+ 'a future-stamped archive must not poison a restarted history timeline');
+ assert.throws(()=>merge({...current,
+  events:[{observedAtMs:impossible,status:'ELEMENT_FOUND_ONLY'}]},archive),
+  /INVALID_LIMITED_HISTORY_EVENTS/,
+  'a forged future native session event must not appear currently healthy');
+ assert.deepEqual(merge(current,archive).events,[
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ],'valid bounded local observations remain mergeable');
+});
