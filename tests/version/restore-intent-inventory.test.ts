@@ -606,3 +606,47 @@ test('TASK-011/TEST-020/021/026: recovery-store staging cannot be exempted by a 
   assert.deepEqual(await readdir(home),[ownPending]);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+/** TASK-011 / TEST-020/026: a canonical native restore-path mutex is
+ * either empty or blocked by a SINGLE child. The prior-intent preflight
+ * must not allocate the entire unbounded directory contents with readdir().
+ * A legitimate empty lock remains clean; foreign nested bytes are preserved.
+ */
+test('TASK-011/TEST-020/026: prior restore-intent guard uses bounded mutex child scan',async t=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-prior-intent-bounded-mutex-'));
+ t.after(()=>rm(home,{recursive:true,force:true}));
+ const sourcePath=join(home,'selected.user.js');
+ const backupDirectory=join(home,'recovery');
+ await writeFile(sourcePath,original);
+ await mkdir(backupDirectory);
+ const lockPath=join(backupDirectory,'.uah-restore-path-'+sha(Buffer.from(sourcePath)));
+ await mkdir(lockPath);
+ const originalReadDir=fsPromises.readdir.bind(fsPromises);
+ let forbiddenEnumerations=0;
+ const patched=mock.method(fsPromises,'readdir',
+  (async(...args:Parameters<typeof fsPromises.readdir>)=>{
+   if(String(args[0])===lockPath){
+    forbiddenEnumerations++;
+    throw new Error('NESTED_MUTEX_FULL_ENUMERATION_FORBIDDEN');
+   }
+   return originalReadDir(...args);
+  }) as typeof fsPromises.readdir);
+ try{
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(
+   sourcePath,backupDirectory),false,
+   'an untouched empty native mutex is not published restore intent');
+  await writeFile(join(lockPath,'foreign-evidence.bin'),'untrusted');
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(
+   sourcePath,backupDirectory),true,
+   'one foreign child blocks a new native restore and retains its bytes');
+  assert.deepEqual(await readFile(join(lockPath,'foreign-evidence.bin')),
+   Buffer.from('untrusted'));
+  assert.equal(forbiddenEnumerations,0,
+   'the native prior-intent guard must never materialize a nested child list');
+ }finally{
+  patched.mock.restore();
+ }
+ assert.deepEqual(await readFile(sourcePath),original,
+  'read-only preflight cannot edit the selected userscript');
+});

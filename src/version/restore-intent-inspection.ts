@@ -10,7 +10,7 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
-import {lstat,open,opendir,readdir} from 'node:fs/promises';
+import {lstat,open,opendir} from 'node:fs/promises';
 import {basename,isAbsolute,join,resolve} from 'node:path';
 import {TextDecoder,types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -38,6 +38,16 @@ const JOURNAL_NAME=new RegExp('^\\.uah-restore-'+UUID+'\\.journal\\.json$');
 const BACKUP_NAME=new RegExp('^'+UUID+'\\.backup\\.user\\.js$');
 const STRUCTURAL_BACKUP_NAME=new RegExp('^(.+~[a-f0-9]{24})\\.('+UUID+')\\.backup\\.user\\.js$');
 const MAX_JOURNAL_BYTES=4096;
+/** Canonical path mutexes must be empty. A single read is sufficient to
+ * reject unexpected native recovery evidence without allocating an
+ * unbounded full listing from a potentially foreign-populated directory.
+ * A read/close failure propagates to the existing fail-closed outer guard.
+ */
+async function nativeRestoreMutexHasChildren(path:string):Promise<boolean>{
+ const cursor=await opendir(path);
+ try{return await cursor.read()!==null;}
+ finally{await cursor.close();}
+}
 type Input={
  sourcePath:string;backupDirectory:string;journalFileName:string;
  userApproved:boolean
@@ -263,9 +273,9 @@ export async function hasPriorPublishedRestoreIntentForSource(
      if(await hasUnsafePathLink(lockPath))return true;
      const beforeLock=await lstat(lockPath,{bigint:true});
      if(!beforeLock.isDirectory()||beforeLock.isSymbolicLink())return true;
-     const children=await readdir(lockPath);
+     const hasChild=await nativeRestoreMutexHasChildren(lockPath);
      const afterLock=await lstat(lockPath,{bigint:true});
-     if(children.length!==0||!afterLock.isDirectory()||
+     if(hasChild||!afterLock.isDirectory()||
         afterLock.isSymbolicLink()||!sameDir(beforeLock,afterLock)||
         beforeLock.mtimeNs!==afterLock.mtimeNs||
         beforeLock.ctimeNs!==afterLock.ctimeNs||
@@ -321,9 +331,9 @@ export async function hasPriorPublishedRestoreIntentForSource(
       identity.mtimeNs!==beforeLock.mtimeNs||
       identity.ctimeNs!==beforeLock.ctimeNs||
       identity.mode!==beforeLock.mode)return true;
-   const children=await readdir(path);
+   const hasChild=await nativeRestoreMutexHasChildren(path);
    const afterLock=await lstat(path,{bigint:true});
-   if(children.length!==0||!afterLock.isDirectory()||
+   if(hasChild||!afterLock.isDirectory()||
       afterLock.isSymbolicLink()||!sameDir(beforeLock,afterLock)||
       beforeLock.mtimeNs!==afterLock.mtimeNs||
       beforeLock.ctimeNs!==afterLock.ctimeNs||
