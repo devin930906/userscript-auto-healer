@@ -6,7 +6,7 @@
  * cannot substitute for an atomic filesystem lock against external writers.
  */
 import type {BigIntStats} from 'node:fs';
-import {lstat,opendir} from 'node:fs/promises';
+import {lstat,opendir,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 import {hasStructurallyValidNativeRestoreJournalReadOnly} from './restore-intent-inspection';
@@ -82,7 +82,19 @@ export async function hasInterruptedRestoreStaging(
      if(current.isSymbolicLink()||
         (published?(!current.isFile()||current.nlink!==1n):
          !current.isDirectory()))pending=true;
-     else if(published){
+     else if(lock){
+      // Native path mutexes are created as empty directories. Unexpected
+      // contents may hold foreign/interrupted recovery evidence; do not
+      // silently classify a populated reserved directory as clean.
+      const lockPath=join(directory,entry.name);
+      const children=await readdir(lockPath);
+      const afterLock=await lstat(lockPath,{bigint:true});
+      if(children.length!==0||!afterLock.isDirectory()||
+         afterLock.isSymbolicLink()||
+         current.dev!==afterLock.dev||current.ino!==afterLock.ino||
+         current.mtimeNs!==afterLock.mtimeNs||
+         current.ctimeNs!==afterLock.ctimeNs)pending=true;
+     }else if(published){
       const path=join(directory,entry.name);
       if(!await hasStructurallyValidNativeRestoreJournalReadOnly(path))
        pending=true;
