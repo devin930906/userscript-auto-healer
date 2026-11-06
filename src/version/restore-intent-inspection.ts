@@ -294,9 +294,19 @@ export async function hasPriorPublishedRestoreIntentForSource(
   for(const entry of independent){
    const now=await lstat(entry.path,{bigint:true});
    if(!now.isFile()||now.isSymbolicLink()||now.nlink!==1n||
-      !sameFile(entry.identity,now)||
+      !sameFile(entry.identity,now)||now.mode!==entry.identity.mode||
       await readJournal(entry.path)!==entry.bytes)return true;
   }
+  // The previous parent snapshot precedes awaited per-journal rereads.
+  // A renamed/replaced recovery store must not inherit a clean preflight
+  // just because the old journal paths were valid when enumerated.
+  // This remains a bounded read-only observation, NOT a directory lock.
+  const finalDirectory=await lstat(backupDirectory,{bigint:true});
+  if(!finalDirectory.isDirectory()||finalDirectory.isSymbolicLink()||
+     !sameDir(start,finalDirectory)||
+     start.mtimeNs!==finalDirectory.mtimeNs||
+     start.ctimeNs!==finalDirectory.ctimeNs||
+     await hasUnsafePathLink(backupDirectory))return true;
   return false;
  }catch{return true;}
 }

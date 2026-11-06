@@ -2,7 +2,7 @@
 import {test,mock} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {lstat,mkdir,mkdtemp,readFile,readdir,rm,stat,symlink,truncate,utimes,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,stat,symlink,truncate,utimes,writeFile} from 'node:fs/promises';
 import {promises as fsPromises} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -460,6 +460,44 @@ test('TASK-011/TEST-020/021/026: shared native recovery directory counts only th
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+
+test('TASK-011/TEST-020/026: a recovery store swapped after the prior-intent scan cannot appear clean',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-prior-final-parent-'));
+ const backupDirectory=join(home,'recoveries');
+ const movedDirectory=join(home,'moved-recoveries');
+ const sourcePath=join(home,'selected.user.js');
+ try{
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  await writeFile(join(backupDirectory,'ordinary-notes.txt'),'existing');
+
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
+   'an unchanged recovery store containing only unrelated notes is clean');
+  const originalLstat=fsPromises.lstat.bind(fsPromises);
+  let storeLookups=0,swapped=false;
+  const hook=mock.method(fsPromises,'lstat',
+   (async(...args:Parameters<typeof fsPromises.lstat>)=>{
+    if(String(args[0])===backupDirectory&&++storeLookups===5){
+     // The old implementation finished after the fourth directory lookup:
+     // initial path safety, start identity, post-scan identity and path safety.
+     // The fifth lookup is the new post-verification receipt boundary.
+     await rename(backupDirectory,movedDirectory);
+     await mkdir(backupDirectory);
+     await writeFile(join(backupDirectory,'foreign-record.txt'),'new owner');
+     swapped=true;
+    }
+    return originalLstat(...args);
+   }) as typeof fsPromises.lstat);
+  try{
+   assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),true,
+    'a replacement recovery directory must block a native source rename');
+  }finally{hook.mock.restore();}
+  assert.equal(swapped,true,'the directory must actually change at the final boundary');
+  assert.deepEqual(await readFile(sourcePath),original,'preflight never edits the source');
+  assert.equal(await readFile(join(movedDirectory,'ordinary-notes.txt'),'utf8'),'existing');
+  assert.equal(await readFile(join(backupDirectory,'foreign-record.txt'),'utf8'),'new owner');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
 
 test('TASK-011/TEST-020/021/026: malformed reserved journal name is never a clean prior-intent preflight',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-prior-reserved-'));
