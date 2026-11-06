@@ -66,7 +66,7 @@ export function readLimitedSessionHistory(
  * Archive timestamps are strictly ordered. Current-session events may share
  * a millisecond, but neither source may introduce verified business states.
  */
-function validLimitedEventRows(value:unknown,allowSameTick:boolean,allowEmpty:boolean):boolean{
+function validLimitedEventRows(value:unknown,allowSameTick:boolean,allowEmpty:boolean,maxObservedAtMs:number):boolean{
  try{
   if(!Array.isArray(value)||nodeTypes.isProxy(value)||
      Object.getPrototypeOf(value)!==Array.prototype)return false;
@@ -91,6 +91,7 @@ function validLimitedEventRows(value:unknown,allowSameTick:boolean,allowEmpty:bo
       !Object.prototype.hasOwnProperty.call(time,'value')||
       !Object.prototype.hasOwnProperty.call(status,'value')||
       !Number.isSafeInteger(time.value)||time.value<0||
+      time.value>maxObservedAtMs||
       (status.value!=='ELEMENT_FOUND_ONLY'&&status.value!=='INDETERMINATE')||
       (allowSameTick?time.value<last:time.value<=last))return false;
    last=time.value;
@@ -129,13 +130,23 @@ export function mergeLimitedSessionArchive(
  // TypeScript-only valid archive/session discriminant.
  // The validated own-data descriptors below also guard the outer records.
  // Do not evaluate stored.events or current.events before those checks.
+ // Both persisted and session event arrays are untrusted at this exported
+ // native boundary. Do not let a far-future timestamp permanently outrank
+ // newly observed DOM history, even if a caller forged TypeScript types.
+ // Use one wall-clock snapshot for both arrays; invalid time fails closed.
+ const now=Date.now();
+ const futureSkewMs=5*60*1000;
+ if(!Number.isSafeInteger(now)||now<0||
+    now>Number.MAX_SAFE_INTEGER-futureSkewMs)
+  throw Error('INVALID_LIMITED_HISTORY_EVENTS');
+ const maxObservedAtMs=now+futureSkewMs;
  const storedRows=nativeHistoryMergeField(stored,'events');
  const sessionRows=nativeHistoryMergeField(current,'events');
  const sessionStatus=nativeHistoryMergeField(current,'currentStatus');
  const archiveStatus=nativeHistoryMergeField(stored,'currentStatus');
  if(!storedRows||!sessionRows||!sessionStatus||!archiveStatus||
-    !validLimitedEventRows(storedRows.value,false,false)||
-    !validLimitedEventRows(sessionRows.value,true,true))
+    !validLimitedEventRows(storedRows.value,false,false,maxObservedAtMs)||
+    !validLimitedEventRows(sessionRows.value,true,true,maxObservedAtMs))
   throw Error('INVALID_LIMITED_HISTORY_EVENTS');
  const archived=storedRows.value as readonly Readonly<{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}>[];
  const observed=sessionRows.value as
