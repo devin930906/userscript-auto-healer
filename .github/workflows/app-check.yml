@@ -154,6 +154,19 @@ jobs:
             if ($testExitCode -ne 0) {
               throw 'Worker diagnostic failed; preserve preceding reason codes and test output.'
             }
+            # The full suite intentionally emits bounded failure markers in its
+            # mocked retirement-failure tests. Run real isolated Worker
+            # scenarios separately so unexpected lifecycle markers here are
+            # not confused with deliberate fault-injection evidence. Keep the
+            # full suite above; this is additional coverage, not a replacement.
+            # Match the 24-, 36- and 70-file real Worker scenarios only.
+            $realWorkerPattern = 'native-batch AST results run in an actual isolated Node worker|native batch previews 36 scripts across bounded isolated worker segments|read-only native AST batch continues beyond 64 files'
+            node --test --test-concurrency=1 --test-name-pattern="$realWorkerPattern" dist/tests/analyze/import-preview.test.js
+            $realExitCode = $LASTEXITCODE
+            Write-Output "Real Worker sample $attempt exit=$realExitCode"
+            if ($realExitCode -ne 0) {
+              throw 'Real isolated Worker sample failed; preserve bounded lifecycle diagnostics.'
+            }
             if ($budget.Elapsed.TotalSeconds -ge 120) {
               throw 'Diagnostic budget exhausted; no reliability conclusion.'
             }
