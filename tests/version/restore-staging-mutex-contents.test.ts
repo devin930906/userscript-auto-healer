@@ -93,3 +93,27 @@ test('TASK-011/TEST-020/026: late foreign contents in an initially empty restore
    'scanner must not delete or rewrite unknown recovery evidence');
  }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/026: empty mutex probe must not enumerate an unbounded reserved child directory',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-mutex-bounded-probe-'));
+ try{
+  const mutex=join(root,'.uah-restore-path-'+'a'.repeat(64));
+  await mkdir(mutex);
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const nativeReaddir=fsPromises.readdir;
+  let wholeDirectoryReads=0;
+  t.mock.method(fsPromises,'readdir',async (...args:Parameters<typeof nativeReaddir>)=>{
+   if(String(args[0])===mutex){
+    wholeDirectoryReads++;
+    // Simulate a mutex whose contents cannot be safely materialized as a
+    // whole Array. The scan must use a bounded one-entry probe instead.
+    throw new Error('MUTEX_UNBOUNDED_READ_FORBIDDEN');
+   }
+   return nativeReaddir(...args);
+  });
+  assert.equal(await hasInterruptedRestoreStaging(root),false,
+   'an empty canonical lock is clean even if full enumeration is prohibited');
+  assert.equal(wholeDirectoryReads,0,
+   'a read-only scan must not allocate an unbounded list of mutex children');
+ }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
+});
