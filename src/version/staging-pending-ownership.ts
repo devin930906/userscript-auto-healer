@@ -50,7 +50,11 @@ export async function removeOwnedStagingPending(
    const pendingId=basename(pending).slice(1,-'.pending'.length);
    const publishedId=publishedName.match(new RegExp(
      '('+UUID+')\\.(?:backup\\.user\\.js|candidate\\.user\\.js|'+
-     'checkpoint\\.json|user\\.js)
+     'checkpoint\\.json|user\\.js)$'))?.[1];
+   if(!isAbsolute(published)||published!==resolve(published)||
+      dirname(published)!==folder||published===pending||
+      !PUBLISHED_NAME.test(publishedName)||publishedId!==pendingId||
+      await hasUnsafePathLink(published))return false;
    const final=await lstat(published,{bigint:true});
    if(!final.isFile()||final.isSymbolicLink()||
       current.nlink!==2n||final.nlink!==2n||
