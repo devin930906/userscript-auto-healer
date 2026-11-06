@@ -143,11 +143,15 @@ export function mergeLimitedSessionArchive(
  const storedRows=nativeHistoryMergeField(stored,'events');
  const sessionRows=nativeHistoryMergeField(current,'events');
  const sessionStatus=nativeHistoryMergeField(current,'currentStatus');
+ const sessionReceipt=nativeHistoryMergeField(current,'status');
+ const sessionOk=nativeHistoryMergeField(current,'ok');
  const archiveStatus=nativeHistoryMergeField(stored,'currentStatus');
  const archiveReceipt=nativeHistoryMergeField(stored,'status');
  // A BLOCKED/missing/foreign read cannot contribute historical evidence,
  // even if its event rows happen to look like a valid unverified archive.
  if(!storedRows||!sessionRows||!sessionStatus||!archiveStatus||
+    !sessionReceipt||sessionReceipt.value!=='UNVERIFIED_SESSION_HISTORY_ONLY'||
+    !sessionOk||sessionOk.value!==true||
     !archiveReceipt||archiveReceipt.value!=='ARCHIVE_READ_UNVERIFIED'||
     archiveStatus.value!=='INDETERMINATE'||
     !validLimitedEventRows(storedRows.value,false,false,maxObservedAtMs)||
