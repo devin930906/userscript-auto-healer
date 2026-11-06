@@ -136,10 +136,11 @@ export async function stageRecoveryCheckpointOnly(
     });
     const bytes=Buffer.from(JSON.stringify(record)+'\n','utf8');
     const expectedHash=createHash('sha256').update(bytes).digest('hex');
+    const publicationId=randomUUID();
     const checkpointFileName=checkpointPrefix(opts.sourcePath)+'.'+
-      randomUUID()+'.checkpoint.json';
+      publicationId+'.checkpoint.json';
     const final=join(opts.backupDirectory,checkpointFileName);
-    const pending=join(opts.backupDirectory,'.'+randomUUID()+'.pending');
+    const pending=join(opts.backupDirectory,'.'+publicationId+'.pending');
     let tempCreated=false;
     let pendingIdentity:BigIntStats|undefined;
     try{
