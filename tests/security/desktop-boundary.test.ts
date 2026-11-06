@@ -695,7 +695,7 @@ test('TASK-017/TEST-002/022: bounded dropped-folder scan retains discovered file
  const scan=ui.slice(start,end);
  assert.match(scan,/let scanLimitReached=false;/,
   'the directory cap needs explicit state rather than throwing away the collected batch');
- assert.match(scan,/if\s*\(scanLimitReached\)\s*break;/,
+ assert.match(scan,/if\s*\([^)]*scanLimitReached\)\s*break;/,
   'scan must stop enumerating new roots or entries after reaching a cap');
  assert.match(scan,/scanLimitReached=true;/,
   'both file-count and visited-entry limits must end the scan');
