@@ -110,7 +110,10 @@ export type ChromeStartupStage='CHROME_SPAWN_RETURNED'|'FETCH_FAILED'|'FETCH_REF
   'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR'|
   'CDP_TIMEOUT_LISTENER_PID_MATCH'|'CDP_TIMEOUT_LISTENER_UNAVAILABLE'|
   'CDP_TIMEOUT_LISTENER_PID_MISMATCH'|'CDP_TIMEOUT_LISTENER_AMBIGUOUS'|
-  'CDP_TIMEOUT_PROBE_INCONCLUSIVE';
+  'CDP_TIMEOUT_PROBE_INCONCLUSIVE'|'CDP_PID_PROOF_STARTED'|
+  'CDP_PID_PROOF_VERIFIED'|'CDP_PID_PROOF_REJECTED'|
+  'CDP_WS_PROOF_STARTED'|'CDP_WS_PROOF_VERIFIED'|
+  'CDP_WS_PROOF_REJECTED'|'CDP_POST_VERSION_DEADLINE';
 
 /** Only fixed, redacted transport labels. Never serialize an underlying
  * fetch/undici error, socket address, Chrome profile, process or user script.
@@ -410,8 +413,11 @@ export async function launchApprovedIsolatedChrome(
               // Native Windows PID inspection has its own OS timeout, but it
               // must not outlive this launch's shorter remaining 20s budget.
               // Preserve user revocation and owned-child exit precedence.
-              if(performance.now()-began>=20000)
+              if(performance.now()-began>=20000){
+                emitStage('CDP_POST_VERSION_DEADLINE');
                 return {ok:false,code:'CDP_TIMEOUT'};
+              }
+              emitStage('CDP_PID_PROOF_STARTED');
               const pendingOwnership=verifyWindowsLoopbackListenerPid(
                 cfg.remoteDebuggingPort,pid);
               const remainingMs=Math.max(1,Math.ceil(
@@ -419,16 +425,26 @@ export async function launchApprovedIsolatedChrome(
               const ownership=await awaitPrelaunchCheckOrRevocation(
                 pendingOwnership,
                 AbortSignal.any([activeSignal,AbortSignal.timeout(remainingMs)]));
-              if(ownership.aborted)
+              if(ownership.aborted){
+                if(!checked.signal?.aborted&&!errored&&!exited)
+                  emitStage('CDP_POST_VERSION_DEADLINE');
                 return {ok:false,code:checked.signal?.aborted?'ABORTED':
                   (errored||exited?'LAUNCH_FAILED':'CDP_TIMEOUT')};
+              }
               if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
               if(errored||exited)return {ok:false,code:'LAUNCH_FAILED'};
-              if(!ownership.value.ok)return {ok:false,code:'OWNER_MISMATCH'};
+              if(!ownership.value.ok){
+                emitStage('CDP_PID_PROOF_REJECTED');
+                return {ok:false,code:'OWNER_MISMATCH'};
+              }
+              emitStage('CDP_PID_PROOF_VERIFIED');
               // The native OS PID receipt may arrive after the 20s startup
               // deadline. Refuse any NEW browser CDP I/O after expiry.
-              if(performance.now()-began>=20000)
+              if(performance.now()-began>=20000){
+                emitStage('CDP_POST_VERSION_DEADLINE');
                 return {ok:false,code:'CDP_TIMEOUT'};
+              }
+              emitStage('CDP_WS_PROOF_STARTED');
               const handshake=await verifyCdpBrowserWebSocket(inspected.websocketUrl,
                 cfg.remoteDebuggingPort,binary.version,activeSignal);
               // Consent may be revoked during the asynchronous handshake.
@@ -444,9 +460,15 @@ export async function launchApprovedIsolatedChrome(
               // Consent revocation above still takes precedence.
               if(errored||exited||child.killed||child.exitCode!==null)
                 return {ok:false,code:'LAUNCH_FAILED'};
-              if(performance.now()-began>=20000)
+              if(performance.now()-began>=20000){
+                emitStage('CDP_POST_VERSION_DEADLINE');
                 return {ok:false,code:'CDP_TIMEOUT'};
-              if(!handshake)return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
+              }
+              if(!handshake){
+                emitStage('CDP_WS_PROOF_REJECTED');
+                return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
+              }
+              emitStage('CDP_WS_PROOF_VERIFIED');
               const verified:Extract<ManagedLaunchResult,{ok:true}>=Object.freeze({
                 ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
