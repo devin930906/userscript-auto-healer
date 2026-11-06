@@ -686,3 +686,25 @@ test('TASK-017/TEST-002/022: second drag/drop batch is rejected visibly without 
   assert.doesNotMatch(preLock, /filesFromDrop\(/,
     'a rejected batch must never read a file or traverse a directory');
 });
+
+test('TASK-017/TEST-002/022: bounded dropped-folder scan retains discovered files and reports unknown remainder',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('async function filesFromDrop(');
+ const end=ui.indexOf("cancelImport?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'the bounded dropped-directory enumerator is present');
+ const scan=ui.slice(start,end);
+ assert.match(scan,/let scanLimitReached=false;/,
+  'the directory cap needs explicit state rather than throwing away the collected batch');
+ assert.match(scan,/if\s*\(scanLimitReached\)\s*break;/,
+  'scan must stop enumerating new roots or entries after reaching a cap');
+ assert.match(scan,/scanLimitReached=true;/,
+  'both file-count and visited-entry limits must end the scan');
+ assert.doesNotMatch(scan,/throw new Error\('SCAN_LIMIT'\)/,
+  'a bounded scan is expected partial input, not a total import error');
+ assert.match(scan,/logLine\('拖放扫描达到上限；已发现 '/,
+  'the user must see that a partial batch was accepted');
+ assert.match(scan,/其余未扫描文件数量未知/,
+  'never invent the number of unenumerated entries');
+ assert.match(scan,/return found;/,
+  'safe already-discovered files must remain eligible for native validation');
+});
