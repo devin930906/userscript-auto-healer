@@ -658,3 +658,17 @@ test('TASK-017/TEST-002/022: packaged desktop workspace styling preserves focus 
  assert.doesNotMatch(html,/<style\b|\sstyle=/,
   'keep the renderer CSP free from inline styling');
 });
+
+test('TASK-017/TEST-002/022: imported workspace has an accessible heading without decorative navigation text', () => {
+  const html = readFileSync(join(process.cwd(), 'app/ui/index.html'), 'utf-8');
+  // This structural check does not claim a rendered Electron or screen-reader test.
+  assert.match(html, /<section id="import-workspace" tabindex="-1" aria-labelledby="import-heading">\s*<h2 id="import-heading">导入油猴脚本（只读）<\/h2>/);
+  const navigation = html.match(/<nav aria-label="工作区导航">([\s\S]*?)<\/nav>/)?.[1];
+  assert.ok(navigation, 'existing workspace navigation remains present');
+  const targets = [...navigation.matchAll(/data-workspace-target="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(targets, [
+    'import-workspace', 'scenario-workspace', 'restore-workspace',
+    'ai-workspace', 'browser-workspace'
+  ]);
+  assert.doesNotMatch(navigation, /<\/button>\s*·/, 'flex navigation uses spacing, not extra spoken separators');
+});
