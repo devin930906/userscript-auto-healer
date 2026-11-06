@@ -536,7 +536,13 @@ chooser?.addEventListener('change', () => {
 dropZone?.addEventListener('dragover', event => { event.preventDefault(); });
 dropZone?.addEventListener('drop', event => {
   event.preventDefault();
-  if (!(event instanceof DragEvent) || !event.dataTransfer || busy) return;
+  if (!(event instanceof DragEvent) || !event.dataTransfer) return;
+  if (busy) {
+    // The current batch owns the drop target: do not silently imply that
+    // the second batch was accepted, and never enumerate its file entries.
+    logLine('当前仍在导入；本次拖放未接收，请等待完成后重新拖放。');
+    return;
+  }
   // A second drop must not traverse entries while an earlier batch owns the lock.
   // Start scanning synchronously inside the lock: drag data is protected
   // after the drop event returns. Keep cancellation enabled through scanning.

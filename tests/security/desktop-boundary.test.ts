@@ -672,3 +672,17 @@ test('TASK-017/TEST-002/022: imported workspace has an accessible heading withou
   ]);
   assert.doesNotMatch(navigation, /<\/button>\s*·/, 'flex navigation uses spacing, not extra spoken separators');
 });
+
+test('TASK-017/TEST-002/022: second drag/drop batch is rejected visibly without reading files', () => {
+  const ui = readFileSync(join(process.cwd(), 'app/ui/index.ts'), 'utf8');
+  const start = ui.indexOf("dropZone?.addEventListener('drop', event => {");
+  const end = ui.indexOf("void locked(async () => {", start);
+  assert.ok(start >= 0 && end > start, 'drop handler and the exclusive import lock exist');
+  const preLock = ui.slice(start, end);
+  assert.match(preLock, /event\.preventDefault\(\)/,
+    'a busy drop must not cause Chromium to navigate to the dropped file');
+  assert.match(preLock, /if \(busy\)\s*\{[\s\S]*?logLine\('当前仍在导入；本次拖放未接收，请等待完成后重新拖放。'\);\s*return;\s*\}/,
+    'a second batch must be explicitly refused before any transfer enumeration');
+  assert.doesNotMatch(preLock, /filesFromDrop\(/,
+    'a rejected batch must never read a file or traverse a directory');
+});
