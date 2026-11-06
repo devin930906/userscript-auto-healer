@@ -163,9 +163,10 @@ export async function exportReviewedCandidateForManualInstall(
      sameDir(exportBefore,backupDir)||sameDir(exportBefore,sourceDir))
     return block('UNSAFE_DESTINATION');
   if(nativeSignal?.aborted)return block('CANCELLED');
+  const candidatePublicationId=randomUUID();
   const name='UAH-Reviewed-'+proposal.candidateSha256.slice(0,12)+'-'+
-    randomUUID()+'.user.js';
-  const pending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
+    candidatePublicationId+'.user.js';
+  const pending=join(options.exportDirectory,'.'+candidatePublicationId+'.pending');
   const final=join(options.exportDirectory,name);
   let pendingExists=false;
   let pendingIdentity:BigIntStats|undefined;
@@ -230,10 +231,11 @@ export async function exportReviewedCandidateForManualInstall(
     if(!originalBytes.length||originalBytes.length>MAX_SCRIPT_BYTES||
        createHash('sha256').update(originalBytes).digest('hex')!==proposal.originalSha256)
       return block('RECHECK_FAILED');
+    const recoveryPublicationId=randomUUID();
     const recoveryName='UAH-Original-'+proposal.originalSha256.slice(0,12)+'-'+
-      randomUUID()+'.user.js';
+      recoveryPublicationId+'.user.js';
     if(nativeSignal?.aborted)return block('CANCELLED');
-    const recoveryPending=join(options.exportDirectory,'.'+randomUUID()+'.pending');
+    const recoveryPending=join(options.exportDirectory,'.'+recoveryPublicationId+'.pending');
     const recoveryFinal=join(options.exportDirectory,recoveryName);
     let recoveryPendingExists=false;
     let recoveryPendingIdentity:BigIntStats|undefined;
