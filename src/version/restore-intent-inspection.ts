@@ -10,7 +10,7 @@
 import {createHash} from 'node:crypto';
 import {constants} from 'node:fs';
 import type {BigIntStats} from 'node:fs';
-import {lstat,open,opendir} from 'node:fs/promises';
+import {lstat,open,opendir,readdir} from 'node:fs/promises';
 import {basename,isAbsolute,join,resolve} from 'node:path';
 import {TextDecoder,types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
@@ -244,6 +244,9 @@ export async function hasPriorPublishedRestoreIntentForSource(
       verifiedOwn.identity.isSymbolicLink()||
       verifiedOwn.identity.nlink!==1n))return true;
   const independent:Array<{path:string;identity:BigIntStats;bytes:string}>=[];
+  // The outer store's timestamps do not track edits inside a mutex directory.
+  // Remember every initially empty lock for a final read-only identity check.
+  const mutexChecks:Array<{path:string;identity:BigIntStats}>=[];
   let entries=0,journals=0,ownSeen=false;
   const directory=await opendir(backupDirectory);
   for await(const entry of directory){
@@ -256,8 +259,19 @@ export async function hasPriorPublishedRestoreIntentForSource(
     // A valid cooperative lock for an independent source is not a journal.
     // A same-shaped fake file or link is still unsafe recovery evidence.
     if(/^[.]uah-restore-path-[a-f0-9]{64}$/.test(entry.name)){
-     const lock=await lstat(join(backupDirectory,entry.name),{bigint:true});
-     if(lock.isDirectory()&&!lock.isSymbolicLink())continue;
+     const lockPath=join(backupDirectory,entry.name);
+     if(await hasUnsafePathLink(lockPath))return true;
+     const beforeLock=await lstat(lockPath,{bigint:true});
+     if(!beforeLock.isDirectory()||beforeLock.isSymbolicLink())return true;
+     const children=await readdir(lockPath);
+     const afterLock=await lstat(lockPath,{bigint:true});
+     if(children.length!==0||!afterLock.isDirectory()||
+        afterLock.isSymbolicLink()||!sameDir(beforeLock,afterLock)||
+        beforeLock.mtimeNs!==afterLock.mtimeNs||
+        beforeLock.ctimeNs!==afterLock.ctimeNs||
+        beforeLock.mode!==afterLock.mode)return true;
+     mutexChecks.push({path:lockPath,identity:afterLock});
+     continue;
     }
     return true;
    }
@@ -296,6 +310,24 @@ export async function hasPriorPublishedRestoreIntentForSource(
    if(!now.isFile()||now.isSymbolicLink()||now.nlink!==1n||
       !sameFile(entry.identity,now)||now.mode!==entry.identity.mode||
       await readJournal(entry.path)!==entry.bytes)return true;
+  }
+  // Published journal rechecks may outlive a previously empty mutex. Catch
+  // new nested crash evidence even when the outer store did not change.
+  for(const {path,identity} of mutexChecks){
+   if(await hasUnsafePathLink(path))return true;
+   const beforeLock=await lstat(path,{bigint:true});
+   if(!beforeLock.isDirectory()||beforeLock.isSymbolicLink()||
+      !sameDir(identity,beforeLock)||
+      identity.mtimeNs!==beforeLock.mtimeNs||
+      identity.ctimeNs!==beforeLock.ctimeNs||
+      identity.mode!==beforeLock.mode)return true;
+   const children=await readdir(path);
+   const afterLock=await lstat(path,{bigint:true});
+   if(children.length!==0||!afterLock.isDirectory()||
+      afterLock.isSymbolicLink()||!sameDir(beforeLock,afterLock)||
+      beforeLock.mtimeNs!==afterLock.mtimeNs||
+      beforeLock.ctimeNs!==afterLock.ctimeNs||
+      beforeLock.mode!==afterLock.mode)return true;
   }
   // The previous parent snapshot precedes awaited per-journal rereads.
   // A renamed/replaced recovery store must not inherit a clean preflight
