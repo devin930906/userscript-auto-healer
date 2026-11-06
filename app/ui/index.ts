@@ -1246,6 +1246,12 @@ for(const id of workAreaIds){
   button?.addEventListener('click',()=>{
     const area=document.getElementById(id);
     if(!area)return;
+    // This is a long-page location jump, not a tab switch: all sections
+    // remain visible, so use aria-current instead of aria-selected.
+    document.querySelectorAll<HTMLButtonElement>(
+      'nav[aria-label="工作区导航"] button[data-workspace-target]'
+    ).forEach(otherButton=>otherButton.removeAttribute('aria-current'));
+    button.setAttribute('aria-current','location');
     area.scrollIntoView({block:'start'});
     area.focus({preventScroll:true});
   });
