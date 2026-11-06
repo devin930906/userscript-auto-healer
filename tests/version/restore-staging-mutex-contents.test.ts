@@ -57,7 +57,7 @@ test('TASK-011/TEST-020/026: late foreign contents in an initially empty restore
    originalBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
    displacedBackupFileName:prefix+'.'+randomUUID()+'.backup.user.js',
    automaticPatchAllowed:false,automaticRollbackAllowed:false
-  })+'\\n');
+  })+'\n');
   assert.equal(await hasInterruptedRestoreStaging(root),false,
    'an empty canonical lock and a valid published journal start clean');
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
