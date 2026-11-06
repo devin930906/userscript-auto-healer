@@ -645,12 +645,12 @@ test('TASK-017/TEST-002/022: work-area navigation indicates the latest keyboard 
  const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
  for(const id of ['import-workspace','scenario-workspace','restore-workspace',
    'ai-workspace','browser-workspace']){
-  assert.match(html,new RegExp('data-workspace-target="'+id+'" aria-controls="'+id+'"'),
+  assert.match(html,new RegExp('aria-controls="'+id+'" data-workspace-target="'+id+'"'),
    'each navigation control must identify its existing destination for assistive technology');
  }
  assert.ok(ui.includes("button.setAttribute('aria-current','location')"),
   'the active work-area jump must expose a current location to assistive technology');
- assert.ok(ui.includes("button.removeAttribute('aria-current')"),
+ assert.ok(ui.includes("otherButton.removeAttribute('aria-current')"),
   'a later jump must remove stale location announcements from other buttons');
  assert.ok(css.includes('nav[aria-label="工作区导航"] button[aria-current="location"]'),
   'the location currently selected with a navigation button needs a visible cue');
