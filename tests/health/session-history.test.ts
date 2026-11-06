@@ -1079,3 +1079,33 @@ test('TASK-015/TEST-024/026: native merge refuses a forged current session ident
     'only actual read-only session identity can contribute current events');
  }
 });
+
+
+test('TASK-015/TEST-024/026: merged current status cannot contradict its last limited observation',()=>{
+ const now=Date.now();
+ const scenario=new DesktopScenarioSession();
+ const registry=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(scenario,'status-consistency',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'status-consistency');
+ registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+ const current=readLimitedSessionHistory(scenario,registry,'status-consistency');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ assert.equal(current.currentStatus,'INDETERMINATE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const native=mergeLimitedSessionArchive(current,archive);
+ assert.equal(native.currentStatus,'INDETERMINATE');
+ const forged=mergeLimitedSessionArchive(
+  {...current,currentStatus:'ELEMENT_FOUND_ONLY'},archive);
+ assert.equal(forged.currentStatus,'INDETERMINATE',
+  'forged current status must not promote an INDETERMINATE event to a DOM hit');
+ assert.deepEqual(forged.events,native.events);
+ assert.equal(forged.tampermonkeyVerified,false);
+ assert.equal(forged.businessVerified,false);
+ assert.equal(forged.automaticPatchAllowed,false);
+});
