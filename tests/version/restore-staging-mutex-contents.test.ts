@@ -61,17 +61,19 @@ test('TASK-011/TEST-020/026: late foreign contents in an initially empty restore
   assert.equal(await hasInterruptedRestoreStaging(root),false,
    'an empty canonical lock and a valid published journal start clean');
   const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
-  const originalReadDir=fsPromises.readdir;
+  const originalOpenDir=fsPromises.opendir;
   const inspector=require('../../src/version/restore-intent-inspection') as
    typeof import('../../src/version/restore-intent-inspection');
   const originalInspect=inspector.hasStructurallyValidNativeRestoreJournalReadOnly;
   const foreign=join(mutex,'late-foreign-recovery-evidence');
   let scannedEmpty=false,inserted=false;
-  t.mock.method(fsPromises,'readdir',async (...args:Parameters<typeof originalReadDir>)=>{
-   const entries=await originalReadDir(...args);
-   if(String(args[0])===mutex&&Array.isArray(entries)&&entries.length===0)
-    scannedEmpty=true;
-   return entries;
+  t.mock.method(fsPromises,'opendir',async (...args:Parameters<typeof originalOpenDir>)=>{
+   const cursor=await originalOpenDir(...args);
+   // New scanner opens only the owned canonical mutex and reads at most one
+   // directory entry. Trigger the later mutation after this first observation
+   // so the final inode-and-contents recheck remains a real safety assertion.
+   if(String(args[0])===mutex)scannedEmpty=true;
+   return cursor;
   });
   t.mock.method(inspector,'hasStructurallyValidNativeRestoreJournalReadOnly',async(path:string)=>{
    const valid=await originalInspect(path);
