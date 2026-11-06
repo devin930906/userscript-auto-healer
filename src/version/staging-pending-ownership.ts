@@ -43,9 +43,17 @@ export async function removeOwnedStagingPending(
   if(!current.isFile()||current.isSymbolicLink()||
      !sameBytes(current,owned))return false;
   if(published!==undefined){
+   // A matching inode and allowed basename are insufficient: the published
+   // file must belong to this EXACT staging transaction, not another UUID.
+   // All native publishers generate the two names from one publicationId.
+   const publishedName=basename(published);
+   const pendingId=basename(pending).slice(1,-'.pending'.length);
+   const publishedId=publishedName.match(new RegExp(
+     '('+UUID+')\\.(?:backup\\.user\\.js|candidate\\.user\\.js|'+
+     'checkpoint\\.json|user\\.js)$'))?.[1];
    if(!isAbsolute(published)||published!==resolve(published)||
       dirname(published)!==folder||published===pending||
-      !PUBLISHED_NAME.test(basename(published))||
+      !PUBLISHED_NAME.test(publishedName)||publishedId!==pendingId||
       await hasUnsafePathLink(published))return false;
    const final=await lstat(published,{bigint:true});
    if(!final.isFile()||final.isSymbolicLink()||

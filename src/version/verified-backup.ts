@@ -141,9 +141,12 @@ export async function createVerifiedBackupOnly(input:unknown):Promise<VerifiedBa
     const digest=createHash('sha256').update(bytes).digest('hex');
     if(digest!==expected)return deny('HASH_MISMATCH');
 
-    const name=backupPrefix(path)+'.'+randomUUID()+'.backup.user.js';
+    // One publication identity binds both names of the same staged inode.
+    // Different transaction IDs must never authorize .pending cleanup.
+    const publicationId=randomUUID();
+    const name=backupPrefix(path)+'.'+publicationId+'.backup.user.js';
     const final=join(directory,name);
-    const pending=join(directory,'.'+randomUUID()+'.pending');
+    const pending=join(directory,'.'+publicationId+'.pending');
     let tempCreated=false;
     let pendingIdentity:BigIntStats|undefined;
     try {

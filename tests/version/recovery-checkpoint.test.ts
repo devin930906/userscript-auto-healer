@@ -68,8 +68,11 @@ test('TEST-020/026: pending cleanup refuses substituted source, alias and parent
   assert.equal(await removeOwnedStagingPending(alias,beforeAlias,parent),false);
   assert.equal((await readFile(alias)).toString(),'double-linked');
 
-  const pending=next();
-  const published=join(folder,'published.12345678-1234-4123-8123-123456789abc.backup.user.js');
+  // A legitimate publication derives its pending and final names from
+  // the same UUID; foreign publication IDs are rejected separately.
+  const publicationId=randomUUID();
+  const pending=join(folder,'.'+publicationId+'.pending');
+  const published=join(folder,'published.'+publicationId+'.backup.user.js');
   await writeFile(pending,'verified-copy');
   const before=await lstat(pending,{bigint:true});
   await link(pending,published);
