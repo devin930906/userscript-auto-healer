@@ -6,7 +6,7 @@
  * cannot substitute for an atomic filesystem lock against external writers.
  */
 import type {BigIntStats} from 'node:fs';
-import {lstat,opendir,readdir} from 'node:fs/promises';
+import {lstat,opendir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hasUnsafePathLink} from './path-boundary';
 import {hasStructurallyValidNativeRestoreJournalReadOnly} from './restore-intent-inspection';
@@ -29,6 +29,17 @@ function sameOwnedPending(actual:BigIntStats,owned:BigIntStats):boolean{
   actual.size===owned.size&&actual.mtimeNs===owned.mtimeNs&&
   actual.ctimeNs===owned.ctimeNs&&
   (actual.mode&0o777n)===(owned.mode&0o777n);
+}
+
+/** Inspect no more than one child in a reserved restore mutex directory.
+ * Reading the entire child list can allocate an unbounded amount of memory,
+ * even though the outer recovery directory is capped at MAX_ENTRIES.
+ * A nonempty mutex remains foreign/pending evidence; this does not mutate it.
+ */
+async function restoreMutexHasChildren(path:string):Promise<boolean>{
+ const cursor=await opendir(path);
+ try{return await cursor.read()!==null;}
+ finally{await cursor.close();}
 }
 
 /** Native-only directory path from an independently consented OS selection.
@@ -90,9 +101,9 @@ export async function hasInterruptedRestoreStaging(
       // contents may hold foreign/interrupted recovery evidence; do not
       // silently classify a populated reserved directory as clean.
       const lockPath=join(directory,entry.name);
-      const children=await readdir(lockPath);
+      const hasChildren=await restoreMutexHasChildren(lockPath);
       const afterLock=await lstat(lockPath,{bigint:true});
-      if(children.length!==0||!afterLock.isDirectory()||
+      if(hasChildren||!afterLock.isDirectory()||
          afterLock.isSymbolicLink()||
          current.dev!==afterLock.dev||current.ino!==afterLock.ino||
          current.mtimeNs!==afterLock.mtimeNs||
@@ -172,9 +183,9 @@ export async function hasInterruptedRestoreStaging(
   try{
    if(await hasUnsafePathLink(path)){pending=true;continue;}
    const beforeLock=await lstat(path,{bigint:true});
-   const children=await readdir(path);
+   const hasChildren=await restoreMutexHasChildren(path);
    const afterLock=await lstat(path,{bigint:true});
-   if(children.length!==0||!beforeLock.isDirectory()||
+   if(hasChildren||!beforeLock.isDirectory()||
       beforeLock.isSymbolicLink()||!afterLock.isDirectory()||
       afterLock.isSymbolicLink()||
       identity.dev!==beforeLock.dev||identity.ino!==beforeLock.ino||
