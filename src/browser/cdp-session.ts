@@ -299,7 +299,10 @@ export async function verifyCdpBrowserWebSocket(
             id?:unknown;result?:{product?:unknown};error?:unknown
           };
           if(payload.id!==1)return;
-          finish(!payload.error && (
+          // A protocol error key is an error even when its JSON value is
+          // null, false, zero or empty. A forged matching product must not
+          // turn such an envelope into owned-browser identity evidence.
+          finish(!Object.prototype.hasOwnProperty.call(payload,'error') && (
             payload.result?.product==='Chrome/'+expectedVersion||
             payload.result?.product==='HeadlessChrome/'+expectedVersion
           ));
