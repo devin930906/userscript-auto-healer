@@ -528,6 +528,27 @@ test('TASK-011/TEST-020/021/026: malformed reserved journal name is never a clea
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-011/TEST-020/026: populated native path mutex blocks prior-intent preflight even without a journal',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-prior-mutex-children-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await writeFile(sourcePath,original);
+  await mkdir(backupDirectory);
+  const mutex=join(backupDirectory,'.uah-restore-path-'+'f'.repeat(64));
+  await mkdir(mutex);
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),false,
+   'an unchanged empty canonical mutex belongs to the legitimate namespace');
+  const foreign=join(mutex,'unreconciled-recovery-evidence');
+  await writeFile(foreign,'foreign native recovery evidence');
+  assert.equal(await hasPriorPublishedRestoreIntentForSource(sourcePath,backupDirectory),true,
+   'nested crash evidence may not turn into a clean native pre-rename receipt');
+  assert.equal(await readFile(foreign,'utf8'),'foreign native recovery evidence');
+  assert.deepEqual(await readFile(sourcePath),original,
+   'preflight must not touch the selected userscript');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as canonical native recovery evidence',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-native-journal-utf8-'));
  try{
