@@ -639,6 +639,27 @@ test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC fra
     'navigation must precede the long first workflow');
 });
 
+test('TASK-017/TEST-002/022: work-area navigation indicates the latest keyboard focus destination without changing the trusted URL',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
+ for(const id of ['import-workspace','scenario-workspace','restore-workspace',
+   'ai-workspace','browser-workspace']){
+  assert.match(html,new RegExp('data-workspace-target="'+id+'" aria-controls="'+id+'"'),
+   'each navigation control must identify its existing destination for assistive technology');
+ }
+ assert.match(ui,/button\\.setAttribute\\('aria-current','location'\\)/,
+  'the active work-area jump must expose a current location to assistive technology');
+ assert.match(ui,/button\\.removeAttribute\\('aria-current'\\)/,
+  'a later jump must remove stale location announcements from other buttons');
+ assert.match(css,/nav\\[aria-label="工作区导航"\\] button\\[aria-current="location"\\]/,
+  'the location currently selected with a navigation button needs a visible cue');
+ assert.match(ui,/area\\.focus\\(\\{preventScroll:true\\}\\)/,
+  'a navigation state indicator cannot replace actual keyboard focus transfer');
+ assert.doesNotMatch(ui,/location\\.hash\\s*=|history\\.(?:pushState|replaceState)\\(/,
+  'the navigation indication must not mutate the exact trusted Electron file URL');
+});
+
 test('TASK-017/TEST-002/022: packaged desktop workspace styling preserves focus and narrow windows',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
