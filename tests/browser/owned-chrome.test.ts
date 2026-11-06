@@ -850,12 +850,19 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     await redactedChromeBootstrapMarkers(profile));
   const allowed=new Set(['CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
     'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED',
-    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP']);
+    'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP',
+    'CDP_PID_PROOF_STARTED','CDP_PID_PROOF_VERIFIED','CDP_PID_PROOF_REJECTED',
+    'CDP_WS_PROOF_STARTED','CDP_WS_PROOF_VERIFIED','CDP_WS_PROOF_REJECTED',
+    'CDP_POST_VERSION_DEADLINE']);
   assert.ok(startupStages.every(stage=>allowed.has(stage)),
     'diagnostic stages must only use fixed redacted labels');
   assert.ok(startupStages.length<=100,'startup diagnostics must be bounded');
   assert.ok(startupStages.includes('CDP_VERSION_PARSED'),
     'a successful Chrome launch must report the parsed CDP version stage');
+  assert.ok(startupStages.includes('CDP_PID_PROOF_VERIFIED'),
+    'successful Chrome launch must confirm the native listener PID proof');
+  assert.ok(startupStages.includes('CDP_WS_PROOF_VERIFIED'),
+    'successful Chrome launch must confirm its browser WebSocket proof');
   if(result.ok) {
     stop=result.stop;
     assert.equal(result.status,'OWNED_CDP_BROWSER_VERIFIED');
