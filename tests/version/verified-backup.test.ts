@@ -381,6 +381,12 @@ test('TASK-011/TEST-020/026: published hard-link aliases with non-project filena
    {name:'source.backup.user.js',valid:false},
    {name:'UAH-Reviewed-not-a-hash-12345678-1234-4123-8123-123456789abc.user.js',valid:false},
    {name:'source.12345678-1234-4123-8123-123456789abc.journal.json',valid:false},
+   // A valid project name and matching inode alone cannot authorize cleanup
+   // of a staging file belonging to a DIFFERENT publication transaction.
+   {name:'source.12345678-1234-4123-8123-000000000000.backup.user.js',valid:false},
+   {name:'source.12345678-1234-4123-8123-000000000000.candidate.user.js',valid:false},
+   {name:'source.12345678-1234-4123-8123-000000000000.checkpoint.json',valid:false},
+   {name:'UAH-Original-0123456789ab-12345678-1234-4123-8123-000000000000.user.js',valid:false},
    {name:'source.12345678-1234-4123-8123-123456789abc.backup.user.js',valid:true},
    {name:'source.12345678-1234-4123-8123-123456789abc.candidate.user.js',valid:true},
    {name:'source.12345678-1234-4123-8123-123456789abc.checkpoint.json',valid:true},
