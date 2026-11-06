@@ -463,12 +463,16 @@ async function filesFromDrop(transfer: DataTransfer,signal:AbortSignal): Promise
   if (!roots.length) return fallback.length ? fallback : Array.from(transfer.files);
   const found: File[] = [...fallback];
   let visited = 0;
+  let scanLimitReached=false;
   const visit = async (entry: FileSystemEntry, depth: number): Promise<void> => {
     // Cancellation covers asynchronous directory enumeration, not just the
     // later byte-import loop. Unknown/unvisited entries remain uncounted.
-    if (cancelRequested || signal.aborted) return;
+    if (cancelRequested || signal.aborted || scanLimitReached) return;
     if (++visited > MAX_DIRECTORY_ENTRIES || found.length >= MAX_FILES) {
-      throw new Error('SCAN_LIMIT');
+      // Preserve already enumerated files instead of discarding the batch.
+      // No further entry or directory is read once either bound is reached.
+      scanLimitReached=true;
+      return;
     }
     if (entry.isFile) {
       // Nested directory entries are filtered, but explicitly dropped root
@@ -485,20 +489,22 @@ async function filesFromDrop(transfer: DataTransfer,signal:AbortSignal): Promise
       return;
     }
     const reader = (entry as FileSystemDirectoryEntry).createReader();
-    while (!cancelRequested&&!signal.aborted) {
+    while (!cancelRequested&&!signal.aborted&&!scanLimitReached) {
       const batch = await readDropEntry<FileSystemEntry[]>(
         (ok,fail)=>reader.readEntries(ok,fail),signal);
       if (cancelRequested||signal.aborted||!batch||!batch.length) break;
       for (const child of batch) {
-        if (cancelRequested) break;
+        if (cancelRequested||signal.aborted||scanLimitReached) break;
         await visit(child, depth + 1);
       }
     }
   };
   for (const root of roots) {
-    if (cancelRequested) break;
+    if (cancelRequested||signal.aborted||scanLimitReached) break;
     await visit(root, 0);
   }
+  if(scanLimitReached)logLine('拖放扫描达到上限；已发现 '+found.length+
+    ' 份文件，其余未扫描文件数量未知。已发现文件仍会进行只读验证。');
   return found;
 }
 
