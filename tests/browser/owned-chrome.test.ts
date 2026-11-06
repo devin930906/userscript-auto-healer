@@ -1407,6 +1407,61 @@ test('TASK-005/TEST-006/008/009/026: timed-out Chrome diagnostics cannot wait fo
   }
 });
 
+/** Deterministic read-only proof-stage receipt; the Windows intermittency
+ * remains unproven. No real Chrome, port, filesystem or trusted user Profile.
+ */
+test('TASK-005/TEST-006/008/009: rejected listener PID emits a bounded stage before WebSocket I/O',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12073);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41273,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let websocketCalls=0;
+  const stages:string[]=[];
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12073/devtools/browser/abcdefgh-1234'
+    })));
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:false as const,code:'LISTENER_PID_MISMATCH' as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      websocketCalls++;return true;
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,onStartupStage:stage=>stages.push(stage)
+    });
+    assert.deepEqual(result,{ok:false,code:'OWNER_MISMATCH'});
+    assert.deepEqual(stages,[
+      'CHROME_SPAWN_RETURNED','CDP_VERSION_PARSED',
+      'CDP_PID_PROOF_STARTED','CDP_PID_PROOF_REJECTED'
+    ]);
+    assert.equal(websocketCalls,0,'unowned PID cannot proceed to WebSocket proof');
+    assert.equal(child.killed,true,'stop only the synthetic owned child');
+    assert.equal(stages.join(',').includes('12073'),false);
+    assert.equal(stages.join(',').includes('41273'),false);
+    assert.equal(stages.join(',').includes('synthetic'),false);
+  }finally{t.mock.reset();}
+});
+
 test('TASK-005/TEST-006/008/009: timeout listener status is bounded and has no PID leakage',()=>{
   const classify=(ownedChromeDiagnostics as unknown as {
     classifyCdpTimeoutListener?: (v:unknown)=>string
