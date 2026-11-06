@@ -43,9 +43,40 @@ export async function removeOwnedStagingPending(
   if(!current.isFile()||current.isSymbolicLink()||
      !sameBytes(current,owned))return false;
   if(published!==undefined){
+   // A matching inode and allowed basename are insufficient: the published
+   // file must belong to this EXACT staging transaction, not another UUID.
+   // All native publishers generate the two names from one publicationId.
+   const publishedName=basename(published);
+   const pendingId=basename(pending).slice(1,-'.pending'.length);
+   const publishedId=publishedName.match(new RegExp(
+     '('+UUID+')\\.(?:backup\\.user\\.js|candidate\\.user\\.js|'+
+     'checkpoint\\.json|user\\.js)
+   const final=await lstat(published,{bigint:true});
+   if(!final.isFile()||final.isSymbolicLink()||
+      current.nlink!==2n||final.nlink!==2n||
+      !sameBytes(current,final)||!sameBytes(final,owned))return false;
+   // Creating the hard link updates ctime, which must not equal owned.ctimeNs.
+  }else if(current.nlink!==1n||current.ctimeNs!==owned.ctimeNs){
+   return false;
+  }
+  await unlink(pending);
+  if(published!==undefined){
+   // A successful pending-name removal alone does not prove that the
+   // published pathname still refers to the verified staged inode.
+   // Fail closed on post-unlink replacement or an unexpected extra link.
+   // This second snapshot narrows, but cannot eliminate, pathname races.
+   const remaining=await lstat(published,{bigint:true});
+   if(!remaining.isFile()||remaining.isSymbolicLink()||
+      remaining.nlink!==1n||!sameBytes(remaining,owned)||
+      await hasUnsafePathLink(published))return false;
+  }
+  return true;
+ }catch{return false;}
+}
+))?.[1];
    if(!isAbsolute(published)||published!==resolve(published)||
       dirname(published)!==folder||published===pending||
-      !PUBLISHED_NAME.test(basename(published))||
+      !PUBLISHED_NAME.test(publishedName)||publishedId!==pendingId||
       await hasUnsafePathLink(published))return false;
    const final=await lstat(published,{bigint:true});
    if(!final.isFile()||final.isSymbolicLink()||
