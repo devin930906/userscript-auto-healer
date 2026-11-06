@@ -168,7 +168,11 @@ async function readJournal(path:string):Promise<string|null>{
    // bytes to look exactly like a legitimate filename containing U+FFFD.
    // Refuse lossy decoding before JSON/schema validation; preserve valid
    // Unicode filenames and require manual review of corrupt journal bytes.
-   return new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,count));
+   // Preserve an unexpected UTF-8 BOM as a real character rather than
+   // silently stripping its three wire bytes. The exact native JSON
+   // serialization check then rejects BOM-prefixed foreign journals.
+   return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true})
+    .decode(buffer.subarray(0,count));
   }finally{await h.close();}
  }catch{return null;}
 }
