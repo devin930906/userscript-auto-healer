@@ -170,9 +170,13 @@ export function mergeLimitedSessionArchive(
  // Runtime callers can misstate a TypeScript-only discriminant. Historical
  // DOM observations never authorize VERIFIED/BROKEN/RECOVERED business state,
  // even when their timestamp is newer than the last archive record.
- const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'||
-  sessionStatus.value==='INDETERMINATE'?
-  sessionStatus.value:'INDETERMINATE' as const;
+ // A DOM-hit summary is admissible only when the latest actual limited
+ // observation is also a DOM hit. An independent, untrusted currentStatus
+ // field can never promote INDETERMINATE evidence into a positive claim.
+ const latestObserved=observed[observed.length-1];
+ const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'&&
+  latestObserved?.status==='ELEMENT_FOUND_ONLY'?
+  'ELEMENT_FOUND_ONLY' as const:'INDETERMINATE' as const;
  const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   limitedCurrent:'INDETERMINATE' as const;
  // Do not spread the caller's view: the archive merge is a projection of
