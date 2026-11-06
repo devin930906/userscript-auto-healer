@@ -11,14 +11,15 @@
   <main>
     <h1>Userscript Auto Healer</h1>
     <nav aria-label="工作区导航">
-      <button type="button" data-workspace-target="import-workspace">导入脚本</button> ·
-      <button type="button" data-workspace-target="scenario-workspace">测试场景</button> ·
-      <button type="button" data-workspace-target="restore-workspace">手动恢复</button> ·
-      <button type="button" data-workspace-target="ai-workspace">AI 模型</button> ·
+      <button type="button" data-workspace-target="import-workspace">导入脚本</button>
+      <button type="button" data-workspace-target="scenario-workspace">测试场景</button>
+      <button type="button" data-workspace-target="restore-workspace">手动恢复</button>
+      <button type="button" data-workspace-target="ai-workspace">AI 模型</button>
       <button type="button" data-workspace-target="browser-workspace">Chrome 诊断</button>
     </nav>
     <p>当前支持只读导入、静态选择器分析与获授权的独立 Chrome/CDP 连接；默认不修改原始脚本或自动安装脚本。只有在单独的原生手动恢复流程中，经过两次系统确认才会尝试替换用户选定的本地脚本。只有经过独立原生授权的双选择器场景才可生成新的人工审核候选文件。静态结果或管理器运行目标提示不代表 Tampermonkey、GM API 或真实业务恢复验证，自动修复尚未开放。</p>
-    <section id="import-workspace" tabindex="-1" aria-label="油猴脚本导入区">
+    <section id="import-workspace" tabindex="-1" aria-labelledby="import-heading">
+      <h2 id="import-heading">导入油猴脚本（只读）</h2>
       <div id="drop-area">
       <button id="choose-files" type="button">选择 .user.js 文件（多选）</button>
       <button id="choose-folder" type="button">选择脚本文件夹</button>
