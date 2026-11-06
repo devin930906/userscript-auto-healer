@@ -144,12 +144,15 @@ async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
 function createBoundedChromeBootstrapTimeline(){
   const transitions:string[]=[];
   let last='';
+  let lastElapsedMs=-1;
   return {
     observe(elapsedMs:number,marker:unknown):void{
       if(!Number.isFinite(elapsedMs)||elapsedMs<0||typeof marker!=='string')
         return;
       const match=/^state=([01]) endpointMarker=([01])$/.exec(marker);
-      if(!match)return;
+      if(!match||elapsedMs<lastElapsedMs)return;
+      // An out-of-order sample cannot rewrite the sequence of readiness states.
+      lastElapsedMs=elapsedMs;
       const next=match[1]+match[2];
       if(next===last)return;
       last=next;
@@ -171,6 +174,9 @@ test('TASK-005/TEST-006/008/009/026: profile readiness evidence is bounded, mono
   timeline.observe(25000,'state=0 endpointMarker=1');
   assert.equal(timeline.summary(),'t0:00,t1:10,t20:11,t25:01');
   const before=timeline.summary();
+  // Older asynchronous samples must not invent a backwards boot transition.
+  timeline.observe(15000,'state=0 endpointMarker=0');
+  assert.equal(timeline.summary(),before);
   for(const [time,marker] of [
     [Infinity,'state=1 endpointMarker=0'],
     [-1,'state=1 endpointMarker=0'],
