@@ -71,8 +71,8 @@ function parseOptions(input:unknown):Options|null{
 function sameDir(a:{dev:bigint;ino:bigint},b:{dev:bigint;ino:bigint}){
   return a.dev===b.dev&&a.ino===b.ino;
 }
-function candidatePrefix(path:string):string{
-  const suffix='.'+randomUUID()+'.candidate.user.js';
+function candidatePrefix(path:string,publicationId:string):string{
+  const suffix='.'+publicationId+'.candidate.user.js';
   const maximum=255-suffix.length;
   let out='';
   for(const c of backupPrefix(path)){
@@ -130,9 +130,10 @@ export async function stageReviewedCandidateOnly(
     if(!dirBefore.isDirectory()||dirBefore.isSymbolicLink())
       return block('UNSAFE_DESTINATION');
 
-    const candidateFileName=candidatePrefix(options.sourcePath);
+    const publicationId=randomUUID();
+    const candidateFileName=candidatePrefix(options.sourcePath,publicationId);
     const final=join(options.backupDirectory,candidateFileName);
-    const pending=join(options.backupDirectory,'.'+randomUUID()+'.pending');
+    const pending=join(options.backupDirectory,'.'+publicationId+'.pending');
     let tempCreated=false;
     let pendingIdentity:BigIntStats|undefined;
     try{
