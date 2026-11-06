@@ -2459,3 +2459,50 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
     }
   }
 });
+
+
+/** TASK-018 / TEST-009/026: a CDP Browser.getVersion receipt carrying an
+ * explicit protocol error is never a successful identity proof, even when
+ * error is falsy and a plausible product appears alongside it.
+ * No browser, network socket or user profile is accessed.
+ */
+test('TASK-018/TEST-009/026: Browser.getVersion rejects every present error field even when falsy',async()=>{
+  const nativeSocket=globalThis.WebSocket;
+  const callbacks=new Map<string,Array<(event?:{data?:unknown})=>void>>();
+  class SyntheticCdpSocket {
+    constructor(_url:string){}
+    addEventListener(name:string,callback:(event?:{data?:unknown})=>void){
+      callbacks.set(name,[...(callbacks.get(name)??[]),callback]);
+    }
+    send(raw:string):void {
+      assert.deepEqual(JSON.parse(raw),{id:1,method:'Browser.getVersion'});
+    }
+    close():void {}
+  }
+  globalThis.WebSocket=SyntheticCdpSocket as unknown as typeof WebSocket;
+  const version='155.0.1.1';
+  const port=12118;
+  const websocket='ws://127.0.0.1:'+port+'/devtools/browser/abcdefgh-1234';
+  const probe=async(frame:Record<string,unknown>,expected:boolean)=>{
+    callbacks.clear();
+    const pending=verifyCdpBrowserWebSocket(websocket,port,version);
+    const open=callbacks.get('open')?.[0];
+    const message=callbacks.get('message')?.[0];
+    assert.ok(open);
+    assert.ok(message);
+    open();
+    message({data:JSON.stringify(frame)});
+    assert.equal(await pending,expected,
+      'CDP success requires an error-free protocol envelope');
+  };
+  try{
+    const valid={id:1,result:{product:'Chrome/'+version}};
+    await probe(valid,true);
+    for(const error of [null,false,0,'',{}]){
+      await probe({...valid,error},false);
+    }
+    await probe({...valid,error:{code:-32601,message:'synthetic'}},false);
+  }finally{
+    globalThis.WebSocket=nativeSocket;
+  }
+});
