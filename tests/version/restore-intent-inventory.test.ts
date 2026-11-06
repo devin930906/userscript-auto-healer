@@ -569,6 +569,14 @@ test('TASK-011/TEST-020/026: invalid UTF-8 journal bytes must not masquerade as 
   await writeFile(journal,valid);
   assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),true,
    'genuine UTF-8 replacement-character filenames remain valid');
+  // TextDecoder defaults to BOM stripping. The native writer never emits a
+  // UTF-8 BOM; accepting those extra three bytes would silently normalize a
+  // foreign/corrupt journal into an apparently exact canonical JSON record.
+  const bom=Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),valid]);
+  await writeFile(journal,bom);
+  assert.equal(await hasStructurallyValidNativeRestoreJournalReadOnly(journal),false,
+   'UTF-8 BOM bytes must not be stripped before native journal wire validation');
+  await writeFile(journal,valid);
   // Replace ONE valid U+FFFD byte sequence with an invalid UTF-8 byte.
   // Buffer.toString silently maps it back to the same U+FFFD: JSON text,
   // structural prefixes and digests therefore look unchanged to a lossy reader.
