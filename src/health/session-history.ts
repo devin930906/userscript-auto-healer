@@ -144,7 +144,12 @@ export function mergeLimitedSessionArchive(
  const sessionRows=nativeHistoryMergeField(current,'events');
  const sessionStatus=nativeHistoryMergeField(current,'currentStatus');
  const archiveStatus=nativeHistoryMergeField(stored,'currentStatus');
+ const archiveReceipt=nativeHistoryMergeField(stored,'status');
+ // A BLOCKED/missing/foreign read cannot contribute historical evidence,
+ // even if its event rows happen to look like a valid unverified archive.
  if(!storedRows||!sessionRows||!sessionStatus||!archiveStatus||
+    !archiveReceipt||archiveReceipt.value!=='ARCHIVE_READ_UNVERIFIED'||
+    archiveStatus.value!=='INDETERMINATE'||
     !validLimitedEventRows(storedRows.value,false,false,maxObservedAtMs)||
     !validLimitedEventRows(sessionRows.value,true,true,maxObservedAtMs))
   throw Error('INVALID_LIMITED_HISTORY_EVENTS');
