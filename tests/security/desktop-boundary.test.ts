@@ -648,15 +648,16 @@ test('TASK-017/TEST-002/022: work-area navigation indicates the latest keyboard 
   assert.match(html,new RegExp('data-workspace-target="'+id+'" aria-controls="'+id+'"'),
    'each navigation control must identify its existing destination for assistive technology');
  }
- assert.match(ui,/button\\.setAttribute\\('aria-current','location'\\)/,
+ assert.ok(ui.includes("button.setAttribute('aria-current','location')"),
   'the active work-area jump must expose a current location to assistive technology');
- assert.match(ui,/button\\.removeAttribute\\('aria-current'\\)/,
+ assert.ok(ui.includes("button.removeAttribute('aria-current')"),
   'a later jump must remove stale location announcements from other buttons');
- assert.match(css,/nav\\[aria-label="工作区导航"\\] button\\[aria-current="location"\\]/,
+ assert.ok(css.includes('nav[aria-label="工作区导航"] button[aria-current="location"]'),
   'the location currently selected with a navigation button needs a visible cue');
- assert.match(ui,/area\\.focus\\(\\{preventScroll:true\\}\\)/,
+ assert.ok(ui.includes('area.focus({preventScroll:true})'),
   'a navigation state indicator cannot replace actual keyboard focus transfer');
- assert.doesNotMatch(ui,/location\\.hash\\s*=|history\\.(?:pushState|replaceState)\\(/,
+ assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState(')&&
+   !ui.includes('history.replaceState('),
   'the navigation indication must not mutate the exact trusted Electron file URL');
 });
 
