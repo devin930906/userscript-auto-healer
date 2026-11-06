@@ -59,6 +59,9 @@ export async function hasInterruptedRestoreStaging(
  // A structurally valid journal can be edited in place without changing its
  // parent directory timestamp. Keep its inode/metadata for a final recheck.
  const publishedChecks:Array<{path:string;identity:BigIntStats}>=[];
+ // An initially empty path mutex can gain foreign contents while later
+ // journal checks await I/O without changing the outer directory metadata.
+ const mutexChecks:Array<{path:string;identity:BigIntStats}>=[];
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
@@ -94,6 +97,7 @@ export async function hasInterruptedRestoreStaging(
          current.dev!==afterLock.dev||current.ino!==afterLock.ino||
          current.mtimeNs!==afterLock.mtimeNs||
          current.ctimeNs!==afterLock.ctimeNs)pending=true;
+      else mutexChecks.push({path:lockPath,identity:afterLock});
      }else if(published){
       const path=join(directory,entry.name);
       if(!await hasStructurallyValidNativeRestoreJournalReadOnly(path))
@@ -158,6 +162,29 @@ export async function hasInterruptedRestoreStaging(
       current.size!==identity.size||current.mtimeNs!==identity.mtimeNs||
       current.ctimeNs!==identity.ctimeNs||current.mode!==identity.mode)
     pending=true;
+  }catch{pending=true;}
+ }
+ // A later journal read can outlive the initial empty-lock observation.
+ // Recheck every captured lock's contents and inode before returning a
+ // clean result; changing nested directories may not touch the parent time.
+ // This remains a bounded snapshot, NOT a lock on external writers.
+ for(const {path,identity} of mutexChecks){
+  try{
+   if(await hasUnsafePathLink(path)){pending=true;continue;}
+   const beforeLock=await lstat(path,{bigint:true});
+   const children=await readdir(path);
+   const afterLock=await lstat(path,{bigint:true});
+   if(children.length!==0||!beforeLock.isDirectory()||
+      beforeLock.isSymbolicLink()||!afterLock.isDirectory()||
+      afterLock.isSymbolicLink()||
+      identity.dev!==beforeLock.dev||identity.ino!==beforeLock.ino||
+      identity.mtimeNs!==beforeLock.mtimeNs||
+      identity.ctimeNs!==beforeLock.ctimeNs||
+      identity.mode!==beforeLock.mode||
+      beforeLock.dev!==afterLock.dev||beforeLock.ino!==afterLock.ino||
+      beforeLock.mtimeNs!==afterLock.mtimeNs||
+      beforeLock.ctimeNs!==afterLock.ctimeNs||
+      beforeLock.mode!==afterLock.mode)pending=true;
   }catch{pending=true;}
  }
  const after=await lstat(directory,{bigint:true});
