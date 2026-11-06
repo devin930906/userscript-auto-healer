@@ -1043,3 +1043,39 @@ test('TASK-015/TEST-024/026: native merge rejects a forged archive identity with
   /INVALID_LIMITED_HISTORY_EVENTS/,
   'an archive read must never claim a verified or fresh current status');
 });
+
+
+test('TASK-015/TEST-024/026: native merge refuses a forged current session identity',()=>{
+ const now=Date.now();
+ const session=new DesktopScenarioSession();
+ const registry=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(session,'session-identity',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'session-identity');
+ registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const view=readLimitedSessionHistory(session,registry,'session-identity');
+ if(!view.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merge=(sessionView:unknown)=>mergeLimitedSessionArchive(
+  sessionView as typeof view,archive);
+ assert.deepEqual(merge(view).events,[
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ for(const [ok,status] of [
+  [false,'UNVERIFIED_SESSION_HISTORY_ONLY'],
+  [true,'RECOVERED_VERIFIED'],
+  [true,'SCENARIO_NOT_FOUND'],
+  [true,null],
+  [true,undefined]
+ ] as const){
+  assert.throws(()=>merge({...view,ok,status}),
+    /INVALID_LIMITED_HISTORY_EVENTS/,
+    'only actual read-only session identity can contribute current events');
+ }
+});
