@@ -308,3 +308,30 @@ test('TASK-008/TEST-013: main-frame confirmation rejects raw dot-segment aliases
  assert.equal(classify(query,query),'MAIN_FRAME_CONFIRMED',
   'literal query values must not be mistaken for path navigation');
 });
+
+ // TASK-008 / REQ-013 / TEST-013: WHATWG URL() normalizes IPv4 integer,
+ // hexadecimal and abbreviated host spellings. A raw consented or observed
+ // authority must not be silently rewritten into a different host identity.
+ test('TASK-008/TEST-013: main-frame evidence rejects normalized raw host aliases',()=>{
+  const classify=moduleUnderTest.classifyMainFrameUrl;
+  assert.equal(typeof classify,'function');
+  if(!classify)return;
+  const canonical='http://127.0.0.1/fixture';
+  for(const alias of [
+   'http://2130706433/fixture',
+   'http://0x7f000001/fixture',
+   'http://127.1/fixture',
+   'http://0177.0.0.1/fixture',
+   'http://%31%32%37.0.0.1/fixture'
+  ]){
+   assert.equal(classify(canonical,alias),'MAIN_FRAME_INVALID_URL',
+    'the approved raw authority may not be rewritten to canonical loopback');
+   assert.equal(classify(alias,canonical),'MAIN_FRAME_INVALID_URL',
+    'a raw CDP frame alias may not be rewritten to canonical loopback');
+  }
+  assert.equal(classify(canonical,canonical),'MAIN_FRAME_CONFIRMED',
+   'the literal canonical loopback URL remains eligible');
+  assert.equal(classify('https://EXAMPLE.com:443/fixture',
+    'https://example.com/fixture'),'MAIN_FRAME_CONFIRMED',
+   'case and explicitly specified default ports remain supported');
+ });
