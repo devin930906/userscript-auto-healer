@@ -43,24 +43,43 @@ export interface ReportedTampermonkeyState {
  */
 export function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  if(typeof pattern!=='string'||pattern.length>1024)return false;
+ // This exported helper is a direct runtime boundary, not only a TypeScript
+ // contract. URL-like objects can expose arbitrary getters, and Proxy URLs
+ // can execute traps on every property read. Require native URL internal
+ // slots and read the platform accessors without caller-defined shadows.
+ let protocol:string,hostname:string,port:string,pathname:string,search:string;
+ try{
+  if(!target||typeof target!=='object'||nodeTypes.isProxy(target)||
+     Object.getPrototypeOf(target)!==URL.prototype)return false;
+  const native=(name:'protocol'|'hostname'|'port'|'pathname'|'search'):string=>{
+   const getter=Object.getOwnPropertyDescriptor(URL.prototype,name)?.get;
+   if(typeof getter!=='function')throw Error('NATIVE_URL_ACCESSOR_MISSING');
+   return getter.call(target) as string;
+  };
+  protocol=native('protocol');
+  hostname=native('hostname');
+  port=native('port');
+  pathname=native('pathname');
+  search=native('search');
+ }catch{return false;}
  const match=/^(https?):\/\/([a-z0-9.-]+)(\/[^\s]*)$/i.exec(pattern);
  if(!match||match[2].startsWith('.')||match[2].endsWith('.')||match[2].includes('..')||
     match[2].includes('*')||match[2].includes(':'))return false;
- if(target.protocol!==match[1].toLowerCase()+':'||
-    target.hostname!==match[2].toLowerCase())return false;
+ if(protocol!==match[1].toLowerCase()+':'||
+    hostname!==match[2].toLowerCase())return false;
  // Chrome-style @match patterns contain no port component. Our disposable
  // GM fixture binds to a random loopback port and performs an independent
  // exact-origin runtime check; its metadata must not be rejected merely for
  // that port. Keep remote/non-loopback nonstandard ports fail-closed: this
  // preflight is not authority to install or execute a userscript.
- if(target.port&&!(target.protocol==='http:'&&target.hostname==='127.0.0.1'&&
+ if(port&&!(protocol==='http:'&&hostname==='127.0.0.1'&&
     match[2].toLowerCase()==='127.0.0.1'))return false;
  // A wildcard at the end of the path is a conservative, literal prefix;
  // other wildcards require true manager-based matching.
  const path=match[3];
  // Chrome content-script match paths include the URL query. Ignoring it
  // would incorrectly accept exact @match paths on queried pages.
- const pathAndQuery=target.pathname+target.search;
+ const pathAndQuery=pathname+search;
  if(path==='/*')return true;
  if(path.includes('*')&&(!path.endsWith('*')||path.slice(0,-1).includes('*')))return false;
  if(!path.endsWith('*'))return pathAndQuery===path;
