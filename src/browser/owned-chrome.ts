@@ -23,6 +23,21 @@ export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):
     if(response.body)void response.body.cancel().catch(()=>undefined);
     return null;
   };
+  // The direct CDP response reader is an exported security boundary too.
+  // A forged or revoked AbortSignal must never invoke application-untrusted
+  // getters/Proxy traps before Chrome ownership and consent are checked.
+  if(signal!==undefined){
+    try{
+      if(!signal||typeof signal!=='object'||nodeTypes.isProxy(signal)||
+         Object.getPrototypeOf(signal)!==AbortSignal.prototype||
+         ['aborted','addEventListener','removeEventListener'].some(key=>
+           Object.prototype.hasOwnProperty.call(signal,key)))return rejectUnread();
+      const getter=Object.getOwnPropertyDescriptor(
+        AbortSignal.prototype,'aborted')?.get;
+      if(typeof getter!=='function'||typeof getter.call(signal)!=='boolean')
+        return rejectUnread();
+    }catch{return rejectUnread();}
+  }
   if(response.status!==200)return rejectUnread();
   if(signal?.aborted)return rejectUnread();
   const length=response.headers.get('content-length');
