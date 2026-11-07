@@ -741,3 +741,64 @@ test('TASK-017/TEST-022: isolated Chrome profile warnings are tied to profile an
    'the Chrome safety warning must be available from the '+id+' control');
  }
 });
+
+
+/** TASK-017 / TEST-002/022: evaluate the REAL renderer history event
+ * handlers against out-of-order native IPC replies. This isolated harness
+ * cannot confer native browser, manager or script-write authority.
+ */
+test('TASK-017/TEST-002/022: switching history scenarios ignores stale IPC replies and permits a fresh query',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("scenarioHistoryButton?.addEventListener('click'");
+ const end=ui.indexOf('// Explicitly user-started bounded monitoring',start);
+ assert.ok(start>=0&&end>start,'real read-only history handler must be present');
+ const handlers=new Map<string,()=>void>();
+ const selectHandlers=new Map<string,()=>void>();
+ const button={addEventListener:(name:string,fn:()=>void)=>handlers.set(name,fn)};
+ const selector={value:'scenario-A',
+  addEventListener:(name:string,fn:()=>void)=>selectHandlers.set(name,fn)};
+ const summary={textContent:''};
+ const rows:{textContent:string}[]=[];
+ const entries={
+  replaceChildren:()=>{rows.length=0;},
+  append:(node:{textContent:string})=>{rows.push(node);}
+ };
+ const pending=new Map<string,(value:unknown)=>void>();
+ const requested:string[]=[];
+ runInNewContext(ui.slice(start,end),{
+  scenarioHistoryButton:button,scenarioInspectId:selector,
+  scenarioHistoryBusy:false,scenarioHistoryGeneration:0,
+  scenarioHistorySummary:summary,scenarioHistoryEntries:entries,
+  browserControls:()=>undefined,
+  window:{healer:{readScenarioHistory:(id:string)=>{
+   requested.push(id);
+   return new Promise(resolve=>{pending.set(id,resolve);});
+  }}},
+  document:{createElement:()=>({textContent:''})}
+ });
+ const flush=async()=>new Promise<void>(resolve=>setImmediate(resolve));
+ handlers.get('click')?.();
+ assert.deepEqual(requested,['scenario-A']);
+ selector.value='scenario-B';
+ selectHandlers.get('change')?.();
+ assert.equal(rows.length,0,'old results must be cleared when the scenario changes');
+ handlers.get('click')?.();
+ assert.deepEqual(requested,['scenario-A','scenario-B'],
+  'selection change must retire the old read lock, without waiting for stale IPC');
+ const view=(status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE')=>({
+  ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:status,archiveRetained:false,
+  events:[{observedAtMs:2000,status}]
+ });
+ pending.get('scenario-B')?.(view('ELEMENT_FOUND_ONLY'));
+ await flush();
+ assert.match(summary.textContent,/仅观察到元素存在/);
+ assert.equal(rows.length,1);
+ pending.get('scenario-A')?.(view('INDETERMINATE'));
+ await flush();
+ assert.match(summary.textContent,/仅观察到元素存在/,
+  'late A response must never overwrite selected B current-health label');
+ assert.equal(rows.length,1,'late A response must never append B-panel history');
+ assert.match(rows[0].textContent,/DOM 元素存在/);
+});
