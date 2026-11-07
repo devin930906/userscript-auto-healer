@@ -1171,3 +1171,40 @@ test('TASK-017/TEST-022: scenario registration list is labelled without duplicat
  assert.match(html,/<ul id="scenario-list" aria-labelledby="scenario-status"><\/ul>/,
   'the scenario list should have a name and should not announce every rendered row');
 });
+
+
+test('TASK-015/TEST-024/026: native archive snapshot cannot invoke inherited array map',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-inherited-map-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'inherited-map');
+  const history=new LimitedHealthRegistry(()=>Date.now()-1000);
+  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const snapshot=history.snapshot(key);
+  const originalMap=Object.getOwnPropertyDescriptor(Array.prototype,'map');
+  assert.ok(originalMap);
+  let invoked=false;
+  let saved:Awaited<ReturnType<typeof saveLimitedHealthArchive>>|undefined;
+  try{
+   // A verified dense native array must be read by indexed data descriptors,
+   // not by executing a mutable method inherited from Array.prototype.
+   Object.defineProperty(Array.prototype,'map',{
+    configurable:true,writable:true,value(){
+     invoked=true;
+     throw Error('UNTRUSTED_INHERITED_MAP_EXECUTED');
+    }
+   });
+   saved=await saveLimitedHealthArchive(userData,snapshot);
+  }finally{
+   Object.defineProperty(Array.prototype,'map',originalMap!);
+  }
+  assert.equal(invoked,false,'archive persistence must not dispatch inherited map');
+  assert.equal(saved?.status,'ARCHIVE_SAVED_UNVERIFIED');
+  const restored=await readLimitedHealthArchive(userData,key);
+  assert.equal(restored.status,'ARCHIVE_READ_UNVERIFIED');
+  assert.equal(restored.businessVerified,false);
+  assert.equal(restored.automaticPatchAllowed,false);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
