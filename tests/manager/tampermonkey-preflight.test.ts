@@ -242,6 +242,29 @@ test('TASK-007/TEST-017/026: encoded or Unicode authority aliases cannot broaden
  }
 });
 
+test('TASK-007/TEST-017/026: numeric IPv4 hostname aliases do not borrow canonical loopback consent',()=>{
+ const loopback=metadata({grant:['GM_getValue'],match:['http://127.0.0.1/*']});
+ for(const address of [
+  'http://2130706433/private',
+  'http://0x7f000001/private',
+  'http://0177.0.0.1/private',
+  'http://127.1/private',
+  'http://0x7f.1/private'
+ ]){
+  const result=inspect(report,loopback,address);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',code:'INVALID_INPUT',
+   gmApiVerified:false,businessVerified:false},address);
+ }
+ // Real disposable GM fixtures are permitted a random loopback port; do not
+ // reject a canonical explicitly selected IPv4 address or its query payload.
+ for(const url of ['http://127.0.0.1/private',
+   'http://127.0.0.1:43210/private?next=0x7f000001']){
+  const result=inspect(report,loopback,url);
+  assert.equal(result.ok,true,url);
+  if(result.ok)assert.equal(result.gmApiVerified,false);
+ }
+});
+
 test('TASK-007/TEST-017/026: dot segments inside a query are not path aliases',()=>{
  const scoped=metadata({grant:['GM_getValue'],match:['https://example.com/private*']});
  // The raw pathname stays /private; only the query contains dot segments.

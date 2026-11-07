@@ -189,6 +189,13 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  try{target=new URL(targetUrl);}catch{return blocked('INVALID_INPUT');}
  if(!['http:','https:'].includes(target.protocol)||!target.hostname||
     target.username||target.password||target.hash)return blocked('INVALID_INPUT');
+ // Numeric IPv4 aliases (integer, hexadecimal, octal, abbreviated) are
+ // normalized by URL() before matching @match. A consented target's host must
+ // be the literal canonical host selected by the caller, not an alias that
+ // becomes eligible only after WHATWG authority rewriting. Preserve an exact
+ // explicit loopback port for the separately constrained local GM fixture.
+ const rawHost=rawAuthority.replace(/:[0-9]+$/,'');
+ if(rawHost.toLowerCase()!==target.hostname)return blocked('INVALID_INPUT');
  // @exclude can overrule @match. Conservatively refuse it until a real
  // extension test evaluates manager-specific exclusion/precedence rules.
  if(metadata.tags.include!==undefined||
