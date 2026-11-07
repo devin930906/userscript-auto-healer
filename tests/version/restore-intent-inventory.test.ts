@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MAX_SCRIPT_BYTES} from '../../src/import/import-service';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
+import {withNativeSourceLock} from '../../src/version/native-source-lock';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
@@ -657,4 +658,44 @@ test('TASK-011/TEST-020/026: prior restore-intent guard uses bounded mutex child
  }
  assert.deepEqual(await readFile(sourcePath),original,
   'read-only preflight cannot edit the selected userscript');
+});
+
+test('TASK-011/TEST-020/021/026: active and abandoned native source mutex block clean recovery inventory',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-source-mutex-inventory-'));
+ try{
+  const sourcePath=join(home,'selected.user.js');
+  const backupDirectory=join(home,'recoveries');
+  await writeFile(sourcePath,original);
+  await mkdir(backupDirectory);
+  const inspect=()=>inspectNativeRestoreIntentInventoryReadOnly({
+   sourcePath,backupDirectory,userApproved:true
+  });
+  const baseline=await inspect();
+  assert.equal(baseline.status,'RESTORE_INTENT_INVENTORY_READ_ONLY');
+
+  // This is the real cooperative lock used by backup/restore operations.
+  // The other native operation is still active: returning an empty clean
+  // inventory would allow a misleading reconciliation receipt.
+  await withNativeSourceLock(sourcePath,async()=>{
+   const during=await inspect();
+   assert.deepEqual([during.status,'reason' in during?during.reason:null],
+    ['BLOCKED','RECOVERY_REVIEW_REQUIRED']);
+   assert.deepEqual(await readFile(sourcePath),original);
+  });
+  const released=await inspect();
+  assert.equal(released.status,'RESTORE_INTENT_INVENTORY_READ_ONLY');
+
+  // A crashed process leaves exactly the native inode-derived mutex behind.
+  // Never retire it here: manual privileged reconciliation is required.
+  const identity=await lstat(sourcePath,{bigint:true});
+  const key=sha(Buffer.from(identity.dev.toString()+':'+identity.ino.toString()));
+  const stranded=join(home,'.uah-source-lock-'+key);
+  await mkdir(stranded);
+  const abandoned=await inspect();
+  assert.deepEqual([abandoned.status,'reason' in abandoned?abandoned.reason:null],
+   ['BLOCKED','RECOVERY_REVIEW_REQUIRED']);
+  assert.ok((await lstat(stranded)).isDirectory());
+  assert.deepEqual(await readdir(backupDirectory),[]);
+  assert.deepEqual(await readFile(sourcePath),original);
+ }finally{await rm(home,{recursive:true,force:true});}
 });
