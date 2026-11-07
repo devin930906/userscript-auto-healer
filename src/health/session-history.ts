@@ -143,8 +143,17 @@ export function mergeLimitedSessionArchive(
  const storedRows=nativeHistoryMergeField(stored,'events');
  const sessionRows=nativeHistoryMergeField(current,'events');
  const sessionStatus=nativeHistoryMergeField(current,'currentStatus');
+ const sessionReceipt=nativeHistoryMergeField(current,'status');
+ const sessionOk=nativeHistoryMergeField(current,'ok');
  const archiveStatus=nativeHistoryMergeField(stored,'currentStatus');
+ const archiveReceipt=nativeHistoryMergeField(stored,'status');
+ // A BLOCKED/missing/foreign read cannot contribute historical evidence,
+ // even if its event rows happen to look like a valid unverified archive.
  if(!storedRows||!sessionRows||!sessionStatus||!archiveStatus||
+    !sessionReceipt||sessionReceipt.value!=='UNVERIFIED_SESSION_HISTORY_ONLY'||
+    !sessionOk||sessionOk.value!==true||
+    !archiveReceipt||archiveReceipt.value!=='ARCHIVE_READ_UNVERIFIED'||
+    archiveStatus.value!=='INDETERMINATE'||
     !validLimitedEventRows(storedRows.value,false,false,maxObservedAtMs)||
     !validLimitedEventRows(sessionRows.value,true,true,maxObservedAtMs))
   throw Error('INVALID_LIMITED_HISTORY_EVENTS');
@@ -161,9 +170,13 @@ export function mergeLimitedSessionArchive(
  // Runtime callers can misstate a TypeScript-only discriminant. Historical
  // DOM observations never authorize VERIFIED/BROKEN/RECOVERED business state,
  // even when their timestamp is newer than the last archive record.
- const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'||
-  sessionStatus.value==='INDETERMINATE'?
-  sessionStatus.value:'INDETERMINATE' as const;
+ // A DOM-hit summary is admissible only when the latest actual limited
+ // observation is also a DOM hit. An independent, untrusted currentStatus
+ // field can never promote INDETERMINATE evidence into a positive claim.
+ const latestObserved=observed[observed.length-1];
+ const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'&&
+  latestObserved?.status==='ELEMENT_FOUND_ONLY'?
+  'ELEMENT_FOUND_ONLY' as const:'INDETERMINATE' as const;
  const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   limitedCurrent:'INDETERMINATE' as const;
  // Do not spread the caller's view: the archive merge is a projection of

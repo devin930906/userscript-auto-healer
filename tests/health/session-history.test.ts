@@ -1011,3 +1011,101 @@ test('TASK-015/TEST-024/026: native history merge refuses far-future session and
   {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
  ],'valid bounded local observations remain mergeable');
 });
+
+
+test('TASK-015/TEST-024/026: native merge rejects a forged archive identity without trusting its events',()=>{
+ const now=Date.now();
+ const scenario=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(scenario,'archive-identity',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'archive-identity');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(scenario,history,'archive-identity');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merge=(old:unknown)=>mergeLimitedSessionArchive(
+  current,old as Parameters<typeof mergeLimitedSessionArchive>[1]);
+ assert.deepEqual(merge(archive).events,[
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ for(const status of ['BLOCKED','NOT_FOUND','ARCHIVE_SAVED_UNVERIFIED',null,undefined]){
+  assert.throws(()=>merge({...archive,status}),/INVALID_LIMITED_HISTORY_EVENTS/,
+   'only an actual unverified archive-read receipt may contribute historical events');
+ }
+ assert.throws(()=>merge({...archive,currentStatus:'RECOVERED_VERIFIED'}),
+  /INVALID_LIMITED_HISTORY_EVENTS/,
+  'an archive read must never claim a verified or fresh current status');
+});
+
+
+test('TASK-015/TEST-024/026: native merge refuses a forged current session identity',()=>{
+ const now=Date.now();
+ const session=new DesktopScenarioSession();
+ const registry=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(session,'session-identity',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'session-identity');
+ registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const view=readLimitedSessionHistory(session,registry,'session-identity');
+ if(!view.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const merge=(sessionView:unknown)=>mergeLimitedSessionArchive(
+  sessionView as typeof view,archive);
+ assert.deepEqual(merge(view).events,[
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ for(const [ok,status] of [
+  [false,'UNVERIFIED_SESSION_HISTORY_ONLY'],
+  [true,'RECOVERED_VERIFIED'],
+  [true,'SCENARIO_NOT_FOUND'],
+  [true,null],
+  [true,undefined]
+ ] as const){
+  assert.throws(()=>merge({...view,ok,status}),
+    /INVALID_LIMITED_HISTORY_EVENTS/,
+    'only actual read-only session identity can contribute current events');
+ }
+});
+
+
+test('TASK-015/TEST-024/026: merged current status cannot contradict its last limited observation',()=>{
+ const now=Date.now();
+ const scenario=new DesktopScenarioSession();
+ const registry=new LimitedHealthRegistry(()=>now-1000);
+ assert.equal(stage(scenario,'status-consistency',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'status-consistency');
+ registry.record({scriptHash:key,kind:'INSUFFICIENT_EVIDENCE',evidenceHash:null});
+ const current=readLimitedSessionHistory(scenario,registry,'status-consistency');
+ if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
+ assert.equal(current.currentStatus,'INDETERMINATE');
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const native=mergeLimitedSessionArchive(current,archive);
+ assert.equal(native.currentStatus,'INDETERMINATE');
+ const forged=mergeLimitedSessionArchive(
+  {...current,currentStatus:'ELEMENT_FOUND_ONLY'},archive);
+ assert.equal(forged.currentStatus,'INDETERMINATE',
+  'forged current status must not promote an INDETERMINATE event to a DOM hit');
+ assert.deepEqual(forged.events,native.events);
+ assert.equal(forged.tampermonkeyVerified,false);
+ assert.equal(forged.businessVerified,false);
+ assert.equal(forged.automaticPatchAllowed,false);
+});
