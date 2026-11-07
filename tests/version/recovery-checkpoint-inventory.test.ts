@@ -329,3 +329,24 @@ test('TASK-011/TEST-020/026: checkpoint inserted after directory snapshot during
   assert.equal(await readFile(options.sourcePath,'utf8'),source);
  });
 });
+
+test('TASK-011/TEST-020/026: truncated source-bound checkpoint name cannot masquerade as an empty inventory',async()=>{
+  await fixture(async options=>{
+    const staged=await stageReviewedCandidateOnly(
+      request,proposeLiteralSelectorPatch(request),options);
+    assert.equal(staged.status,'CANDIDATE_STAGED_RUNTIME_UNVERIFIED');
+    if(staged.status!=='CANDIDATE_STAGED_RUNTIME_UNVERIFIED')return;
+    const made=await stageRecoveryCheckpointOnly(request,staged,options);
+    assert.equal(made.status,'CHECKPOINT_STAGED_UNVERIFIED');
+    if(made.status!=='CHECKPOINT_STAGED_UNVERIFIED')return;
+    const originalPath=join(options.backupDirectory,made.checkpointFileName);
+    const damagedName=made.checkpointFileName.replace(/\.checkpoint\.json$/,'.checkpoin');
+    assert.notEqual(damagedName,made.checkpointFileName);
+    await rename(originalPath,join(options.backupDirectory,damagedName));
+    const result=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+    assert.equal(result.status,'BLOCKED',
+      'an interrupted or truncated checkpoint is not evidence of no checkpoints');
+    if(result.status==='BLOCKED')assert.equal(result.reason,'UNSAFE_CHECKPOINT');
+    assert.equal(await readFile(options.sourcePath,'utf8'),source);
+  });
+});
