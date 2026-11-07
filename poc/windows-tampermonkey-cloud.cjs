@@ -46,7 +46,9 @@ assert.ok([
   'Unreviewed fixture variant is forbidden');
 // querySelector is tested at document-start and document-idle. The native
 // getElementById and querySelectorAll NodeList[0] manual export cases are
-// tested independently at idle; neither authorizes automatic installation.
+// tested independently at idle; querySelector product comparisons cover all
+// four declared run-at modes without certifying exact injection timing.
+// None of these comparisons authorizes automatic installation.
 // Every variant uses an independent, disposable Tampermonkey Profile.
 const isIdProduct=variant==='product-id-original'||variant==='product-id-candidate';
 const isAllProduct=variant==='product-all-original'||variant==='product-all-candidate';
@@ -61,7 +63,7 @@ const productReadOnlyGm=isProductOriginal||isProductCandidate;
 const expectedRoundtrip=productReadOnlyGm?'false':'true';
 if(isProductOriginal||isProductCandidate)
   assert.ok(isIdProduct||isAllProduct?runAt==='document-idle':
-    ['document-start','document-idle'].includes(runAt),
+    RUN_AT_MODES.includes(runAt),
     'AST product cases must use reviewed matrix injection modes');
 assert.ok(RUN_AT_MODES.includes(runAt),
   'A documented Tampermonkey @run-at mode must be supplied by the isolated CI matrix');
