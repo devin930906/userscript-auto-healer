@@ -40,6 +40,11 @@ function Resolve-CandidatePortableProcessExecutablePath([object]$process) {
     $image=[string]$secondary.Path
     if([string]::IsNullOrWhiteSpace($image) -or
        -not [IO.Path]::IsPathFullyQualified($image)) { return $null }
+    # A matching PID/start time does not authenticate a malformed executable
+    # path. Apply the same incomplete-UNC rejection as the primary CIM image,
+    # before GetFullPath can normalize it into misleading identity evidence.
+    if($image.StartsWith('\\',[StringComparison]::Ordinal) -and
+       $image -cnotmatch '^\\\\[^\\]+\\[^\\]+\\.+') { return $null }
     return [IO.Path]::GetFullPath($image)
   } catch { return $null }
 }
