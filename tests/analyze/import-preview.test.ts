@@ -894,3 +894,49 @@ test('TASK-013/TEST-022/026: unretired AST worker reports bounded failure reason
   console.warn=originalWarn;
  }
 });
+
+test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segment deadline',async t=>{
+ const script=imported(header+'document.querySelector("#private-overdue-reply");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const {performance}=require('node:perf_hooks') as typeof import('node:perf_hooks');
+ const native=workers.Worker;
+ const originalWarn=console.warn;
+ const actualNow=performance.now.bind(performance);
+ let skew=0;
+ const warnings:string[]=[];
+ let starts=0;
+ try{
+  // Advance only the monotonic worker clock while setImmediate runs; the
+  // 10s timer has not fired, yet the result is already beyond its budget.
+  // No 10-second wall-clock test delay or source-dependent diagnostic.
+  t.mock.method(performance,'now',()=>actualNow()+skew);
+  workers.Worker=class extends EventEmitter{
+   constructor(_filename:string,opts:{workerData:typeof script[]}){
+    super();starts++;
+    setImmediate(()=>{
+     skew=11000;
+     this.emit('online');
+     this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate(){return Promise.resolve(0);}
+  } as unknown as typeof native;
+  console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
+  const report=await previewImportedBatchOffMain([script]);
+  assert.equal(starts,1);
+  assert.deepEqual(report.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED'],
+   'a late valid-looking reply is not in-budget isolated AST evidence');
+  assert.ok(report.every(item=>item.metadataStatus==='NOT_CHECKED'&&
+   !item.tampermonkeyVerified&&!item.businessVerified&&!item.automaticPatchAllowed));
+  assert.equal(warnings.length,1);
+  assert.match(warnings[0],
+   /^UAH_AST_WORKER_UNAVAILABLE reason=DEADLINE count=1 phase=POST_ONLINE /);
+  assert.equal(warnings[0].includes('private-overdue-reply'),false);
+ }finally{
+  workers.Worker=native;
+  console.warn=originalWarn;
+  t.mock.restoreAll();
+ }
+});
