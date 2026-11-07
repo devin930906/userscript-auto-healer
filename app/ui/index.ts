@@ -201,8 +201,12 @@ const scenarioList = document.getElementById('scenario-list');
 let scenarioBusy=false;
 function updateScenarioControls():void{
  if(scenarioScript)scenarioScript.disabled=seenScripts.size===0;
- if(scenarioRegister)scenarioRegister.disabled=seenScripts.size===0||scenarioBusy;
+ if(scenarioRegister)scenarioRegister.disabled=seenScripts.size===0||scenarioBusy||
+  scenarioApprove?.checked!==true;
 }
+// Consent is scoped to this registration attempt. Revoking it immediately
+// disables the renderer action; the native service verifies consent again.
+scenarioApprove?.addEventListener('change', updateScenarioControls);
 let busy = false;
 let activeImport = false;
 let nativeImportMode = false;
@@ -605,7 +609,7 @@ void window.healer.getStatus().then(s => {
  // The native process checks the digest again; a renderer string cannot claim
  // script import, browser consent or Tampermonkey verification.
 scenarioRegister?.addEventListener('click',()=>{
- if(scenarioBusy||!scenarioScript?.value)return;
+ if(scenarioBusy||!scenarioScript?.value||scenarioApprove?.checked!==true)return;
  const input={
   id:scenarioId?.value.trim()??'',
   scriptSha256:scenarioScript.value,
