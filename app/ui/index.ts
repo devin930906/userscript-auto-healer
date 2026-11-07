@@ -685,6 +685,15 @@ function clearGmDisplay(message:string):void{
  if(gmLinks)gmLinks.textContent='';
  if(gmResult)gmResult.textContent=message;
 }
+// An expired or explicitly revoked native fixture is not a usable UI session.
+// Keep ordinary consent cancellation and transient failures visible without
+// discarding a still-valid fixture; browserAction restores button states.
+function retireGmIfNativeSessionGone(code:string|undefined):boolean{
+ if(code!=='NO_ACTIVE_FIXTURE'&&code!=='SESSION_REVOKED')return false;
+ clearGmDisplay('临时 GM 测试服务已结束或撤销，旧测试链接已失效。'+
+  '若曾安装临时脚本，请自行从 Tampermonkey 删除。');
+ return true;
+}
 
 function setBrowserStatus(value:string):void{
  if(browserStatus)browserStatus.textContent=value;
@@ -1134,6 +1143,7 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.saveGmReport();
+ if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
  if(gmResult)gmResult.textContent=result.ok&&result.status==='UNVERIFIED_REPORT_SAVED_ONLY'
   ?'已另存未经认证的本机诊断摘要：'+result.fileName+
    '（SHA-256 '+result.sha256+'，'+result.byteLength+' bytes）。'+
@@ -1143,12 +1153,14 @@ gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
 for(const mode of ['broken','fixed'] as const){
  gmVisitButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
   const result=await window.healer.visitGmFixture(mode);
+  if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 专用测试页已在本程序拥有的 Chrome 打开；脚本执行未验证。'
    :'测试页未打开：'+(result.code??'UNKNOWN');
  }));
  gmObserveButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
   const result=await window.healer.observeGmFixture(mode);
+  if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 只读 DOM 动作数：'+result.actionCount+
       '；符合人工预设：'+Boolean(result.fixtureDomMatchesExpected)+
