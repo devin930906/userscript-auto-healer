@@ -110,8 +110,8 @@ function inspectReportedTampermonkeyPreflightUnchecked(
  // preflight, require the authority to be plainly spelled; do not turn an
  // encoded or confusable host alias into an eligible reported @match.
  // Encoded path/query data remains within its separately matched scope.
- const rawAuthority=/^https?:\\/\\/([^/?#]*)/i.exec(targetUrl)?.[1];
- if(!rawAuthority||/%|[^\\x00-\\x7f]/.test(rawAuthority))
+ const rawAuthority=/^https?:\/\/([^/?#]*)/i.exec(targetUrl)?.[1];
+ if(!rawAuthority||/%|[^\x00-\x7f]/.test(rawAuthority))
     return blocked('INVALID_INPUT');
  if(report.extensionId!==TAMPERMONKEY_EXTENSION_ID)return blocked('WRONG_MANAGER');
  if(typeof report.version!=='string'||!/^[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}$/.test(report.version))
