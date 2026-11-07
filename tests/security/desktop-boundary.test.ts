@@ -854,3 +854,20 @@ test('TASK-017/TEST-022: scenario registration consent exposes scope to assistiv
   assert.match(html, /<p id="scenario-consent-scope">[^<]*不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey/);
   assert.match(html, /<input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope">/);
 });
+
+test('TASK-017/TEST-002/022: scenario consent gates enabled registration and native dispatch',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function updateScenarioControls():void{');
+ const end=ui.indexOf('\nlet busy = false;',start);
+ assert.ok(start>=0&&end>start,'the existing scenario control updater must remain');
+ const controls=ui.slice(start,end);
+ assert.match(controls,/scenarioRegister\.disabled\s*=\s*[^;]*scenarioApprove\?\.checked\s*!==\s*true/,
+  'a loaded script alone must not enable registration without explicit consent');
+ assert.match(ui,/scenarioApprove\?\.addEventListener\('change',\s*updateScenarioControls\)/,
+  'checking or revoking consent must refresh the disabled state immediately');
+ const click=ui.indexOf("scenarioRegister?.addEventListener('click'");
+ assert.ok(click>=0,'native registration click handler must remain');
+ const handlerStart=ui.slice(click,click+240);
+ assert.match(handlerStart,/if\([^\n]*scenarioApprove\?\.checked\s*!==\s*true\)return;/,
+  'a forged click event cannot dispatch native registration without current consent');
+});
