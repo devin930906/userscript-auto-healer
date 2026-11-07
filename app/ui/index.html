@@ -32,7 +32,7 @@
     </section>
     <section id="scenario-workspace" tabindex="-1" aria-labelledby="scenario-heading">
       <h2 id="scenario-heading">导入脚本的测试场景登记（当前会话）</h2>
-      <p>仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
+      <p id="scenario-consent-scope">仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
       <label for="scenario-script">已导入脚本：</label>
       <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
       <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
@@ -46,7 +46,7 @@
       <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
       <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
       <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
-      <label><input id="scenario-approve" type="checkbox"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
+      <label><input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
       <button id="scenario-register" type="button" disabled>登记只读测试场景</button>
       <label for="scenario-inspect-id">只读检查已登记场景：</label>
       <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>

@@ -848,3 +848,9 @@ test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot rep
  assert.match(result.textContent,/FRESH_REVIEW_ADVICE/,
   'the freshly requested result may appear for the unchanged selected scenario');
 });
+
+test('TASK-017/TEST-022: scenario registration consent exposes scope to assistive technology', () => {
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+  assert.match(html, /<p id="scenario-consent-scope">[^<]*不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey/);
+  assert.match(html, /<input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope">/);
+});
