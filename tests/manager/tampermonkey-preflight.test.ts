@@ -697,7 +697,7 @@ test('TASK-007/TEST-017/026: exact-origin matcher rejects spoofed URL getters wi
   get protocol(){getterCalls++;throw Error('UNTRUSTED_PROTOCOL_GETTER');},
   hostname:'example.com',port:'',pathname:'/x',search:''
  };
- assert.equal(matchingExactOriginPattern('https://example.com/*',fake as URL),false);
+ assert.equal(matchingExactOriginPattern('https://example.com/*',fake as unknown as URL),false);
  assert.equal(getterCalls,0,'a fake URL getter must never run at the trust boundary');
  const proxy=new Proxy(new URL('https://example.com/x'),{
   get(){getterCalls++;throw Error('UNTRUSTED_PROXY_GET');}
@@ -705,7 +705,7 @@ test('TASK-007/TEST-017/026: exact-origin matcher rejects spoofed URL getters wi
  assert.equal(matchingExactOriginPattern('https://example.com/*',proxy),false);
  assert.equal(getterCalls,0,'URL proxies are not safe value containers');
  class OverriddenUrl extends URL{
-  override get protocol(){getterCalls++;throw Error('UNTRUSTED_SUBCLASS_GETTER');}
+  override get protocol():string{getterCalls++;throw Error('UNTRUSTED_SUBCLASS_GETTER');}
  }
  assert.equal(matchingExactOriginPattern('https://example.com/*',
   new OverriddenUrl('https://example.com/x')),false);
