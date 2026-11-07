@@ -53,7 +53,7 @@ function normalizeUrl(input:unknown):string|null {
   // Do not grant a ready-to-test consent receipt for a different route.
   // Only inspect the path part: query values such as ?next=/../ are data.
   const rawPath=input.split(/[?#]/,1)[0];
-  if(/\\/(?:\\.|%2e){1,2}(?=\\/|$)/i.test(rawPath))return null;
+  if(/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath))return null;
   try {
     const url=new URL(input);
     if(!['http:','https:'].includes(url.protocol) || !url.hostname ||
