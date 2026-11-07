@@ -270,9 +270,19 @@ export async function saveLimitedHealthArchive(
  // await. A native caller can mutate its object while baseDir() is pending;
  // validated events must never be published under a different script scope.
  const key=snapshot.scriptHash;
- const originalObservations=snapshot.history.map(event=>Object.freeze({
-  observedAtMs:event.observedAtMs,status:event.status
- }));
+ // The dense history and every event were validated by newEvents(), but
+ // Array.prototype.map is mutable and must not execute in this privileged
+ // filesystem boundary. Copy only the verified own data descriptor values.
+ const originalObservations:ArchiveEvent[]=[];
+ for(let i=0;i<snapshot.history.length;i++){
+  const descriptor=Object.getOwnPropertyDescriptor(snapshot.history,String(i));
+  if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))
+   return Object.freeze({status:'BLOCKED',...emptyAuthority});
+  const event=descriptor.value as LimitedHealthSnapshot['history'][number];
+  originalObservations.push(Object.freeze({
+   observedAtMs:event.observedAtMs,status:event.status
+  }));
+ }
  const dir=await baseDir(userData,true);
  if(!dir)return Object.freeze({status:'BLOCKED',...emptyAuthority});
  const target=join(dir,'health-'+key+'.json');
