@@ -154,6 +154,9 @@ const scenarioInspectId = document.getElementById('scenario-inspect-id') as HTML
 const aiReviewButton=document.getElementById('ai-reviewed-suggest') as HTMLButtonElement|null;
 const aiReviewResult=document.getElementById('ai-reviewed-result');
 let aiReviewPending=false;
+// A previously authorized AI response cannot be attributed to a later
+// scenario selection, even if the selector returns to the old value.
+let aiReviewGeneration=0;
 // A renderer hint only: the native gateway separately checks its own
 // authorized observation receipt and still asks for consent before network.
 const observedScenarioIds=new Set<string>();
@@ -1244,11 +1247,14 @@ aiReviewButton?.addEventListener('click',()=>{
     if(aiReviewResult)aiReviewResult.textContent='尚未选择已登记的只读场景。先完成本机只读场景检查。';
     return;
   }
+  const requestGeneration=++aiReviewGeneration;
+  const isCurrentAiReview=()=>requestGeneration===aiReviewGeneration&&
+    scenarioInspectId?.value===id;
   aiReviewPending=true;
   aiReviewButton.disabled=true;
   if(aiReviewResult)aiReviewResult.textContent='请选择本地 AI 配置并在原生窗口确认具体外发字段；未同意不联网。';
   void window.healer.requestNativeAiReview(id).then(result=>{
-    if(!aiReviewResult)return;
+    if(!isCurrentAiReview()||!aiReviewResult)return;
     if(!result.ok){
       aiReviewResult.textContent='本次 AI 文字建议未取得：'+(result.code??'UNKNOWN')+
         '。不会修改或安装任何脚本。';
@@ -1259,8 +1265,18 @@ aiReviewButton?.addEventListener('click',()=>{
       (result.candidateText??'')+
       '。仅供人工复核，未验证 Tampermonkey 或业务功能；不具备脚本写入权限。';
   }).catch(()=>{
-    if(aiReviewResult)aiReviewResult.textContent='本次 AI 请求受阻，未产生任何可信修复结果。';
+    if(isCurrentAiReview()&&aiReviewResult)
+      aiReviewResult.textContent='本次 AI 请求受阻，未产生任何可信修复结果。';
   }).finally(()=>{aiReviewPending=false;browserControls();});
+});
+// Selection changes retire only renderer presentation, not the native call.
+// Already authorized work may finish; its delayed text must not cross views.
+scenarioInspectId?.addEventListener('change',()=>{
+  aiReviewGeneration++;
+  if(aiReviewResult)aiReviewResult.textContent='已切换场景；先前的 AI 文字建议已隐藏。'+
+    (aiReviewPending
+      ?'原请求可能仍在执行，完成后请为当前场景单独授权。'
+      :'如需本场景建议，请单独授权。');
 });
 
 /** Work-area buttons scroll and move keyboard focus without modifying the
