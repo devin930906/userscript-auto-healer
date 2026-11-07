@@ -163,8 +163,12 @@ export async function inspectChangedSourceRestorePreflightReadOnly(
   const sourceParentBefore=await lstat(dirname(options.sourcePath),{bigint:true});
   const directoryBefore=await lstat(options.backupDirectory,{bigint:true});
   const backupBefore=await lstat(join(options.backupDirectory,options.backupFileName),{bigint:true});
+  // The native restore transaction rejects write-protected originals before
+  // any backup or intent publication. A read-only preflight must not report
+  // recovery readiness for a source the actual native restore will refuse.
   if(!sourceBefore.isFile()||sourceBefore.isSymbolicLink()||
-     sourceBefore.nlink!==1n||!sourceParentBefore.isDirectory()||
+     sourceBefore.nlink!==1n||(sourceBefore.mode&0o222n)===0n||
+     !sourceParentBefore.isDirectory()||
      sourceParentBefore.isSymbolicLink()||!directoryBefore.isDirectory()||
      directoryBefore.isSymbolicLink())return deny('UNSAFE_PATH');
   if(!backupBefore.isFile()||backupBefore.isSymbolicLink()||backupBefore.nlink!==1n)

@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {hasStructurallyValidNativeRestoreJournalReadOnly} from '../../src/version/restore-intent-inspection';
 import {hasInterruptedRestoreStaging} from '../../src/version/restore-staging-residue';
-import {link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
+import {chmod,link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {proposeLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
@@ -374,4 +374,25 @@ test('TASK-011/TEST-020/021/026: final async intent scan cannot return a stale r
    }
   });
  }
+});
+
+test('TASK-011/TEST-020/021: read-only changed script is not eligible for native restoration',async()=>{
+ await fixture(async ({sourcePath,backupDirectory,opts})=>{
+  const before=await readFile(sourcePath);
+  const backup=await readFile(join(backupDirectory,opts.backupFileName));
+  try{
+   await chmod(sourcePath,0o444);
+   const mode=(await lstat(sourcePath,{bigint:true})).mode;
+   assert.equal(mode&0o222n,0n,
+    'fixture must create a genuinely read-only source on this runner');
+   const result=await inspectChangedSourceRestorePreflightReadOnly(opts);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   if(result.status==='BLOCKED')assert.equal(result.reason,'UNSAFE_PATH');
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.deepEqual(await readFile(sourcePath),before);
+   assert.deepEqual(await readFile(join(backupDirectory,opts.backupFileName)),backup);
+  }finally{
+   await chmod(sourcePath,0o666);
+  }
+ });
 });
