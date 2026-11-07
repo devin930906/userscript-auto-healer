@@ -190,6 +190,8 @@ const scenarioHistoryButton = document.getElementById('scenario-history') as HTM
 const scenarioHistorySummary = document.getElementById('scenario-history-summary');
 const scenarioHistoryEntries = document.getElementById('scenario-history-entries');
 let scenarioHistoryBusy=false;
+// A superseded read-only history request cannot repaint another scenario.
+let scenarioHistoryGeneration=0;
 const scenarioExportButton = document.getElementById('scenario-export-manual') as HTMLButtonElement | null;
 const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
@@ -748,10 +750,14 @@ scenarioHistoryButton?.addEventListener('click',()=>{
  if(scenarioHistoryBusy)return;
  const id=scenarioInspectId?.value??'';
  if(!id){if(scenarioHistorySummary)scenarioHistorySummary.textContent='请先登记并选择一个只读场景。';return;}
+ const requestGeneration=++scenarioHistoryGeneration;
+ const isCurrentHistoryRequest=()=>requestGeneration===scenarioHistoryGeneration&&
+   scenarioInspectId?.value===id;
  scenarioHistoryBusy=true;browserControls();
  scenarioHistoryEntries?.replaceChildren();
  if(scenarioHistorySummary)scenarioHistorySummary.textContent='正在读取本窗口及可能存在的本机脱敏历史；不会访问浏览器。';
  void window.healer.readScenarioHistory(id).then(view=>{
+  if(!isCurrentHistoryRequest())return;
   if(!view.ok||view.status!=='UNVERIFIED_SESSION_HISTORY_ONLY'||!Array.isArray(view.events)){
    if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史不可用：'+(view.code??'UNKNOWN');
    return;
@@ -769,8 +775,22 @@ scenarioHistoryButton?.addEventListener('click',()=>{
    scenarioHistoryEntries?.append(row);
   }
  }).catch(()=>{
+  if(!isCurrentHistoryRequest())return;
   if(scenarioHistorySummary)scenarioHistorySummary.textContent='观察历史读取失败；不推断脚本状态。';
- }).finally(()=>{scenarioHistoryBusy=false;browserControls();});
+ }).finally(()=>{
+  if(requestGeneration!==scenarioHistoryGeneration)return;
+  scenarioHistoryBusy=false;browserControls();
+ });
+});
+scenarioInspectId?.addEventListener('change',()=>{
+ // A native read can finish later; its old scenario no longer owns this UI.
+ // Retire the presentation lock without canceling or trusting the old IPC.
+ scenarioHistoryGeneration++;
+ scenarioHistoryBusy=false;
+ scenarioHistoryEntries?.replaceChildren();
+ if(scenarioHistorySummary)
+  scenarioHistorySummary.textContent='已切换场景；请重新点击查看当前场景的观察历史。';
+ browserControls();
 });
 // Explicitly user-started bounded monitoring, never unattended background
 // authority. Each round re-enters the existing main-process native dialog,
