@@ -26,8 +26,14 @@ export type TargetNavigationStage = 'TAB_CREATED'|'TAB_CREATION_FAILED'|
 // The URL constructor can silently remove C0 controls or reinterpret a
 // backslash as a slash. A navigation must use the exact raw approved URL.
 function unambiguousRawTarget(raw:string):boolean {
+  // WHATWG URL silently removes literal and percent-encoded dot segments.
+  // Consent and read-only frame observations must retain the original
+  // selected path, not confirm a different path after normalization.
+  // Query data such as ?return=/../ is not a navigated path segment.
+  const rawPath=raw.split(/[?#]/,1)[0];
   return raw.length<=4096&&raw.trim()===raw&&
-    !/[\x00-\x1f\x7f\\]/.test(raw);
+    !/[\x00-\x1f\x7f\\]/.test(raw)&&
+    !/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath);
 }
 function validTarget(raw:string):boolean {
   if(!unambiguousRawTarget(raw))return false;
