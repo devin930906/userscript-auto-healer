@@ -49,6 +49,11 @@ function normalizeUrl(input:unknown):string|null {
   // a different raw address into an apparently approved navigation target.
   if(typeof input!=='string'||!input||input.length>4096||
      input.trim()!==input||/[\x00-\x1f\x7f\\]/.test(input))return null;
+  // Dot segments in the submitted PATH can be silently removed by URL().
+  // Do not grant a ready-to-test consent receipt for a different route.
+  // Only inspect the path part: query values such as ?next=/../ are data.
+  const rawPath=input.split(/[?#]/,1)[0];
+  if(/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath))return null;
   try {
     const url=new URL(input);
     if(!['http:','https:'].includes(url.protocol) || !url.hostname ||

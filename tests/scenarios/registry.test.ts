@@ -207,3 +207,32 @@ test('TEST-005/026: live/revoked Proxy and nested array traps never run during p
   }
   assert.equal(traps,0,'untrusted Proxy reflection traps must never execute');
 });
+
+
+test('TASK-004/009 TEST-005/014/026: dot-segment URL normalization never widens approved scenario scope',()=>{
+  const base:ScenarioInput={...bare,id:'dot_segment_scope',
+    userApproved:true,requiresLogin:false,
+    targetUrl:'https://example.test/approved'};
+  assert.equal(preflightScenario(base).state,'READY_TO_TEST');
+  for(const targetUrl of [
+    'https://example.test/unapproved/../approved',
+    'https://example.test/unapproved/./approved',
+    'https://example.test/unapproved/%2e%2e/approved',
+    'https://example.test/unapproved/.%2E/approved',
+    'https://example.test/unapproved/%2e./approved',
+    'https://example.test/unapproved/%2E/approved'
+  ]){
+    const result=preflightScenario({...base,targetUrl});
+    assert.equal(result.state,'INVALID',
+      'a user-approved path must not silently normalize to a different route: '+targetUrl);
+    assert.ok(result.issues.includes('INVALID_URL'));
+    assert.equal(result.input.targetUrl,undefined,
+      'do not stage the normalized target after rejecting malformed consent scope');
+  }
+  // Query values are not navigation path segments; allow literal dot text
+  // there and keep the approved origin/route unchanged.
+  const query='https://example.test/approved?next=/../resource&encoded=%2e%2e';
+  const permitted=preflightScenario({...base,targetUrl:query});
+  assert.equal(permitted.state,'READY_TO_TEST');
+  assert.equal(permitted.input.targetUrl,query);
+});
