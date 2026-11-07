@@ -730,3 +730,14 @@ test('TASK-017/TEST-002/022: bounded dropped-folder scan retains discovered file
  assert.match(scan,/return found;/,
   'safe already-discovered files must remain eligible for native validation');
 });
+
+
+test('TASK-017/TEST-022: isolated Chrome profile warnings are tied to profile and launch controls',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(html,/<p id="chrome-profile-safety">[^<]*不允许使用日常 Chrome Profile/,
+  'the existing warning must be identifiable without replacing its approved safety copy');
+ for(const id of ['choose-profile','create-profile','launch-chrome']){
+  assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety">'),
+   'the Chrome safety warning must be available from the '+id+' control');
+ }
+});
