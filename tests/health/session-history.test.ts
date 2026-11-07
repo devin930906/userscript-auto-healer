@@ -1109,3 +1109,44 @@ test('TASK-015/TEST-024/026: merged current status cannot contradict its last li
  assert.equal(forged.businessVerified,false);
  assert.equal(forged.automaticPatchAllowed,false);
 });
+
+
+test('TASK-015/TEST-024/026: archive merge cannot revive expired or future current DOM evidence',()=>{
+ const now=Date.now();
+ const archive={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-12*60*1000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ // A TypeScript readonly view is not a native freshness receipt. A forged
+ // positive status can carry a real-looking but long-expired event.
+ const current={
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus:'ELEMENT_FOUND_ONLY' as const,
+  events:[{observedAtMs:now-11*60*1000,status:'ELEMENT_FOUND_ONLY' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const expired=mergeLimitedSessionArchive(current,archive);
+ assert.equal(expired.currentStatus,'INDETERMINATE',
+  'an event older than the real registry 10-minute freshness window cannot be current');
+ assert.equal(expired.events.length,2,'past events remain unverified history');
+ // The archive format permits at most five minutes of clock skew for
+ // historical retention, not for minting a current observation from future time.
+ const future=mergeLimitedSessionArchive({...current,events:[
+  {observedAtMs:now+60*1000,status:'ELEMENT_FOUND_ONLY' as const}
+ ]},archive);
+ assert.equal(future.currentStatus,'INDETERMINATE',
+  'an observation in the future cannot establish current DOM readiness');
+ assert.equal(future.tampermonkeyVerified,false);
+ assert.equal(future.businessVerified,false);
+ assert.equal(future.automaticPatchAllowed,false);
+ // Do not regress the genuine positive limited-scope case within the window.
+ const fresh=mergeLimitedSessionArchive({...current,events:[
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY' as const}
+ ]},archive);
+ assert.equal(fresh.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.equal(fresh.businessVerified,false);
+});
