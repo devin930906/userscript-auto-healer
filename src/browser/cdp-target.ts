@@ -139,8 +139,15 @@ export function readCreatedTargetReceipt(raw:unknown):string|null|undefined{
     const data=parsed as {id?:unknown;result?:{targetId?:unknown};error?:unknown};
     if(data.id!==2)return undefined;
     if(Object.prototype.hasOwnProperty.call(data,'error'))return null;
+    // Browser Target.createTarget has exactly id + result, and a single
+    // result.targetId. Extra envelope/result properties are ambiguous remote
+    // evidence; do not mint an app-owned target identity from such a reply.
+    if(Object.keys(data).length!==2||
+       !Object.prototype.hasOwnProperty.call(data,'result'))return null;
     const result=data.result;
-    if(!result||typeof result!=='object'||Array.isArray(result))return null;
+    if(!result||typeof result!=='object'||Array.isArray(result)||
+       Object.keys(result).length!==1||
+       !Object.prototype.hasOwnProperty.call(result,'targetId'))return null;
     const id=result.targetId;
     return typeof id==='string'&&/^[a-zA-Z0-9_-]{8,128}$/.test(id)?id:null;
   }catch{return null;}
@@ -201,8 +208,15 @@ export function readClosedTargetReceipt(raw:unknown):boolean|undefined{
     const receipt=parsed as {id?:unknown;error?:unknown;result?:unknown};
     if(receipt.id!==3)return undefined;
     if(Object.prototype.hasOwnProperty.call(receipt,'error'))return false;
+    // Only the precise CDP close-target acknowledgement has authority to
+    // initiate absence verification. Additional fields are not an ordinary
+    // success receipt, even if result.success happens to be true.
+    if(Object.keys(receipt).length!==2||
+       !Object.prototype.hasOwnProperty.call(receipt,'result'))return false;
     const result=receipt.result;
     return !!result&&typeof result==='object'&&!Array.isArray(result)&&
+      Object.keys(result).length===1&&
+      Object.prototype.hasOwnProperty.call(result,'success')&&
       (result as {success?:unknown}).success===true;
   }catch{return false;}
 }
