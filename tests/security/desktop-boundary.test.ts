@@ -933,3 +933,56 @@ test('TASK-017/TEST-022: switching inspected scenarios retires stale DOM results
  await flush();
  assert.match(status.textContent,/场景 scenario-B：/);
 });
+
+/** TASK-017 / TEST-002/022: registration consent is per dispatch, never a
+ * persistent toggle authorizing a later registration without a new gesture.
+ * Exercise the real renderer handler, not a duplicate example implementation.
+ */
+test('TASK-017/TEST-022: registration consumes consent before native IPC and requires fresh approval',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("scenarioRegister?.addEventListener('click'");
+ const end=ui.indexOf("// Native browser actions never expose",start);
+ assert.ok(start>=0&&end>start,'real registration event handler remains available');
+ const callbacks=new Map<string,()=>void>();
+ const register={disabled:false,addEventListener:(name:string,fn:()=>void)=>callbacks.set(name,fn)};
+ const approve={checked:true};
+ const script={value:'a'.repeat(64)};
+ const status={textContent:''};
+ const pending:{input:{userApproved:boolean};resolve:(value:unknown)=>void}[]=[];
+ const items:{textContent:string}[]=[];
+ const document={createElement:()=>({textContent:''})};
+ const context={
+  scenarioRegister:register,scenarioBusy:false,scenarioApprove:approve,
+  scenarioScript:script,scenarioId:{value:'approved-scene'},
+  scenarioUrl:{value:'https://example.com'},scenarioSelector:{value:'#approved'},
+  scenarioReplacement:null,scenarioNeedsLogin:null,scenarioLoginReady:null,
+  scenarioStatus:status,scenarioInspectId:null,scenarioList:{append:(v:{textContent:string})=>items.push(v)},
+  updateScenarioControls:()=>{register.disabled=!approve.checked;},
+  browserControls:()=>undefined,document,
+  window:{healer:{registerScenario:(input:{userApproved:boolean})=>new Promise(resolve=>{
+   pending.push({input,resolve});
+  })}}
+ };
+ runInNewContext(ui.slice(start,end),context);
+ const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
+ callbacks.get('click')?.();
+ assert.equal(pending.length,1);
+ assert.equal(pending[0].input.userApproved,true,
+  'the explicit approval must reach only the dispatched native registration');
+ assert.equal(approve.checked,false,
+  'one-shot approval must be cleared synchronously before the pending IPC reply');
+ pending[0].resolve({ok:true,status:'STAGED_RUNTIME_UNVERIFIED',
+  state:'REGISTERED_UNVERIFIED',id:'approved-scene',readOnlyDomEligible:false});
+ await flush();
+ callbacks.get('click')?.();
+ assert.equal(pending.length,1,
+  'a second registration must not inherit consent from the previous successful request');
+ approve.checked=true;
+ callbacks.get('click')?.();
+ assert.equal(pending.length,2,'a fresh approval permits a fresh authorized request');
+ pending[1].resolve({ok:false,code:'REJECTED'});
+ await flush();
+ assert.equal(approve.checked,false,
+  'a failed native registration must not preserve the next attempt authorization');
+});
