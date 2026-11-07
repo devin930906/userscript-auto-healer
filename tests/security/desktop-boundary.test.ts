@@ -879,9 +879,12 @@ test('TASK-017/TEST-002/022: scenario consent gates enabled registration and nat
 test('TASK-017/TEST-022: switching inspected scenarios retires stale DOM results',async()=>{
  const {runInNewContext}=await import('node:vm');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
- const start=ui.indexOf("scenarioInspectButton?.addEventListener('click'");
+ const handlerStart=ui.indexOf("scenarioInspectButton?.addEventListener('click'");
+ const generationStart=ui.indexOf('let scenarioInspectionGeneration=0;');
+ const start=generationStart>=0?generationStart:handlerStart;
  const end=ui.indexOf("manualRestoreButton?.addEventListener('click'",start);
- assert.ok(start>=0&&end>start,'real DOM inspection event handler is present');
+ assert.ok(handlerStart>=0&&end>handlerStart,
+  'real DOM inspection event handler is present');
  const clicks=new Map<string,()=>void>();
  const changes=new Map<string,()=>void>();
  const button={addEventListener:(event:string,handler:()=>void)=>clicks.set(event,handler)};
