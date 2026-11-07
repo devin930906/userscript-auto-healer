@@ -90,13 +90,13 @@
     </section>
     <section id="browser-workspace" tabindex="-1" aria-labelledby="browser-heading">
       <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
-      <p>先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
+      <p id="chrome-profile-safety">先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
       <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>
-      <button id="choose-profile" type="button">选择已有独立 Profile</button>
-      <button id="create-profile" type="button">创建新的独立 Profile（需确认）</button>
+      <button id="choose-profile" type="button" aria-describedby="chrome-profile-safety">选择已有独立 Profile</button>
+      <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
       <label for="chrome-port">本机 CDP 端口：</label>
       <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
-      <button id="launch-chrome" type="button">授权启动独立 Chrome</button>
+      <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
       <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
       <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
       <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
