@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {parseUserscriptMetadata,type MetadataResult} from '../../src/analyze/metadata-parser';
 import {inspectTampermonkeyTargetHints,TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
-import {inspectReportedTampermonkeyPreflight} from '../../src/manager/tampermonkey-preflight';
+import {inspectReportedTampermonkeyPreflight,matchingExactOriginPattern} from '../../src/manager/tampermonkey-preflight';
 import {startIsolatedTampermonkeyGmProbe} from '../../src/manager/tampermonkey-gm-probe';
 
 const runtime=inspectTampermonkeyTargetHints([
@@ -689,4 +689,27 @@ test('TASK-007/TEST-017/026: unreviewed metadata envelope cannot smuggle busines
  }
  assert.equal(inspect().ok,true,
   'the exact ordinary metadata envelope stays eligible without any attestation');
+});
+
+test('TASK-007/TEST-017/026: exact-origin matcher rejects spoofed URL getters without invoking them',()=>{
+ let getterCalls=0;
+ const fake={
+  get protocol(){getterCalls++;throw Error('UNTRUSTED_PROTOCOL_GETTER');},
+  hostname:'example.com',port:'',pathname:'/x',search:''
+ };
+ assert.equal(matchingExactOriginPattern('https://example.com/*',fake as unknown as URL),false);
+ assert.equal(getterCalls,0,'a fake URL getter must never run at the trust boundary');
+ const proxy=new Proxy(new URL('https://example.com/x'),{
+  get(){getterCalls++;throw Error('UNTRUSTED_PROXY_GET');}
+ });
+ assert.equal(matchingExactOriginPattern('https://example.com/*',proxy),false);
+ assert.equal(getterCalls,0,'URL proxies are not safe value containers');
+ class OverriddenUrl extends URL{
+  override get protocol():string{getterCalls++;throw Error('UNTRUSTED_SUBCLASS_GETTER');}
+ }
+ assert.equal(matchingExactOriginPattern('https://example.com/*',
+  new OverriddenUrl('https://example.com/x')),false);
+ assert.equal(getterCalls,0,'URL subclasses cannot override the canonical authority read');
+ assert.equal(matchingExactOriginPattern('https://example.com/x',
+  new URL('https://example.com/x')),true);
 });
