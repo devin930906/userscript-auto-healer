@@ -101,7 +101,11 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
     // reject forged direct calls before allocating an unbounded snapshot.
     if(copiedBytes+length>MAX_TOTAL_IMPORTED_BYTES)return null;
     copiedBytes+=length;
-    // The Uint8Array constructor consults a caller-owned Symbol.iterator.\n    // Copy through the intrinsic typed-array operation instead: it reads\n    // native element slots without executing subclass/own iterator hooks.\n    stableBytes=new Uint8Array(length);\n    Uint8Array.prototype.set.call(stableBytes,bytes);
+    // The Uint8Array constructor consults a caller-owned Symbol.iterator.
+    // Copy through the intrinsic typed-array operation instead: it reads
+    // native element slots without executing subclass/own iterator hooks.
+    stableBytes=new Uint8Array(length);
+    Uint8Array.prototype.set.call(stableBytes,bytes);
    }
    safe.push({bytes:stableBytes,textEncoding:encoding});
   }
