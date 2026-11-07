@@ -1753,6 +1753,29 @@ async function createMainWindow(): Promise<void> {
       throw new Error('GM_PROBE_PENDING_START_STOP_FAILED');
 
 
+    // TASK-017 / TEST-022: after native NO_ACTIVE_FIXTURE, renderer actions
+    // must revoke stale controls/links rather than presenting a live session.
+    // This uses the genuine sandbox preload IPC; no Chrome or manager is started.
+    const staleFixtureControls=await win.webContents.executeJavaScript(
+      "(async()=>{const ids=['gm-probe-save-report','gm-probe-visit-broken','gm-probe-observe-fixed'];"+
+      "const links=document.getElementById('gm-probe-links');"+
+      "const visit=document.getElementById('gm-probe-visit-broken');"+
+      "const stop=document.getElementById('gm-probe-stop');"+
+      "let passed=true;try{for(const id of ids){"+
+      "browserConnected=true;gmProbeActive=true;browserControls();links.textContent='STALE_TEST_LINK';"+
+      "const button=document.getElementById(id);"+
+      "if(!button||button.disabled){passed=false;break;}button.click();"+
+      "const settled=await new Promise(resolve=>{const since=Date.now();"+
+      "const poll=()=>{if(!browserBusy||Date.now()-since>3000)resolve(!browserBusy);"+
+      "else setTimeout(poll,20);};setTimeout(poll,20);});"+
+      "if(!settled||gmProbeActive||links.textContent!==''||!visit.disabled||!stop.disabled){"+
+      "passed=false;break;}}return passed;"+
+      "}finally{browserConnected=false;gmProbeActive=false;links.textContent='';browserControls();}})()",
+      true
+    ) as boolean;
+    if(!staleFixtureControls)
+      throw new Error('GM_PROBE_STALE_FIXTURE_CONTROLS_FAILED');
+
     // TEST-022/026: real sandbox renderer-preload IPC cancellation policy.
     const uiCancelReady=await win.webContents.executeJavaScript(
       "(() => {const el=document.getElementById('scenario-cancel');"+
