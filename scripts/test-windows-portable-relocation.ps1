@@ -94,6 +94,26 @@ try {
     if($foreignChecks -ne 1) {
       throw 'TEST-028: independent foreign image was not distinguished from candidate'
     }
+    # TASK-020 / TEST-028: a missing CIM path can be replaced only by a
+    # corroborated COMPLETE process image. .NET considers an incomplete UNC
+    # root "fully qualified"; it must remain UNKNOWN even with matching
+    # PID and creation-time witnesses.
+    $script:opaqueFallbackPath='\\UserscriptAutoHealer.exe'
+    $secondaryIdentity=Resolve-CandidatePortableProcessExecutablePath $script:opaqueCim
+    if($null -ne $secondaryIdentity) {
+      throw 'TEST-028: incomplete UNC secondary image incorrectly established identity'
+    }
+    $secondaryUnknownRejected=$false
+    try { Wait-CandidatePortableProcessExit $candidateOpaque 1 0 | Out-Null }
+    catch [System.InvalidOperationException] {
+      if($_.Exception.Message -notlike '*path unavailable*') { throw }
+      $secondaryUnknownRejected=$true
+    }
+    if(-not $secondaryUnknownRejected) {
+      throw 'TEST-028: incomplete UNC secondary process escaped unknown-path gate'
+    }
+    Write-Output 'PASS: incomplete UNC secondary process path remains unverified'
+
     $script:opaqueFallbackPath=$candidateOpaque
     $ownedRejected=$false
     try { Wait-CandidatePortableProcessExit $candidateOpaque 1 0 | Out-Null }
