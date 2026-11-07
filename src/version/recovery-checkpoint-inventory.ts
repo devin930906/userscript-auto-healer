@@ -122,12 +122,118 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
       // Do not reject ordinary backup or staged-candidate files sharing this
       // source prefix: only the reserved checkpoint marker is relevant.
       const sourceBound=entry.name.toLowerCase().startsWith(prefix.toLowerCase());
+      const suffix=sourceBound?entry.name.slice(prefix.length):'';
       const checkpointMarked=entry.name.toLowerCase().includes('.checkpoint');
-      if(entry.name.startsWith(prefix)&&
-         namePattern.test(entry.name.slice(prefix.length))){
+      // A published checkpoint may be truncated before the full
+      // ".checkpoint" marker. A source-bound transaction UUID is a reserved
+      // recovery name, not an unrelated file merely because its extension
+      // is damaged. Keep legitimate backup/candidate files in this shared
+      // store usable; do not classify them as checkpoints.
+      const transactionName=new RegExp('^'+UUID_V4+'(?:\\.|$)','i').test(suffix);
+      const otherPublishedName=new RegExp(
+        '^'+UUID_V4+'\\.(?:backup|candidate)\\.user\\.js
+    }
+    matches.sort();
+    const observed:Array<{
+      checkpointFileName:string;checkpointSha256:string;
+      originalSha256:string;candidateSha256:string
+    }>=[];
+    // Bind every observation to the SAME checkpoint inode and metadata
+    // across the entire inventory, not merely matching SHA-256.
+    // In-place edits do not change the parent directory's timestamps.
+    const checkpointFiles:Array<{name:string;file:BigIntStats}>=[];
+    for(const name of matches){
+      const before=await lstat(join(options.backupDirectory,name),{bigint:true});
+      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n)
+        return deny('UNSAFE_CHECKPOINT');
+      checkpointFiles.push({name,file:before});
+      const inspected=await inspectRecoveryCheckpointReadOnly(
+        request,name,options);
+      if(inspected.status!=='CHECKPOINT_RECHECKED_READ_ONLY')
+        return deny('UNSAFE_CHECKPOINT');
+      observed.push(Object.freeze({
+        checkpointFileName:name,checkpointSha256:inspected.checkpointSha256,
+        originalSha256:inspected.originalSha256,
+        candidateSha256:inspected.candidateSha256
+      }));
+    }
+    // A checkpoint inspected earlier may be overwritten while later entries
+    // are checked. Repeat the existing bounded, independent source/backup/
+    // candidate verification and reject any changed result before reporting.
+    // These are only observational snapshots, not a cross-process file lock.
+    for(const earlier of observed){
+      const latest=await inspectRecoveryCheckpointReadOnly(
+        request,earlier.checkpointFileName,options);
+      if(latest.status!=='CHECKPOINT_RECHECKED_READ_ONLY'||
+         latest.checkpointSha256!==earlier.checkpointSha256||
+         latest.originalSha256!==earlier.originalSha256||
+         latest.candidateSha256!==earlier.candidateSha256)
+        return deny('UNSAFE_CHECKPOINT');
+    }
+    if(await hasUnsafePathLink(options.sourcePath)||
+       await hasUnsafePathLink(options.backupDirectory))
+      return deny('UNSAFE_PATH');
+    const sourceAfter=await lstat(options.sourcePath,{bigint:true});
+    const dirAfter=await lstat(options.backupDirectory,{bigint:true});
+    const sourceParentAfter=await lstat(dirname(options.sourcePath),{bigint:true});
+    const sourceFinal=await verifyApprovedSourceFingerprint({
+      sourcePath:options.sourcePath,expectedSha256:request.expectedSourceSha256,
+      userApproved:true
+    });
+    if(!sameFile(sourceBefore,sourceAfter)||sourceAfter.nlink!==1n||
+       sourceFinal.status!=='MATCHED_READ_ONLY')
+      return deny('SOURCE_UNVERIFIED');
+    // The same directory inode can gain or lose checkpoint entries without
+    // changing its identity. An inventory over a changed namespace is stale.
+    if(!sameDir(dirBefore,dirAfter)||dirAfter.isSymbolicLink()||
+       !dirAfter.isDirectory()||
+       !sourceParentAfter.isDirectory()||sourceParentAfter.isSymbolicLink()||
+       !sameDir(sourceParentBefore,sourceParentAfter)||
+       sameDir(sourceParentAfter,dirAfter)||
+       dirBefore.mtimeNs!==dirAfter.mtimeNs||
+       dirBefore.ctimeNs!==dirAfter.ctimeNs)return deny('UNSAFE_PATH');
+    // Both independent inspectors can accept identical checkpoint bytes
+    // even after an external process rewrites a file BETWEEN their calls.
+    // The directory is unchanged by this edit; compare original inode,
+    // ctime/mtime, mode and link count at the aggregate boundary.
+    // A read-only snapshot is not an OS-enforced cross-process lock.
+    for(const entry of checkpointFiles){
+      const last=await lstat(join(options.backupDirectory,entry.name),
+        {bigint:true});
+      if(!last.isFile()||last.isSymbolicLink()||last.nlink!==1n||
+         !sameFile(entry.file,last)||entry.file.mode!==last.mode||
+         entry.file.nlink!==last.nlink)
+        return deny('UNSAFE_CHECKPOINT');
+    }
+    // The final source digest and per-checkpoint inode checks above yield
+    // filesystem control after dirAfter was captured. Another process can
+    // insert/remove a checkpoint in that interval, including for an empty
+    // inventory. Refuse a stale snapshot instead of returning an incomplete
+    // list of recovery evidence. This is not a cross-process filesystem lock.
+    if(await hasUnsafePathLink(options.backupDirectory))
+      return deny('UNSAFE_PATH');
+    const dirAtReceipt=await lstat(options.backupDirectory,{bigint:true});
+    if(!dirAtReceipt.isDirectory()||dirAtReceipt.isSymbolicLink()||
+       !sameDir(dirBefore,dirAtReceipt)||
+       dirBefore.mtimeNs!==dirAtReceipt.mtimeNs||
+       dirBefore.ctimeNs!==dirAtReceipt.ctimeNs)
+      return deny('UNSAFE_PATH');
+    return Object.freeze({
+      status:'OBSERVED_CHECKPOINTS_READ_ONLY' as const,
+      checkpoints:Object.freeze(observed),...noAuthority
+    });
+  }catch{
+    // Do not return native errors, private paths or script contents.
+    return deny('IO_FAILURE');
+  }
+}
+
+      ).test(suffix);
+      if(entry.name.startsWith(prefix)&&namePattern.test(suffix)){
         matches.push(entry.name);
         if(matches.length>MAX_CHECKPOINTS)return deny('TOO_MANY_ENTRIES');
-      }else if(sourceBound&&checkpointMarked){
+      }else if(sourceBound&&(checkpointMarked||
+               (transactionName&&!otherPublishedName))){
         return deny('UNSAFE_CHECKPOINT');
       }
     }
