@@ -1490,6 +1490,9 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-selector').value='#submit'; " +
       "document.getElementById('scenario-replacement').value='#candidate'; " +
       "document.getElementById('scenario-approve').checked=true; " +
+      // Programmatic property assignment alone does not fire a real user's
+      // checkbox change event. Exercise the consent-gated renderer path.
+      "document.getElementById('scenario-approve').dispatchEvent(new Event('change',{bubbles:true})); " +
       "const uiScenarioButton=document.getElementById('scenario-register'); " +
       "const uiScenarioButtonEnabled=!uiScenarioButton.disabled; uiScenarioButton.click(); " +
       "const uiScenarioStaged=await new Promise(resolve=>{const start=Date.now(); const tick=()=>{ " +
