@@ -219,6 +219,29 @@ test('TASK-007/TEST-017/026: raw dot-segment URL aliases never gain metadata eli
  }
 });
 
+test('TASK-007/TEST-017/026: encoded or Unicode authority aliases cannot broaden consented origin',()=>{
+ const approved=metadata({grant:['GM_getValue'],match:['https://example.com/*']});
+ for(const url of [
+  'https://%65xample.com/private',
+  'https://examp%6ce.com/private',
+  'https://example。com/private',
+  'https://ｅxample.com/private'
+ ]){
+  const result=inspect(report,approved,url);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_INPUT',gmApiVerified:false,businessVerified:false},url);
+ }
+ // Percent escapes in the path or query are not authority aliases.
+ for(const url of [
+  'https://example.com/%70rivate',
+  'https://example.com/private?next=%65xample'
+ ]){
+  const result=inspect(report,approved,url);
+  assert.equal(result.ok,true,url);
+  if(result.ok)assert.equal(result.businessVerified,false);
+ }
+});
+
 test('TASK-007/TEST-017/026: dot segments inside a query are not path aliases',()=>{
  const scoped=metadata({grant:['GM_getValue'],match:['https://example.com/private*']});
  // The raw pathname stays /private; only the query contains dot segments.
