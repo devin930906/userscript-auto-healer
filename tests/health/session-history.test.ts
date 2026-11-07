@@ -780,26 +780,27 @@ test('TASK-015/TEST-024/026: same-tick conflicting archive evidence stays indete
 });
 
 test('TASK-015/TEST-024: a strictly newer native observation may show limited DOM status without inheriting archive authority',()=>{
- let clock=1000;
+ let clock=Date.now()-2000;
+ const previousTick=clock;
  const session=new DesktopScenarioSession();
  const history=new LimitedHealthRegistry(()=>clock);
  assert.equal(stage(session,'newer-tick',A).ok,true);
  const key=limitedScenarioHistoryKey(A,'newer-tick');
- clock=1001;
+ clock=previousTick+1;
  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
  const current=readLimitedSessionHistory(session,history,'newer-tick');
  if(!current.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
  const archived={
   status:'ARCHIVE_READ_UNVERIFIED' as const,currentStatus:'INDETERMINATE' as const,
-  events:Object.freeze([{observedAtMs:1000,status:'INDETERMINATE' as const}]),
+  events:Object.freeze([{observedAtMs:previousTick,status:'INDETERMINATE' as const}]),
   tampermonkeyVerified:false as const,businessVerified:false as const,
   automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
  };
  const merged=mergeLimitedSessionArchive(current,archived);
  assert.equal(merged.currentStatus,'ELEMENT_FOUND_ONLY');
  assert.deepEqual(merged.events,[
-  {observedAtMs:1000,status:'INDETERMINATE'},
-  {observedAtMs:1001,status:'ELEMENT_FOUND_ONLY'}
+  {observedAtMs:previousTick,status:'INDETERMINATE'},
+  {observedAtMs:clock,status:'ELEMENT_FOUND_ONLY'}
  ]);
  assert.equal(merged.tampermonkeyVerified,false);
  assert.equal(merged.businessVerified,false);
@@ -807,8 +808,9 @@ test('TASK-015/TEST-024: a strictly newer native observation may show limited DO
 });
 
 test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrary view fields',()=>{
+ const now=Date.now();
  const session=new DesktopScenarioSession();
- const history=new LimitedHealthRegistry(()=>2001);
+ const history=new LimitedHealthRegistry(()=>now-1000);
  assert.equal(stage(session,'safe-projection',A).ok,true);
  const key=limitedScenarioHistoryKey(A,'safe-projection');
  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
@@ -817,7 +819,7 @@ test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrar
  const archive={
   status:'ARCHIVE_READ_UNVERIFIED' as const,
   currentStatus:'INDETERMINATE' as const,
-  events:Object.freeze([{observedAtMs:2000,status:'INDETERMINATE' as const}]),
+  events:Object.freeze([{observedAtMs:now-2000,status:'INDETERMINATE' as const}]),
   tampermonkeyVerified:false as const,businessVerified:false as const,
   automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
  };
@@ -831,8 +833,8 @@ test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrar
  const merged=mergeLimitedSessionArchive(forged,archive);
  assert.equal(merged.currentStatus,'ELEMENT_FOUND_ONLY');
  assert.deepEqual(merged.events,[
-  {observedAtMs:2000,status:'INDETERMINATE'},
-  {observedAtMs:2001,status:'ELEMENT_FOUND_ONLY'}
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
  ]);
  assert.equal(merged.tampermonkeyVerified,false);
  assert.equal(merged.businessVerified,false);
@@ -852,8 +854,9 @@ test('TASK-015/TEST-024/026: archive merge drops injected authority and arbitrar
 });
 
 test('TASK-015/TEST-024/026: forged newer current health status never gains verification authority',()=>{
+ const now=Date.now();
  const session=new DesktopScenarioSession();
- const history=new LimitedHealthRegistry(()=>3001);
+ const history=new LimitedHealthRegistry(()=>now-1000);
  assert.equal(stage(session,'status-boundary',A).ok,true);
  const key=limitedScenarioHistoryKey(A,'status-boundary');
  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
@@ -861,7 +864,7 @@ test('TASK-015/TEST-024/026: forged newer current health status never gains veri
  if(!view.ok)throw Error('SESSION_HISTORY_UNAVAILABLE');
  const archived={
   status:'ARCHIVE_READ_UNVERIFIED' as const,currentStatus:'INDETERMINATE' as const,
-  events:Object.freeze([{observedAtMs:3000,status:'INDETERMINATE' as const}]),
+  events:Object.freeze([{observedAtMs:now-2000,status:'INDETERMINATE' as const}]),
   tampermonkeyVerified:false as const,businessVerified:false as const,
   automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
  };
