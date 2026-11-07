@@ -873,16 +873,32 @@ scenarioRecheckStopButton?.addEventListener('click',()=>{
    scenarioRecheckStatus.textContent='当前检查的取消状态无法确认；后续轮次已停止。';
  });
 });
+let scenarioInspectionGeneration=0;
+scenarioInspectId?.addEventListener('change',()=>{
+ // In-flight native observation belongs to its original scenario, not the
+ // newly selected view. Do not revoke native consent or discard its receipt.
+ scenarioInspectionGeneration++;
+ if(scenarioStatus)scenarioStatus.textContent=
+  '已切换场景；当前选择尚未执行新的只读检查。';
+});
 scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const id=scenarioInspectId?.value??'';
  if(!id){
   if(scenarioStatus)scenarioStatus.textContent='必须先登记并选择一个场景。';
   return;
  }
+ const requestGeneration=++scenarioInspectionGeneration;
  scenarioInspectionBusy=true;browserControls();
  if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权；限定 DOM 检查和短时页面 JavaScript 异常观察都不是业务验收。';
  try{
   const result=await window.healer.inspectScenario(id);
+  // Preserve the native-scoped observation and browser lifecycle signal, but
+  // prevent old replies from claiming to describe the current selection.
+  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY')
+   observedScenarioIds.add(id);
+  if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+  if(requestGeneration!==scenarioInspectionGeneration||scenarioInspectId?.value!==id)
+   return;
   if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
    ?'场景 '+id+'：只读 DOM 断言 '+(result.checkedAssertions??0)+
       ' 项；故障信号 '+(result.faultCategory??'UNKNOWN')+
@@ -913,9 +929,6 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
       '仅为只读页面信号，Tampermonkey、GM 和真实业务未验证。'
    :'场景检查未通过：'+(result.code??'UNKNOWN')+
       '。没有获得 Tampermonkey 或业务验证结果。';
-  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY')
-   observedScenarioIds.add(id);
-  if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
  }finally{scenarioInspectionBusy=false;browserControls();}
 }));
 manualRestoreButton?.addEventListener('click',()=>{
