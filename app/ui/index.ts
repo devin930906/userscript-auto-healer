@@ -865,18 +865,27 @@ scenarioRecheckStartButton?.addEventListener('click',()=>{
   }
  })();
 });
-scenarioRecheckStopButton?.addEventListener('click',()=>{
+/** A scheduled recheck is scoped to its originally selected scenario.
+ * Switching the selected scenario cancels subsequent native visits to the
+ * original target, without pretending an in-flight observation is undone.
+ */
+function stopScheduledRechecks(reason:'user'|'selection'):void{
  if(!recheckRunning)return;
  const cancelNative=recheckNativeActive;
  revokeBoundedRechecks();
  if(scenarioRecheckStatus)
-  scenarioRecheckStatus.textContent='停止已请求；后续复检不会启动。'+
+  scenarioRecheckStatus.textContent=
+   (reason==='selection'
+     ?'已切换场景；原场景的后续复检已取消。'
+     :'停止已请求；后续复检不会启动。')+
    (cancelNative?'正在撤销当前原生检查。':'当前没有进行中的网页访问。');
  if(cancelNative)void window.healer.cancelScenarioInspection().catch(()=>{
   if(scenarioRecheckStatus)
    scenarioRecheckStatus.textContent='当前检查的取消状态无法确认；后续轮次已停止。';
  });
-});
+}
+scenarioRecheckStopButton?.addEventListener('click',()=>stopScheduledRechecks('user'));
+scenarioInspectId?.addEventListener('change',()=>stopScheduledRechecks('selection'));
 let scenarioInspectionGeneration=0;
 scenarioInspectId?.addEventListener('change',()=>{
  // In-flight native observation belongs to its original scenario, not the
