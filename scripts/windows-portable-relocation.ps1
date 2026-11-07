@@ -11,6 +11,14 @@ function Resolve-CandidatePortableProcessExecutablePath([object]$process) {
       # paths rather than manufacturing an absolute candidate/foreign name.
       # Do not fall back to PID-only evidence for a malformed primary path.
       if(-not [IO.Path]::IsPathFullyQualified($primary)) { return $null }
+      # .NET on Windows can report a malformed UNC root such as
+      # \\UserscriptAutoHealer.exe as "fully qualified" even though it
+      # provides no server/share/file identity. Require all three path
+      # components for UNC-style images before treating CIM as authoritative.
+      if($primary.StartsWith('\\',[StringComparison]::Ordinal) -and
+         $primary -cnotmatch '^\\\\[^\\]+\\[^\\]+\\.+') {
+        return $null
+      }
       return [IO.Path]::GetFullPath($primary)
     }
     # PID alone can be reused. Require a creation-time witness so a different
