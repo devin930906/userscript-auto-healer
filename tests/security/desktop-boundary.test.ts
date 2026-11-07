@@ -802,3 +802,49 @@ test('TASK-017/TEST-002/022: switching history scenarios ignores stale IPC repli
  assert.equal(rows.length,1,'late A response must never append B-panel history');
  assert.match(rows[0].textContent,/DOM 元素存在/);
 });
+
+/** TASK-017/014 / TEST-022/016: execute the real renderer handler with
+ * deferred, native IPC replies. Switching A -> B -> A must NOT allow the
+ * first A response to be mistaken for a fresh recommendation.
+ * This tests renderer presentation, not permission to call a model.
+ */
+test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot repaint a later scenario view',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("aiReviewButton?.addEventListener('click'");
+ const end=ui.indexOf('/** Work-area buttons',start);
+ assert.ok(start>=0&&end>start,'real reviewed-AI renderer handler must be present');
+ const buttonHandlers=new Map<string,()=>void>();
+ const selectHandlers=new Map<string,()=>void>();
+ const button={disabled:false,addEventListener:(name:string,fn:()=>void)=>buttonHandlers.set(name,fn)};
+ const selector={value:'scenario-A',
+  addEventListener:(name:string,fn:()=>void)=>selectHandlers.set(name,fn)};
+ const result={textContent:''};
+ const calls:{id:string;resolve:(value:unknown)=>void}[]=[];
+ runInNewContext(ui.slice(start,end),{
+  aiReviewButton:button,aiReviewPending:false,aiReviewGeneration:0,
+  browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  scenarioInspectId:selector,observedScenarioIds:new Set(['scenario-A','scenario-B']),
+  aiReviewResult:result,browserControls:()=>undefined,
+  window:{healer:{requestNativeAiReview:(id:string)=>new Promise(resolve=>{
+   calls.push({id,resolve});
+  })}}
+ });
+ const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
+ buttonHandlers.get('click')?.();
+ assert.equal(calls.length,1);
+ assert.equal(calls[0].id,'scenario-A');
+ selector.value='scenario-B';selectHandlers.get('change')?.();
+ selector.value='scenario-A';selectHandlers.get('change')?.();
+ calls[0].resolve({ok:true,model:'prior-model',candidateText:'STALE_PRIVATE_ADVICE'});
+ await flush();
+ assert.doesNotMatch(result.textContent,/STALE_PRIVATE_ADVICE/,
+  'a superseded AI request must never repaint the new selection, even after A-B-A');
+ buttonHandlers.get('click')?.();
+ assert.equal(calls.length,2,'the current scenario can request a fresh, separately authorized review');
+ assert.equal(calls[1].id,'scenario-A');
+ calls[1].resolve({ok:true,model:'current-model',candidateText:'FRESH_REVIEW_ADVICE'});
+ await flush();
+ assert.match(result.textContent,/FRESH_REVIEW_ADVICE/,
+  'the freshly requested result may appear for the unchanged selected scenario');
+});
