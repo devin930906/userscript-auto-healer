@@ -405,7 +405,8 @@ test('TASK-011/TEST-020/026: persisted recovery checkpoint decoding rejects loss
   'legacy Buffer decoding would falsely turn corruption into canonical text');
  assert.equal(decode(malformed),null,
   'corrupt native checkpoint bytes must be rejected, not substituted');
- assert.equal(decode(Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),original])),canonical,
+ assert.equal(decode(Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),original])),
+  '\uFEFF'+canonical,
   'the decoder preserves an unexpected BOM for wire-format rejection');
  assert.equal(decode(Buffer.from([0xc3])),null,
   'truncated multibyte sequence is invalid');
