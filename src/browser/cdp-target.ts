@@ -31,9 +31,20 @@ function unambiguousRawTarget(raw:string):boolean {
   // selected path, not confirm a different path after normalization.
   // Query data such as ?return=/../ is not a navigated path segment.
   const rawPath=raw.split(/[?#]/,1)[0];
-  return raw.length<=4096&&raw.trim()===raw&&
-    !/[\x00-\x1f\x7f\\]/.test(raw)&&
-    !/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath);
+  if(raw.length>4096||raw.trim()!==raw||
+     /[\x00-\x1f\x7f\\]/.test(raw)||
+     /\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath))return false;
+  // URL() also rewrites IPv4 integer/hex/octal/abbreviated hosts and
+  // percent-encoded authorities. An observed main frame or a consented
+  // target must use the explicit canonical host spelling supplied to the
+  // browser, not an alias silently resolved by WHATWG URL parsing.
+  const rawAuthority=/^https?:\/\/([^/?#]*)/i.exec(raw)?.[1];
+  if(!rawAuthority||/%|[^\x00-\x7f]/.test(rawAuthority))return false;
+  try{
+    const parsed=new URL(raw);
+    const rawHost=rawAuthority.replace(/:[0-9]+$/,'');
+    return rawHost.toLowerCase()===parsed.hostname;
+  }catch{return false;}
 }
 function validTarget(raw:string):boolean {
   if(!unambiguousRawTarget(raw))return false;
