@@ -940,3 +940,24 @@ test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segme
   t.mock.restoreAll();
  }
 });
+
+test('TASK-013/TEST-004/011/026: snapshot never invokes imported byte iterator',async()=>{
+ const source=header+'document.querySelector("#private-byte-iterator");';
+ const bytes=new Uint8Array(new TextEncoder().encode(source));
+ let iteratorCalls=0;
+ // A typed array can carry a hostile own iterator even when its native
+ // byteLength and buffer internal slots are valid. Import must never run it.
+ Object.defineProperty(bytes,Symbol.iterator,{configurable:true,value:()=>{
+  iteratorCalls++;
+  throw Error('PRIVATE_UNTRUSTED_ITERATOR_EXECUTED');
+ }});
+ const report=await previewImportedBatchOffMain([{bytes,textEncoding:'utf-8'}]);
+ assert.equal(iteratorCalls,0,'copy bytes using native typed-array slots only');
+ assert.equal(report.length,1);
+ assert.equal(report[0].status,'STATIC_ANALYSIS_ONLY');
+ assert.equal(report[0].literalSites,1);
+ assert.equal(report[0].automaticPatchAllowed,false);
+ assert.equal(report[0].tampermonkeyVerified,false);
+ assert.equal(report[0].businessVerified,false);
+ assert.equal(JSON.stringify(report).includes('private-byte-iterator'),false);
+});
