@@ -986,3 +986,59 @@ test('TASK-017/TEST-022: registration consumes consent before native IPC and req
  assert.equal(approve.checked,false,
   'a failed native registration must not preserve the next attempt authorization');
 });
+
+
+/** TASK-017/015 / TEST-022/024/026: the user selected scenario is the
+ * scope of an expressly started recheck plan. Changing the selection must
+ * revoke the old plan, including an in-flight read-only native observation.
+ * This harness runs the actual renderer handlers, not a parallel mock policy.
+ */
+test('TASK-017/015: switching scenarios stops pending native rechecks and never visits the old choice again',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("scenarioRecheckStartButton?.addEventListener('click'");
+ const end=ui.indexOf('let scenarioInspectionGeneration=0;',start);
+ assert.ok(start>=0&&end>start,'real bounded recheck renderer handlers exist');
+ const actions=new Map<string,()=>void>(),selections=new Map<string,()=>void>();
+ const button=(store:Map<string,()=>void>)=>({addEventListener:(name:string,fn:()=>void)=>store.set(name,fn)});
+ const selector={value:'scenario-A',addEventListener:(name:string,fn:()=>void)=>selections.set(name,fn)};
+ const status={textContent:''};
+ const calls:string[]=[];
+ let finishNative:(value:unknown)=>void=()=>undefined;
+ let cancelCount=0;
+ const sandbox:{
+  [key:string]:unknown;
+  recheckCancelled:boolean;recheckRunning:boolean;recheckNativeActive:boolean
+ }={
+  scenarioRecheckStartButton:button(actions),scenarioRecheckStopButton:button(new Map()),
+  scenarioInspectId:selector,scenarioRecheckStatus:status,
+  browserBusy:false,stopInProgress:false,browserConnected:true,
+  recheckRunning:false,recheckCancelled:false,recheckNativeActive:false,
+  RECHECK_MAX_ROUNDS:3,
+  revokeBoundedRechecks:()=>{sandbox.recheckCancelled=true;},
+  waitRecheckInterval:()=>Promise.resolve(),
+  browserControls:()=>undefined,observedScenarioIds:new Set(),
+  window:{healer:{
+   inspectScenario:(id:string)=>{calls.push(id);return new Promise(resolve=>{finishNative=resolve;});},
+   cancelScenarioInspection:()=>{cancelCount++;return Promise.resolve({ok:true});}
+  }}
+ };
+ const ts=require('typescript') as typeof import('typescript');
+ const executable=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}
+ }).outputText;
+ runInNewContext(executable,sandbox);
+ actions.get('click')?.();
+ assert.deepEqual(calls,['scenario-A'],'the first approved round uses the selected script');
+ selector.value='scenario-B';selections.get('change')?.();
+ assert.equal(sandbox.recheckCancelled,true,
+  'changing selection must immediately revoke all future rounds');
+ assert.equal(cancelCount,1,'pending native observation must receive cancellation request');
+ finishNative({ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',localArchiveStatus:'SAVED_UNVERIFIED'});
+ await new Promise<void>(resolve=>setImmediate(resolve));
+ assert.deepEqual(calls,['scenario-A'],
+  'an old scenario must not receive a second native visit after selection changes');
+ assert.equal(sandbox.recheckRunning,false);
+ assert.match(status.textContent,/停止|取消/,
+  'the user needs a visible stop or cancellation confirmation, not a success claim');
+});
