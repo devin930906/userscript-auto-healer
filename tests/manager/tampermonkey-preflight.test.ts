@@ -713,3 +713,18 @@ test('TASK-007/TEST-017/026: exact-origin matcher rejects spoofed URL getters wi
  assert.equal(matchingExactOriginPattern('https://example.com/x',
   new URL('https://example.com/x')),true);
 });
+
+test('TASK-007 / TEST-017/026: direct @match helper rejects credentialed or fragment targets',()=>{
+ const pattern='https://example.com/*';
+ // The standalone exported matcher is callable outside the stricter
+ // metadata preflight. It must not silently drop credentials or fragments
+ // and then report a clean match against a differently scoped URL.
+ for(const target of [
+  'https://alice:password@example.com/page',
+  'https://example.com/page#private',
+  'https://alice@example.com/page#private'
+ ]){
+  assert.equal(matchingExactOriginPattern(pattern,new URL(target)),false,target);
+ }
+ assert.equal(matchingExactOriginPattern(pattern,new URL('https://example.com/page')),true);
+});
