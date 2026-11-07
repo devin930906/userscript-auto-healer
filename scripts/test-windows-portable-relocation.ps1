@@ -34,16 +34,19 @@ try {
   # misclassify an opaque process as a proven foreign/candidate image.
   # Only a fully qualified native image path may prove process identity.
   $candidateImage=Join-Path $root 'UserscriptAutoHealer.exe'
+  $caseNumber=0
   foreach($untrustedImage in @(
     'UserscriptAutoHealer.exe',
     '.\\UserscriptAutoHealer.exe',
     '\\UserscriptAutoHealer.exe',
     'C:UserscriptAutoHealer.exe'
   )) {
+    $caseNumber++
     $resolved=Resolve-CandidatePortableProcessExecutablePath (
       [pscustomobject]@{ExecutablePath=$untrustedImage})
     if($null -ne $resolved) {
-      throw 'TEST-028: relative CIM image path incorrectly established process identity'
+      throw ("TEST-028: relative CIM image path incorrectly established process identity case="+$caseNumber+
+        " fullyQualified="+[IO.Path]::IsPathFullyQualified($untrustedImage))
     }
   }
   $confirmed=Resolve-CandidatePortableProcessExecutablePath (
