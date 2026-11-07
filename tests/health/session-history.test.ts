@@ -1153,3 +1153,12 @@ test('TASK-015/TEST-024/026: archive merge cannot revive expired or future curre
  assert.equal(fresh.currentStatus,'ELEMENT_FOUND_ONLY');
  assert.equal(fresh.businessVerified,false);
 });
+
+test('TASK-017/TEST-022: scenario history list has a named region without duplicate live announcements',()=>{
+ const html=require('node:fs').readFileSync(
+  require('node:path').join(process.cwd(),'app/ui/index.html'),'utf8') as string;
+ assert.match(html,/<p id="scenario-history-summary" role="status" aria-live="polite">/,
+  'the existing concise status remains the only live announcement');
+ assert.match(html,/<ol id="scenario-history-entries" aria-labelledby="scenario-history-summary"><\/ol>/,
+  'the history list should be named by its current scenario/status context, not narrate 32 rows live');
+});
