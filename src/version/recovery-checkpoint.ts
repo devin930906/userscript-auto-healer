@@ -6,7 +6,7 @@
  * Native-only: never expose arbitrary paths through renderer IPC.
  */
 import {createHash,randomUUID} from 'node:crypto';
-import {types as nodeTypes} from 'node:util';
+import {TextDecoder,types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {link,lstat,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -35,6 +35,15 @@ export type RecoveryCheckpointResult=
 const block=(reason:Reason):Extract<RecoveryCheckpointResult,{status:'BLOCKED'}>=>
   Object.freeze({status:'BLOCKED' as const,reason,...noAuthority});
 
+/** Native recovery records must decode without replacement characters.
+ * Buffer.toString('utf8') silently maps invalid wire bytes to U+FFFD, which
+ * could impersonate a legitimate Unicode filename in canonical JSON.
+ * Preserve a BOM as a character so exact JSON wire checks reject it.
+ */
+export function decodeRecoveryCheckpointUtf8(bytes:Uint8Array):string|null{
+ try{return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}
+ catch{return null;}
+}
 const receiptFields=[
   'status','backupFileName','candidateFileName','originalSha256',
   'candidateSha256','candidateByteLength','automaticPatchAllowed',
@@ -285,7 +294,8 @@ export async function inspectRecoveryCheckpointReadOnly(
         return block('CHECKPOINT_FAILED');
       bytes=Buffer.from(buffer.subarray(0,count));
     }finally{await handle.close();}
-    const text=bytes.toString('utf8');
+    const text=decodeRecoveryCheckpointUtf8(bytes);
+    if(text===null)return block('CHECKPOINT_FAILED');
     let parsed:unknown;
     try{parsed=JSON.parse(text);}catch{return block('CHECKPOINT_FAILED');}
     const fields=values(parsed,[
