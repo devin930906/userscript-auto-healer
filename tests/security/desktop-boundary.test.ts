@@ -871,3 +871,62 @@ test('TASK-017/TEST-002/022: scenario consent gates enabled registration and nat
  assert.match(handlerStart,/if\([^\n]*scenarioApprove\?\.checked\s*!==\s*true\)return;/,
   'a forged click event cannot dispatch native registration without current consent');
 });
+
+/** TASK-017 / TEST-002/022: the real renderer must not display an old
+ * scenario's asynchronous inspection reply after the user selects another.
+ * UI presentation only: native browser authorization stays untouched.
+ */
+test('TASK-017/TEST-022: switching inspected scenarios retires stale DOM results',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("scenarioInspectButton?.addEventListener('click'");
+ const end=ui.indexOf("manualRestoreButton?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'real DOM inspection event handler is present');
+ const clicks=new Map<string,()=>void>();
+ const changes=new Map<string,()=>void>();
+ const button={addEventListener:(event:string,handler:()=>void)=>clicks.set(event,handler)};
+ const selection={value:'scenario-A',
+  addEventListener:(event:string,handler:()=>void)=>changes.set(event,handler)};
+ const status={textContent:''};
+ const pending:{id:string;resolve:(reply:unknown)=>void}[]=[];
+ const observed=new Set<string>();
+ let busy=false;
+ runInNewContext(ui.slice(start,end),{
+  scenarioInspectButton:button,scenarioInspectId:selection,scenarioStatus:status,
+  scenarioInspectionBusy:false,scenarioInspectionGeneration:0,
+  browserControls:()=>undefined,browserConnected:true,observedScenarioIds:observed,
+  browserAction:async(fn:()=>Promise<void>)=>{if(busy)return;busy=true;
+   try{await fn();}finally{busy=false;}},
+  window:{healer:{inspectScenario:(id:string)=>new Promise(resolve=>{
+   pending.push({id,resolve});
+  })}}
+ });
+ const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
+ const inspected=(id:string)=>({
+  ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',checkedAssertions:1,
+  faultCategory:'UNKNOWN',triageStatus:'INCONCLUSIVE',evidenceCount:1,
+  sessionHealthStatus:'INDETERMINATE',
+  localArchiveStatus:'UNAVAILABLE',tampermonkeyVerified:false,
+  businessVerified:false,automaticPatchAllowed:false,code:id
+ });
+ clicks.get('click')?.();
+ assert.equal(pending.length,1);
+ assert.equal(pending[0].id,'scenario-A');
+ selection.value='scenario-B';
+ assert.ok(changes.has('change'),'changing the selection must invalidate the pending reply');
+ changes.get('change')?.();
+ assert.match(status.textContent,/已切换场景/);
+ pending[0].resolve(inspected('scenario-A'));
+ await flush();
+ assert.doesNotMatch(status.textContent,/场景 scenario-A：/);
+ assert.equal(observed.has('scenario-A'),true,
+  'a completed native inspection may retain its own scoped receipt');
+ assert.match(status.textContent,/已切换场景/,
+  'a stale response must not repaint the newly selected scenario');
+ clicks.get('click')?.();
+ assert.equal(pending.length,2);
+ assert.equal(pending[1].id,'scenario-B');
+ pending[1].resolve(inspected('scenario-B'));
+ await flush();
+ assert.match(status.textContent,/场景 scenario-B：/);
+});
