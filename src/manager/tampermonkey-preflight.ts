@@ -48,10 +48,11 @@ export function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
  // can execute traps on every property read. Require native URL internal
  // slots and read the platform accessors without caller-defined shadows.
  let protocol:string,hostname:string,port:string,pathname:string,search:string;
+ let username:string,password:string,href:string;
  try{
   if(!target||typeof target!=='object'||nodeTypes.isProxy(target)||
      Object.getPrototypeOf(target)!==URL.prototype)return false;
-  const native=(name:'protocol'|'hostname'|'port'|'pathname'|'search'):string=>{
+  const native=(name:'protocol'|'hostname'|'port'|'pathname'|'search'|'username'|'password'|'href'):string=>{
    const getter=Object.getOwnPropertyDescriptor(URL.prototype,name)?.get;
    if(typeof getter!=='function')throw Error('NATIVE_URL_ACCESSOR_MISSING');
    return getter.call(target) as string;
@@ -61,7 +62,14 @@ export function matchingExactOriginPattern(pattern:unknown,target:URL):boolean {
   port=native('port');
   pathname=native('pathname');
   search=native('search');
+  username=native('username');
+  password=native('password');
+  href=native('href');
  }catch{return false;}
+ // A credential-bearing URL or fragment can change the user-consented
+ // navigation target even when its origin/path happen to match @match.
+ // Use native accessors; caller-defined URL property shadows are untrusted.
+ if(username||password||href.includes('#'))return false;
  const match=/^(https?):\/\/([a-z0-9.-]+)(\/[^\s]*)$/i.exec(pattern);
  if(!match||match[2].startsWith('.')||match[2].endsWith('.')||match[2].includes('..')||
     match[2].includes('*')||match[2].includes(':'))return false;
