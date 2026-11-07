@@ -382,3 +382,32 @@ test('TASK-011/TEST-020/026: checkpoint inspection refuses same-byte inode repla
   assert.equal(await readFile(join(opts.backupDirectory,staged.backupFileName),'utf8'),source);
  });
 });
+
+test('TASK-011/TEST-020/026: persisted recovery checkpoint decoding rejects lossy UTF-8',()=>{
+ const decode=(require('../../src/version/recovery-checkpoint') as {
+  decodeRecoveryCheckpointUtf8?:(bytes:Uint8Array)=>string|null
+ }).decodeRecoveryCheckpointUtf8;
+ assert.equal(typeof decode,'function','native checkpoint reader needs a strict decoder');
+ if(!decode)return;
+ // The replacement glyph U+FFFD is legal in a real Unicode filename, but
+ // corrupt raw bytes must never be silently transformed into that glyph.
+ const canonical='{"backupFileName":"original-�.backup.user.js"}\n';
+ assert.equal(decode(Buffer.from(canonical,'utf8')),canonical,
+  'valid Unicode records remain readable');
+ const original=Buffer.from(canonical,'utf8');
+ const marker=Buffer.from('�','utf8');
+ const at=original.indexOf(marker);
+ assert.ok(at>=0);
+ const malformed=Buffer.concat([
+  original.subarray(0,at),Buffer.from([0xff]),original.subarray(at+marker.length)
+ ]);
+ assert.equal(malformed.toString('utf8'),canonical,
+  'legacy Buffer decoding would falsely turn corruption into canonical text');
+ assert.equal(decode(malformed),null,
+  'corrupt native checkpoint bytes must be rejected, not substituted');
+ assert.equal(decode(Buffer.concat([Buffer.from([0xef,0xbb,0xbf]),original])),
+  '\uFEFF'+canonical,
+  'the decoder preserves an unexpected BOM for wire-format rejection');
+ assert.equal(decode(Buffer.from([0xc3])),null,
+  'truncated multibyte sequence is invalid');
+});
