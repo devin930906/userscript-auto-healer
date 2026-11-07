@@ -6,7 +6,7 @@
 import {createHash} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import {DesktopScenarioSession} from '../scenarios/desktop-session';
-import {LimitedHealthRegistry,type LimitedHealthStatus} from './health-registry';
+import {LimitedHealthRegistry,LIMITED_HEALTH_FRESHNESS_MS,type LimitedHealthStatus} from './health-registry';
 import type {ArchiveRead} from './limited-health-archive';
 
 const noAuthority=Object.freeze({
@@ -174,8 +174,15 @@ export function mergeLimitedSessionArchive(
  // observation is also a DOM hit. An independent, untrusted currentStatus
  // field can never promote INDETERMINATE evidence into a positive claim.
  const latestObserved=observed[observed.length-1];
+ // An untrusted current view may claim a DOM hit for an expired or
+ // future-dated observation. The live registry uses this same ten-minute
+ // limit; only an actual timestamp within [now-window, now] may be current.
+ // Retained timeline rows never gain manager, repair or business authority.
+ const latestFresh=latestObserved!==undefined&&
+  latestObserved.observedAtMs<=now&&
+  now-latestObserved.observedAtMs<=LIMITED_HEALTH_FRESHNESS_MS;
  const limitedCurrent=sessionStatus.value==='ELEMENT_FOUND_ONLY'&&
-  latestObserved?.status==='ELEMENT_FOUND_ONLY'?
+  latestObserved?.status==='ELEMENT_FOUND_ONLY'&&latestFresh?
   'ELEMENT_FOUND_ONLY' as const:'INDETERMINATE' as const;
  const currentStatus=currentLast!==undefined&&currentLast>oldLast?
   limitedCurrent:'INDETERMINATE' as const;
