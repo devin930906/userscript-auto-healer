@@ -2506,3 +2506,29 @@ test('TASK-018/TEST-009/026: Browser.getVersion rejects every present error fiel
     globalThis.WebSocket=nativeSocket;
   }
 });
+
+
+test('TASK-005/TEST-009/026: raw CDP response reader refuses hostile cancellation signals without executing hooks',async()=>{
+  let hooks=0;
+  const actual=new AbortController().signal;
+  const proxy=new Proxy(actual,{
+    get(){hooks++;throw Error('UNTRUSTED_SIGNAL_GET');},
+    getPrototypeOf(){hooks++;throw Error('UNTRUSTED_SIGNAL_PROTO');}
+  });
+  const revoked=Proxy.revocable(actual,{});
+  revoked.revoke();
+  const shadow=new AbortController().signal;
+  Object.defineProperty(shadow,'aborted',{get(){hooks++;throw Error('UNTRUSTED_ABORT_GETTER');}});
+  const forged=Object.create(AbortSignal.prototype) as AbortSignal;
+  for(const signal of [proxy,revoked.proxy,shadow,forged,{
+    get aborted(){hooks++;throw Error('UNTRUSTED_SIGNAL_OBJECT');}
+  } as unknown as AbortSignal]){
+    const response=new Response('{\"Browser\":\"Chrome/155.0.1.1\"}');
+    assert.equal(await readBoundedCdpJson(response,signal),null,
+      'invalid signal must not be allowed to validate a CDP HTTP receipt');
+  }
+  assert.equal(hooks,0,'neither Proxy traps nor forged AbortSignal getters may execute');
+  assert.deepEqual(await readBoundedCdpJson(new Response('{\"Browser\":\"Chrome/155.0.1.1\"}'),
+    new AbortController().signal),{Browser:'Chrome/155.0.1.1'},
+    'a real native, unrevoked signal keeps normal CDP parsing working');
+});
