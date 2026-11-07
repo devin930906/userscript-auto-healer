@@ -122,12 +122,21 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
       // Do not reject ordinary backup or staged-candidate files sharing this
       // source prefix: only the reserved checkpoint marker is relevant.
       const sourceBound=entry.name.toLowerCase().startsWith(prefix.toLowerCase());
+      const suffix=sourceBound?entry.name.slice(prefix.length):'';
       const checkpointMarked=entry.name.toLowerCase().includes('.checkpoint');
-      if(entry.name.startsWith(prefix)&&
-         namePattern.test(entry.name.slice(prefix.length))){
+      // A truncated ".checkpoint" suffix loses its marker, but a
+      // source-bound transaction UUID is still reserved recovery evidence.
+      // Recognized independent backup/candidate payloads remain harmless
+      // for a read-only checkpoint inventory.
+      const transactionName=new RegExp('^'+UUID_V4+'(?:\\.|$)','i').test(suffix);
+      const otherPublishedName=new RegExp(
+        '^'+UUID_V4+'\\.(?:backup|candidate)\\.user\\.js$'
+      ).test(suffix);
+      if(entry.name.startsWith(prefix)&&namePattern.test(suffix)){
         matches.push(entry.name);
         if(matches.length>MAX_CHECKPOINTS)return deny('TOO_MANY_ENTRIES');
-      }else if(sourceBound&&checkpointMarked){
+      }else if(sourceBound&&(checkpointMarked||
+                (transactionName&&!otherPublishedName))){
         return deny('UNSAFE_CHECKPOINT');
       }
     }
