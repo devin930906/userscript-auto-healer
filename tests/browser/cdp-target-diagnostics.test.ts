@@ -283,3 +283,28 @@ test('TASK-008/TEST-013/026: main-frame classifier cannot silently canonicalize 
  assert.equal(classify('https://EXAMPLE.com:443/fixture','https://example.com/fixture'),
    'MAIN_FRAME_CONFIRMED');
 });
+
+// TASK-008 / TEST-013: CDP main-frame confirmation must not silently
+// turn a user-supplied path with dot segments into a different approved URL.
+// Query data can legitimately contain /../ and must remain unaffected.
+test('TASK-008/TEST-013: main-frame confirmation rejects raw dot-segment aliases',()=>{
+ const classify=moduleUnderTest.classifyMainFrameUrl;
+ assert.equal(typeof classify,'function');
+ if(!classify)return;
+ const canonical='https://example.com/private';
+ for(const alias of [
+  'https://example.com/public/../private',
+  'https://example.com/public/%2e%2e/private',
+  'https://example.com/public/.%2e/private',
+  'https://example.com/public/%2e./private',
+  'https://example.com/./private'
+ ]){
+  assert.equal(classify(canonical,alias),'MAIN_FRAME_INVALID_URL',
+   'an approved raw spelling may not be normalized into a different path');
+  assert.equal(classify(alias,canonical),'MAIN_FRAME_INVALID_URL',
+   'a reported raw frame URL may not be normalized into false confirmation');
+ }
+ const query='https://example.com/private?return=/../allowed';
+ assert.equal(classify(query,query),'MAIN_FRAME_CONFIRMED',
+  'literal query values must not be mistaken for path navigation');
+});
