@@ -620,6 +620,10 @@ scenarioRegister?.addEventListener('click',()=>{
   requiresLogin:scenarioNeedsLogin?.checked===true,
   loginReady:scenarioLoginReady?.checked===true
  };
+ // The checkbox grants exactly this captured registration, not a reusable
+ // approval for a later click, retry, or a modified scenario. The main
+ // process still independently verifies the explicit userApproved input.
+ if(scenarioApprove)scenarioApprove.checked=false;
  scenarioBusy=true;updateScenarioControls();
  if(scenarioStatus)scenarioStatus.textContent='正在检查本机会话场景输入；不会访问网站。';
  void window.healer.registerScenario(input).then(result=>{
