@@ -28,6 +28,35 @@ try {
 
   . (Join-Path $PSScriptRoot 'windows-portable-relocation.ps1')
 
+  # TASK-020 / ISSUE-215 / TEST-028: even a successful CIM query may
+  # supply a root-/drive-/cwd-relative image path. GetFullPath would
+  # silently resolve it using the current directory or drive state and
+  # misclassify an opaque process as a proven foreign/candidate image.
+  # Only a fully qualified native image path may prove process identity.
+  $candidateImage=Join-Path $root 'UserscriptAutoHealer.exe'
+  $caseNumber=0
+  foreach($untrustedImage in @(
+    'UserscriptAutoHealer.exe',
+    '.\\UserscriptAutoHealer.exe',
+    '\\UserscriptAutoHealer.exe',
+    'C:UserscriptAutoHealer.exe'
+  )) {
+    $caseNumber++
+    $resolved=Resolve-CandidatePortableProcessExecutablePath (
+      [pscustomobject]@{ExecutablePath=$untrustedImage})
+    if($null -ne $resolved) {
+      throw ("TEST-028: relative CIM image path incorrectly established process identity case="+$caseNumber+
+        " fullyQualified="+[IO.Path]::IsPathFullyQualified($untrustedImage))
+    }
+  }
+  $confirmed=Resolve-CandidatePortableProcessExecutablePath (
+    [pscustomobject]@{ExecutablePath=$candidateImage})
+  if(-not [string]::Equals($confirmed,$candidateImage,
+    [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'TEST-028: fully qualified CIM candidate image unexpectedly rejected'
+  }
+  Write-Output 'PASS: candidate process identity refuses ambiguous relative CIM image paths'
+
   # ISSUE-215 / TEST-028: an opaque CIM path may refer to an unrelated
   # namesake process. A second native read-only observation may disambiguate
   # it ONLY if the PID and creation time identify the same process.

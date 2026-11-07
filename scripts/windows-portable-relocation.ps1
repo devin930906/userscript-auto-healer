@@ -6,6 +6,19 @@ function Resolve-CandidatePortableProcessExecutablePath([object]$process) {
   try {
     $primary=[string]$process.ExecutablePath
     if(-not [string]::IsNullOrWhiteSpace($primary)) {
+      # A CIM image path is identity evidence, not a path to resolve from
+      # the current drive/directory. Refuse root-/drive-/cwd-relative
+      # paths rather than manufacturing an absolute candidate/foreign name.
+      # Do not fall back to PID-only evidence for a malformed primary path.
+      if(-not [IO.Path]::IsPathFullyQualified($primary)) { return $null }
+      # .NET on Windows can report a malformed UNC root such as
+      # \\UserscriptAutoHealer.exe as "fully qualified" even though it
+      # provides no server/share/file identity. Require all three path
+      # components for UNC-style images before treating CIM as authoritative.
+      if($primary.StartsWith('\\',[StringComparison]::Ordinal) -and
+         $primary -cnotmatch '^\\\\[^\\]+\\[^\\]+\\.+') {
+        return $null
+      }
       return [IO.Path]::GetFullPath($primary)
     }
     # PID alone can be reused. Require a creation-time witness so a different
