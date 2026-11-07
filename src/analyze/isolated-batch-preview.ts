@@ -354,6 +354,13 @@ async function previewImportedChunkOffMain(
     if(!finished&&readyAt===null)readyAt=performance.now();
     return;
    }
+   // Under a busy event loop the Worker message may be delivered before a
+   // likewise-delayed setTimeout callback. Trust the monotonic elapsed time,
+   // not callback ordering, before accepting otherwise valid AST evidence.
+   if(performance.now()-startedAt>=workerDeadlineMs){
+    finish(null,true,'DEADLINE');
+    return;
+   }
    const checked=validateIsolatedPreviewReply(value,selected.length);
    // A valid message can arrive before its Worker exits. Retire within the
    // existing segment deadline before allowing another segment to start.
