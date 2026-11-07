@@ -335,3 +335,28 @@ test('TASK-008/TEST-013: main-frame confirmation rejects raw dot-segment aliases
     'https://example.com/fixture'),'MAIN_FRAME_CONFIRMED',
    'case and explicitly specified default ports remain supported');
  });
+
+test('TASK-008/TEST-013/026: create and close receipts reject ambiguous success envelopes',()=>{
+ const created=moduleUnderTest.readCreatedTargetReceipt;
+ const closed=moduleUnderTest.readClosedTargetReceipt;
+ assert.equal(typeof created,'function');
+ assert.equal(typeof closed,'function');
+ if(!created||!closed)return;
+ const targetId='0123456789abcdef0123456789abcdef';
+ assert.equal(created(JSON.stringify({id:2,result:{targetId}})),targetId);
+ assert.equal(closed(JSON.stringify({id:3,result:{success:true}})),true);
+ for(const extra of [null,false,0,'',{},[]]){
+  assert.equal(created(JSON.stringify({id:2,result:{targetId,unexpected:extra}})),null,
+   'extra result fields cannot mint an authorized target ID');
+  assert.equal(created(JSON.stringify({id:2,result:{targetId},unexpected:extra})),null,
+   'extra envelope fields cannot mint an authorized target ID');
+  assert.equal(closed(JSON.stringify({id:3,result:{success:true,unexpected:extra}})),false,
+   'extra result fields cannot acknowledge tab cleanup');
+  assert.equal(closed(JSON.stringify({id:3,result:{success:true},unexpected:extra})),false,
+   'extra envelope fields cannot acknowledge tab cleanup');
+ }
+ assert.equal(created(JSON.stringify({id:19,result:{targetId,unexpected:true}})),
+  undefined,'unrelated command IDs are ignored');
+ assert.equal(closed(JSON.stringify({id:19,result:{success:true,unexpected:true}})),
+  undefined,'unrelated command IDs are ignored');
+});
