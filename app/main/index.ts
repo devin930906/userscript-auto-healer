@@ -1499,12 +1499,16 @@ async function createMainWindow(): Promise<void> {
       "const lines=Array.from(document.querySelectorAll('#scenario-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.includes('smoke_ui_scenario') && x.includes('READY_TO_TEST') && x.includes('未执行')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      "const uiConsentConsumed=document.getElementById('scenario-approve').checked===false && uiScenarioButton.disabled; " +
+      "document.getElementById('scenario-approve').checked=true; " +
+      "document.getElementById('scenario-approve').dispatchEvent(new Event('change',{bubbles:true})); " +
       "const uiUnknownButtonReady=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "if(!uiScenarioButton.disabled)resolve(true);else if(Date.now()-start>3000)resolve(false); " +
       "else setTimeout(tick,40);};tick();}); " +
       "document.getElementById('scenario-id').value='smoke_login_unknown'; " +
       "document.getElementById('scenario-needs-login').checked=true; " +
       "if(uiUnknownButtonReady)uiScenarioButton.click(); " +
+      "const uiUnknownConsentConsumed=document.getElementById('scenario-approve').checked===false; " +
       "const uiUnknownNotOffered=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#scenario-list li')).map(x=>x.textContent); " +
       "const listed=lines.some(x=>x.includes('smoke_login_unknown') && x.includes('UNKNOWN')); " +
@@ -1542,7 +1546,7 @@ async function createMainWindow(): Promise<void> {
       "noNativeExport.code === 'NO_NATIVE_SOURCE' && singleSelectorExport.code === 'TWO_SELECTORS_REQUIRED' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && uiHistoryAvailable && uiHistoryShown && " +
-      "uiUnknownButtonReady && uiUnknownNotOffered && " +
+      "uiConsentConsumed && uiUnknownConsentConsumed && uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
       "document.getElementById('scenario-export-manual').disabled && " +
