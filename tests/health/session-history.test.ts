@@ -1162,3 +1162,12 @@ test('TASK-017/TEST-022: scenario history list has a named region without duplic
  assert.match(html,/<ol id="scenario-history-entries" aria-labelledby="scenario-history-summary"><\/ol>/,
   'the history list should be named by its current scenario/status context, not narrate 32 rows live');
 });
+
+test('TASK-017/TEST-022: scenario registration list is labelled without duplicate live announcements',()=>{
+ const html=require('node:fs').readFileSync(
+  require('node:path').join(process.cwd(),'app/ui/index.html'),'utf8') as string;
+ assert.match(html,/<p id="scenario-status" role="status" aria-live="polite">/,
+  'the concise scenario status must remain announced');
+ assert.match(html,/<ul id="scenario-list" aria-labelledby="scenario-status"><\/ul>/,
+  'the scenario list should have a name and should not announce every rendered row');
+});
