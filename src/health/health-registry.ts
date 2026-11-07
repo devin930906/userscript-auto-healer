@@ -32,7 +32,8 @@ export interface LimitedHealthSnapshot {
 }
 const MAX_SCRIPTS = 1000;
 const MAX_EVENTS_PER_SCRIPT = 32;
-const FRESHNESS_MS = 10 * 60 * 1000;
+/** Shared local-observation window; archives alone never refresh status. */
+export const LIMITED_HEALTH_FRESHNESS_MS = 10 * 60 * 1000;
 const SHA256 = /^[0-9a-f]{64}$/;
 type ObservationInput = {
   readonly scriptHash: string;
@@ -122,7 +123,7 @@ export class LimitedHealthRegistry {
       for (const [key, events] of this.entries) {
         const latest = events[events.length - 1];
         if (latest && timestamp >= latest.observedAtMs &&
-            timestamp - latest.observedAtMs > FRESHNESS_MS) {
+            timestamp - latest.observedAtMs > LIMITED_HEALTH_FRESHNESS_MS) {
           this.entries.delete(key);
           this.staleEvidence.delete(key);
         }
@@ -159,7 +160,7 @@ export class LimitedHealthRegistry {
     // Retain the fact that this specific script was observed as expired or
     // time-reversed, without changing or deleting historical observations.
     const expired = !!latest && (timestamp < latest.observedAtMs ||
-      timestamp - latest.observedAtMs > FRESHNESS_MS);
+      timestamp - latest.observedAtMs > LIMITED_HEALTH_FRESHNESS_MS);
     if (expired) this.staleEvidence.add(hash);
     const status: LimitedHealthStatus = !latest ? 'UNTESTED' :
       this.staleEvidence.has(hash) ? 'INDETERMINATE' : latest.status;
