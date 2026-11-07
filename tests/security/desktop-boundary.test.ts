@@ -1023,7 +1023,11 @@ test('TASK-017/015: switching scenarios stops pending native rechecks and never 
    cancelScenarioInspection:()=>{cancelCount++;return Promise.resolve({ok:true});}
   }}
  };
- runInNewContext(ui.slice(start,end),sandbox);
+ const ts=require('typescript') as typeof import('typescript');
+ const executable=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}
+ }).outputText;
+ runInNewContext(executable,sandbox);
  actions.get('click')?.();
  assert.deepEqual(calls,['scenario-A'],'the first approved round uses the selected script');
  selector.value='scenario-B';selections.get('change')?.();
