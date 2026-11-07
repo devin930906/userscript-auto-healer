@@ -43,6 +43,20 @@ async function nativeRestorePathLockPresent(sourcePath:string):Promise<boolean>{
   throw error;
  }
 }
+/** The backup and manual-restore writer share an inode-keyed native source
+ * mutex in the selected script parent. An empty recovery directory does not
+ * mean there is no unresolved native operation while this lock exists.
+ * Observe only; a stranded lock must be reviewed by a privileged caller.
+ */
+async function nativeSourceMutexPresent(sourcePath:string,source:BigIntStats):Promise<boolean>{
+ const identity=source.dev.toString()+':'+source.ino.toString();
+ const name='.uah-source-lock-'+createHash('sha256').update(identity).digest('hex');
+ try{await lstat(join(dirname(sourcePath),name));return true;}
+ catch(error){
+  if((error as NodeJS.ErrnoException).code==='ENOENT')return false;
+  throw error;
+ }
+}
 function parse(input:unknown):{sourcePath:string;backupDirectory:string;userApproved:boolean}|null{
  try{
   if(!input||typeof input!=='object'||nodeTypes.isProxy(input)||Array.isArray(input))
@@ -96,7 +110,8 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
      !sourceParent.isDirectory()||sourceParent.isSymbolicLink()||
      (sourceParent.dev===dir.dev&&sourceParent.ino===dir.ino))
    return block('UNSAFE_PATH');
-  if(await nativeRestorePathLockPresent(x.sourcePath))
+  if(await nativeSourceMutexPresent(x.sourcePath,src)||
+     await nativeRestorePathLockPresent(x.sourcePath))
    return block('RECOVERY_REVIEW_REQUIRED');
   let visited=0,journalEntries=0,inspected=0,originalPresent=0,displacedPresent=0,rejected=0;
   // Shared recovery stores may contain valid intents for independent scripts.
@@ -231,7 +246,8 @@ export async function inspectNativeRestoreIntentInventoryReadOnly(
   if(await hasInterruptedRestoreStaging(dirname(x.sourcePath),undefined,undefined,'source-parent'))
    return block('RECOVERY_REVIEW_REQUIRED');
   // A restore may acquire the path mutex during the inventory scan.
-  if(await nativeRestorePathLockPresent(x.sourcePath))
+  if(await nativeSourceMutexPresent(x.sourcePath,srcAfter)||
+     await nativeRestorePathLockPresent(x.sourcePath))
    return block('RECOVERY_REVIEW_REQUIRED');
   return Object.freeze({status:'RESTORE_INTENT_INVENTORY_READ_ONLY' as const,
    inspected,originalPresent,displacedPresent,rejected,...noAuthority});
