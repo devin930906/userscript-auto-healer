@@ -535,3 +535,13 @@ test('TASK-002/TEST-002/022: native file selection remains a fixed snapshot acro
     'a progress callback cannot change the authorized native selection in flight');
   assert.equal((await readFile(decoy,'utf8')),script+'// decoy');
 });
+
+
+test('TASK-017/TEST-002/022: import results list uses the concise status without duplicate live row announcements',()=>{
+  const html=require('node:fs').readFileSync(
+    require('node:path').join(process.cwd(),'app/ui/index.html'),'utf8') as string;
+  assert.match(html,/<p id="import-summary" role="status" aria-live="polite">/,
+    'the import summary must retain its accessible live progress announcements');
+  assert.match(html,/<ul id="import-list" aria-labelledby="import-summary"><\/ul>/,
+    'the results list must have a label while avoiding repeated announcements of individual file names, hashes and errors');
+});
