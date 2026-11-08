@@ -1160,6 +1160,11 @@ stopButton?.addEventListener('click',()=>{
  }
  // A pending fixture start cannot repaint links after browser shutdown.
  gmProbeGeneration++;
+ // An already authorized optional AI request may finish after native stop.
+ // Retire its renderer presentation now; this never revokes native consent.
+ aiReviewGeneration++;
+ if(aiReviewResult)aiReviewResult.textContent=
+  '已请求停止独立 Chrome；先前的 AI 文字建议已隐藏，停止状态仍待系统确认。';
  stopInProgress=true;browserControls();
  void window.healer.stopBrowser().then(result=>{
   if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
