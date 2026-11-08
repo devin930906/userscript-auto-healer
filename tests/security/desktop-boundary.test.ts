@@ -1118,3 +1118,30 @@ test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixt
  assert.doesNotMatch(result.textContent,/测试服务已开启/,
   'stop confirmation must not be overwritten by a superseded success');
 });
+
+
+/** TASK-007 / TEST-017/018: execute the actual cloud manager-selection
+ * block with ambiguous chrome://extensions cards. This is isolated test
+ * evidence only; name/ID are not store-installation attestation.
+ */
+test('TASK-007/TEST-017: cloud manager probe rejects ambiguous matching extension cards',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const source=readFileSync(join(process.cwd(),'poc/windows-tampermonkey-cloud.cjs'),'utf8');
+ const start=source.indexOf('  const manager=cards.find(');
+ const end=source.indexOf('  // MV3 service workers',start);
+ assert.ok(start>=0&&end>start,'execute the real cloud manager selection logic');
+ const selection=source.slice(start,end)+'\\nmanager;';
+ const card=(id:string,name='Tampermonkey')=>({id,name});
+ const first='a'.repeat(32),other='b'.repeat(32);
+ const select=(cards:unknown)=>runInNewContext(selection,{cards,assert}) as {id:string;name:string};
+ assert.equal(select([card(first)]).id,first,
+  'a single actual matching extension card remains selectable');
+ assert.throws(()=>select([card(first),card(other)]),/exactly one|ambiguous|unique/i,
+  'two matching extension names cannot silently pick the first card');
+ assert.throws(()=>select([card(first),card(first)]),/exactly one|ambiguous|unique/i,
+  'duplicate cards for one runtime ID must also be rejected');
+ assert.equal(select([card(first),card(other,'Unrelated Utility')]).id,first,
+  'unrelated extension cards must not block the unique manager');
+ assert.throws(()=>select([card(first,'Tampermonkey Beta')]),/register|matching|exactly one|ambiguous|unique/i,
+  'excluded Beta variants must not be promoted as the supported manager');
+});
