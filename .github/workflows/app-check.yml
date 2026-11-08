@@ -209,7 +209,11 @@ jobs:
               }
               # Preserve the actual test output on failure instead of
               # considering a completed PowerShell job sufficient evidence.
-              Receive-Job -Job $probeJob -ErrorAction Stop | Out-Null
+              # Preserve bounded synthetic-fixture TAP output (including any
+              # Worker lifecycle reason) for a real intermittent failure.
+              # Discarding it would hide the concurrent probe's diagnostic
+              # evidence even when a job reports a completed state.
+              Receive-Job -Job $probeJob -ErrorAction Stop | Out-Host
               if ($probeJob.State -ne 'Completed') {
                 throw 'Concurrent Worker probe did not complete successfully'
               }
