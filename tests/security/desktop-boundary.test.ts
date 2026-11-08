@@ -1338,3 +1338,64 @@ test('TASK-017/TEST-022: late GM manual action cannot repaint stopped fixture',a
   assert.equal(sandbox.gmProbeActive,false);
  }
 });
+
+
+/** TASK-017 / TEST-022: a delayed cancellation response belongs to the
+ * original selected scenario. It may cancel native work, but must not
+ * present the prior scenario's cancellation in a newly selected view.
+ */
+test('TASK-017/TEST-022: late scenario cancel receipt does not overwrite switched view',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const selectionStart=ui.indexOf('let scenarioInspectionGeneration=0;');
+ const selectionEnd=ui.indexOf("scenarioInspectButton?.addEventListener('click'",selectionStart);
+ const cancelStart=ui.indexOf("scenarioCancelButton?.addEventListener('click'");
+ const cancelEnd=ui.indexOf("chooseChromeButton?.addEventListener('click'",cancelStart);
+ assert.ok(selectionStart>=0&&selectionEnd>selectionStart&&
+  cancelStart>=0&&cancelEnd>cancelStart,'run actual selection and cancel handlers');
+ const js=ts.transpileModule(
+  ui.slice(selectionStart,selectionEnd)+'\n'+ui.slice(cancelStart,cancelEnd),{
+   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+  }).outputText;
+ for(const fail of [false,true]){
+  const events=new Map<string,()=>void>();
+  const scenarioInspectId={
+   value:'scene-A',
+   addEventListener:(event:string,handler:()=>void)=>events.set('select-'+event,handler)
+  };
+  const scenarioStatus={textContent:'scene-A observation pending'};
+  let cancelCalls=0;
+  let resolveNative:(v:unknown)=>void=()=>{throw Error('NOT_CALLED')};
+  let rejectNative:(e:unknown)=>void=()=>{throw Error('NOT_CALLED')};
+  const sandbox:any={
+   scenarioInspectId,scenarioStatus,
+   scenarioInspectionBusy:true,manualExportBusy:false,
+   scenarioCancelButton:{
+    disabled:false,
+    addEventListener:(event:string,handler:()=>void)=>{
+     if(event==='click')events.set('cancel',handler);
+    }
+   },
+   window:{healer:{cancelScenarioInspection:()=>{
+    cancelCalls++;
+    return new Promise((resolve,reject)=>{
+     resolveNative=resolve;rejectNative=reject;
+    });
+   }}}
+  };
+  runInNewContext(js,sandbox);
+  assert.ok(events.has('select-change')&&events.has('cancel'));
+  events.get('cancel')?.();
+  assert.equal(cancelCalls,1,'the native cancel remains requested for original scenario');
+  scenarioInspectId.value='scene-B';
+  events.get('select-change')?.();
+  const switched=scenarioStatus.textContent;
+  assert.match(switched,/已切换场景/);
+  if(fail)rejectNative(Error('cancellation failed'));
+  else resolveNative({ok:true});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(scenarioStatus.textContent,switched,
+   'old '+(fail?'rejected':'successful')+' cancellation must not repaint scene-B');
+ }
+});
