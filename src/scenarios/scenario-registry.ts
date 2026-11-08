@@ -54,10 +54,22 @@ function normalizeUrl(input:unknown):string|null {
   // Only inspect the path part: query values such as ?next=/../ are data.
   const rawPath=input.split(/[?#]/,1)[0];
   if(/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath))return null;
+  // Native scenario consent and TASK-007 manager preflight must agree on
+  // the selected authority. URL() can decode %65 into 'e', map Unicode
+  // confusables to Punycode, or turn 0177/0x7f000001 into 127.0.0.1.
+  // A syntactically different raw host must not inherit a canonical host's
+  // @match coverage, even for an unverified/manual-review repair candidate.
+  const rawAuthority=/^https?:\/\/([^/?#]*)/i.exec(input)?.[1];
+  if(!rawAuthority||/%|[^\x00-\x7f]/.test(rawAuthority))return null;
   try {
     const url=new URL(input);
     if(!['http:','https:'].includes(url.protocol) || !url.hostname ||
        url.username || url.password) return null;
+    // IPv6 bracketed literals are handled by URL's native parser, and the
+    // existing consent path keeps them separate from domain/IPv4 aliases.
+    if(!rawAuthority.startsWith('[')&&
+       rawAuthority.replace(/:[0-9]+$/,'').toLowerCase()!==url.hostname)
+      return null;
     return url.toString();
   } catch { return null; }
 }

@@ -230,6 +230,24 @@ test('TEST-019: proposed source must actually match the approved scenario URL',(
 });
 
 
+test('TASK-009/TEST-019/026: aliased approved hosts cannot mint review-only repair candidates',()=>{
+ // The manager preflight refuses encoded hostname aliases. The scenario
+ // registry and DOM candidate bridge must not silently normalize them into
+ // a matching @match URL and issue an apparently eligible repair candidate.
+ for(const targetUrl of [
+   'https://%65xample.com/',
+   'https://exampl%65.com/'
+ ]){
+   const result=proposeFromReadOnlyDomDiagnostic(
+     patch,{...scenario,targetUrl},series(),true);
+   assert.equal(result.status,'BLOCKED',targetUrl);
+   assert.equal(result.automaticPatchAllowed,false,targetUrl);
+   assert.equal('candidateSource' in result,false,targetUrl);
+ }
+ assert.equal(proposeFromReadOnlyDomDiagnostic(
+   patch,scenario,series(),true).status,'CANDIDATE_ONLY');
+});
+
 test('TEST-019: unresolved metadata execution and update dependencies block DOM-only candidates',()=>{
   // A matching URL alone is insufficient to reason about what the manager
   // installs/loads. DOM snapshots cannot attest @require/@resource, network
