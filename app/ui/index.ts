@@ -1037,11 +1037,20 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
   if(scenarioStatus)scenarioStatus.textContent='先选择已登记的双选择器场景。';
   return;
  }
+ // This native action may finish after selection changes. The separate
+ // export remains valid evidence for its original scenario only; do not
+ // repaint a newly selected scenario with the old candidate's filenames.
+ const requestGeneration=++scenarioInspectionGeneration;
  manualExportBusy=true;browserControls();
  if(scenarioStatus)scenarioStatus.textContent=
    '正在等待原生授权并重新采集真实 DOM；未获授权、证据不足或源文件变化时不会导出。';
  try{
   const answer=await window.healer.exportManualScenario(id);
+  if(requestGeneration!==scenarioInspectionGeneration||scenarioInspectId?.value!==id){
+   if(answer.code==='BROWSER_NOT_RUNNING'||answer.code==='SESSION_REVOKED')
+    browserConnected=false;
+   return;
+  }
   if(scenarioStatus)scenarioStatus.textContent=
    answer.ok&&answer.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'
     ?'已生成本地人工审核候选：'+(answer.exportFileName??'')+
