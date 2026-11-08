@@ -915,6 +915,7 @@ test('TASK-017/TEST-022: late AI advice cannot repaint after owned Chrome stop',
   aiReviewResult:aiResult,scenarioInspectionBusy:false,
   browserBusy:false,browserConnected:true,stopInProgress:false,
   stopButton,recheckRunning:false,gmProbeGeneration:0,
+  browserSessionGeneration:0,
   browserControls:()=>undefined,clearGmDisplay:()=>undefined,
   setBrowserStatus:()=>undefined,
   window:{healer:{
