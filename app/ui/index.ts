@@ -1217,7 +1217,9 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
    (result.fixedDomAction??'未观察')+'）。仅限未经认证的夹具对照，不证明真实 GM 或业务恢复。';
 }));
 gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const requestGeneration=gmProbeGeneration;
  const result=await window.healer.saveGmReport();
+ if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
  if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
  if(gmResult)gmResult.textContent=result.ok&&result.status==='UNVERIFIED_REPORT_SAVED_ONLY'
   ?'已另存未经认证的本机诊断摘要：'+result.fileName+
@@ -1227,14 +1229,18 @@ gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 for(const mode of ['broken','fixed'] as const){
  gmVisitButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const requestGeneration=gmProbeGeneration;
   const result=await window.healer.visitGmFixture(mode);
+  if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
   if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 专用测试页已在本程序拥有的 Chrome 打开；脚本执行未验证。'
    :'测试页未打开：'+(result.code??'UNKNOWN');
  }));
  gmObserveButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const requestGeneration=gmProbeGeneration;
   const result=await window.healer.observeGmFixture(mode);
+  if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
   if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 只读 DOM 动作数：'+result.actionCount+
