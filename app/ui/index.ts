@@ -1068,9 +1068,10 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
  if(!scenarioInspectionBusy&&!manualExportBusy)return;
- // Native cancellation remains scoped to the original request; delayed
- // receipts cannot claim the newly selected scenario's UI.
- const requestGeneration=scenarioInspectionGeneration;
+ // Native cancellation remains scoped to the original request. Retire
+ // earlier inspection/export presentation immediately, so late success
+ // cannot repaint a cancellation receipt or imply renewed authority.
+ const requestGeneration=++scenarioInspectionGeneration;
  const requestScenarioId=scenarioInspectId?.value??'';
  const isCurrentCancel=()=>requestGeneration===scenarioInspectionGeneration&&
   scenarioInspectId?.value===requestScenarioId;
