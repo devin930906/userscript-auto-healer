@@ -572,13 +572,13 @@ test('TASK-017/TEST-002/022: file-changing restore is visually distinct from rea
   const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
   assert.match(html, /<button id="restore-manual-original" type="button" aria-describedby="manual-restore-risk">[^<]*将改写所选文件/,
     'the write-capable action must visibly describe its local file effect');
-  assert.match(css, /#manual-restore-risk\\s*\\{[^}]*border-inline-start:\\s*0\\.35rem solid[^}]*background:/s,
+  assert.match(css, /#manual-restore-risk\s*\{[^}]*border-inline-start:\s*0\.35rem solid[^}]*background:/s,
     'the write warning must be set apart by shape and background');
-  assert.match(css, /#restore-manual-original\\s*\\{[^}]*border:\\s*2px solid[^}]*font-weight:\\s*700/s,
+  assert.match(css, /#restore-manual-original\s*\{[^}]*border:\s*2px solid[^}]*font-weight:\s*700/s,
     'destructive restore must differ by border thickness and text weight, not color alone');
-  assert.doesNotMatch(css, /#restore-inspect-intent\\s*\\{|#restore-inspect-inventory\\s*\\{/,
+  assert.doesNotMatch(css, /#restore-inspect-intent\s*\{|#restore-inspect-inventory\s*\{/,
     'read-only checks must not be styled as file-changing actions');
-  assert.match(css, /button:disabled\\s*\\{[^}]*opacity:/,
+  assert.match(css, /button:disabled\s*\{[^}]*opacity:/,
     'busy or disabled operations must retain their existing unavailable feedback');
   // Static source assertions only; rendered Windows GUI and assistive tech
   // interaction remain part of final human acceptance.
