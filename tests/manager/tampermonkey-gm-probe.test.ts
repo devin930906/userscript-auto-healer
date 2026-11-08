@@ -321,6 +321,33 @@ test('TEST-017/018 stage: isolated local probe generates explicit GM userscript 
  const wrongRoute=await fetch(probe.origin+'/unrelated');
  assert.equal(wrongRoute.status,404);
 });
+test('TASK-007/TEST-017/018/026: a self-report requires its own served fixture mode',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
+ assert.ok(token);
+ const send=(mode:'broken'|'fixed',businessAction:boolean)=>fetch(probe.origin+'/receipt',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({token,mode,gmDefaultMatched:true,
+   gmStorageRoundtripMatched:true,businessAction})
+ });
+ // A token-bearing self-report alone cannot invent a fixture page visit.
+ assert.equal((await send('fixed',true)).status,403);
+ assert.deepEqual(probe.receiptSnapshot(),{});
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
+ assert.equal((await send('fixed',true)).status,403,
+  'visiting broken does not satisfy an unrelated fixed-mode receipt');
+ assert.deepEqual(probe.receiptSnapshot(),{});
+ assert.equal((await send('broken',false)).status,204);
+ assert.equal(probe.receiptSnapshot().broken?.businessVerified,false);
+ assert.equal((await fetch(probe.origin+'/?mode=fixed')).status,200);
+ assert.equal((await send('fixed',true)).status,204);
+ assert.equal(probe.receiptSnapshot().fixed?.businessVerified,false);
+});
+
 test('TASK-007/TEST-017/018/026: impossible broken-mode success cannot become a diagnostic receipt',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
@@ -334,6 +361,7 @@ test('TASK-007/TEST-017/018/026: impossible broken-mode success cannot become a 
   body:JSON.stringify({token,mode:'broken',
    gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction})
  });
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
  // The shipped broken fixture contains #current-target but no #obsolete-target.
  // A true businessAction is inconsistent even for a caller holding the token.
  assert.equal((await send(true)).status,403);
@@ -367,6 +395,7 @@ test('TASK-007/TEST-017/018/026: malformed UTF-8 receipt bytes fail before parsi
  });
  assert.equal(status,400,'reject malformed wire bytes before JSON/identity checks');
  assert.deepEqual(probe.receiptSnapshot(),{});
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
  // A refused malformed request must not occupy the first receipt slot.
  const valid=await fetch(probe.origin+'/receipt',{method:'POST',
   headers:{'Content-Type':'application/json'},
@@ -414,6 +443,8 @@ test('TEST-018 stage: untrusted posted receipts never become manager/GM/business
    gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true,extensionVerified:true})).status,403);
  assert.equal((await send({token,mode:'fixed',
    gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:true},{'Content-Type':'text/plain'})).status,415);
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
+ assert.equal((await fetch(probe.origin+'/?mode=fixed')).status,200);
  assert.equal((await send({token,mode:'broken',
    gmDefaultMatched:true,gmStorageRoundtripMatched:true,businessAction:false})).status,204);
  assert.equal((await send({token,mode:'fixed',
@@ -1132,6 +1163,7 @@ test('TASK-007/TEST-017/018/026: revoked GM probe snapshot must not expose accep
  try{
   const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
   assert.ok(token);
+  assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
   const response=await fetch(probe.origin+'/receipt',{
    method:'POST',headers:{'Content-Type':'application/json'},
    body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
@@ -1157,6 +1189,7 @@ test('TASK-007/TEST-017/018/026: expired receipt snapshot revokes cached fixture
  t.after(()=>probe.stop());
  const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
  assert.ok(token);
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
  const response=await fetch(probe.origin+'/receipt',{
   method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
@@ -1205,6 +1238,7 @@ test('TASK-007/TEST-017/026: invalid live wall clock irreversibly revokes a GM f
  t.after(()=>probe.stop());
  const token=probe.source.match(/token:"([0-9a-f]{64})"/)?.[1];
  assert.ok(token);
+ assert.equal((await fetch(probe.origin+'/?mode=broken')).status,200);
  const response=await fetch(probe.origin+'/receipt',{
   method:'POST',headers:{'Content-Type':'application/json'},
   body:JSON.stringify({token,mode:'broken',gmDefaultMatched:true,
