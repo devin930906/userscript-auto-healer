@@ -396,3 +396,35 @@ test('TASK-011/TEST-020/021: read-only changed script is not eligible for native
   }
  });
 });
+
+
+/** TASK-011 / TEST-020/026: a backup name is an untrusted single component.
+ * Reject traversing spellings before the native preflight can lstat a path
+ * outside the separately selected backup directory. No writes are permitted.
+ */
+test('TASK-011/TEST-020/026: traversal backup names fail request validation before filesystem lookup',async()=>{
+ await fixture(async ({sourcePath,backupDirectory,opts})=>{
+  const names=[
+   '../fixture.user.js',
+   '..\\\\fixture.user.js',
+   '/fixture.user.js',
+   'other/fixture.user.js',
+   'other\\\\fixture.user.js'
+  ];
+  for(const backupFileName of names){
+   const outcome=await inspectChangedSourceRestorePreflightReadOnly({
+    ...opts,backupFileName
+   });
+   assert.equal(outcome.status,'BLOCKED',backupFileName);
+   if(outcome.status==='BLOCKED')assert.equal(outcome.reason,'INVALID_REQUEST',
+    'malformed path components must be rejected before any lstat on a joined path');
+   assert.equal(outcome.automaticRollbackAllowed,false);
+   assert.equal(outcome.automaticPatchAllowed,false);
+  }
+  const clean=await inspectChangedSourceRestorePreflightReadOnly(opts);
+  assert.equal(clean.status,'RESTORE_PREFLIGHT_READ_ONLY',
+   'a valid separately verified backup remains eligible for read-only review');
+  assert.equal(await readFile(sourcePath,'utf8'),changed);
+  assert.ok((await readdir(backupDirectory)).includes(opts.backupFileName));
+ });
+});
