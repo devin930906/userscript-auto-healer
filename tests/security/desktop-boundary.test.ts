@@ -915,6 +915,7 @@ test('TASK-017/TEST-022: late AI advice cannot repaint after owned Chrome stop',
   aiReviewResult:aiResult,scenarioInspectionBusy:false,
   browserBusy:false,browserConnected:true,stopInProgress:false,
   stopButton,recheckRunning:false,gmProbeGeneration:0,
+  browserSessionGeneration:0,
   browserControls:()=>undefined,clearGmDisplay:()=>undefined,
   setBrowserStatus:()=>undefined,
   window:{healer:{
@@ -935,6 +936,64 @@ test('TASK-017/TEST-022: late AI advice cannot repaint after owned Chrome stop',
   'late advice from a stopped Chrome session must not repaint the UI');
 });
  
+/** TASK-017 / TEST-002/022: an owned Chrome launch may return after the user
+ * has requested native stop. A late successful handshake is not a fresh
+ * session: the renderer must keep the disconnected state and receipt.
+ */
+test('TASK-017/TEST-002/022: late Chrome launch cannot reconnect UI after stop',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const actionStart=ui.indexOf('async function browserAction(');
+ const actionEnd=ui.indexOf("scenarioHistoryButton?.addEventListener",actionStart);
+ const launchStart=ui.indexOf("launchButton?.addEventListener('click'");
+ const launchEnd=ui.indexOf("inspectButton?.addEventListener('click'",launchStart);
+ const stopStart=ui.indexOf("stopButton?.addEventListener('click'");
+ const stopEnd=ui.indexOf("gmStartButton?.addEventListener('click'",stopStart);
+ assert.ok(actionStart>=0&&actionEnd>actionStart&&launchStart>=0&&
+   launchEnd>launchStart&&stopStart>=0&&stopEnd>stopStart);
+ const launchHandlers=new Map<string,()=>void>();
+ const stopHandlers=new Map<string,()=>void>();
+ let resolveLaunch:(value:unknown)=>void=()=>undefined;
+ let stopCalls=0;
+ let status='';
+ const scope={
+  launchButton:{addEventListener:(type:string,fn:()=>void)=>launchHandlers.set(type,fn)},
+  stopButton:{addEventListener:(type:string,fn:()=>void)=>stopHandlers.set(type,fn)},
+  portInput:{value:'9223'},browserBusy:false,stopInProgress:false,
+  browserConnected:false,gmProbeGeneration:0,aiReviewGeneration:0,
+  aiReviewResult:{textContent:''},recheckRunning:false,
+  browserSessionGeneration:0,
+  browserControls:()=>undefined,clearGmDisplay:()=>undefined,
+  setBrowserStatus:(value:string)=>{status=value;},
+  window:{healer:{
+   startBrowser:()=>new Promise(resolve=>{resolveLaunch=resolve;}),
+   stopBrowser:async()=>{stopCalls++;return {ok:true};}
+  }}
+ };
+ // Strip only the TypeScript function signature for this VM harness; the
+ // body is copied unchanged from the real renderer source.
+ const actionSource=ui.slice(actionStart,actionEnd).replace(
+  'async function browserAction(fn:()=>Promise<void>):Promise<void>{',
+  'async function browserAction(fn){'
+ );
+ runInNewContext(
+  actionSource+'\n'+ui.slice(launchStart,launchEnd)+'\n'+
+  ui.slice(stopStart,stopEnd),scope
+ );
+ launchHandlers.get('click')?.();
+ assert.equal(scope.browserBusy,true,'launch is still awaiting native validation');
+ stopHandlers.get('click')?.();
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(stopCalls,1,'native stop must still be dispatched');
+ assert.equal(scope.browserConnected,false);
+ resolveLaunch({ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',chromeVersion:'old'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(scope.browserConnected,false,
+  'a delayed pre-stop handshake must not assert a new owned Chrome connection');
+ assert.doesNotMatch(status,/已确认本程序启动的 Chrome CDP 连接/,
+  'old launch success must not overwrite the stop receipt');
+});
+
 test('TASK-017/TEST-022: scenario registration consent exposes scope to assistive technology', () => {
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
   assert.match(html, /<p id="scenario-consent-scope">[^<]*不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey/);
