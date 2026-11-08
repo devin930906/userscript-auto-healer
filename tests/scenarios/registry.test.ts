@@ -65,6 +65,32 @@ test('TASK-018/TEST-005/026: approved scenario URLs cannot silently change under
  }
 });
 
+test('TASK-009/TEST-005/019/026: consented scenario host aliases never become authorized by URL normalization',()=>{
+ const approved={...bare,userApproved:true,requiresLogin:false,
+   targetUrl:'https://example.test/app'};
+ assert.equal(preflightScenario(approved).state,'READY_TO_TEST');
+ // WHATWG URL decodes percent-encoded host bytes and rewrites numeric
+ // IPv4 aliases. The original consented spelling must remain authoritative.
+ for(const targetUrl of [
+   'https://%65xample.test/app',
+   'https://exampl%65.test/app',
+   'http://0177.0.0.1/app',
+   'http://0x7f000001/app',
+   'http://2130706433/app'
+ ]){
+   const checked=preflightScenario({...approved,targetUrl});
+   assert.equal(checked.state,'INVALID',targetUrl);
+   assert.ok(checked.issues.includes('INVALID_URL'),targetUrl);
+   assert.equal(checked.input.targetUrl,undefined,targetUrl);
+ }
+ // Explicitly spelled ordinary hosts and the supported loopback fixture
+ // still preserve their existing metadata-only scenario eligibility.
+ for(const targetUrl of ['https://EXAMPLE.test/app',
+   'http://127.0.0.1:54321/?mode=fixed']){
+   assert.equal(preflightScenario({...approved,targetUrl}).state,'READY_TO_TEST');
+ }
+});
+
 test('TEST-005/026: lower-level scenario flags must be actual booleans, never coerced',()=>{
   // Native workflows also use preflightScenario directly, not only the desktop
   // IPC wrapper. Invalid requiresLogin must never become an approved no-login
