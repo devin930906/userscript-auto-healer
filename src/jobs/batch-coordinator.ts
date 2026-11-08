@@ -254,6 +254,7 @@ export class ReadOnlyBatchCoordinator{
  private readonly batchFingerprint:string|null;
  private readonly worker:ReadOnlyWorker;
  private controller:AbortController|null=null;
+ private starting=false;
  private inFlight:Promise<ReadOnlyBatchSnapshot>|null=null;
  constructor(options:Options,worker:ReadOnlyWorker,checkpoint?:unknown){
   const opts=validateOptions(options);
@@ -337,6 +338,10 @@ export class ReadOnlyBatchCoordinator{
   if(onTransition!==undefined&&
      (typeof onTransition!=='function'||this.concurrency!==1))
    return Promise.reject(Error('INVALID_CHECKPOINT_CALLBACK'));
+  // The first lane synchronously invokes the trusted worker before Promise.all
+  // is assigned to inFlight. Do not allow a nested run() to dispatch a
+  // competing batch during that publication window.
+  if(this.starting)return Promise.reject(Error('BATCH_ALREADY_RUNNING'));
   if(this.inFlight){
    if(onTransition)return Promise.reject(Error('BATCH_ALREADY_RUNNING'));
    return this.inFlight;
@@ -430,9 +435,14 @@ export class ReadOnlyBatchCoordinator{
     }
    }
   };
-  this.inFlight=Promise.all(Array.from({length:this.concurrency},()=>lane()))
-   .then(()=>this.snapshot())
-   .finally(()=>{this.controller=null;this.inFlight=null;});
-  return this.inFlight;
+  this.starting=true;
+  try{
+   this.inFlight=Promise.all(Array.from({length:this.concurrency},()=>lane()))
+    .then(()=>this.snapshot())
+    .finally(()=>{this.controller=null;this.inFlight=null;});
+   return this.inFlight;
+  }finally{
+   this.starting=false;
+  }
  }
 }
