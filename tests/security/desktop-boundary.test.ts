@@ -888,6 +888,53 @@ test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot rep
   'the freshly requested result may appear for the unchanged selected scenario');
 });
 
+/** TASK-017 / TEST-022: stopping an owned Chrome session must invalidate
+ * a still-pending optional AI review in the real renderer click handlers.
+ * This is only a presentation guard; native consent remains authoritative.
+ */
+test('TASK-017/TEST-022: late AI advice cannot repaint after owned Chrome stop',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const aiStart=ui.indexOf("aiReviewButton?.addEventListener('click'");
+ const aiEnd=ui.indexOf('/** Work-area buttons',aiStart);
+ const stopStart=ui.indexOf("stopButton?.addEventListener('click'");
+ const stopEnd=ui.indexOf("gmStartButton?.addEventListener('click'",stopStart);
+ assert.ok(aiStart>=0&&aiEnd>aiStart&&stopStart>=0&&stopEnd>stopStart,
+  'real AI and owned-browser stop handlers must be present');
+ const aiHandlers=new Map<string,()=>void>();
+ const stopHandlers=new Map<string,()=>void>();
+ const aiButton={disabled:false,addEventListener:(key:string,fn:()=>void)=>aiHandlers.set(key,fn)};
+ const stopButton={disabled:false,addEventListener:(key:string,fn:()=>void)=>stopHandlers.set(key,fn)};
+ const selector={value:'scene-A',addEventListener:()=>undefined};
+ const aiResult={textContent:'PRIVATE_PREVIOUS_ADVICE'};
+ const calls:{resolve:(value:unknown)=>void}[]=[];
+ let stopCalls=0;
+ const scope={
+  aiReviewButton:aiButton,aiReviewPending:false,aiReviewGeneration:0,
+  scenarioInspectId:selector,observedScenarioIds:new Set(['scene-A']),
+  aiReviewResult:aiResult,scenarioInspectionBusy:false,
+  browserBusy:false,browserConnected:true,stopInProgress:false,
+  stopButton,recheckRunning:false,gmProbeGeneration:0,
+  browserControls:()=>undefined,clearGmDisplay:()=>undefined,
+  setBrowserStatus:()=>undefined,
+  window:{healer:{
+   requestNativeAiReview:()=>new Promise(resolve=>calls.push({resolve})),
+   stopBrowser:async()=>{stopCalls++;return {ok:true};}
+  }}
+ };
+ runInNewContext(ui.slice(aiStart,aiEnd)+'\n'+ui.slice(stopStart,stopEnd),scope);
+ aiHandlers.get('click')?.();
+ assert.equal(calls.length,1,'native optional AI review started only after prior observation');
+ stopHandlers.get('click')?.();
+ assert.equal(stopCalls,1,'real native browser stop still executes');
+ assert.doesNotMatch(aiResult.textContent,/PRIVATE_PREVIOUS_ADVICE/,
+  'old AI text must be hidden as soon as browser stop is requested');
+ calls[0].resolve({ok:true,model:'stale-model',candidateText:'LATE_PRIVATE_ADVICE'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.doesNotMatch(aiResult.textContent,/LATE_PRIVATE_ADVICE/,
+  'late advice from a stopped Chrome session must not repaint the UI');
+});
+ 
 test('TASK-017/TEST-022: scenario registration consent exposes scope to assistive technology', () => {
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
   assert.match(html, /<p id="scenario-consent-scope">[^<]*不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey/);
