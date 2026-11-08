@@ -509,8 +509,12 @@ export function proposeLiteralSelectorPatch(input:LiteralPatchRequest):LiteralPa
     const request=captureLiteralPatchRequest(input);
     if(!request||typeof request.source!=='string'||
        Buffer.byteLength(request.source,'utf8')>MAX_SOURCE_BYTES||
+       // RegExp.test coerces object inputs and can run attacker-defined
+       // toString / Symbol.toPrimitive hooks in this untrusted entry point.
+       typeof request.expectedSourceSha256!=='string'||
        !SHA256.test(request.expectedSourceSha256)||
        !Number.isSafeInteger(request.callOffset)||request.callOffset<0||
+       typeof request.faultEvidenceId!=='string'||
        !EVIDENCE_ID.test(request.faultEvidenceId)||
        (request.method!=='querySelector'&&request.method!=='querySelectorAll'&&
         request.method!=='getElementById')||
