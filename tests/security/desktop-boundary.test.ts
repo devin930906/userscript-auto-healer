@@ -1083,7 +1083,7 @@ test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixt
   gmStatusButton:null,gmReportButton:null,
   gmVisitButtons:{broken:null,fixed:null},
   gmObserveButtons:{broken:null,fixed:null},
-  gmProbeStarting:false,gmProbeActive:false,gmStopInProgress:false,
+  gmProbeStarting:false,gmProbeActive:false,gmStopInProgress:false,gmProbeGeneration:0,
   gmLinks:links,gmResult:result,
   browserAction:(fn:()=>Promise<void>)=>fn(),
   browserControls:()=>undefined,
