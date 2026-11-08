@@ -1317,19 +1317,24 @@ const workAreaIds=[
   'import-workspace','scenario-workspace','restore-workspace',
   'ai-workspace','browser-workspace'
 ] as const;
+// Focus may enter a work area via keyboard navigation as well as by its
+// navigation button. Keep the announced location aligned with the actual
+// focused section without changing the trusted Electron frame URL.
+function indicateCurrentWorkArea(button:HTMLButtonElement):void{
+  // All sections remain visible: this is a location, not a selected tab.
+  document.querySelectorAll<HTMLButtonElement>(
+    'nav[aria-label="工作区导航"] button[data-workspace-target]'
+  ).forEach(otherButton=>otherButton.removeAttribute('aria-current'));
+  button.setAttribute('aria-current','location');
+}
 for(const id of workAreaIds){
   const button=document.querySelector<HTMLButtonElement>(
     'nav[aria-label="工作区导航"] button[data-workspace-target="'+id+'"]'
   );
-  button?.addEventListener('click',()=>{
-    const area=document.getElementById(id);
-    if(!area)return;
-    // This is a long-page location jump, not a tab switch: all sections
-    // remain visible, so use aria-current instead of aria-selected.
-    document.querySelectorAll<HTMLButtonElement>(
-      'nav[aria-label="工作区导航"] button[data-workspace-target]'
-    ).forEach(otherButton=>otherButton.removeAttribute('aria-current'));
-    button.setAttribute('aria-current','location');
+  const area=document.getElementById(id);
+  if(!button||!area)continue;
+  area.addEventListener('focusin',()=>indicateCurrentWorkArea(button));
+  button.addEventListener('click',()=>{
     area.scrollIntoView({block:'start'});
     area.focus({preventScroll:true});
   });

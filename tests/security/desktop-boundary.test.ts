@@ -1042,3 +1042,14 @@ test('TASK-017/015: switching scenarios stops pending native rechecks and never 
  assert.match(status.textContent,/停止|取消/,
   'the user needs a visible stop or cancellation confirmation, not a success claim');
 });
+
+
+test('TASK-017/TEST-002: keyboard focus moving between work areas updates current location',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(ui,/area\.addEventListener\('focusin',\(\)=>/);
+ assert.match(ui,/indicateCurrentWorkArea\(button\)/);
+ assert.match(ui,/otherButton\.removeAttribute\('aria-current'\)/);
+ assert.match(ui,/button\.setAttribute\('aria-current','location'\)/);
+ assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState('),
+  'keyboard focus tracking must retain the trusted frame URL');
+});
