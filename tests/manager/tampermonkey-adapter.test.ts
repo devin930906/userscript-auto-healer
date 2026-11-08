@@ -362,3 +362,27 @@ test('TASK-007/TEST-017/026: cancellation wins after first async listener owner 
  assert.ok(cancelled>=0&&ownerFailure>cancelled,
   'revoked consent must be observed before an in-flight owner lookup error');
 });
+
+
+test('TASK-007/TEST-017/026: CDP target hints reject hidden or accessor-only extra target fields without executing them',()=>{
+ let getterCalls=0;
+ const withExtraData={...worker,title:'background',attached:false};
+ const legitimate=inspectTampermonkeyTargetHints([withExtraData]);
+ assert.equal(legitimate.ok,true,'ordinary JSON target metadata remains supported');
+ if(legitimate.ok)assert.equal(legitimate.matchedRuntimeTargets,1);
+ const withAccessor=Object.defineProperty({...worker},'title',{
+  enumerable:true,get(){getterCalls++;throw Error('PRIVATE_TARGET_METADATA');}
+ });
+ const withHidden=Object.defineProperty({...worker},Symbol('secret'),{
+  enumerable:false,get(){getterCalls++;throw Error('PRIVATE_HIDDEN_METADATA');}
+ });
+ const withExtraSymbol=Object.defineProperty({...worker},Symbol('private'),{
+  enumerable:false,value:'PRIVATE_EXTENSION_METADATA'
+ });
+ for(const item of [withAccessor,withHidden,withExtraSymbol]){
+  assert.deepEqual(inspectTampermonkeyTargetHints([item]),
+   {ok:false,code:'INVALID_CDP_RESPONSE'},
+   'unexpected non-JSON property descriptors must not produce a manager hint');
+ }
+ assert.equal(getterCalls,0,'no metadata accessor may execute while inspecting targets');
+});
