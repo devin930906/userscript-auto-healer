@@ -1400,6 +1400,13 @@ function indicateCurrentWorkArea(button:HTMLButtonElement):void{
   ).forEach(otherButton=>otherButton.removeAttribute('aria-current'));
   button.setAttribute('aria-current','location');
 }
+// Keep keyboard skip navigation on the same exact file:// URL used by
+// the main-process IPC sender check. Reuse the approved workspace button.
+document.getElementById('skip-workspaces')?.addEventListener('click',()=>{
+  document.querySelector<HTMLButtonElement>(
+    'nav[aria-label="工作区导航"] button[data-workspace-target="import-workspace"]'
+  )?.click();
+});
 for(const id of workAreaIds){
   const button=document.querySelector<HTMLButtonElement>(
     'nav[aria-label="工作区导航"] button[data-workspace-target="'+id+'"]'
