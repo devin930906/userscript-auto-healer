@@ -114,7 +114,7 @@ function parse(input:unknown):Data|null {
      // The deeper recovery verifier checks the UUID/provenance later, but
      // this preflight lstat's the joined path BEFORE invoking that verifier.
      // Reject both separators on every platform before any filesystem I/O.
-     backupFileName.includes('/')||backupFileName.includes('\\\\')||
+     backupFileName.includes('/')||backupFileName.includes('\\')||
      typeof expectedCurrentSha256!=='string'||!SHA256.test(expectedCurrentSha256)||
      typeof expectedOriginalSha256!=='string'||!SHA256.test(expectedOriginalSha256)||
      typeof expectedOriginalByteLength!=='number'||
