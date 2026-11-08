@@ -58,6 +58,25 @@ button {
 }
 button:hover:not(:disabled) { background: #eaf1f8; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* TASK-017/TEST-002/022: manual restore can replace a local userscript.
+ * Distinguish this write-capable control from adjacent read-only checks
+ * with a strong border and weight, not color alone. Its existing native
+ * double confirmation and disabled/busy gates remain authoritative.
+ */
+#manual-restore-risk {
+  max-width: none;
+  padding: 0.75rem 0.9rem;
+  border-inline-start: 0.35rem solid #9b4d12;
+  background: #fff4e7;
+  color: #58300d;
+}
+#restore-manual-original {
+  border: 2px solid #9b4d12;
+  background: #fff0d9;
+  color: #58300d;
+  font-weight: 700;
+}
+#restore-manual-original:hover:not(:disabled) { background: #ffe1b9; }
 :focus-visible { outline: 3px solid #1760a8; outline-offset: 3px; }
 section > button, #drop-area > button { margin: 0.35rem 0.4rem 0.35rem 0; }
 label[for] { display: block; margin-top: 1rem; margin-bottom: 0.3rem; }
