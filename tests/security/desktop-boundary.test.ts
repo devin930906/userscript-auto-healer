@@ -1275,3 +1275,66 @@ test('TASK-017/TEST-022: delayed manual export result cannot repaint another sce
  assert.match(status.textContent,/人工导出未完成：NOT_AUTHORIZED/,
   'a current-scene denial must be shown accurately');
 });
+
+
+/** TASK-017 / TEST-022: stopping a GM fixture invalidates older asynchronous
+ * manual report/visit/DOM receipts even if the native response arrives later.
+ * The renderer must not present a revoked fixture as active or successful.
+ */
+test('TASK-017/TEST-022: late GM manual action cannot repaint stopped fixture',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmReportButton?.addEventListener('click'");
+ const end=ui.indexOf('browserControls();',ui.indexOf('});\n browserControls();',start));
+ assert.ok(start>=0&&end>start,'run real GM report/visit/observe/stop handlers');
+ const script=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ for(const action of ['report','visit','observe'] as const){
+  let resolveAction:(value:unknown)=>void=()=>{throw Error('NOT_REQUESTED')};
+  const callbacks=new Map<string,()=>void>();
+  const button=(key:string)=>({addEventListener:(event:string,handler:()=>void)=>{
+   if(event==='click')callbacks.set(key,handler);
+  }});
+  const links={textContent:'temporary fixture URLs'};
+  const result={textContent:'active fixture'};
+  const sandbox:any={
+   gmReportButton:button('report'),
+   gmVisitButtons:{broken:button('visit'),fixed:null},
+   gmObserveButtons:{broken:button('observe'),fixed:null},
+   gmStopButton:button('stop'),
+   gmProbeActive:true,gmProbeStarting:false,gmStopInProgress:false,gmProbeGeneration:0,
+   gmLinks:links,gmResult:result,
+   browserAction:(fn:()=>Promise<void>)=>fn(),
+   browserControls:()=>undefined,
+   retireGmIfNativeSessionGone:()=>false,
+   window:{healer:{
+    saveGmReport:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    visitGmFixture:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    observeGmFixture:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    stopGmProbe:async()=>({ok:true,status:'FIXTURE_STOP_REQUESTED'})
+   }}
+  };
+  sandbox.clearGmDisplay=(message:string)=>{
+   sandbox.gmProbeActive=false;links.textContent='';result.textContent=message;
+  };
+  runInNewContext(script,sandbox);
+  callbacks.get(action)?.();
+  callbacks.get('stop')?.();
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  const stopped=result.textContent;
+  assert.match(stopped,/关闭|删除|停止/);
+  resolveAction(action==='report'
+   ?{ok:true,status:'UNVERIFIED_REPORT_SAVED_ONLY',fileName:'old.json',
+      sha256:'a'.repeat(64),byteLength:14}
+   :action==='visit'
+    ?{ok:true}
+    :{ok:true,actionCount:1,fixtureDomMatchesExpected:true});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(result.textContent,stopped,
+   'late '+action+' result must not repaint a revoked GM fixture');
+  assert.equal(links.textContent,'');
+  assert.equal(sandbox.gmProbeActive,false);
+ }
+});
