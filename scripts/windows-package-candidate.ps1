@@ -415,6 +415,53 @@ if (-not (Test-Path -LiteralPath $canary -PathType Leaf) -or
   throw 'Candidate uninstall deleted or altered independent or prior-version user data'
 }
 Write-Output 'PASS: disposable candidate userData identity and uninstall retention'
+# TASK-019 / TEST-027: an upgrade-only smoke can pass even if a clean
+# installation of the CURRENT candidate is broken. After the synthetic
+# upgrade/uninstall cycle, install that same built EXE into a fresh runner-only
+# location, verify the full payload, run Electron, and uninstall independently.
+# Do not touch any installed Stable AppId or existing non-test user files.
+$freshPath=Join-Path $temp 'fresh-candidate-install'
+if(Test-Path -LiteralPath $freshPath){throw 'Refusing to overwrite a fresh-install test directory'}
+$freshProcess=Start-Process -FilePath $exe -ArgumentList @(
+ '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$freshPath"
+) -PassThru -Wait
+try {
+ if($freshProcess.ExitCode -ne 0){throw 'Fresh candidate installer execution failed'}
+} finally { $freshProcess.Dispose() }
+foreach($original in $sourceFiles){
+ $relative=$original.FullName.Substring($stage.Length+1)
+ $installed=Join-Path $freshPath $relative
+ Require-File $installed
+ if((Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash){
+  throw "Fresh candidate installation payload mismatch: $relative"
+ }
+}
+$freshReceipt=Smoke (Join-Path $freshPath 'UserscriptAutoHealer.exe') $freshPath 'fresh-install' $temp
+Assert-RetainedData $freshReceipt $userDataRoot $canary $canaryText $smokeRoaming
+if(-not (Test-Path -LiteralPath $upgradeCanary -PathType Leaf) -or
+   [IO.File]::ReadAllText($upgradeCanary) -cne $upgradeCanaryValue){
+ throw 'Fresh candidate installation altered retained prior-version user data'
+}
+$freshUninstaller=Get-ChildItem -LiteralPath $freshPath -Filter 'unins*.exe' |
+ Select-Object -First 1
+if(-not $freshUninstaller){throw 'Fresh candidate uninstaller missing'}
+$freshUninstallProcess=Start-Process -FilePath $freshUninstaller.FullName -ArgumentList @(
+ '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+) -PassThru -Wait
+try {
+ if($freshUninstallProcess.ExitCode -ne 0 -or
+    (Test-Path -LiteralPath (Join-Path $freshPath 'UserscriptAutoHealer.exe'))){
+  throw 'Fresh candidate uninstall failed'
+ }
+} finally { $freshUninstallProcess.Dispose() }
+if(-not (Test-Path -LiteralPath $canary -PathType Leaf) -or
+   [IO.File]::ReadAllText($canary) -cne $canaryText -or
+   -not (Test-Path -LiteralPath $upgradeCanary -PathType Leaf) -or
+   [IO.File]::ReadAllText($upgradeCanary) -cne $upgradeCanaryValue){
+ throw 'Fresh candidate uninstall altered retained user data'
+}
+Write-Output "PASS: clean candidate install, full payload SHA-256 parity ($($sourceFiles.Count) files), Electron launch, uninstall and userData retention"
 $sum=Join-Path $out 'SHA256SUMS.txt'
 @(
  ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $exe)),
