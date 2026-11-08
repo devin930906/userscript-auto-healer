@@ -969,10 +969,15 @@ test('TASK-017/TEST-002/022: late Chrome launch cannot reconnect UI after stop',
    stopBrowser:async()=>{stopCalls++;return {ok:true};}
   }}
  };
+ // Strip only the TypeScript function signature for this VM harness; the
+ // body is copied unchanged from the real renderer source.
+ const actionSource=ui.slice(actionStart,actionEnd).replace(
+  'async function browserAction(fn:()=>Promise<void>):Promise<void>{',
+  'async function browserAction(fn){'
+ );
  runInNewContext(
-  ui.slice(actionStart,actionEnd)+'\n'+
-  ui.slice(launchStart,launchEnd)+'\n'+ui.slice(stopStart,stopEnd),
-  scope
+  actionSource+'\n'+ui.slice(launchStart,launchEnd)+'\n'+
+  ui.slice(stopStart,stopEnd),scope
  );
  launchHandlers.get('click')?.();
  assert.equal(scope.browserBusy,true,'launch is still awaiting native validation');
