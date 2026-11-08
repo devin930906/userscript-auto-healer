@@ -285,3 +285,28 @@ test('TASK-005/008/TEST-009/026: target inventory rejects ambiguous raw approved
  }
  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url).ok,true);
 });
+
+
+test('TASK-008/TEST-013/026: CDP target list refuses normalized URL aliases at the raw boundary',()=>{
+ const aliases=[
+  'https://example.com/hidden/../authorized-test',
+  'https://example.com/hidden/%2e%2e/authorized-test',
+  'https://example.com/hidden/.%2e/authorized-test',
+  'https://example.com/./authorized-test',
+  'https://%65xample.com/authorized-test'
+ ];
+ for(const alias of aliases){
+  assert.deepEqual(inspectCdpTargetList(
+   [{...testPage,url:alias}],9223,testPage.url,pageId),
+   {ok:false,code:'TARGET_NOT_FOUND'},
+   'a raw CDP target URL alias must not match a differently spelled approved URL');
+  assert.deepEqual(inspectCdpTargetList([testPage],9223,alias,pageId),
+   {ok:false,code:'INVALID_TARGET_INPUT'},
+   'an ambiguous consented target must not become valid through URL normalization');
+ }
+ const canonical='https://example.com/authorized-test?return=/../legit';
+ assert.equal(inspectCdpTargetList(
+  [{...testPage,url:canonical}],9223,canonical,pageId).ok,true,
+  'query data with path-like text remains inside exact consented URL matching');
+ assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true);
+});
