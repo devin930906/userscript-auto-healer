@@ -946,3 +946,31 @@ test('TASK-009/TEST-019/026: indirect evaluator call/apply/bind/Reflect dispatch
     assert.equal(result.automaticPatchAllowed,false);
   }
 });
+
+
+/** TASK-009 / TEST-019/026: plain own-data request fields can themselves
+ * hold hostile objects. In particular RegExp.test converts its input with
+ * ToString, so reject nonprimitive identity values before invoking it.
+ * This is offline patch review only; no userscript execution or file write.
+ */
+test('TASK-009/TEST-019/026: object-valued source hashes and evidence IDs never execute coercion hooks',()=>{
+ let calls=0;
+ const hostileValues:unknown[]=[
+  {toString(){calls++;return 'scenario_assertion_1';}},
+  {[Symbol.toPrimitive](){calls++;throw Error('PRIVATE_PATCH_IDENTITY');}}
+ ];
+ const legitimate=request(meta+"document.querySelector('#old');");
+ const valid=proposeLiteralSelectorPatch(legitimate);
+ assert.equal(valid.status,'CANDIDATE_ONLY','valid primitive baseline must stay reviewable');
+ for(const field of ['expectedSourceSha256','faultEvidenceId'] as const){
+  for(const hostile of hostileValues){
+   const outcome=proposeLiteralSelectorPatch({
+    ...legitimate,[field]:hostile
+   } as unknown as LiteralPatchRequest);
+   assert.equal(outcome.status,'BLOCKED',field);
+   assert.equal(outcome.automaticPatchAllowed,false);
+   assert.equal('candidateSource' in outcome,false);
+  }
+ }
+ assert.equal(calls,0,'the planner must not invoke external ToString or Symbol.toPrimitive');
+});
