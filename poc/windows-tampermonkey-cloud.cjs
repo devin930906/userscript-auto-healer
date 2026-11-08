@@ -522,9 +522,15 @@ async function main(){
     reviewedCandidateForExport,context);
   console.log('TESTED_DECLARED_RUN_AT '+runAt);
   const cards=await extensionCards(context);
-  const manager=cards.find(x=>/tampermonkey/i.test(x.name)&&
+  // A matching display name alone is not store-signed identity evidence.
+  // Multiple matching cards make any later GM/business assertion ambiguous:
+  // never silently attribute the first extension's behavior to our package.
+  // The authenticated CRX3 developer-key check remains an independent gate.
+  const managerCandidates=cards.filter(x=>/tampermonkey/i.test(x.name)&&
     !/beta|legacy/i.test(x.name));
-  assert.ok(manager,'Official-hosted Tampermonkey package did not register in isolated Chromium: '+JSON.stringify(cards));
+  assert.equal(managerCandidates.length,1,
+    'Expected exactly one matching supported Tampermonkey runtime card');
+  const manager=managerCandidates[0];
   assert.match(manager.id,/^[a-p]{32}$/);
   const id=manager.id;
   // MV3 service workers are event-driven and may already have suspended.
