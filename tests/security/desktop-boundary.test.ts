@@ -1469,6 +1469,8 @@ test('TASK-017/TEST-022: cancel request fences late inspection and export succes
   for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
   assert.equal(status.textContent,cancellationReceipt,
    'late '+action+' success must not overwrite pending cancellation');
+  assert.equal(observed.has('scene-A'),false,
+   'cancelled or stale DOM work must not unlock AI review of the scenario');
   assert.equal(sandbox.scenarioInspectionBusy,false);
   assert.equal(sandbox.manualExportBusy,false);
  }
