@@ -1185,7 +1185,11 @@ gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
    '扩展运行目标仅是提示，测试结果不是 GM 或业务恢复证明。';
 }));
 gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
+ // A user may stop the fixture while this status request is pending.
+ // Its earlier unverified report must not repaint the stopped session.
+ const requestGeneration=gmProbeGeneration;
  const result=await window.healer.gmProbeStatus();
+ if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
  if(!result.ok){
   clearGmDisplay('没有有效的测试会话：'+(result.code??'UNKNOWN')+
     '。如已安装临时脚本，请自行清理。');
