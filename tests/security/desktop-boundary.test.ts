@@ -1146,3 +1146,70 @@ test('TASK-007/TEST-017: cloud manager probe rejects ambiguous matching extensio
  assert.throws(()=>select([card(first,'Tampermonkey Beta')]),/register|matching|exactly one|ambiguous|unique/i,
   'excluded Beta variants must not be promoted as the supported manager');
 });
+
+
+/** TASK-017 / TEST-002/022: a native manual export may finish after the user
+ * selects another scenario. Its result must not claim to belong to the new
+ * selected scenario. This executes the existing renderer handlers, not a copy.
+ * Native consent, backup and disk-write authority remain separate.
+ */
+test('TASK-017/TEST-022: delayed manual export result cannot repaint another scenario',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const selectionStart=ui.indexOf('let scenarioInspectionGeneration=0;');
+ const selectionEnd=ui.indexOf("scenarioInspectButton?.addEventListener('click'",selectionStart);
+ const exportStart=ui.indexOf("scenarioExportButton?.addEventListener('click'");
+ const exportEnd=ui.indexOf("scenarioCancelButton?.addEventListener('click'",exportStart);
+ assert.ok(selectionStart>=0&&selectionEnd>selectionStart&&
+   exportStart>=0&&exportEnd>exportStart,'execute real scenario-selection and manual-export handlers');
+ const source=ts.transpileModule(
+  ui.slice(selectionStart,selectionEnd)+'\n'+ui.slice(exportStart,exportEnd),{
+   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+  }).outputText;
+ const events=new Map<string,()=>void>();
+ const scenarioInspectId={
+  value:'scenario-A',
+  addEventListener:(name:string,callback:()=>void)=>events.set('selection-'+name,callback)
+ };
+ let resolveExport:(value:unknown)=>void=()=>{throw Error('NO_PENDING_EXPORT')};
+ let calledWith='';
+ const status={textContent:''};
+ let handler:(()=>void)|undefined;
+ const sandbox:any={
+  scenarioInspectId,scenarioStatus:status,
+  scenarioExportButton:{addEventListener:(name:string,callback:()=>void)=>{
+   if(name==='click')handler=callback;
+  }},
+  manualExportBusy:false,browserConnected:true,
+  browserControls:()=>undefined,
+  browserAction:(fn:()=>Promise<void>)=>fn(),
+  window:{healer:{exportManualScenario:(id:string)=>{
+   calledWith=id;
+   return new Promise(resolve=>{resolveExport=resolve;});
+  }}}
+ };
+ runInNewContext(source,sandbox);
+ assert.ok(handler&&events.has('selection-change'));
+ handler?.();
+ assert.equal(calledWith,'scenario-A');
+ scenarioInspectId.value='scenario-B';
+ events.get('selection-change')?.();
+ const switched=status.textContent;
+ assert.match(switched,/已切换场景/);
+ resolveExport({ok:true,status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',
+  exportFileName:'scenario-A-candidate.user.js',candidateByteLength:42,
+  candidateSha256:'a'.repeat(64),recoveryExportFileName:'original.user.js',
+  backupFileName:'backup.user.js',checkpointFileName:'checkpoint.json'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(status.textContent,switched,
+  'late successful export must not announce an old scenario candidate in the new view');
+ assert.equal(sandbox.manualExportBusy,false,'native operation may settle normally');
+ // A new request in the selected scenario must still present its own result.
+ handler?.();
+ assert.equal(calledWith,'scenario-B');
+ resolveExport({ok:false,code:'NOT_AUTHORIZED'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.match(status.textContent,/人工导出未完成：NOT_AUTHORIZED/,
+  'a current-scene denial must be shown accurately');
+});
