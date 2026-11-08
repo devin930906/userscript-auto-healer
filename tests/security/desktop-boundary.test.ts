@@ -1053,3 +1053,68 @@ test('TASK-017/TEST-002: keyboard focus moving between work areas updates curren
  assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState('),
   'keyboard focus tracking must retain the trusted frame URL');
 });
+
+
+/** TASK-017 / TEST-022: execute the real transpiled renderer handlers.
+ * A stop during pending native GM fixture creation invalidates even a late
+ * success reply; the UI must not resurrect a revoked session or leak old
+ * temporary fixture URLs. This tests display only, never GM authenticity.
+ */
+test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixture links',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmStartButton?.addEventListener('click'");
+ const end=ui.indexOf('browserControls();\\n\\nconst aiDiscoveryButton',start);
+ assert.ok(start>=0&&end>start,'use the real GM start/stop renderer handlers');
+ const source=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ const handlers=new Map<string,()=>void>();
+ const button=()=>({addEventListener:(event:string,fn:()=>void)=>{
+  if(event==='click')handlers.set(handlers.size?'stop':'start',fn);
+ }});
+ const links={textContent:''}, result={textContent:''};
+ let resolveStart:(value:unknown)=>void=()=>{throw Error('NO_PENDING_START')};
+ let startCount=0,stopCount=0;
+ const state:any={
+  gmStartButton:button(),gmStopButton:button(),
+  gmRunAtSelect:{value:'document-idle'},
+  gmStatusButton:null,gmReportButton:null,
+  gmVisitButtons:{broken:null,fixed:null},
+  gmObserveButtons:{broken:null,fixed:null},
+  gmProbeStarting:false,gmProbeActive:false,gmStopInProgress:false,
+  gmLinks:links,gmResult:result,
+  browserAction:(fn:()=>Promise<void>)=>fn(),
+  browserControls:()=>undefined,
+  retireGmIfNativeSessionGone:()=>false,
+  window:{healer:{
+   startGmProbe:()=>{startCount++;return new Promise(resolve=>{resolveStart=resolve;});},
+   stopGmProbe:async()=>{stopCount++;return {ok:true,status:'FIXTURE_STOP_REQUESTED'};}
+  }}
+ };
+ state.clearGmDisplay=(message:string)=>{
+  state.gmProbeActive=false;links.textContent='';result.textContent=message;
+ };
+ runInNewContext(source,state);
+ assert.ok(handlers.has('start')&&handlers.has('stop'));
+ handlers.get('start')?.();
+ assert.equal(startCount,1);
+ assert.equal(state.gmProbeStarting,true);
+ handlers.get('stop')?.();
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(stopCount,1);
+ assert.equal(state.gmProbeActive,false);
+ assert.equal(links.textContent,'');
+ resolveStart({ok:true,status:'MANUAL_FIXTURE_READY_ONLY',
+  installUrl:'http://127.0.0.1/private-fixture',
+  brokenUrl:'http://127.0.0.1/broken',
+  fixedUrl:'http://127.0.0.1/fixed',
+  expiresAt:'2026-11-08T15:00:00Z',runAt:'document-idle'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(state.gmProbeActive,false,
+  'an earlier GM start reply must not reactivate an explicitly stopped fixture');
+ assert.equal(links.textContent,'','revoked fixture URLs must never reappear');
+ assert.doesNotMatch(result.textContent,/测试服务已开启/,
+  'stop confirmation must not be overwritten by a superseded success');
+});
