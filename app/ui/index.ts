@@ -890,6 +890,10 @@ function stopScheduledRechecks(reason:'user'|'selection'):void{
 scenarioRecheckStopButton?.addEventListener('click',()=>stopScheduledRechecks('user'));
 scenarioInspectId?.addEventListener('change',()=>stopScheduledRechecks('selection'));
 let scenarioInspectionGeneration=0;
+// Selection changes retire presentation only; explicit cancellation also
+// invalidates the pending observation's optional AI review eligibility.
+let activeScenarioObservationGeneration=0;
+let cancelledScenarioObservationGeneration=0;
 scenarioInspectId?.addEventListener('change',()=>{
  // In-flight native observation belongs to its original scenario, not the
  // newly selected view. Do not revoke native consent or discard its receipt.
@@ -904,6 +908,7 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
   return;
  }
  const requestGeneration=++scenarioInspectionGeneration;
+ activeScenarioObservationGeneration=requestGeneration;
  scenarioInspectionBusy=true;browserControls();
  if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权；限定 DOM 检查和短时页面 JavaScript 异常观察都不是业务验收。';
  try{
@@ -915,7 +920,8 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
    return;
   // A cancelled or switched-away result cannot unlock later AI review.
   // Native evidence remains scoped to its own request, not current UI eligibility.
-  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY')
+  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'&&
+     requestGeneration!==cancelledScenarioObservationGeneration)
    observedScenarioIds.add(id);
   if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
    ?'场景 '+id+'：只读 DOM 断言 '+(result.checkedAssertions??0)+
@@ -1073,6 +1079,8 @@ scenarioCancelButton?.addEventListener('click',()=>{
  // Native cancellation remains scoped to the original request. Retire
  // earlier inspection/export presentation immediately, so late success
  // cannot repaint a cancellation receipt or imply renewed authority.
+ if(scenarioInspectionBusy)
+  cancelledScenarioObservationGeneration=activeScenarioObservationGeneration;
  const requestGeneration=++scenarioInspectionGeneration;
  const requestScenarioId=scenarioInspectId?.value??'';
  const isCurrentCancel=()=>requestGeneration===scenarioInspectionGeneration&&
