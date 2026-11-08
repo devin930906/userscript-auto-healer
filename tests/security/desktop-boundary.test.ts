@@ -1649,7 +1649,11 @@ test('TASK-017/TEST-002/022: offline history allows switching registered scenari
   scenarioInspectId:selector,scenarioHistoryButton:history,
   scenarioInspectButton:inspect,aiReviewButton:ai
  });
- runInNewContext(ui.slice(start,end)+'\nbrowserControls();',sandbox);
+ const ts=await import('typescript');
+ const controls=ts.transpileModule(ui.slice(start,end)+'\nbrowserControls();',{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ runInNewContext(controls,sandbox);
  assert.equal(selector.disabled,false,
   'registered scenarios must remain selectable for offline-only history');
  assert.equal(history.disabled,false,'read-only history remains available without Chrome');
