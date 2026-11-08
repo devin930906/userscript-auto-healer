@@ -739,7 +739,8 @@ function browserControls():void{
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
  if(aiReviewButton)aiReviewButton.disabled=aiReviewPending||controlsBusy||
-   scenarioInspectionBusy||!observedScenarioIds.has(scenarioInspectId?.value??'');
+   !browserConnected||scenarioInspectionBusy||
+   !observedScenarioIds.has(scenarioInspectId?.value??'');
  if(gmStartButton)gmStartButton.disabled=controlsBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=controlsBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=controlsBusy||!gmProbeActive;
@@ -890,6 +891,10 @@ function stopScheduledRechecks(reason:'user'|'selection'):void{
 scenarioRecheckStopButton?.addEventListener('click',()=>stopScheduledRechecks('user'));
 scenarioInspectId?.addEventListener('change',()=>stopScheduledRechecks('selection'));
 let scenarioInspectionGeneration=0;
+// Selection changes retire presentation only; explicit cancellation also
+// invalidates the pending observation's optional AI review eligibility.
+let activeScenarioObservationGeneration=0;
+let cancelledScenarioObservationGeneration=0;
 scenarioInspectId?.addEventListener('change',()=>{
  // In-flight native observation belongs to its original scenario, not the
  // newly selected view. Do not revoke native consent or discard its receipt.
@@ -904,15 +909,19 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
   return;
  }
  const requestGeneration=++scenarioInspectionGeneration;
+ activeScenarioObservationGeneration=requestGeneration;
  scenarioInspectionBusy=true;browserControls();
  if(scenarioStatus)scenarioStatus.textContent='等待系统原生授权；限定 DOM 检查和短时页面 JavaScript 异常观察都不是业务验收。';
  try{
   const result=await window.healer.inspectScenario(id);
   // Preserve the native-scoped observation and browser lifecycle signal, but
   // prevent old replies from claiming to describe the current selection.
-  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY')
-   observedScenarioIds.add(id);
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+  // Preserve genuine native observations across selection changes, but a
+  // specifically cancelled inspection cannot unlock later optional AI review.
+  if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'&&
+     requestGeneration!==cancelledScenarioObservationGeneration)
+   observedScenarioIds.add(id);
   if(requestGeneration!==scenarioInspectionGeneration||scenarioInspectId?.value!==id)
    return;
   if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
@@ -1068,14 +1077,25 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
  if(!scenarioInspectionBusy&&!manualExportBusy)return;
+ // Native cancellation remains scoped to the original request. Retire
+ // earlier inspection/export presentation immediately, so late success
+ // cannot repaint a cancellation receipt or imply renewed authority.
+ if(scenarioInspectionBusy)
+  cancelledScenarioObservationGeneration=activeScenarioObservationGeneration;
+ const requestGeneration=++scenarioInspectionGeneration;
+ const requestScenarioId=scenarioInspectId?.value??'';
+ const isCurrentCancel=()=>requestGeneration===scenarioInspectionGeneration&&
+  scenarioInspectId?.value===requestScenarioId;
  scenarioCancelButton.disabled=true;
  void window.healer.cancelScenarioInspection().then(result=>{
+  if(!isCurrentCancel())return;
   if(scenarioStatus)scenarioStatus.textContent=result.ok
    ?'已请求取消只读检查／人工导出写入前流程；打开过的标签页不用于业务验收。'
    :result.code==='EXPORT_WRITE_ALREADY_STARTED'
      ?'已开始创建备份／人工候选文件，无法通过此按钮撤销。请核对最终结果和输出目录。'
      :'取消请求未完成：'+(result.code??'UNKNOWN');
  }).catch(()=>{
+  if(!isCurrentCancel())return;
   if(scenarioStatus)scenarioStatus.textContent='取消检查失败，需核实运行状态。';
  });
 });
@@ -1217,7 +1237,9 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
    (result.fixedDomAction??'未观察')+'）。仅限未经认证的夹具对照，不证明真实 GM 或业务恢复。';
 }));
 gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const requestGeneration=gmProbeGeneration;
  const result=await window.healer.saveGmReport();
+ if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
  if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
  if(gmResult)gmResult.textContent=result.ok&&result.status==='UNVERIFIED_REPORT_SAVED_ONLY'
   ?'已另存未经认证的本机诊断摘要：'+result.fileName+
@@ -1227,14 +1249,18 @@ gmReportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 for(const mode of ['broken','fixed'] as const){
  gmVisitButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const requestGeneration=gmProbeGeneration;
   const result=await window.healer.visitGmFixture(mode);
+  if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
   if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 专用测试页已在本程序拥有的 Chrome 打开；脚本执行未验证。'
    :'测试页未打开：'+(result.code??'UNKNOWN');
  }));
  gmObserveButtons[mode]?.addEventListener('click',()=>void browserAction(async()=>{
+  const requestGeneration=gmProbeGeneration;
   const result=await window.healer.observeGmFixture(mode);
+  if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
   if(!result.ok&&retireGmIfNativeSessionGone(result.code))return;
   if(gmResult)gmResult.textContent=result.ok
    ?mode+' 只读 DOM 动作数：'+result.actionCount+
@@ -1294,6 +1320,13 @@ aiDiscoveryButton?.addEventListener('click',()=>{
 
 aiReviewButton?.addEventListener('click',()=>{
   if(aiReviewPending||browserBusy||stopInProgress||scenarioInspectionBusy)return;
+  // Read-only observations from a past Chrome session are not a live action.
+  // Native still independently checks manager/session authority before any call.
+  if(!browserConnected){
+    if(aiReviewResult)aiReviewResult.textContent=
+      '独立 Chrome 尚未连接；请先启动浏览器并完成当前场景的只读检查。';
+    return;
+  }
   // Native still independently checks the selected scenario's observation.
   const id=scenarioInspectId?.value??'';
   if(!id||!observedScenarioIds.has(id)){

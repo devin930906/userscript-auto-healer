@@ -610,6 +610,44 @@ test('TASK-014/017 TEST-015/022: AI review stays disabled until a real read-only
  assert.match(handler,/aiReviewPending=false;browserControls\(\)/);
 });
 
+/** TASK-017 / TEST-015/022: a past DOM observation does not make a
+ * disconnected browser a current AI review session. */
+test('TASK-017/014: disconnected Chrome cannot enable or dispatch AI review',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const controls=ui.slice(ui.indexOf('function browserControls():void{'),
+   ui.indexOf('async function browserAction('));
+ const startAssignment=controls.indexOf('if(aiReviewButton)aiReviewButton.disabled=');
+ const endAssignment=controls.indexOf(';',startAssignment);
+ assert.ok(startAssignment>=0&&endAssignment>startAssignment,'real browserControls AI action gate');
+ const assignment=controls.slice(startAssignment,endAssignment+1);
+ let click:()=>void=()=>{throw Error('NO_HANDLER')};
+ const button={disabled:false,addEventListener:(_:string,fn:()=>void)=>{click=fn;}};
+ const scenarioInspectId={value:'scenario-A'};
+ const observedScenarioIds=new Set(['scenario-A']);
+ runInNewContext(assignment,{aiReviewButton:button,aiReviewPending:false,
+  controlsBusy:false,browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  browserConnected:false,scenarioInspectId,observedScenarioIds});
+ assert.equal(button.disabled,true,'a past observation must not enable review after disconnect');
+ const start=ui.indexOf("aiReviewButton?.addEventListener('click'");
+ const end=ui.indexOf('// Selection changes retire only renderer presentation',start);
+ assert.ok(start>=0&&end>start,'real AI review click handler');
+ const js=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ let nativeCalls=0;
+ const result={textContent:''};
+ runInNewContext(js,{aiReviewButton:button,aiReviewPending:false,
+  aiReviewGeneration:0,browserBusy:false,stopInProgress:false,
+  scenarioInspectionBusy:false,browserConnected:false,scenarioInspectId,
+  observedScenarioIds,aiReviewResult:result,browserControls:()=>undefined,
+  window:{healer:{requestNativeAiReview:async()=>{nativeCalls++;return {ok:false};}}}});
+ click();
+ assert.equal(nativeCalls,0,'synthetic click must not cross disconnected browser gate');
+ assert.match(result.textContent,/Chrome|浏览器|连接/,'blocked user action needs explanation');
+});
+
 test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC frame URL', () => {
   const html = readFileSync(join(process.cwd(), 'app', 'ui', 'index.html'), 'utf8');
   const ui = readFileSync(join(process.cwd(), 'app', 'ui', 'index.ts'), 'utf8');
@@ -824,6 +862,7 @@ test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot rep
  runInNewContext(ui.slice(start,end),{
   aiReviewButton:button,aiReviewPending:false,aiReviewGeneration:0,
   browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  browserConnected:true,
   scenarioInspectId:selector,observedScenarioIds:new Set(['scenario-A','scenario-B']),
   aiReviewResult:result,browserControls:()=>undefined,
   window:{healer:{requestNativeAiReview:(id:string)=>new Promise(resolve=>{
@@ -1274,4 +1313,204 @@ test('TASK-017/TEST-022: delayed manual export result cannot repaint another sce
  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
  assert.match(status.textContent,/人工导出未完成：NOT_AUTHORIZED/,
   'a current-scene denial must be shown accurately');
+});
+
+
+/** TASK-017 / TEST-022: stopping a GM fixture invalidates older asynchronous
+ * manual report/visit/DOM receipts even if the native response arrives later.
+ * The renderer must not present a revoked fixture as active or successful.
+ */
+test('TASK-017/TEST-022: late GM manual action cannot repaint stopped fixture',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmReportButton?.addEventListener('click'");
+ const end=ui.indexOf('\nbrowserControls();',start);
+ assert.ok(start>=0&&end>start,'run real GM report/visit/observe/stop handlers');
+ const script=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ for(const action of ['report','visit','observe'] as const){
+  let resolveAction:(value:unknown)=>void=()=>{throw Error('NOT_REQUESTED')};
+  const callbacks=new Map<string,()=>void>();
+  const button=(key:string)=>({addEventListener:(event:string,handler:()=>void)=>{
+   if(event==='click')callbacks.set(key,handler);
+  }});
+  const links={textContent:'temporary fixture URLs'};
+  const result={textContent:'active fixture'};
+  const sandbox:any={
+   gmReportButton:button('report'),
+   gmVisitButtons:{broken:button('visit'),fixed:null},
+   gmObserveButtons:{broken:button('observe'),fixed:null},
+   gmStopButton:button('stop'),
+   gmProbeActive:true,gmProbeStarting:false,gmStopInProgress:false,gmProbeGeneration:0,
+   gmLinks:links,gmResult:result,
+   browserAction:(fn:()=>Promise<void>)=>fn(),
+   browserControls:()=>undefined,
+   retireGmIfNativeSessionGone:()=>false,
+   window:{healer:{
+    saveGmReport:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    visitGmFixture:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    observeGmFixture:()=>new Promise(resolve=>{resolveAction=resolve;}),
+    stopGmProbe:async()=>({ok:true,status:'FIXTURE_STOP_REQUESTED'})
+   }}
+  };
+  sandbox.clearGmDisplay=(message:string)=>{
+   sandbox.gmProbeActive=false;links.textContent='';result.textContent=message;
+  };
+  runInNewContext(script,sandbox);
+  callbacks.get(action)?.();
+  callbacks.get('stop')?.();
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  const stopped=result.textContent;
+  assert.match(stopped,/关闭|删除|停止/);
+  resolveAction(action==='report'
+   ?{ok:true,status:'UNVERIFIED_REPORT_SAVED_ONLY',fileName:'old.json',
+      sha256:'a'.repeat(64),byteLength:14}
+   :action==='visit'
+    ?{ok:true}
+    :{ok:true,actionCount:1,fixtureDomMatchesExpected:true});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(result.textContent,stopped,
+   'late '+action+' result must not repaint a revoked GM fixture');
+  assert.equal(links.textContent,'');
+  assert.equal(sandbox.gmProbeActive,false);
+ }
+});
+
+
+/** TASK-017 / TEST-022: a delayed cancellation response belongs to the
+ * original selected scenario. It may cancel native work, but must not
+ * present the prior scenario's cancellation in a newly selected view.
+ */
+test('TASK-017/TEST-022: late scenario cancel receipt does not overwrite switched view',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const selectionStart=ui.indexOf('let scenarioInspectionGeneration=0;');
+ const selectionEnd=ui.indexOf("scenarioInspectButton?.addEventListener('click'",selectionStart);
+ const cancelStart=ui.indexOf("scenarioCancelButton?.addEventListener('click'");
+ const cancelEnd=ui.indexOf("chooseChromeButton?.addEventListener('click'",cancelStart);
+ assert.ok(selectionStart>=0&&selectionEnd>selectionStart&&
+  cancelStart>=0&&cancelEnd>cancelStart,'run actual selection and cancel handlers');
+ const js=ts.transpileModule(
+  ui.slice(selectionStart,selectionEnd)+'\n'+ui.slice(cancelStart,cancelEnd),{
+   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+  }).outputText;
+ for(const fail of [false,true]){
+  const events=new Map<string,()=>void>();
+  const scenarioInspectId={
+   value:'scene-A',
+   addEventListener:(event:string,handler:()=>void)=>events.set('select-'+event,handler)
+  };
+  const scenarioStatus={textContent:'scene-A observation pending'};
+  let cancelCalls=0;
+  let resolveNative:(v:unknown)=>void=()=>{throw Error('NOT_CALLED')};
+  let rejectNative:(e:unknown)=>void=()=>{throw Error('NOT_CALLED')};
+  const sandbox:any={
+   scenarioInspectId,scenarioStatus,
+   scenarioInspectionBusy:true,manualExportBusy:false,
+   scenarioCancelButton:{
+    disabled:false,
+    addEventListener:(event:string,handler:()=>void)=>{
+     if(event==='click')events.set('cancel',handler);
+    }
+   },
+   window:{healer:{cancelScenarioInspection:()=>{
+    cancelCalls++;
+    return new Promise((resolve,reject)=>{
+     resolveNative=resolve;rejectNative=reject;
+    });
+   }}}
+  };
+  runInNewContext(js,sandbox);
+  assert.ok(events.has('select-change')&&events.has('cancel'));
+  events.get('cancel')?.();
+  assert.equal(cancelCalls,1,'the native cancel remains requested for original scenario');
+  scenarioInspectId.value='scene-B';
+  events.get('select-change')?.();
+  const switched=scenarioStatus.textContent;
+  assert.match(switched,/已切换场景/);
+  if(fail)rejectNative(Error('cancellation failed'));
+  else resolveNative({ok:true});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(scenarioStatus.textContent,switched,
+   'old '+(fail?'rejected':'successful')+' cancellation must not repaint scene-B');
+ }
+});
+
+
+/** TASK-017 / TEST-022: the cancellation boundary must retire earlier
+ * in-flight inspection/export presentation, not just older cancellation
+ * acknowledgements when the selected scenario changes. Native work may
+ * already have completed; an obsolete reply is not fresh UI authority.
+ */
+test('TASK-017/TEST-022: cancel request fences late inspection and export success receipts',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const slice=(start:string,end:string)=>{
+  const a=ui.indexOf(start),b=ui.indexOf(end,a);
+  assert.ok(a>=0&&b>a,'real renderer handlers: '+start);
+  return ui.slice(a,b);
+ };
+ const js=ts.transpileModule([
+  slice('let scenarioInspectionGeneration=0;',
+   "manualRestoreButton?.addEventListener('click'"),
+  slice("scenarioExportButton?.addEventListener('click'",
+   "scenarioCancelButton?.addEventListener('click'"),
+  slice("scenarioCancelButton?.addEventListener('click'",
+   "chooseChromeButton?.addEventListener('click'")
+ ].join('\n'),{compilerOptions:{
+  target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None
+ }}).outputText;
+ for(const action of ['inspect','export'] as const){
+  const events=new Map<string,()=>void>();
+  const button=(name:string)=>({disabled:false,
+   addEventListener:(kind:string,fn:()=>void)=>{
+    if(kind==='click')events.set(name,fn);
+   }
+  });
+  let resolveWork:(value:unknown)=>void=()=>{throw Error('NO_WORK')};
+  let nativeCancelCalls=0;
+  const status={textContent:'not started'};
+  const observed=new Set<string>();
+  const sandbox:any={
+   scenarioInspectId:{value:'scene-A',addEventListener:()=>undefined},
+   scenarioInspectButton:button('inspect'),
+   scenarioExportButton:button('export'),
+   scenarioCancelButton:button('cancel'),
+   scenarioStatus:status,
+   scenarioInspectionBusy:false,manualExportBusy:false,
+   browserAction:(fn:()=>Promise<void>)=>fn(),
+   browserControls:()=>undefined,
+   observedScenarioIds:observed,browserConnected:true,
+   window:{healer:{
+    inspectScenario:()=>new Promise(resolve=>{resolveWork=resolve;}),
+    exportManualScenario:()=>new Promise(resolve=>{resolveWork=resolve;}),
+    cancelScenarioInspection:async()=>{nativeCancelCalls++;return {ok:true};}
+   }}
+  };
+  runInNewContext(js,sandbox);
+  events.get(action)?.();
+  assert.match(status.textContent,/等待系统原生授权|正在等待原生授权/);
+  events.get('cancel')?.();
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(nativeCancelCalls,1,'native cancellation is still sent');
+  const cancellationReceipt=status.textContent;
+  assert.match(cancellationReceipt,/已请求取消/);
+  resolveWork(action==='inspect'
+   ?{ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',checkedAssertions:1,
+      faultCategory:'NO_ERROR',triageStatus:'READ_ONLY',evidenceCount:1}
+   :{ok:true,status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',
+     exportFileName:'stale-candidate.user.js',candidateByteLength:99,
+     candidateSha256:'a'.repeat(64)});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(status.textContent,cancellationReceipt,
+   'late '+action+' success must not overwrite pending cancellation');
+  assert.equal(observed.has('scene-A'),false,
+   'cancelled or stale DOM work must not unlock AI review of the scenario');
+  assert.equal(sandbox.scenarioInspectionBusy,false);
+  assert.equal(sandbox.manualExportBusy,false);
+ }
 });
