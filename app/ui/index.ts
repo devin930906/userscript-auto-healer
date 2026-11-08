@@ -739,7 +739,8 @@ function browserControls():void{
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
    manualExportBusy||(scenarioInspectId?.options.length??0)<=1;
  if(aiReviewButton)aiReviewButton.disabled=aiReviewPending||controlsBusy||
-   scenarioInspectionBusy||!observedScenarioIds.has(scenarioInspectId?.value??'');
+   !browserConnected||scenarioInspectionBusy||
+   !observedScenarioIds.has(scenarioInspectId?.value??'');
  if(gmStartButton)gmStartButton.disabled=controlsBusy||!browserConnected||gmProbeActive;
  if(gmRunAtSelect)gmRunAtSelect.disabled=controlsBusy||gmProbeActive;
  if(gmStatusButton)gmStatusButton.disabled=controlsBusy||!gmProbeActive;
@@ -1319,6 +1320,13 @@ aiDiscoveryButton?.addEventListener('click',()=>{
 
 aiReviewButton?.addEventListener('click',()=>{
   if(aiReviewPending||browserBusy||stopInProgress||scenarioInspectionBusy)return;
+  // Read-only observations from a past Chrome session are not a live action.
+  // Native still independently checks manager/session authority before any call.
+  if(!browserConnected){
+    if(aiReviewResult)aiReviewResult.textContent=
+      '独立 Chrome 尚未连接；请先启动浏览器并完成当前场景的只读检查。';
+    return;
+  }
   // Native still independently checks the selected scenario's observation.
   const id=scenarioInspectId?.value??'';
   if(!id||!observedScenarioIds.has(id)){
