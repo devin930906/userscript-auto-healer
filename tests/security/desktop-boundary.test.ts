@@ -1065,7 +1065,7 @@ test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixt
  const ts=await import('typescript');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const start=ui.indexOf("gmStartButton?.addEventListener('click'");
- const end=ui.indexOf('browserControls();\\n\\nconst aiDiscoveryButton',start);
+ const end=ui.indexOf('const aiDiscoveryButton',start);
  assert.ok(start>=0&&end>start,'use the real GM start/stop renderer handlers');
  const source=ts.transpileModule(ui.slice(start,end),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
