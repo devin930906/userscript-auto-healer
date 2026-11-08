@@ -1286,7 +1286,7 @@ test('TASK-017/TEST-022: late GM manual action cannot repaint stopped fixture',a
  const ts=await import('typescript');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const start=ui.indexOf("gmReportButton?.addEventListener('click'");
- const end=ui.indexOf('browserControls();',ui.indexOf('});\n browserControls();',start));
+ const end=ui.indexOf('\n browserControls();',start);
  assert.ok(start>=0&&end>start,'run real GM report/visit/observe/stop handlers');
  const script=ts.transpileModule(ui.slice(start,end),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
