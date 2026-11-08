@@ -281,6 +281,40 @@ function plainDataSnapshot(input:unknown):Record<string,unknown>|null {
  }
  return result;
 }
+/** Metadata line descriptions are part of an untrusted metadata envelope.
+ * Although eligibility is recomputed from the header, reject hostile line
+ * containers rather than passing getter/Proxy objects across this boundary.
+ * Do not execute any supplied iterator, accessor or custom prototype method.
+ */
+function safeMetadataLines(input:unknown):boolean {
+ if(!Array.isArray(input)||nodeTypes.isProxy(input)||
+    Object.getPrototypeOf(input)!==Array.prototype)return false;
+ const length=Object.getOwnPropertyDescriptor(input,'length')?.value;
+ if(!Number.isSafeInteger(length)||length<0||length>65536)return false;
+ const descriptors=Object.getOwnPropertyDescriptors(input);
+ if(Reflect.ownKeys(descriptors).length!==length+1)return false;
+ for(let i=0;i<length;i++){
+  const slot=descriptors[String(i)];
+  if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return false;
+  const line=plainDataSnapshot(slot.value);
+  if(!line)return false;
+  const keys=Object.keys(line);
+  if(!Number.isSafeInteger(line.line)||(line.line as number)<1||
+     (line.line as number)>65536||typeof line.raw!=='string'||
+     line.raw.length>65536)return false;
+  if(line.kind==='tag'){
+   if(keys.length!==6||!['line','raw','kind','name','value','known'].every(
+      key=>Object.prototype.hasOwnProperty.call(line,key))||
+      typeof line.name!=='string'||typeof line.value!=='string'||
+      typeof line.known!=='boolean')return false;
+  }else if(line.kind==='blank'||line.kind==='comment'){
+   if(keys.length!==3||!['line','raw','kind'].every(
+      key=>Object.prototype.hasOwnProperty.call(line,key)))return false;
+  }else return false;
+ }
+ return true;
+}
+
 /** @grant, @match and the unknown-tag list are arrays supplied by metadata.
  * Snapshot each string slot without iterating or invoking index getters.
  */
@@ -345,6 +379,8 @@ export function inspectReportedTampermonkeyPreflight(
   const metadataKeys=['status','header','lines','tags','unknownNames'];
   if(Object.keys(safeMetadata).length!==metadataKeys.length||
      metadataKeys.some(key=>!Object.prototype.hasOwnProperty.call(safeMetadata,key)))
+   return blocked('INVALID_SCRIPT_METADATA');
+  if(!safeMetadataLines(safeMetadata.lines))
    return blocked('INVALID_SCRIPT_METADATA');
   const rawTags=plainDataSnapshot(safeMetadata.tags);
   const unknownNames=stringListSnapshot(safeMetadata.unknownNames);

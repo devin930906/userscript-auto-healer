@@ -728,3 +728,31 @@ test('TASK-007 / TEST-017/026: direct @match helper rejects credentialed or frag
  }
  assert.equal(matchingExactOriginPattern(pattern,new URL('https://example.com/page')),true);
 });
+
+
+test('TASK-007/TEST-017/026: untrusted metadata line containers cannot bypass the preflight boundary',()=>{
+ let getterCalls=0,proxyCalls=0;
+ const untrusted=[
+  {lines:undefined},
+  {lines:'not an array'},
+  {lines:new Proxy([],{
+   get(){proxyCalls++;throw Error('metadata lines proxy invoked');}
+  })},
+  {lines:Object.defineProperty([], '0', {
+   get(){getterCalls++;throw Error('metadata line getter invoked');},
+   enumerable:true,configurable:true
+  })},
+  {lines:[new Proxy({line:1,raw:'',kind:'blank'},{
+   get(){proxyCalls++;throw Error('metadata entry proxy invoked');}
+  })]},
+  {lines:[{line:1,raw:'',kind:'blank',automaticPatchAllowed:true}]},
+ ];
+ for(const input of untrusted){
+  const result=inspect(report,{...normal,...input} as MetadataResult);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_SCRIPT_METADATA',gmApiVerified:false,businessVerified:false});
+ }
+ assert.equal(getterCalls,0,'never read a metadata line through an accessor');
+ assert.equal(proxyCalls,0,'never invoke metadata line proxy hooks');
+ assert.equal(inspect().ok,true,'ordinary metadata remains eligible only');
+});
