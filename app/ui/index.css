@@ -10,6 +10,23 @@
 }
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; min-width: 0; }
+/* TASK-017: let keyboard users bypass the repeated workspace navigation.
+ * The link is visually hidden until focused, without any script or IPC.
+ */
+.skip-workspaces {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  transform: translateY(-200%);
+  padding: 0.55rem 0.75rem;
+  border: 2px solid #1760a8;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #163d64;
+}
+.skip-workspaces:focus-visible { transform: none; }
+
 main {
   width: min(100% - 2rem, 78rem);
   margin: 0 auto;
