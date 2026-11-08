@@ -916,13 +916,13 @@ scenarioInspectButton?.addEventListener('click',()=>void browserAction(async()=>
   // Preserve the native-scoped observation and browser lifecycle signal, but
   // prevent old replies from claiming to describe the current selection.
   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
-  if(requestGeneration!==scenarioInspectionGeneration||scenarioInspectId?.value!==id)
-   return;
-  // A cancelled or switched-away result cannot unlock later AI review.
-  // Native evidence remains scoped to its own request, not current UI eligibility.
+  // Preserve genuine native observations across selection changes, but a
+  // specifically cancelled inspection cannot unlock later optional AI review.
   if(result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'&&
      requestGeneration!==cancelledScenarioObservationGeneration)
    observedScenarioIds.add(id);
+  if(requestGeneration!==scenarioInspectionGeneration||scenarioInspectId?.value!==id)
+   return;
   if(scenarioStatus)scenarioStatus.textContent=result.ok&&result.status==='LIMITED_DOM_SIGNAL_ONLY'
    ?'场景 '+id+'：只读 DOM 断言 '+(result.checkedAssertions??0)+
       ' 项；故障信号 '+(result.faultCategory??'UNKNOWN')+
