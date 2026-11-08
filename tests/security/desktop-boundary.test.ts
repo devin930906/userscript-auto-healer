@@ -1120,6 +1120,68 @@ test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixt
 });
 
 
+/** TASK-017 / TEST-022: a GM status request started before stop is a
+ * stale presentation receipt. Native cancellation is independent, but an old
+ * reply must not overwrite the stopped state shown to the user.
+ */
+test('TASK-017/TEST-022: late GM status cannot overwrite stopped fixture UI',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmStartButton?.addEventListener('click'");
+ const end=ui.indexOf('const aiDiscoveryButton',start);
+ assert.ok(start>=0&&end>start,'use real GM status and stop handlers');
+ const script=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ const handlers=new Map<string,()=>void>();
+ const button=(name:string)=>({addEventListener:(event:string,handler:()=>void)=>{
+  if(event==='click')handlers.set(name,handler);
+ }});
+ const links={textContent:'temporary link'};
+ const result={textContent:'active fixture'};
+ let resolveStatus:(value:unknown)=>void=()=>{throw Error('STATUS_NOT_REQUESTED')};
+ let stopCount=0,statusCount=0;
+ const state:any={
+  gmStartButton:null,gmStatusButton:button('status'),gmStopButton:button('stop'),
+  gmReportButton:null,gmRunAtSelect:null,
+  gmVisitButtons:{broken:null,fixed:null},
+  gmObserveButtons:{broken:null,fixed:null},
+  gmProbeStarting:false,gmProbeActive:true,gmStopInProgress:false,gmProbeGeneration:0,
+  gmLinks:links,gmResult:result,
+  browserAction:(fn:()=>Promise<void>)=>fn(),
+  browserControls:()=>undefined,
+  retireGmIfNativeSessionGone:()=>false,
+  window:{healer:{
+   gmProbeStatus:()=>{statusCount++;return new Promise(resolve=>{resolveStatus=resolve;});},
+   stopGmProbe:async()=>{stopCount++;return {ok:true,status:'FIXTURE_STOP_REQUESTED'};}
+  }}
+ };
+ state.clearGmDisplay=(message:string)=>{
+  state.gmProbeActive=false;links.textContent='';result.textContent=message;
+ };
+ runInNewContext(script,state);
+ handlers.get('status')?.();
+ assert.equal(statusCount,1,'status request must be in flight before stop');
+ handlers.get('stop')?.();
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(stopCount,1);
+ assert.equal(state.gmProbeActive,false);
+ assert.equal(links.textContent,'');
+ const stopped=result.textContent;
+ assert.match(stopped,/关闭|删除|停止/);
+ resolveStatus({ok:true,observedModes:2,reportedGmDefaultMatched:true,
+  reportedGmStorageRoundtripMatched:true,reportedBrokenFailed:true,
+  reportedFixedRecovered:true,consistencyStatus:'UNVERIFIED_FIXTURE_ONLY',
+  comparedModes:2,brokenDomAction:'none',fixedDomAction:'done'});
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(result.textContent,stopped,
+  'late pre-stop GM status must not repaint a revoked fixture');
+ assert.equal(links.textContent,'');
+ assert.equal(state.gmProbeActive,false);
+});
+
+
 /** TASK-007 / TEST-017/018: execute the actual cloud manager-selection
  * block with ambiguous chrome://extensions cards. This is isolated test
  * evidence only; name/ID are not store-installation attestation.
