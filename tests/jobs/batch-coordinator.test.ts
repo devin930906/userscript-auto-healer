@@ -182,6 +182,30 @@ test('TASK-013/TEST-022/026: a cancelled serial checkpoint must not resume a lat
  assert.equal(dispatched,0);
 });
 
+test('TASK-013/TEST-022/026: synchronous worker reentry cannot start a second batch',async()=>{
+ const launched:number[]=[];
+ const reentrant:Promise<unknown>[]=[];
+ let coordinator!:ReadOnlyBatchCoordinator;
+ coordinator=new ReadOnlyBatchCoordinator({count:3,concurrency:2},async ordinal=>{
+  launched.push(ordinal);
+  if(ordinal===0){
+   // A trusted native worker is invoked synchronously before the scheduler
+   // has finished publishing its in-flight promise. A nested run must not
+   // steal another lane or dispatch the same queued work twice.
+   reentrant.push(coordinator.run());
+  }
+  return 'DONE';
+ });
+ const result=await coordinator.run();
+ assert.equal(reentrant.length,1);
+ await assert.rejects(reentrant[0],/BATCH_ALREADY_RUNNING/);
+ assert.deepEqual(launched,[0,1,2]);
+ assert.deepEqual(result.jobs.map(job=>job.attempts),[1,1,1]);
+ assert.ok(result.jobs.every(job=>job.state==='SUCCEEDED'));
+ assert.equal(result.automaticPatchAllowed,false);
+ assert.equal(result.automaticRollbackAllowed,false);
+});
+
 test('TEST-022: independent batch results, bounded transient retry and no automatic authority',async()=>{
  const visited:number[]=[];
  const coordinator=new ReadOnlyBatchCoordinator({count:4,maxAttempts:2},
