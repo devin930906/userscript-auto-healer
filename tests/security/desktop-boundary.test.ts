@@ -1399,3 +1399,77 @@ test('TASK-017/TEST-022: late scenario cancel receipt does not overwrite switche
    'old '+(fail?'rejected':'successful')+' cancellation must not repaint scene-B');
  }
 });
+
+
+/** TASK-017 / TEST-022: the cancellation boundary must retire earlier
+ * in-flight inspection/export presentation, not just older cancellation
+ * acknowledgements when the selected scenario changes. Native work may
+ * already have completed; an obsolete reply is not fresh UI authority.
+ */
+test('TASK-017/TEST-022: cancel request fences late inspection and export success receipts',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const slice=(start:string,end:string)=>{
+  const a=ui.indexOf(start),b=ui.indexOf(end,a);
+  assert.ok(a>=0&&b>a,'real renderer handlers: '+start);
+  return ui.slice(a,b);
+ };
+ const js=ts.transpileModule([
+  slice('let scenarioInspectionGeneration=0;',
+   "manualRestoreButton?.addEventListener('click'"),
+  slice("scenarioExportButton?.addEventListener('click'",
+   "scenarioCancelButton?.addEventListener('click'"),
+  slice("scenarioCancelButton?.addEventListener('click'",
+   "chooseChromeButton?.addEventListener('click'")
+ ].join('\n'),{compilerOptions:{
+  target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None
+ }}).outputText;
+ for(const action of ['inspect','export'] as const){
+  const events=new Map<string,()=>void>();
+  const button=(name:string)=>({disabled:false,
+   addEventListener:(kind:string,fn:()=>void)=>{
+    if(kind==='click')events.set(name,fn);
+   }
+  });
+  let resolveWork:(value:unknown)=>void=()=>{throw Error('NO_WORK')};
+  let nativeCancelCalls=0;
+  const status={textContent:'not started'};
+  const observed=new Set<string>();
+  const sandbox:any={
+   scenarioInspectId:{value:'scene-A',addEventListener:()=>undefined},
+   scenarioInspectButton:button('inspect'),
+   scenarioExportButton:button('export'),
+   scenarioCancelButton:button('cancel'),
+   scenarioStatus:status,
+   scenarioInspectionBusy:false,manualExportBusy:false,
+   browserAction:(fn:()=>Promise<void>)=>fn(),
+   browserControls:()=>undefined,
+   observedScenarioIds:observed,browserConnected:true,
+   window:{healer:{
+    inspectScenario:()=>new Promise(resolve=>{resolveWork=resolve;}),
+    exportManualScenario:()=>new Promise(resolve=>{resolveWork=resolve;}),
+    cancelScenarioInspection:async()=>{nativeCancelCalls++;return {ok:true};}
+   }}
+  };
+  runInNewContext(js,sandbox);
+  events.get(action)?.();
+  assert.match(status.textContent,/等待系统原生授权|正在等待原生授权/);
+  events.get('cancel')?.();
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(nativeCancelCalls,1,'native cancellation is still sent');
+  const cancellationReceipt=status.textContent;
+  assert.match(cancellationReceipt,/已请求取消/);
+  resolveWork(action==='inspect'
+   ?{ok:true,status:'LIMITED_DOM_SIGNAL_ONLY',checkedAssertions:1,
+      faultCategory:'NO_ERROR',triageStatus:'READ_ONLY',evidenceCount:1}
+   :{ok:true,status:'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',
+     exportFileName:'stale-candidate.user.js',candidateByteLength:99,
+     candidateSha256:'a'.repeat(64)});
+  for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(status.textContent,cancellationReceipt,
+   'late '+action+' success must not overwrite pending cancellation');
+  assert.equal(sandbox.scenarioInspectionBusy,false);
+  assert.equal(sandbox.manualExportBusy,false);
+ }
+});
