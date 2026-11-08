@@ -215,6 +215,9 @@ export async function startIsolatedTampermonkeyGmProbe(
    return consentRevoked;
  };
  const receipts:Partial<Record<GmProbeMode,GmProbeReceipt>>={};
+ // A receipt is a fixture observation only if this session first served
+ // the corresponding mode's test page. This is NOT browser/manager proof.
+ const servedModes=new Set<GmProbeMode>();
  let pageServed=0;
  let server:Server;
  server=createServer((req,res)=>{
@@ -268,6 +271,8 @@ export async function startIsolatedTampermonkeyGmProbe(
    if(req.method==='GET'&&url.pathname==='/'&&
        (url.search===''||url.search==='?mode=broken'||url.search==='?mode=fixed')){
      pageServed=Math.min(128,pageServed+1);
+     if(url.search==='?mode=broken')servedModes.add('broken');
+     else if(url.search==='?mode=fixed')servedModes.add('fixed');
      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
      res.end('<!doctype html><html><head><title>Isolated GM probe</title></head>'+
        '<body><main><div id="current-target">Authorized test fixture</div>'+
@@ -326,6 +331,10 @@ export async function startIsolatedTampermonkeyGmProbe(
        res.writeHead(403).end();return;
      }
      const mode=input.mode as GmProbeMode;
+     // A token-only client may post arbitrary self-reports without ever
+     // requesting the controlled fixture page. Never attach those to a
+     // purported broken/fixed observation; the other mode's GET is not enough.
+     if(!servedModes.has(mode)){res.writeHead(403).end();return;}
      // First receipt wins per mode: replay or a late contradictory POST must
      // never silently rewrite an earlier captured diagnostic observation.
      if(receipts[mode]!==undefined){res.writeHead(409).end();return;}
