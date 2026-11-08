@@ -675,6 +675,9 @@ let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
 let browserConnected=false;
+// Renderer-only lifecycle token: a stopped Chrome cannot be resurrected by
+// the delayed success reply of a pre-stop native launch handshake.
+let browserSessionGeneration=0;
 let gmProbeActive=false;
 let gmProbeStarting=false;
 let gmStopInProgress=false;
@@ -1128,7 +1131,11 @@ launchButton?.addEventListener('click',()=>void browserAction(async()=>{
   setBrowserStatus('CDP 端口必须是 1024 至 65535 的整数。');return;
  }
  setBrowserStatus('检查独立 Chrome 配置与进程归属中；请在系统确认窗口授权。');
+ const requestGeneration=browserSessionGeneration;
  const result=await window.healer.startBrowser(port);
+ // A stop requested during native launch invalidates this renderer receipt;
+ // the privileged main process remains the authority on actual ownership.
+ if(requestGeneration!==browserSessionGeneration)return;
  browserConnected=result.ok&&result.status==='OWNED_CDP_BROWSER_VERIFIED';
  setBrowserStatus(browserConnected
    ? '已确认本程序启动的 Chrome CDP 连接（'+(result.chromeVersion??'unknown')+
@@ -1160,6 +1167,8 @@ stopButton?.addEventListener('click',()=>{
  }
  // A pending fixture start cannot repaint links after browser shutdown.
  gmProbeGeneration++;
+ // Invalidate any pre-stop launch reply before waiting on native shutdown.
+ browserSessionGeneration++;
  // An already authorized optional AI request may finish after native stop.
  // Retire its renderer presentation now; this never revokes native consent.
  aiReviewGeneration++;
