@@ -618,8 +618,10 @@ test('TASK-017/014: disconnected Chrome cannot enable or dispatch AI review',asy
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const controls=ui.slice(ui.indexOf('function browserControls():void{'),
    ui.indexOf('async function browserAction('));
- const assignment=controls.match(/if\\(aiReviewButton\\)aiReviewButton\\.disabled=[\\s\\S]*?;/)?.[0];
- assert.ok(assignment,'real browserControls AI action gate');
+ const startAssignment=controls.indexOf('if(aiReviewButton)aiReviewButton.disabled=');
+ const endAssignment=controls.indexOf(';',startAssignment);
+ assert.ok(startAssignment>=0&&endAssignment>startAssignment,'real browserControls AI action gate');
+ const assignment=controls.slice(startAssignment,endAssignment+1);
  let click:()=>void=()=>{throw Error('NO_HANDLER')};
  const button={disabled:false,addEventListener:(_:string,fn:()=>void)=>{click=fn;}};
  const scenarioInspectId={value:'scenario-A'};
