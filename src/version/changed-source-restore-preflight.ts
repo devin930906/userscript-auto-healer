@@ -110,6 +110,11 @@ function parse(input:unknown):Data|null {
      !isAbsolute(sourcePath)||!isAbsolute(backupDirectory)||
      !/^[^\\/\u0000-\u001f]+\.user\.js$/i.test(basename(sourcePath))||
      backupFileName.length===0||backupFileName.length>255||
+     // The backup name must be one lexical filename, not a relative path.
+     // The deeper recovery verifier checks the UUID/provenance later, but
+     // this preflight lstat's the joined path BEFORE invoking that verifier.
+     // Reject both separators on every platform before any filesystem I/O.
+     backupFileName.includes('/')||backupFileName.includes('\\')||
      typeof expectedCurrentSha256!=='string'||!SHA256.test(expectedCurrentSha256)||
      typeof expectedOriginalSha256!=='string'||!SHA256.test(expectedOriginalSha256)||
      typeof expectedOriginalByteLength!=='number'||
