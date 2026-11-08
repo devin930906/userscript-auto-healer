@@ -1127,10 +1127,11 @@ test('TASK-017/TEST-022: stopping a pending GM start cannot resurrect stale fixt
 test('TASK-007/TEST-017: cloud manager probe rejects ambiguous matching extension cards',async()=>{
  const {runInNewContext}=await import('node:vm');
  const source=readFileSync(join(process.cwd(),'poc/windows-tampermonkey-cloud.cjs'),'utf8');
- const start=source.indexOf('  const manager=cards.find(');
+ const cardsLine=source.indexOf('  const cards=await extensionCards(context);');
+ const start=cardsLine<0?-1:source.indexOf('\n',cardsLine)+1;
  const end=source.indexOf('  // MV3 service workers',start);
  assert.ok(start>=0&&end>start,'execute the real cloud manager selection logic');
- const selection=source.slice(start,end)+'\\nmanager;';
+ const selection=source.slice(start,end)+'\nmanager;';
  const card=(id:string,name='Tampermonkey')=>({id,name});
  const first='a'.repeat(32),other='b'.repeat(32);
  const select=(cards:unknown)=>runInNewContext(selection,{cards,assert}) as {id:string;name:string};
