@@ -627,7 +627,7 @@ test('TASK-017/014: disconnected Chrome cannot enable or dispatch AI review',asy
  const scenarioInspectId={value:'scenario-A'};
  const observedScenarioIds=new Set(['scenario-A']);
  runInNewContext(assignment,{aiReviewButton:button,aiReviewPending:false,
-  browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  controlsBusy:false,browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
   browserConnected:false,scenarioInspectId,observedScenarioIds});
  assert.equal(button.disabled,true,'a past observation must not enable review after disconnect');
  const start=ui.indexOf("aiReviewButton?.addEventListener('click'");
