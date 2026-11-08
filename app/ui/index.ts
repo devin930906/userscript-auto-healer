@@ -678,6 +678,9 @@ let browserConnected=false;
 let gmProbeActive=false;
 let gmProbeStarting=false;
 let gmStopInProgress=false;
+// A native stop revokes presentation authority of any earlier GM start reply.
+// This renderer token does not grant fixture ownership or bypass native checks.
+let gmProbeGeneration=0;
 const gmStartButton=document.getElementById('gm-probe-start') as HTMLButtonElement|null;
 const gmRunAtSelect=document.getElementById('gm-run-at') as HTMLSelectElement|null;
 const gmStatusButton=document.getElementById('gm-probe-status') as HTMLButtonElement|null;
@@ -1126,6 +1129,8 @@ stopButton?.addEventListener('click',()=>{
   if(scenarioRecheckStatus)scenarioRecheckStatus.textContent=
    '已请求停止浏览器；复检计划已取消，不再自动启动下一轮。';
  }
+ // A pending fixture start cannot repaint links after browser shutdown.
+ gmProbeGeneration++;
  stopInProgress=true;browserControls();
  void window.healer.stopBrowser().then(result=>{
   if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
@@ -1146,10 +1151,14 @@ gmStartButton?.addEventListener('click',()=>void browserAction(async()=>{
   if(gmResult)gmResult.textContent='注入时机无效；本机测试未启动。';
   return;
  }
+ const requestGeneration=++gmProbeGeneration;
  gmProbeStarting=true;browserControls();
  let result:Awaited<ReturnType<typeof window.healer.startGmProbe>>;
  try{result=await window.healer.startGmProbe(runAt);}
  finally{gmProbeStarting=false;browserControls();}
+ // Stop may settle before the original native start reply is delivered.
+ // Never resurrect a revoked fixture or display temporary URLs in that case.
+ if(requestGeneration!==gmProbeGeneration)return;
  if(!result.ok||result.status!=='MANUAL_FIXTURE_READY_ONLY'||
     !result.installUrl||!result.brokenUrl||!result.fixedUrl||
     !result.expiresAt){
@@ -1225,6 +1234,7 @@ for(const mode of ['broken','fixed'] as const){
 // pending visit/DOM checks and the short-lived loopback fixture.
 gmStopButton?.addEventListener('click',()=>{
  if(gmStopInProgress||(!gmProbeActive&&!gmProbeStarting))return;
+ gmProbeGeneration++;
  gmStopInProgress=true;browserControls();
  void window.healer.stopGmProbe().then(result=>{
   if(result.ok||result.status==='NO_ACTIVE_FIXTURE'){
