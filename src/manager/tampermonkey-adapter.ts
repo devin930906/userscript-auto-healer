@@ -61,6 +61,13 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     const prototype=Object.getPrototypeOf(value);
     if(prototype!==Object.prototype&&prototype!==null)return invalidTargets();
     const fields=Object.getOwnPropertyDescriptors(value);
+    // CDP Target.getTargets is JSON data. Extra accessors or Symbol fields
+    // cannot be legitimate browser metadata; reject them without invoking
+    // getters, while preserving ordinary JSON properties such as title.
+    const keys=Reflect.ownKeys(fields);
+    if(keys.some(key=>typeof key!=='string'||
+       !Object.prototype.hasOwnProperty.call(fields[key as string],'value')))
+      return invalidTargets();
     const typeField=fields.type,urlField=fields.url,idField=fields.targetId;
     if(!typeField||!urlField||!idField||
        !Object.prototype.hasOwnProperty.call(typeField,'value')||
