@@ -11,7 +11,8 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; min-width: 0; }
 /* TASK-017: let keyboard users bypass the repeated workspace navigation.
- * The link is visually hidden until focused, without any script or IPC.
+ * The button is visually hidden until focused and uses the existing
+ * in-document focus handler; no fragment navigation, native script, or IPC.
  */
 .skip-workspaces {
   position: absolute;
