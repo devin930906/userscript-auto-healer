@@ -60,6 +60,25 @@ function unambiguousCdpWebSocket(raw:string):boolean{
     !/[\x00-\x1f\x7f\\]/.test(raw);
 }
 
+/** The target list is a read-only hint, but an alias normalized by URL()
+ * must not satisfy explicit consent to a different raw navigation spelling.
+ * Preserve legitimate query strings; only reject raw authority rewrites and
+ * path dot-segments. This never establishes browser or page ownership.
+ */
+function unambiguousCdpHttpTarget(raw:string):boolean{
+ if(raw.length===0||raw.length>4096||raw.trim()!==raw||
+    /[\x00-\x1f\x7f\\]/.test(raw))return false;
+ const authority=/^https?:\/\/([^/?#]*)/i.exec(raw)?.[1];
+ if(!authority||/%|[^\x00-\x7f]/.test(authority))return false;
+ const rawPath=raw.split(/[?#]/,1)[0];
+ if(/\/(?:\.|%2e){1,2}(?=\/|$)/i.test(rawPath))return false;
+ try{
+  const url=new URL(raw);
+  const rawHost=authority.replace(/:[0-9]+$/,'');
+  return rawHost.toLowerCase()===url.hostname;
+ }catch{return false;}
+}
+
 export type CdpEnvelope =
   | {readonly ok:true; readonly status:'STRUCTURE_ONLY'; readonly browser:string;
      readonly websocketUrl:string;readonly path:string;readonly owned:false}
@@ -106,7 +125,7 @@ export function inspectCdpTargetList(
   // trim, strip or reinterpret before comparing against a CDP tab receipt.
   if(!Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535 ||
      typeof expectedUrl!=='string' || expectedUrl.length>4096 ||
-     expectedUrl.trim()!==expectedUrl||/[\x00-\x1f\x7f\\]/.test(expectedUrl) ||
+     !unambiguousCdpHttpTarget(expectedUrl) ||
      (createdTargetId!==undefined &&
       (typeof createdTargetId!=='string' ||
        !/^[a-zA-Z0-9_-]{8,128}$/.test(createdTargetId))))
@@ -126,7 +145,7 @@ export function inspectCdpTargetList(
     // never let an altered raw list URL appear to match an approved target.
     if(target.type!=='page'||typeof target.url!=='string'||
        target.url.length>4096||target.url.trim()!==target.url||
-       /[\x00-\x1f\x7f\\]/.test(target.url))continue;
+       !unambiguousCdpHttpTarget(target.url))continue;
     let actual:URL;
     try {actual=new URL(target.url);}
     catch {continue;}
