@@ -728,7 +728,10 @@ function browserControls():void{
    !chromeSelected||!profileSelected;
  if(inspectButton)inspectButton.disabled=controlsBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
- if(scenarioInspectId)scenarioInspectId.disabled=!browserConnected||controlsBusy||
+ // History is a native read-only view and does not require live Chrome.
+ // Keep scenario selection available offline; every live DOM/AI/export action
+ // still enforces its own browserConnected and native authorization gates.
+ if(scenarioInspectId)scenarioInspectId.disabled=controlsBusy||
    (scenarioInspectId.options.length<=1);
  if(scenarioInspectButton)scenarioInspectButton.disabled=!browserConnected||controlsBusy||
    (scenarioInspectId?.options.length??0)<=1;

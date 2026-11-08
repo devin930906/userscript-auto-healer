@@ -1620,3 +1620,46 @@ test('TASK-017/TEST-022: cancel request fences late inspection and export succes
   assert.equal(sandbox.manualExportBusy,false);
  }
 });
+
+
+test('TASK-017/TEST-002/022: offline history allows switching registered scenarios without enabling live browser actions', async () => {
+ const {runInNewContext}=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function browserControls():void{');
+ const end=ui.indexOf('async function browserAction(',start);
+ assert.ok(start>=0&&end>start,'must test the real renderer control policy');
+ const names=[
+  'chooseChromeButton','chooseProfileButton','createProfileButton','portInput',
+  'launchButton','inspectButton','stopButton','scenarioInspectId',
+  'scenarioInspectButton','scenarioRecheckStartButton','scenarioRecheckStopButton',
+  'scenarioCancelButton','scenarioHistoryButton','scenarioExportButton',
+  'aiReviewButton','gmStartButton','gmRunAtSelect','gmStatusButton',
+  'gmReportButton','gmVisitButtons','gmObserveButtons','gmStopButton'
+ ];
+ const sandbox:Record<string,unknown>=Object.fromEntries(names.map(name=>[name,null]));
+ const selector={disabled:true,value:'registered-A',options:[{},{}]};
+ const history={disabled:true},inspect={disabled:false},ai={disabled:false};
+ Object.assign(sandbox,{
+  browserBusy:false,stopInProgress:false,browserConnected:false,
+  chromeSelected:false,profileSelected:false,
+  scenarioHistoryBusy:false,scenarioInspectionBusy:false,manualExportBusy:false,
+  aiReviewPending:false,gmProbeActive:false,gmProbeStarting:false,gmStopInProgress:false,
+  recheckRunning:false,observedScenarioIds:new Set(['registered-A']),
+  gmVisitButtons:{},gmObserveButtons:{},
+  scenarioInspectId:selector,scenarioHistoryButton:history,
+  scenarioInspectButton:inspect,aiReviewButton:ai
+ });
+ const ts=await import('typescript');
+ const controls=ts.transpileModule(ui.slice(start,end)+'\nbrowserControls();',{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ runInNewContext(controls,sandbox);
+ assert.equal(selector.disabled,false,
+  'registered scenarios must remain selectable for offline-only history');
+ assert.equal(history.disabled,false,'read-only history remains available without Chrome');
+ assert.equal(inspect.disabled,true,'actual DOM access remains disabled without Chrome');
+ assert.equal(ai.disabled,true,'optional AI review cannot use a disconnected browser');
+ Object.assign(sandbox,{browserBusy:true});
+ runInNewContext('browserControls();',sandbox);
+ assert.equal(selector.disabled,true,'an active native browser operation still freezes selection');
+});
