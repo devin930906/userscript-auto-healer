@@ -610,6 +610,42 @@ test('TASK-014/017 TEST-015/022: AI review stays disabled until a real read-only
  assert.match(handler,/aiReviewPending=false;browserControls\(\)/);
 });
 
+/** TASK-017 / TEST-015/022: a past DOM observation does not make a
+ * disconnected browser a current AI review session. */
+test('TASK-017/014: disconnected Chrome cannot enable or dispatch AI review',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const controls=ui.slice(ui.indexOf('function browserControls():void{'),
+   ui.indexOf('async function browserAction('));
+ const assignment=controls.match(/if\\(aiReviewButton\\)aiReviewButton\\.disabled=[\\s\\S]*?;/)?.[0];
+ assert.ok(assignment,'real browserControls AI action gate');
+ let click:()=>void=()=>{throw Error('NO_HANDLER')};
+ const button={disabled:false,addEventListener:(_:string,fn:()=>void)=>{click=fn;}};
+ const scenarioInspectId={value:'scenario-A'};
+ const observedScenarioIds=new Set(['scenario-A']);
+ runInNewContext(assignment,{aiReviewButton:button,aiReviewPending:false,
+  browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  browserConnected:false,scenarioInspectId,observedScenarioIds});
+ assert.equal(button.disabled,true,'a past observation must not enable review after disconnect');
+ const start=ui.indexOf("aiReviewButton?.addEventListener('click'");
+ const end=ui.indexOf('// Selection changes retire only renderer presentation',start);
+ assert.ok(start>=0&&end>start,'real AI review click handler');
+ const js=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ let nativeCalls=0;
+ const result={textContent:''};
+ runInNewContext(js,{aiReviewButton:button,aiReviewPending:false,
+  aiReviewGeneration:0,browserBusy:false,stopInProgress:false,
+  scenarioInspectionBusy:false,browserConnected:false,scenarioInspectId,
+  observedScenarioIds,aiReviewResult:result,browserControls:()=>undefined,
+  window:{healer:{requestNativeAiReview:async()=>{nativeCalls++;return {ok:false};}}}});
+ click();
+ assert.equal(nativeCalls,0,'synthetic click must not cross disconnected browser gate');
+ assert.match(result.textContent,/Chrome|浏览器|连接/,'blocked user action needs explanation');
+});
+
 test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC frame URL', () => {
   const html = readFileSync(join(process.cwd(), 'app', 'ui', 'index.html'), 'utf8');
   const ui = readFileSync(join(process.cwd(), 'app', 'ui', 'index.ts'), 'utf8');
@@ -824,6 +860,7 @@ test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot rep
  runInNewContext(ui.slice(start,end),{
   aiReviewButton:button,aiReviewPending:false,aiReviewGeneration:0,
   browserBusy:false,stopInProgress:false,scenarioInspectionBusy:false,
+  browserConnected:true,
   scenarioInspectId:selector,observedScenarioIds:new Set(['scenario-A','scenario-B']),
   aiReviewResult:result,browserControls:()=>undefined,
   window:{healer:{requestNativeAiReview:(id:string)=>new Promise(resolve=>{
