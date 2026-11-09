@@ -1680,3 +1680,50 @@ test('TASK-017/TEST-002/022: offline history allows switching registered scenari
  runInNewContext('browserControls();',sandbox);
  assert.equal(selector.disabled,true,'an active native browser operation still freezes selection');
 });
+
+
+/** TASK-017 / TEST-022: a transient native GM status query failure is not
+ * evidence that the owned fixture has expired or been revoked. Preserve the
+ * active fixture and cleanup button; retire only when native session loss is
+ * explicitly confirmed. This exercises the actual renderer handler.
+ */
+test('TASK-017/TEST-022: transient GM status failure preserves active fixture and stop control',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmStatusButton?.addEventListener('click'");
+ const end=ui.indexOf("gmReportButton?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'use the actual renderer GM status handler');
+ const source=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ const links={textContent:'authorized temporary fixture links'};
+ const result={textContent:'fixture is active'};
+ let callback:(()=>void)|undefined;
+ let retired=0;
+ const sandbox:any={
+  gmStatusButton:{addEventListener:(type:string,fn:()=>void)=>{
+   if(type==='click')callback=fn;
+  }},
+  gmProbeGeneration:1,gmProbeActive:true,gmResult:result,
+  gmLinks:links,
+  browserAction:(fn:()=>Promise<void>)=>fn(),
+  window:{healer:{gmProbeStatus:async()=>({ok:false,code:'TEMPORARY_STATUS_IO_FAILURE'})}},
+  retireGmIfNativeSessionGone:(code:string)=>{
+   if(code!=='NO_ACTIVE_FIXTURE'&&code!=='SESSION_REVOKED')return false;
+   retired++;sandbox.gmProbeActive=false;links.textContent='';return true;
+  },
+  clearGmDisplay:(message:string)=>{
+   sandbox.gmProbeActive=false;links.textContent='';result.textContent=message;
+  }
+ };
+ runInNewContext(source,sandbox);
+ assert.ok(callback,'status handler registered');
+ callback();
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(retired,0,'transient failure must not retire session');
+ assert.equal(sandbox.gmProbeActive,true,'existing session remains stoppable');
+ assert.equal(links.textContent,'authorized temporary fixture links',
+  'do not erase the only instructions for cleanup on a query error');
+ assert.match(result.textContent,/失败|受阻|无法确认/);
+});
