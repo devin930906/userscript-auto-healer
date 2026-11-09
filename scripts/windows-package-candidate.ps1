@@ -467,6 +467,14 @@ $sum=Join-Path $out 'SHA256SUMS.txt'
  ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $exe)),
  ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $zip))
 ) | Set-Content -LiteralPath $sum -Encoding ascii
+# The checksum manifest must describe exactly the actual EXE and ZIP bytes.
+# Independently parse/re-hash before uploader acceptance; no extra files,
+# missing entries, mixed candidate source identities or aliases are allowed.
+. (Join-Path $PSScriptRoot 'windows-candidate-checksums.ps1')
+if(-not (Assert-CandidateChecksums $out (Split-Path -Leaf $exe) (Split-Path -Leaf $zip))) {
+ throw 'Candidate SHA-256 manifest attestation failed'
+}
+Write-Output 'PASS: independently verified candidate EXE/ZIP checksum manifest'
 Write-Output "CANDIDATE ONLY - NOT STABLE. Source: $sha"
 Write-Output 'PASS: Electron shell staged, extracted and installed; ZIP integrity and uninstall checks'
 Get-Content -LiteralPath $sum

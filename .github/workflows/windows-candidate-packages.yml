@@ -5,6 +5,8 @@ on:
     paths:
       - 'scripts/windows-package-candidate.ps1'
       - 'scripts/windows-portable-relocation.ps1'
+      - 'scripts/windows-candidate-checksums.ps1'
+      - 'scripts/test-windows-candidate-checksums.ps1'
       - 'scripts/test-windows-portable-relocation.ps1'
       - 'tests/**'
       - '.github/workflows/windows-candidate-packages.yml'
@@ -43,6 +45,9 @@ jobs:
       - name: Test real Windows portable relocation, file locks and no overwrite
         shell: pwsh
         run: ./scripts/test-windows-portable-relocation.ps1
+      - name: Verify Windows EXE and ZIP checksum manifest refusal cases
+        shell: pwsh
+        run: ./scripts/test-windows-candidate-checksums.ps1
       - name: Run registered regressions and compile the real app
         shell: pwsh
         run: npm test
