@@ -149,15 +149,20 @@ function produceFixtureSource(origin:string,token:string,scriptId:string,expires
  ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  " const selector=mode==='broken'?'#obsolete-target':'#current-target';",
- ' const target=document.querySelector(selector);',
+ // A hostile/instrumented DOM may throw during lookup or attribute mutation.
+ // Abort the diagnostic rather than report "missing" or "recovered" from an
+ // observation that never completed. No user script or site is modified here.
+ ' let target;',
+ ' try{target=document.querySelector(selector);}catch{return;}',
  ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
  ' let actionConfirmed=false;',
  ' if(target){',
- "  target.setAttribute('data-uah-probe-action','done');",
+ "  try{target.setAttribute('data-uah-probe-action','done');}catch{return;}",
  '  if(expired())return;',
   '  if(location.href!==expectedUrl)return;',
- "  actionConfirmed=target.getAttribute('data-uah-probe-action')==='done';",
+ "  try{actionConfirmed=target.getAttribute('data-uah-probe-action')==='done';}",
+ '  catch{return;}',
  ' }',
  ' if(expired())return;',
   ' if(location.href!==expectedUrl)return;',
