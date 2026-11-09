@@ -7,39 +7,33 @@
 import {lstat} from 'node:fs/promises';
 import {join,parse,resolve,sep} from 'node:path';
 
-export async function hasUnsafePathLink(path:string):Promise<boolean>{
-  // Refuse ambiguous lexical aliases instead of normalizing a consented path.
+/** Pure lexical guard shared by read-only native imports and backup/restore.
+ * A native picker pathname must never silently normalize into another name.
+ * This function performs no filesystem I/O or authorization. */
+export function hasUnsafePathSpelling(path:string):boolean{
   if(path!==resolve(path))return true;
-  // A Win32 extended (\\\\?\\) or device (\\\\.\\) namespace can point to the
-  // same selected file under a second absolute spelling. The prior component
-  // walk starts AFTER parse(path).root and therefore never inspected these
-  // roots. Refuse before lstat or creating source-path-derived recovery locks.
   if(process.platform==='win32'&&
      (path.startsWith(String.fromCharCode(92,92,63,92))||
       path.startsWith(String.fromCharCode(92,92,46,92))))return true;
   const root=parse(path).root;
+  return path.slice(root.length).split(sep).filter(Boolean).some(component=>{
+    // Colons in components can name alternate data streams. Drive letters
+    // belong to the parsed root, outside the component list.
+    if(component.includes(':'))return true;
+    if(process.platform==='win32'&&(
+       /[<>"|?*\u0000-\u001f]/.test(component)||
+       /^(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(component)||
+       component.endsWith('.')||component.endsWith(' ')))return true;
+    return false;
+  });
+}
+
+/** Reject lexical aliases before inspecting each link or junction ancestor. */
+export async function hasUnsafePathLink(path:string):Promise<boolean>{
+  if(hasUnsafePathSpelling(path))return true;
+  const root=parse(path).root;
   let current=root;
   for(const component of path.slice(root.length).split(sep).filter(Boolean)){
-    // A colon within a component can name an NTFS stream. A drive letter
-    // is already part of the parsed root and remains valid.
-    if(component.includes(':'))return true;
-    // Win32 forbids these component characters regardless of which native
-    // file API eventually receives the path. Reject before any lstat or
-    // source-derived lock lookup; callers need a stable fail-closed result.
-    if(process.platform==='win32'&&/[<>"|?*\u0000-\u001f]/.test(component))
-      return true;
-    // Device aliases (including extension suffixes) may resolve to Win32
-    // DOS device namespaces rather than the source path the user selected.
-    // Reject before any filesystem lookup or source-derived lock identity.
-    if(process.platform==='win32'&&
-       /^(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])(?:\.|$)/i.test(component))return true;
-    // Win32 APIs may resolve "folder." or "folder " to "folder" (without
-    // the explicit extended-path namespace). Their spelling can therefore
-    // bypass source-path-derived backup identities or cooperative mutexes.
-    // Reject those ambiguous ancestors before lstat follows an alias.
-    // Hidden names such as ".config" and interior spaces remain legitimate.
-    if(process.platform==='win32'&&
-       (component.endsWith('.')||component.endsWith(' ')))return true;
     current=join(current,component);
     if((await lstat(current,{bigint:true})).isSymbolicLink())return true;
   }
