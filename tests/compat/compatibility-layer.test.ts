@@ -197,3 +197,28 @@ test('TASK-016/TEST-025/026: zero-width formatting is rejected in shared locator
     assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   }
 });
+
+
+test('TASK-016/TEST-025/026: Arabic and left/right direction marks cannot disguise shared selectors',()=>{
+  // U+061C ARABIC LETTER MARK and U+200E/U+200F LRM/RLM are
+  // bidirectional formatting controls, not visible selector characters.
+  // They must not enter active mappings or a future offline preview.
+  const marks=['\u061c','\u200e','\u200f'];
+  for(const mark of marks){
+    const disguised='#new-submit'+mark;
+    const active={...initial,bindings:[
+      {...initial.bindings[0],selector:disguised},initial.bindings[1]
+    ]};
+    assert.throws(()=>new LimitedCompatibilityLayer(active),/INVALID_COMPAT_BINDING/,
+      'an invisible direction mark cannot be included in active selector metadata');
+    const layer=new LimitedCompatibilityLayer(initial);
+    const rejected=layer.previewUpgrade({...newer,bindings:[
+      {...newer.bindings[0],selector:disguised},newer.bindings[1]
+    ]},checks);
+    assert.equal(rejected.status,'BLOCKED',
+      'a direction-controlled shared selector must not enter offline preview');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit',
+      'all current shared-script mappings must remain pinned');
+  }
+});
