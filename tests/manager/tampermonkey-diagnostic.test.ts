@@ -823,8 +823,9 @@ test('TASK-007/TEST-017/026: desktop GM fixture status cannot revive after nativ
   try{
     Date.now=()=>now;
     const nativeSession={expiresAt:expiry,isActive:active};
-    assert.equal(getStatus(nativeSession),true,
-      'a live native consent window remains visible');
+    assert.equal(active(),true,'the standalone consent window is not yet expired');
+    assert.equal(getStatus(nativeSession),false,
+      'a standalone window cannot impersonate an app-owned diagnostic session');
     Date.now=()=>expiry+1;
     assert.equal(getStatus(nativeSession),false,
       'expired native consent immediately removes the desktop session');
@@ -870,6 +871,18 @@ test('TASK-007/TEST-017/026: desktop diagnostic lease lookup never invokes hosti
  assert.equal(check(untrusted),false,
   'an unregistered plain callback must not execute or authorize diagnostics');
  assert.equal(callbackCalls,0,'unregistered callback must never execute');
- assert.equal(check(guarded),true,'registered native consent lease stays supported');
+ assert.equal(check(guarded),false,
+  'a public consent-window factory must not register an app-owned session');
  assert.equal(callbackCalls,0);
+});
+
+test('TASK-007/TEST-017/026: public consent helper cannot mint native desktop diagnostic provenance',()=>{
+ const {isCurrentManualDiagnosticSession:check}=
+  require('../../src/manager/tampermonkey-diagnostic') as
+  typeof import('../../src/manager/tampermonkey-diagnostic');
+ const deadline=Date.now()+60000;
+ const minted=createManualDiagnosticConsentWindow(deadline,60000,performance.now());
+ assert.equal(minted(),true,'time-bound standalone consent is still usable by direct callers');
+ assert.equal(check({expiresAt:deadline,isActive:minted}),false,
+  'only a callback from a real started diagnostic may attest native session activity');
 });
