@@ -99,6 +99,14 @@ export function markLimitedSessionArchiveUnavailable(
      Reflect.ownKeys(Object.getOwnPropertyDescriptors(source)).length!==length+1)
    return blocked();
   const events:{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[]=[];
+  // An unavailable persisted archive cannot justify displaying an impossible
+  // chronology. Match the existing five-minute future skew of the bounded
+  // archive merge; evaluate the wall clock only once for this projection.
+  const now=Date.now();
+  const futureSkewMs=5*60*1000;
+  if(!Number.isSafeInteger(now)||now<0||
+     now>Number.MAX_SAFE_INTEGER-futureSkewMs)return blocked();
+  const maxObservedAtMs=now+futureSkewMs;
   let previous=-1;
   for(let i=0;i<length;i++){
    const slot=Object.getOwnPropertyDescriptor(source,String(i));
@@ -113,6 +121,8 @@ export function markLimitedSessionArchiveUnavailable(
       !Object.prototype.hasOwnProperty.call(row.observedAtMs??{},'value')||
       !Object.prototype.hasOwnProperty.call(row.status??{},'value')||
       !Number.isSafeInteger(row.observedAtMs.value)||
+      row.observedAtMs.value<0||
+      row.observedAtMs.value>maxObservedAtMs||
       row.observedAtMs.value<previous||
       (row.status.value!=='ELEMENT_FOUND_ONLY'&&row.status.value!=='INDETERMINATE'))
     return blocked();
