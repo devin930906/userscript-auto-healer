@@ -721,6 +721,23 @@ try {
     if($outsideShare -cne 'scan=unavailable stage=manifest-scope') {
       throw 'Share probe did not distinguish out-of-scope input without exposing a path'
     }
+    # TASK-020 / TEST-028: this native diagnostic must not silently
+    # interpret an ambiguous drive-rooted path against the caller's drive.
+    # Such a spelling can resolve to a real candidate tree even though it
+    # does not identify an independent absolute file-system path.
+    $sourceRootedRelative=$permanent.Substring(2)
+    $fileRootedRelative=$permanentFile.Substring(2)
+    if(-not $sourceRootedRelative.StartsWith('\') -or
+       -not $fileRootedRelative.StartsWith('\')) {
+      throw 'TEST-028 expected drive-rooted-relative Windows fixtures'
+    }
+    $ambiguousSource=Get-CandidatePortableFileShareSummary $sourceRootedRelative @($permanentFile)
+    $ambiguousFile=Get-CandidatePortableFileShareSummary $permanent @($fileRootedRelative)
+    if($ambiguousSource -cne 'scan=unavailable stage=input' -or
+       $ambiguousFile -cne 'scan=unavailable stage=manifest-scope') {
+      throw "TEST-028 ambiguous file-sharing diagnostic paths must fail closed: source=[$ambiguousSource] file=[$ambiguousFile]"
+    }
+    Write-Output 'PASS: file-sharing diagnostic rejects ambiguous drive-rooted-relative source and file inputs'
     # ISSUE-215: the real post-Electron failure currently reports
     # scan=unavailable, discarding the stage needed to locate the limitation.
     # Force a read-only enumeration failure without changing candidate files;
