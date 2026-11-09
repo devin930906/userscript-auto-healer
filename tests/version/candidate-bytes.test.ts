@@ -103,3 +103,37 @@ test('TEST-020/026: candidate receipt snapshots expected bytes before asynchrono
    'a later caller mutation must never turn unapproved bytes into MATCH');
  });
 });
+
+test('TASK-011/TEST-020/026: Buffer own length accessor cannot execute in native candidate verification',async()=>{
+ await inTemporaryDirectory(async(root)=>{
+  const file=join(root,'reviewed.candidate.user.js');
+  await writeFile(file,Buffer.from('trusted'));
+  const expected=Buffer.from('trusted');
+  let getterCalls=0;
+  Object.defineProperty(expected,'length',{
+   configurable:true,
+   get(){getterCalls++;return 7;}
+  });
+  assert.equal(await verifyExactCandidateBytesReadOnly(file,expected),'CHANGED',
+   'an ambiguous caller-supplied byte length must not be trusted');
+  assert.equal(getterCalls,0,
+   'privileged native receipt must not call a Buffer own length getter');
+  assert.equal(await verifyExactCandidateBytesReadOnly(file,Buffer.from('trusted')),'MATCH');
+ });
+});
+
+test('TASK-011/TEST-020/026: candidate byte snapshot never runs caller Symbol.iterator hooks',async()=>{
+ await inTemporaryDirectory(async(root)=>{
+  const file=join(root,'reviewed.candidate.user.js');
+  const expected=Buffer.from('trusted');
+  await writeFile(file,expected);
+  let iteratorCalls=0;
+  Object.defineProperty(expected,Symbol.iterator,{
+   configurable:true,
+   value(){iteratorCalls++;throw Error('PRIVATE_UNTRUSTED_BUFFER_ITERATOR');}
+  });
+  assert.equal(await verifyExactCandidateBytesReadOnly(file,expected),'MATCH',
+   'native buffer bytes must be read without executing an iterator hook');
+  assert.equal(iteratorCalls,0);
+ });
+});
