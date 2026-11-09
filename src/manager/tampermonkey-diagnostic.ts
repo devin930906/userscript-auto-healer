@@ -235,6 +235,11 @@ export interface ManualTampermonkeyDiagnosticSession {
  /** Closes only the disposable fixture, NOT the separately owned Chrome. */
  readonly stop:()=>Promise<void>;
 }
+// Only application-created consent windows and owned diagnostic session leases
+// may be invoked by desktop status checks; ordinary callable properties are
+// untrusted even when they are not Proxy wrappers or accessor descriptors.
+const registeredDiagnosticLeases=new WeakSet<()=>boolean>();
+
 /** Desktop activity must follow the same native monotonic consent and browser
  * ownership decision as visit()/observe(), not wall time alone.
  * This is only an ephemeral lifecycle check, NEVER GM/business attestation.
@@ -257,7 +262,8 @@ export function isCurrentManualDiagnosticSession(
    return false;
   const deadline:unknown=expiresAt.value;
   if(typeof deadline!=='number'||!Number.isSafeInteger(deadline)||deadline<0||
-     typeof isActive.value!=='function'||isProxy(isActive.value))
+     typeof isActive.value!=='function'||isProxy(isActive.value)||
+     !registeredDiagnosticLeases.has(isActive.value as ()=>boolean))
    return false;
   // Always consult the native monotonic lease before the wall-clock check.
   // Its expiry is sticky: skipping it at the deadline could allow a later
@@ -505,7 +511,7 @@ export function createManualDiagnosticConsentWindow(
  expiresAt:number,ttlMs:number,startedAt:number
 ):()=>boolean{
  let revoked=false;
- return ()=>{
+ const active=()=>{
   if(revoked)return false;
   const wallNow=Date.now();
   const elapsed=performance.now()-startedAt;
@@ -515,6 +521,8 @@ export function createManualDiagnosticConsentWindow(
      wallNow>=expiresAt||elapsed>=ttlMs)revoked=true;
   return !revoked;
  };
+ registeredDiagnosticLeases.add(active);
+ return active;
 }
 
 /** Requires a live owned Chrome and a real CDP runtime hint before listening.
@@ -568,6 +576,7 @@ export async function startApprovedTampermonkeyDiagnostic(
    probe.expiresAt,ttlMs,fixtureStartedAt);
  const ready=()=>!stopped&&!sessionSignal.aborted&&
    consentActive()&&isLiveApprovedChromeSession(browser);
+ registeredDiagnosticLeases.add(ready);
  let stopping:Promise<void>|undefined;
  const stop=():Promise<void>=>{
    if(stopping)return stopping;
