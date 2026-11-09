@@ -74,6 +74,7 @@ interface Window {
     readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
       currentStatus?:'UNTESTED'|'ELEMENT_FOUND_ONLY'|'INDETERMINATE';
       archiveRetained?:boolean;
+      archiveUnavailable?:true;
       events?:readonly {observedAtMs:number;
         status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[];
       tampermonkeyVerified:false;businessVerified:false;
@@ -787,7 +788,9 @@ scenarioHistoryButton?.addEventListener('click',()=>{
   if(scenarioHistorySummary)scenarioHistorySummary.textContent='当前状态：'+(
    view.currentStatus==='ELEMENT_FOUND_ONLY'?'仅观察到元素存在':
    view.currentStatus==='INDETERMINATE'?'证据不足／已过期':'尚未观察')+
-   '；'+(view.archiveRetained?'本机持久的未验证历史':'当前窗口的有限历史')+
+   '；'+(view.archiveUnavailable?
+    '本机持久历史暂无法读取，以下仅为当前窗口的观察；旧记录可能存在。':
+    view.archiveRetained?'本机持久的未验证历史':'当前窗口的有限历史')+
    '共 '+view.events.length+' 条（最多 32 条）。旧历史不作为当前健康认证，也不证明脚本或业务正常。';
   for(const event of view.events){
    const row=document.createElement('li');
