@@ -64,3 +64,9 @@ test('TEST-020/026: Windows trailing dot/space ancestor aliases are rejected',as
   assert.deepEqual(await readFile(source),bytes,'boundary does not alter source');
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('TASK-011/TEST-020/026: embedded NUL is refused before native file lookup',async()=>{
+ const invalid=join(tmpdir(),'selected'+String.fromCharCode(0)+'-script.user.js');
+ assert.equal(await hasUnsafePathLink(invalid),true,
+  'a NUL pathname must return a fail-closed result, not reject with a native filesystem exception');
+});
