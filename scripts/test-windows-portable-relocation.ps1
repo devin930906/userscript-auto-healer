@@ -659,6 +659,41 @@ try {
      [IO.File]::ReadAllText($controlPayload) -cne 'still-original') {
     throw "Candidate ACL diagnostics changed payload or returned invalid evidence: $aclEvidence"
   }
+  # TASK-020 / ISSUE-215 / TEST-028: Windows treats a single-rooted path
+  # (\\folder) as rooted but NOT fully qualified. GetFullPath can silently
+  # map it to the current drive's real runner directory. An ACL diagnostic
+  # must refuse that alias BEFORE querying any candidate ACL metadata.
+  $aclRealRunner=$env:RUNNER_TEMP
+  $controlVolume=[IO.Path]::GetPathRoot($controlSource)
+  $runnerVolume=[IO.Path]::GetPathRoot($aclRealRunner)
+  if(-not [string]::Equals($controlVolume,$runnerVolume,
+     [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'TEST-028: disposable ACL fixture must reside on runner volume'
+  }
+  $ambiguousSource='\'+$controlSource.Substring($controlVolume.Length)
+  $ambiguousRunner='\'+$aclRealRunner.Substring($runnerVolume.Length)
+  if(-not [IO.Path]::IsPathRooted($ambiguousSource) -or
+     [IO.Path]::IsPathFullyQualified($ambiguousSource) -or
+     -not [IO.Path]::IsPathRooted($ambiguousRunner) -or
+     [IO.Path]::IsPathFullyQualified($ambiguousRunner)) {
+    throw 'TEST-028: Windows rooted-relative ACL fixture was not ambiguous'
+  }
+  Push-Location -LiteralPath $controlParent
+  try {
+    $sourceDenied=Get-CandidatePortableRenameAclSummary $ambiguousSource
+    $env:RUNNER_TEMP=$ambiguousRunner
+    $runnerDenied=Get-CandidatePortableRenameAclSummary $controlSource
+  } finally {
+    $env:RUNNER_TEMP=$aclRealRunner
+    Pop-Location
+  }
+  if($sourceDenied -cne 'acl=unavailable' -or
+     $runnerDenied -cne 'acl=unavailable' -or
+     [IO.File]::ReadAllText($controlPayload) -cne 'still-original') {
+    throw ("TEST-028: ACL diagnostic accepted rooted-relative authority source={0} runner={1}" -f
+      $sourceDenied,$runnerDenied)
+  }
+  Write-Output 'PASS: candidate ACL diagnostic refuses rooted-relative source and RUNNER_TEMP'
   $outsideAcl=Get-CandidatePortableRenameAclSummary (Join-Path $root 'outside-unknown')
   if($outsideAcl -cne 'acl=unavailable') { throw 'ACL diagnostic accepted unknown candidate path' }
   $aclFailure=& {
