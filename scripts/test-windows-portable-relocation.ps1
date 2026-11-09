@@ -820,7 +820,7 @@ try {
       $permanent.Substring($rmPathRoot.Length)
     $fileRoot=[string][IO.Path]::DirectorySeparatorChar+
       $permanentFile.Substring($rmPathRoot.Length)
-    $oldRmGuard=Get-Item Function:\Assert-CandidatePortableNoReparsePath
+    $oldRmGuard=(Get-Item Function:\Assert-CandidatePortableNoReparsePath).ScriptBlock
     $script:rmInvalidReachedGuard=$false
     Push-Location -LiteralPath $permanent
     try {
@@ -844,7 +844,7 @@ try {
       }
     } finally {
       $env:RUNNER_TEMP=$runnerAbs
-      Set-Item Function:\Assert-CandidatePortableNoReparsePath -Value $oldRmGuard.ScriptBlock
+      Set-Item Function:\Assert-CandidatePortableNoReparsePath -Value $oldRmGuard
       Remove-Variable rmInvalidReachedGuard -Scope Script -ErrorAction SilentlyContinue
       Pop-Location
     }
@@ -866,7 +866,7 @@ try {
       if($batchRm -cnotmatch 'coverage=\[batches=2 sampled=41 total=41 complete=true extraAffectedObservations=([0-9]+) unavailableBatches=0\]' -or
          [int]$Matches[1] -lt 1 -or
          $batchRm.Contains($batchRoot)) {
-        throw 'Restart Manager did not observe exclusively locked last candidate file in later batch'
+        throw ('Restart Manager did not observe exclusively locked last candidate file in later batch: '+$batchRm)
       }
       # RED TASK-020/TEST-028: an association exclusively in the next
       # 40-file RM batch must reach the privacy-safe per-file diagnostic.
