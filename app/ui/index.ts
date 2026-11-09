@@ -1236,6 +1236,9 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
     '。原有测试服务可能仍在运行；可重试查看或主动关闭。未取得新的 GM 或业务验证。';
   return;
  }
+ // Preserve three states: a missing self-report is not a negative receipt.
+ const selfReported=(value:boolean|null|undefined)=>
+  value===true?'是':value===false?'否':'未报告';
  const renderModeReport=(mode:'broken'|'fixed')=>{
    const report=mode==='broken'?result.brokenReport:result.fixedReport;
    if(!report)return mode+'：状态无法确认';
@@ -1248,10 +1251,10 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
   };
   if(gmResult)gmResult.textContent=renderModeReport('broken')+'；'+
     renderModeReport('fixed')+'。报告模式数：'+(result.observedModes??0)+
-   '；自报 GM 默认值匹配：'+Boolean(result.reportedGmDefaultMatched)+
-   '；自报 GM 存储写入读回：'+Boolean(result.reportedGmStorageRoundtripMatched)+
-   '；自报 broken 失败：'+Boolean(result.reportedBrokenFailed)+
-   '；自报 fixed 动作：'+Boolean(result.reportedFixedRecovered)+
+   '；自报 GM 默认值匹配：'+selfReported(result.reportedGmDefaultMatched)+
+   '；自报 GM 存储写入读回：'+selfReported(result.reportedGmStorageRoundtripMatched)+
+   '；自报 broken 失败：'+selfReported(result.reportedBrokenFailed)+
+   '；自报 fixed 动作：'+selfReported(result.reportedFixedRecovered)+
    '；独立 DOM 对照：'+(result.consistencyStatus??'UNKNOWN')+
    '（已比较 '+(result.comparedModes??0)+' 组；broken 动作 '+
    (result.brokenDomAction??'未观察')+'、fixed 动作 '+
