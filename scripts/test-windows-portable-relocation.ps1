@@ -803,6 +803,52 @@ try {
     if($rmDirectory -cne 'rm=unavailable') {
       throw 'Restart Manager accepted a directory instead of a file'
     }
+    # TASK-020 / TEST-028: Restart Manager accepts only fully qualified
+    # native runner/source/file paths. Windows rooted paths such as \foo and
+    # drive-relative paths can be silently resolved against current location;
+    # they are not independent evidence of a verified disposable candidate.
+    # Trap the reparse guard to assert invalid paths are rejected BEFORE any
+    # candidate file inspection or native Restart Manager session.
+    $rmPathRoot=[IO.Path]::GetPathRoot($permanent)
+    if($rmPathRoot.Length -ne 3 -or $rmPathRoot[1] -cne ':') {
+      throw 'TEST-028 RM partial-path test requires a Windows drive-backed runner'
+    }
+    $runnerAbs=[string]$env:RUNNER_TEMP
+    $runnerRoot=[string][IO.Path]::DirectorySeparatorChar+
+      $runnerAbs.Substring($rmPathRoot.Length)
+    $sourceRoot=[string][IO.Path]::DirectorySeparatorChar+
+      $permanent.Substring($rmPathRoot.Length)
+    $fileRoot=[string][IO.Path]::DirectorySeparatorChar+
+      $permanentFile.Substring($rmPathRoot.Length)
+    $oldRmGuard=(Get-Item Function:\Assert-CandidatePortableNoReparsePath).ScriptBlock
+    $script:rmInvalidReachedGuard=$false
+    Push-Location -LiteralPath $permanent
+    try {
+      Set-Item Function:\Assert-CandidatePortableNoReparsePath -Value {
+        param([string]$runner,[string]$path)
+        $script:rmInvalidReachedGuard=$true
+        throw 'INVALID_RM_PATH_REACHED_FILE_INSPECTION'
+      }
+      foreach($case in @(
+        @{name='runner-root-relative';runner=$runnerRoot;source=$permanent;file=$permanentFile},
+        @{name='source-root-relative';runner=$runnerAbs;source=$sourceRoot;file=$permanentFile},
+        @{name='file-root-relative';runner=$runnerAbs;source=$permanent;file=$fileRoot}
+      )) {
+        $script:rmInvalidReachedGuard=$false
+        $env:RUNNER_TEMP=$case.runner
+        $answer=Get-CandidatePortableRestartManagerSummary $case.source @($case.file)
+        if($answer -cne 'rm=unavailable' -or $script:rmInvalidReachedGuard) {
+          throw ('TEST-028: rooted-but-relative '+$case.name+
+            ' reached runner inspection or native RM instead of early refusal')
+        }
+      }
+    } finally {
+      $env:RUNNER_TEMP=$runnerAbs
+      Set-Item Function:\Assert-CandidatePortableNoReparsePath -Value $oldRmGuard
+      Remove-Variable rmInvalidReachedGuard -Scope Script -ErrorAction SilentlyContinue
+      Pop-Location
+    }
+    Write-Output 'PASS: RM diagnostic rejects rooted-but-relative runner, source and file paths before inspection'
     Write-Output 'PASS: Restart Manager observes a real Windows lock with candidate-only read scope'
     # ISSUE-215: a real exclusive lock at the END of a 41-file manifest.
     # The original first-40-file RM sample cannot see this lock.
@@ -820,7 +866,7 @@ try {
       if($batchRm -cnotmatch 'coverage=\[batches=2 sampled=41 total=41 complete=true extraAffectedObservations=([0-9]+) unavailableBatches=0\]' -or
          [int]$Matches[1] -lt 1 -or
          $batchRm.Contains($batchRoot)) {
-        throw 'Restart Manager did not observe exclusively locked last candidate file in later batch'
+        throw ('Restart Manager did not observe exclusively locked last candidate file in later batch: '+$batchRm)
       }
       # RED TASK-020/TEST-028: an association exclusively in the next
       # 40-file RM batch must reach the privacy-safe per-file diagnostic.

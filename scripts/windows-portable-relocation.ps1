@@ -314,7 +314,21 @@ function Get-CandidatePortableRestartManagerSummary(
        [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
        $null -eq $filePaths -or $filePaths.Count -lt 1 -or
        $filePaths.Count -gt 512 -or
-       -not [IO.Path]::IsPathRooted($source)) { return 'rm=unavailable' }
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
+      return 'rm=unavailable'
+    }
+    # Validate the entire file manifest before any source ancestry or native
+    # file inspection; a later invalid entry must not partially probe earlier
+    # entries or cause cwd-based path resolution.
+    foreach($candidateFile in $filePaths) {
+      if([string]::IsNullOrWhiteSpace($candidateFile) -or
+         -not [IO.Path]::IsPathFullyQualified($candidateFile)) {
+        return 'rm=unavailable'
+      }
+    }
+    # A rooted but drive-/cwd-relative path is not authenticated candidate
+    # identity. Refuse it before GetFullPath or any native RM inspection.
     $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@([char]92,[char]47))
     $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@([char]92,[char]47))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
@@ -326,7 +340,7 @@ function Get-CandidatePortableRestartManagerSummary(
     $paths=[Collections.Generic.List[string]]::new()
     foreach($file in $filePaths) {
       if([string]::IsNullOrWhiteSpace($file) -or
-         -not [IO.Path]::IsPathRooted($file)) { return 'rm=unavailable' }
+         -not [IO.Path]::IsPathFullyQualified($file)) { return 'rm=unavailable' }
       $full=[IO.Path]::GetFullPath($file)
       if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
          -not [IO.File]::Exists($full)) { return 'rm=unavailable' }
