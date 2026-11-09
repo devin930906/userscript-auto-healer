@@ -336,6 +336,35 @@ test('TASK-008/TEST-013: main-frame confirmation rejects raw dot-segment aliases
    'case and explicitly specified default ports remain supported');
  });
 
+// TASK-008 / REQ-013 / TEST-013/026: Page.getFrameTree has the same
+// authority-sensitive success-envelope boundary as create/close target.
+ // Additional top-level or result fields are ambiguous; the real frameTree
+// may still include normal CDP childFrames and frame metadata.
+test('TASK-008/TEST-013/026: main-frame receipt rejects extra success envelopes without rejecting legitimate tree metadata',()=>{
+ const classify=moduleUnderTest.classifyMainFrameResponse;
+ assert.equal(typeof classify,'function');
+ if(!classify)return;
+ const url='http://127.0.0.1:9191/fixture';
+ const frame={id:'0123456789abcdef0123456789abcdef',url,
+   securityOrigin:'http://127.0.0.1:9191',mimeType:'text/html'};
+ const tree={frame,childFrames:[{frame:{
+   id:'fedcba9876543210fedcba9876543210',
+   parentId:frame.id,url:'about:blank'}}]};
+ assert.equal(classify(JSON.stringify({id:1,result:{frameTree:tree}}),url),
+   'MAIN_FRAME_CONFIRMED','legitimate frame metadata and nested child frames stay supported');
+ for(const extra of [null,false,0,'',{},[]]){
+   assert.equal(classify(JSON.stringify({
+     id:1,result:{frameTree:tree,unexpected:extra}}),url),
+     'MAIN_FRAME_RESPONSE_INVALID','unexpected result attributes may not confirm frame');
+   assert.equal(classify(JSON.stringify({
+     id:1,result:{frameTree:tree},unexpected:extra}),url),
+     'MAIN_FRAME_RESPONSE_INVALID','unexpected top-level fields may not confirm frame');
+ }
+ assert.equal(classify(JSON.stringify({
+   id:47,result:{frameTree:tree},unexpected:'PRIVATE'}),url),null,
+   'different CDP message ids remain unrelated and ignored');
+});
+
 test('TASK-008/TEST-013/026: create and close receipts reject ambiguous success envelopes',()=>{
  const created=moduleUnderTest.readCreatedTargetReceipt;
  const closed=moduleUnderTest.readClosedTargetReceipt;
