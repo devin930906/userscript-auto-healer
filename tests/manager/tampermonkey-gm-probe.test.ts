@@ -261,6 +261,33 @@ test('TEST-017: document-start expired while parsing never mutates DOM or report
  handler?.();
  assert.deepEqual(effects,{gm:1,query:0,report:0});
 });
+test('TASK-007/TEST-017/018/026: throwing fixture DOM APIs cannot report false evidence',async t=>{
+ const started=await startIsolatedTampermonkeyGmProbe(true,30000);
+ assert.equal(started.ok,true);
+ if(!started.ok)return;
+ const probe=started.session;
+ t.after(()=>probe.stop());
+ for(const throwAt of ['query','set','get'] as const){
+  const effects={report:0,actions:0};
+  const target={
+   setAttribute:()=>{effects.actions++;if(throwAt==='set')throw Error('DOM_SET_DENIED');},
+   getAttribute:()=>{if(throwAt==='get')throw Error('DOM_READ_DENIED');return 'done';}
+  };
+  assert.doesNotThrow(()=>runInNewContext(probe.source,{
+   Date:class extends Date{static now(){return probe.expiresAt-1000;}},URL,
+   location:{origin:probe.origin,href:probe.origin+'/?mode=fixed'},
+   document:{readyState:'complete',querySelector:()=>{
+    if(throwAt==='query')throw Error('DOM_QUERY_DENIED');
+    return target;
+   }},
+   GM_getValue:(_key:string,fallback:string)=>fallback,
+   fetch:()=>{effects.report++;return Promise.resolve();}
+  }),throwAt);
+  assert.equal(effects.report,0,throwAt+' must remain unverified, never false success');
+ }
+ assert.deepEqual(probe.receiptSnapshot(),{},'VM simulation does not produce authenticated receipts');
+});
+
 test('TEST-018: fixed-mode action must be read back, not inferred from selector existence',async t=>{
  const started=await startIsolatedTampermonkeyGmProbe(true,30000);
  assert.equal(started.ok,true);
