@@ -70,14 +70,62 @@ export function readLimitedSessionHistory(
 export function markLimitedSessionArchiveUnavailable(
  current:LimitedHistoryView
 ):LimitedHistoryView{
- if(!current.ok||current.events.length===0)return Object.freeze({
+ const blocked=():LimitedHistoryView=>Object.freeze({
   ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...noAuthority
  });
- return Object.freeze({
-  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
-  currentStatus:current.currentStatus,events:current.events,
-  archiveUnavailable:true as const,...noAuthority
- });
+ try{
+  // Public TypeScript annotations do not authenticate runtime callers.
+  // Never evaluate untrusted accessors or Proxy traps while projecting a
+  // native history result into the renderer's limited diagnostic view.
+  if(!current||typeof current!=='object'||nodeTypes.isProxy(current)||
+     Array.isArray(current))return blocked();
+  const fields=Object.getOwnPropertyDescriptors(current);
+  const read=(key:string):unknown=>{
+   const descriptor=fields[key];
+   if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))
+    throw Error('INVALID_LIMITED_HISTORY_VIEW');
+   return descriptor.value;
+  };
+  const status=read('status');
+  const currentStatus=read('currentStatus');
+  const source=read('events');
+  if(read('ok')!==true||status!=='UNVERIFIED_SESSION_HISTORY_ONLY'||
+     (currentStatus!=='UNTESTED'&&currentStatus!=='ELEMENT_FOUND_ONLY'&&
+      currentStatus!=='INDETERMINATE')||
+     !Array.isArray(source)||nodeTypes.isProxy(source)||
+     Object.getPrototypeOf(source)!==Array.prototype)return blocked();
+  const length=Object.getOwnPropertyDescriptor(source,'length')?.value;
+  if(!Number.isSafeInteger(length)||length<1||length>32||
+     Reflect.ownKeys(Object.getOwnPropertyDescriptors(source)).length!==length+1)
+   return blocked();
+  const events:{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[]=[];
+  for(let i=0;i<length;i++){
+   const slot=Object.getOwnPropertyDescriptor(source,String(i));
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return blocked();
+   const item:unknown=slot.value;
+   if(!item||typeof item!=='object'||Array.isArray(item)||nodeTypes.isProxy(item))
+    return blocked();
+   const proto=Object.getPrototypeOf(item);
+   if(proto!==Object.prototype&&proto!==null)return blocked();
+   const row=Object.getOwnPropertyDescriptors(item);
+   if(Reflect.ownKeys(row).length!==2||
+      !Object.prototype.hasOwnProperty.call(row.observedAtMs??{},'value')||
+      !Object.prototype.hasOwnProperty.call(row.status??{},'value')||
+      !Number.isSafeInteger(row.observedAtMs.value)||
+      row.observedAtMs.value<0||
+      (row.status.value!=='ELEMENT_FOUND_ONLY'&&row.status.value!=='INDETERMINATE'))
+    return blocked();
+   events.push(Object.freeze({
+    observedAtMs:row.observedAtMs.value as number,
+    status:row.status.value as 'ELEMENT_FOUND_ONLY'|'INDETERMINATE'
+   }));
+  }
+  return Object.freeze({
+   ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+   currentStatus,events:Object.freeze(events),
+   archiveUnavailable:true as const,...noAuthority
+  });
+ }catch{return blocked();}
 }
 
 /** TypeScript discriminants cannot authenticate records provided directly to

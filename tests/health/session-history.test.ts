@@ -1247,6 +1247,41 @@ test('TASK-015/TEST-024: blocked durable archive is visibly unavailable without 
  assert.match(ui,/archiveUnavailable/,
   'the renderer must disclose the unavailable durable history rather than imply no archive exists');
 });
+test('TASK-015/TEST-024/026: unavailable archive projection rejects hostile getters and proxies without execution',()=>{
+ const feature=require('../../src/health/session-history') as {
+  markLimitedSessionArchiveUnavailable:(value:unknown)=>unknown
+ };
+ const project=feature.markLimitedSessionArchiveUnavailable;
+ const blocked={ok:false,code:'HISTORY_UNAVAILABLE',
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false};
+ let invoked=0;
+ const accessor={ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:'ELEMENT_FOUND_ONLY',
+  get events(){invoked++;throw Error('HOSTILE_EVENT_GETTER');}};
+ assert.deepEqual(project(accessor),blocked);
+ assert.equal(invoked,0,'do not evaluate caller-owned history accessor');
+ const proxy=new Proxy({ok:true,events:[]},{get(){invoked++;throw Error('PROXY_GET');}});
+ assert.deepEqual(project(proxy),blocked);
+ assert.equal(invoked,0,'do not dispatch Proxy traps');
+ const maliciousEvent={observedAtMs:1000,
+  get status(){invoked++;throw Error('HOSTILE_ROW_GETTER');}};
+ const history={ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:'ELEMENT_FOUND_ONLY',events:[maliciousEvent]};
+ assert.deepEqual(project(history),blocked);
+ assert.equal(invoked,0,'never read event accessors');
+ const safe={ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:'INDETERMINATE',
+  events:[{observedAtMs:1000,status:'INDETERMINATE'}]};
+ const projected=project(safe) as {ok:boolean;events:unknown[]};
+ assert.equal(projected.ok,true);
+ assert.ok(Object.isFrozen(projected));
+ assert.ok(Object.isFrozen(projected.events));
+ assert.ok(Object.isFrozen(projected.events[0]));
+ assert.notEqual(projected.events,safe.events,
+  'renderer must receive sanitized copies, not caller-owned rows');
+});
+
 function awaitedMain():string{
  return require('node:fs').readFileSync(require('node:path').join(process.cwd(),'app/main/index.ts'),'utf8');
 }
