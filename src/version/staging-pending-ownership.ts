@@ -58,6 +58,7 @@ export async function removeOwnedStagingPending(
    const final=await lstat(published,{bigint:true});
    if(!final.isFile()||final.isSymbolicLink()||
       current.nlink!==2n||final.nlink!==2n||
+      current.mode!==owned.mode||final.mode!==owned.mode||
       !sameBytes(current,final)||!sameBytes(final,owned))return false;
    // Creating the hard link updates ctime, which must not equal owned.ctimeNs.
   }else if(current.nlink!==1n||current.ctimeNs!==owned.ctimeNs){
@@ -71,7 +72,8 @@ export async function removeOwnedStagingPending(
    // This second snapshot narrows, but cannot eliminate, pathname races.
    const remaining=await lstat(published,{bigint:true});
    if(!remaining.isFile()||remaining.isSymbolicLink()||
-      remaining.nlink!==1n||!sameBytes(remaining,owned)||
+      remaining.nlink!==1n||remaining.mode!==owned.mode||
+      !sameBytes(remaining,owned)||
       await hasUnsafePathLink(published))return false;
   }
   return true;
