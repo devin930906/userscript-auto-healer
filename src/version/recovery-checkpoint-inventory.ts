@@ -225,6 +225,22 @@ export async function inspectRecoveryCheckpointInventoryReadOnly(
        dirBefore.mtimeNs!==dirAtReceipt.mtimeNs||
        dirBefore.ctimeNs!==dirAtReceipt.ctimeNs)
       return deny('UNSAFE_PATH');
+    // The earlier source digest precedes asynchronous checkpoint and final
+    // directory identity checks. An external editor may change the selected
+    // script in that interval without changing any recovery-store metadata.
+    // Bind this read-only inventory receipt to the same source inode, bytes
+    // and mode immediately before returning. This is not a durable lock.
+    const receiptSource=await verifyApprovedSourceFingerprint({
+      sourcePath:options.sourcePath,expectedSha256:request.expectedSourceSha256,
+      userApproved:true
+    });
+    const sourceAtReceipt=await lstat(options.sourcePath,{bigint:true});
+    if(receiptSource.status!=='MATCHED_READ_ONLY'||
+       !sourceAtReceipt.isFile()||sourceAtReceipt.isSymbolicLink()||
+       sourceAtReceipt.nlink!==1n||!sameFile(sourceBefore,sourceAtReceipt)||
+       sourceBefore.mode!==sourceAtReceipt.mode||
+       await hasUnsafePathLink(options.sourcePath))
+      return deny('SOURCE_UNVERIFIED');
     return Object.freeze({
       status:'OBSERVED_CHECKPOINTS_READ_ONLY' as const,
       checkpoints:Object.freeze(observed),...noAuthority
