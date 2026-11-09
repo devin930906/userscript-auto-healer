@@ -163,9 +163,13 @@ function Get-CandidatePortableFileShareSummary(
   try {
     if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -or
        [string]::IsNullOrWhiteSpace($source) -or
-       $null -eq $filePaths -or $filePaths.Count -gt 512) {
+       $null -eq $filePaths -or $filePaths.Count -gt 512 -or
+       -not [IO.Path]::IsPathFullyQualified($source) -or
+       -not [IO.Path]::IsPathFullyQualified($env:RUNNER_TEMP)) {
       return 'scan=unavailable stage=input'
     }
+    # The native probe must not manufacture a candidate path by resolving
+    # drive-rooted/cwd-relative input against the runner's current directory.
     $base=[IO.Path]::GetFullPath($source).TrimEnd([char[]]@('\','/'))
     $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([char[]]@('\','/'))
     if(-not $base.StartsWith(($runner+[IO.Path]::DirectorySeparatorChar),
@@ -186,7 +190,10 @@ function Get-CandidatePortableFileShareSummary(
     if($seen.Add($sourceParent)) { $targets.Add($sourceParent) }
     if($seen.Add($base)) { $targets.Add($base) }
     foreach($path in $filePaths) {
-      if([string]::IsNullOrWhiteSpace($path)) { return 'scan=unavailable stage=manifest-scope' }
+      if([string]::IsNullOrWhiteSpace($path) -or
+         -not [IO.Path]::IsPathFullyQualified($path)) {
+        return 'scan=unavailable stage=manifest-scope'
+      }
       $full=[IO.Path]::GetFullPath($path)
       if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
         return 'scan=unavailable stage=manifest-scope'
