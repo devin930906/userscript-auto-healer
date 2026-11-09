@@ -52,6 +52,15 @@ test('TEST-020/026: Windows trailing dot/space ancestor aliases are rejected',as
    assert.equal(await hasUnsafePathLink(join(parent,alias)),true,
     'Win32 device namespace must not be selected as source: '+alias);
   }
+  // Invalid Windows component characters are rejected lexically before
+  // any native path query; lstat errors are not a substitute for a stable
+  // fail-closed boundary result used by privileged source transactions.
+  for(const invalid of ['<','>','"','|','?','*',String.fromCharCode(1),String.fromCharCode(31)]){
+   assert.equal(await hasUnsafePathLink(join(root,'selected'+invalid,'safe.user.js')),true,
+    'Windows forbidden ancestor character must be rejected: '+JSON.stringify(invalid));
+   assert.equal(await hasUnsafePathLink(join(parent,'unsafe'+invalid+'.user.js')),true,
+    'Windows forbidden selected filename must be rejected: '+JSON.stringify(invalid));
+  }
   assert.deepEqual(await readFile(source),bytes,'boundary does not alter source');
  }finally{await rm(root,{recursive:true,force:true});}
 });
