@@ -1288,3 +1288,32 @@ function awaitedMain():string{
 function awaitedUi():string{
  return require('node:fs').readFileSync(require('node:path').join(process.cwd(),'app/ui/index.ts'),'utf8');
 }
+
+test('TASK-015/TEST-024/026: blocked archive projection refuses out-of-order or contradictory session rows',()=>{
+ const {markLimitedSessionArchiveUnavailable:project}=
+  require('../../src/health/session-history') as typeof import('../../src/health/session-history');
+ const blocked={ok:false,code:'HISTORY_UNAVAILABLE',
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false};
+ const event=(observedAtMs:number,status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE')=>
+  ({observedAtMs,status});
+ const current=(events:ReturnType<typeof event>[],currentStatus:string)=>
+  ({ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',currentStatus,events});
+ for(const value of [
+  current([event(2000,'INDETERMINATE'),event(1000,'ELEMENT_FOUND_ONLY')],'ELEMENT_FOUND_ONLY'),
+  current([event(1000,'INDETERMINATE')],'ELEMENT_FOUND_ONLY'),
+  current([event(1000,'ELEMENT_FOUND_ONLY')],'UNTESTED')
+ ]){
+  assert.deepEqual(project(value as never),blocked,
+   'untrusted or inconsistent session history must not appear as a successful partial read');
+ }
+ const legitimate=current([event(1000,'ELEMENT_FOUND_ONLY'),event(1000,'INDETERMINATE')],'INDETERMINATE');
+ const projected=project(legitimate as never);
+ assert.equal(projected.ok,true,'same-tick native session observations remain legal');
+ if(projected.ok){
+  assert.deepEqual(projected.events,legitimate.events);
+  assert.equal(projected.currentStatus,'INDETERMINATE');
+  assert.equal(projected.archiveUnavailable,true);
+  assert.equal(projected.businessVerified,false);
+ }
+});

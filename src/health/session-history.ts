@@ -99,6 +99,7 @@ export function markLimitedSessionArchiveUnavailable(
      Reflect.ownKeys(Object.getOwnPropertyDescriptors(source)).length!==length+1)
    return blocked();
   const events:{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[]=[];
+  let previous=-1;
   for(let i=0;i<length;i++){
    const slot=Object.getOwnPropertyDescriptor(source,String(i));
    if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return blocked();
@@ -112,14 +113,21 @@ export function markLimitedSessionArchiveUnavailable(
       !Object.prototype.hasOwnProperty.call(row.observedAtMs??{},'value')||
       !Object.prototype.hasOwnProperty.call(row.status??{},'value')||
       !Number.isSafeInteger(row.observedAtMs.value)||
-      row.observedAtMs.value<0||
+      row.observedAtMs.value<previous||
       (row.status.value!=='ELEMENT_FOUND_ONLY'&&row.status.value!=='INDETERMINATE'))
     return blocked();
+   previous=row.observedAtMs.value as number;
    events.push(Object.freeze({
     observedAtMs:row.observedAtMs.value as number,
     status:row.status.value as 'ELEMENT_FOUND_ONLY'|'INDETERMINATE'
    }));
   }
+  // An unverified DOM-hit summary must agree with the latest native row.
+  // An untested summary cannot coexist with recorded observations. An
+  // expired or insufficient observation may correctly be INDETERMINATE.
+  if((currentStatus==='ELEMENT_FOUND_ONLY'&&
+      events[events.length-1].status!=='ELEMENT_FOUND_ONLY')||
+     currentStatus==='UNTESTED')return blocked();
   return Object.freeze({
    ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
    currentStatus,events:Object.freeze(events),
