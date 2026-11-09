@@ -104,7 +104,18 @@ export function classifyMainFrameResponse(
     if(receipt.id!==1)return null;
     if(Object.prototype.hasOwnProperty.call(receipt,'error'))
       return 'MAIN_FRAME_CDP_REJECTED';
+    // A Page.getFrameTree success reply must have only its command id
+    // and result envelope. An unrelated attribute is ambiguous CDP
+    // evidence and cannot confirm an authorized main-frame navigation.
+    // Ordinary frame metadata and frameTree.childFrames remain supported.
+    if(Object.keys(receipt).length!==2||
+       !Object.prototype.hasOwnProperty.call(receipt,'result'))
+      return 'MAIN_FRAME_RESPONSE_INVALID';
     const result=receipt.result;
+    if(!result||typeof result!=='object'||Array.isArray(result)||
+       Object.keys(result).length!==1||
+       !Object.prototype.hasOwnProperty.call(result,'frameTree'))
+      return 'MAIN_FRAME_RESPONSE_INVALID';
     if(!result||typeof result!=='object'||Array.isArray(result)||
        !result.frameTree||typeof result.frameTree!=='object'||
        Array.isArray(result.frameTree)||
