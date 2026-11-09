@@ -68,3 +68,46 @@ test('TASK-011/TEST-020/026: new pending recovery intent during last source chec
    'read-only safety inspection must never remove the foreign crash record');
  }finally{t.mock.reset();await rm(root,{recursive:true,force:true});}
 });
+
+
+test('TASK-011/TEST-020/026: a pre-existing pending restore record blocks a clean intent observation',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-restore-preexisting-pending-'));
+ const sourcePath=join(root,'selected.user.js');
+ const backupDirectory=join(root,'recoveries');
+ try{
+  await mkdir(backupDirectory);
+  await writeFile(sourcePath,original);
+  const backup=await createVerifiedBackupOnly({
+   sourcePath,backupDirectory,expectedSha256:sha(original),userApproved:true
+  });
+  assert.equal(backup.status,'BACKUP_ONLY');
+  if(backup.status!=='BACKUP_ONLY')return;
+  await writeFile(sourcePath,changed);
+  const restored=await restoreVerifiedOriginalNativeOnly({
+   sourcePath,backupDirectory,backupFileName:backup.backupFileName,
+   expectedCurrentSha256:sha(changed),expectedOriginalSha256:sha(original),
+   expectedOriginalByteLength:original.length,
+   userApproved:true,manualRestoreApproved:true
+  });
+  assert.equal(restored.status,'RESTORED_NATIVE_ONLY',JSON.stringify(restored));
+  if(restored.status!=='RESTORED_NATIVE_ONLY')return;
+  // This interrupted native intent exists BEFORE the inspector takes its
+  // directory snapshot. Checking timestamps alone cannot discover it.
+  const pending=join(backupDirectory,'.uah-restore-'+randomUUID()+'.pending');
+  const residue=Buffer.from('unpublished recovery intent');
+  await writeFile(pending,residue);
+  const observation=await inspectNativeRestoreIntentReadOnly({
+   sourcePath,backupDirectory,journalFileName:restored.journalFileName,
+   userApproved:true
+  });
+  assert.equal(observation.status,'BLOCKED',JSON.stringify(observation));
+  if(observation.status==='BLOCKED')
+   assert.equal(observation.reason,'UNSAFE_JOURNAL');
+  assert.equal(observation.automaticPatchAllowed,false);
+  assert.equal(observation.automaticRollbackAllowed,false);
+  assert.deepEqual(await readFile(sourcePath),original,
+   'read-only inventory must not touch selected userscript bytes');
+  assert.deepEqual(await readFile(pending),residue,
+   'the interrupted recovery record must remain for manual review');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

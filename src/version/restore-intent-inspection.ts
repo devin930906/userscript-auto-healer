@@ -357,6 +357,24 @@ export async function hasPriorPublishedRestoreIntentForSource(
  }catch{return true;}
 }
 
+/** Refuse unpublished native crash evidence already in the recovery store.
+ * Published journals have separate per-item inventory accounting, so do not
+ * reject those here. Bound enumeration and recheck parent metadata at receipt.
+ */
+async function hasUnpublishedRestorePendingReadOnly(
+ directory:string
+):Promise<boolean>{
+ let count=0;
+ const entries=await opendir(directory);
+ for await(const entry of entries){
+  if(++count>1024)return true;
+  const name=entry.name.toLowerCase();
+  if(name.startsWith('.uah-restore-')&&name.endsWith('.pending'))
+   return true;
+ }
+ return false;
+}
+
 /** Read-only: classify observed source bytes as old or restored, or refuse.
  * No finding permits any automatic retry, rename, manager action or rollback.
  */
@@ -460,6 +478,20 @@ export async function inspectNativeRestoreIntentReadOnly(
      !sameDir(dirStart,directoryAtReceipt)||
      dirStart.mtimeNs!==directoryAtReceipt.mtimeNs||
      dirStart.ctimeNs!==directoryAtReceipt.ctimeNs||
+     await hasUnsafePathLink(x.backupDirectory))
+   return deny('UNSAFE_JOURNAL');
+  // A stranded unpublished intent already present at inspection start
+  // leaves parent timestamps unchanged. Refuse pending crash evidence, but
+  // preserve the inventory's independent per-journal rejection semantics:
+  // other forged published journals must still be counted individually.
+  if(await hasUnpublishedRestorePendingReadOnly(x.backupDirectory))
+   return deny('UNSAFE_JOURNAL');
+  const directoryAfterPendingScan=await lstat(x.backupDirectory,{bigint:true});
+  if(!directoryAfterPendingScan.isDirectory()||
+     directoryAfterPendingScan.isSymbolicLink()||
+     !sameDir(dirStart,directoryAfterPendingScan)||
+     dirStart.mtimeNs!==directoryAfterPendingScan.mtimeNs||
+     dirStart.ctimeNs!==directoryAfterPendingScan.ctimeNs||
      await hasUnsafePathLink(x.backupDirectory))
    return deny('UNSAFE_JOURNAL');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
