@@ -9,6 +9,7 @@ import { constants, type BigIntStats, type Dirent } from 'node:fs';
 import { lstat, opendir, open, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import {types as nodeTypes} from 'node:util';
+import {hasUnsafePathSpelling} from '../version/path-boundary';
 
 export const MAX_SCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_SELECTED_FILES = 1000;
@@ -315,7 +316,7 @@ export async function importApprovedPaths(paths: readonly string[], signal?: Abo
     // . / .. components: with linked ancestors, lexical resolution can read a
     // different file than the one selected (or bypass an ancestor link check).
     if (typeof path !== 'string' || !isAbsolute(path) ||
-        path !== resolve(path) || !validName(display)) {
+        path !== resolve(path) || hasUnsafePathSpelling(path) || !validName(display)) {
       outcome.errors.push(failure(display, typeof path === 'string' && !validName(display) ? 'NOT_USER_SCRIPT' : 'INVALID_PATH'));
       continue;
     }
@@ -382,7 +383,7 @@ export async function scanApprovedDirectory(root: string, signal?: AbortSignal,
   if (signal?.aborted) { outcome.canceled = true; return outcome; }
   // Match the native-selected directory exactly; aliases must not be
   // reinterpreted before the linked-ancestor and containment checks.
-  if (typeof root !== 'string' || !isAbsolute(root) || root !== resolve(root)) {
+  if (typeof root !== 'string' || !isAbsolute(root) || root !== resolve(root) || hasUnsafePathSpelling(root)) {
     outcome.errors.push(failure('(folder)', 'INVALID_PATH'));
     return outcome;
   }
