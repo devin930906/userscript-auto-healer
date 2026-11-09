@@ -545,3 +545,30 @@ test('TASK-017/TEST-002/022: import results list uses the concise status without
   assert.match(html,/<ul id="import-list" aria-labelledby="import-summary"><\/ul>/,
     'the results list must have a label while avoiding repeated announcements of individual file names, hashes and errors');
 });
+
+test('TASK-018/TEST-002/026: Windows native imports reject aliases in selected ancestors',async t=>{
+ if(process.platform!=='win32'){
+  t.skip('Win32 path normalization and aliases are Windows-only');return;
+ }
+ const root=await workspace(t);
+ const canonical=join(root,'selected');
+ await mkdir(canonical);
+ const source=join(canonical,'normal.user.js');
+ await writeFile(source,script);
+ const ordinary=await importApprovedPaths([source]);
+ assert.equal(ordinary.scripts.length,1,'canonical native file is still importable');
+ const canonicalFolder=await scanApprovedDirectory(canonical);
+ assert.equal(canonicalFolder.scripts.length,1,'canonical selected folder still works');
+ for(const alias of ['selected.','selected ']){
+  const alteredFile=join(root,alias,'normal.user.js');
+  const file=await importApprovedPaths([alteredFile]);
+  assert.equal(file.scripts.length,0,'aliased selected path must not import user data: '+alias);
+  assert.equal(file.errors[0]?.code,'INVALID_PATH',
+   'aliased selected path must be rejected lexically: '+alias);
+  const folder=await scanApprovedDirectory(join(root,alias));
+  assert.equal(folder.scripts.length,0,'aliased selected folder must not scan data: '+alias);
+  assert.equal(folder.errors[0]?.code,'INVALID_PATH',
+   'aliased selected folder must be rejected lexically: '+alias);
+ }
+ assert.equal(await readFile(source,'utf8'),script,'native boundary is read-only');
+});
