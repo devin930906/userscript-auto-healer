@@ -25,7 +25,7 @@ import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exce
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
 import {readLimitedHealthArchive,saveLimitedHealthArchive} from '../../src/health/limited-health-archive';
-import {limitedScenarioHistoryKey,readLimitedSessionHistory,mergeLimitedSessionArchive} from '../../src/health/session-history';
+import {limitedScenarioHistoryKey,readLimitedSessionHistory,mergeLimitedSessionArchive,markLimitedSessionArchiveUnavailable} from '../../src/health/session-history';
 import {createExclusiveOwnedDiagnosticGate} from '../../src/browser/diagnostic-operation-gate';
 import {prepareManualOriginalRestoreSelection} from '../../src/version/manual-restore-selection';
 import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restore-transaction';
@@ -1012,12 +1012,10 @@ function registerSafeIpc(): void {
       const key=limitedScenarioHistoryKey(
         selected.scenario.scriptSha256,selected.scenario.id);
       const stored=await readLimitedHealthArchive(app.getPath('userData'),key);
-      if(stored.status==='BLOCKED')return current.events.length?current:
-        {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};
+      if(stored.status==='BLOCKED')return markLimitedSessionArchiveUnavailable(current);
       if(stored.status!=='ARCHIVE_READ_UNVERIFIED')return current;
       return mergeLimitedSessionArchive(current,stored);
-    }catch{return current.events.length?current:
-      {ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...unverified};}
+    }catch{return markLimitedSessionArchiveUnavailable(current);}
   });
 
   // Fresh native consent, verified owned Chrome process and a scenario ID from

@@ -1208,3 +1208,48 @@ test('TASK-015/TEST-024/026: native archive snapshot cannot invoke inherited arr
   assert.equal(restored.automaticPatchAllowed,false);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-015/TEST-024: blocked durable archive is visibly unavailable without suppressing current session evidence',()=>{
+ // Test the exported native projection so no renderer file path or raw
+ // archive payload can be needed to signal a partial history read.
+ const feature=require('../../src/health/session-history') as {
+  markLimitedSessionArchiveUnavailable?: (view:unknown)=>unknown
+ };
+ assert.equal(typeof feature.markLimitedSessionArchiveUnavailable,'function');
+ if(!feature.markLimitedSessionArchiveUnavailable)return;
+ const session=new DesktopScenarioSession();
+ const history=new LimitedHealthRegistry(()=>1000);
+ assert.equal(stage(session,'archive-blocked',A).ok,true);
+ const key=limitedScenarioHistoryKey(A,'archive-blocked');
+ history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+ const current=readLimitedSessionHistory(session,history,'archive-blocked');
+ assert.equal(current.ok,true);
+ const partial=feature.markLimitedSessionArchiveUnavailable(current);
+ assert.deepEqual(partial,{
+  ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:'ELEMENT_FOUND_ONLY',
+  events:[{observedAtMs:1000,status:'ELEMENT_FOUND_ONLY'}],
+  archiveUnavailable:true,
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false
+ });
+ assert.ok(Object.isFrozen(partial));
+ const missing=readLimitedSessionHistory(session,new LimitedHealthRegistry(()=>1000),'archive-blocked');
+ assert.deepEqual(feature.markLimitedSessionArchiveUnavailable(missing),{
+  ok:false,code:'HISTORY_UNAVAILABLE',tampermonkeyVerified:false,
+  businessVerified:false,automaticPatchAllowed:false,automaticRollbackAllowed:false
+ },'a blocked archive plus zero current events must not look like a complete empty history');
+ const main=awaitedMain();
+ const ui=awaitedUi();
+ assert.match(main,/markLimitedSessionArchiveUnavailable\(current\)/,
+  'the native BLOCKED archive branch must actually use the partial-history projection');
+ assert.match(ui,/archiveUnavailable/,
+  'the renderer must disclose the unavailable durable history rather than imply no archive exists');
+});
+function awaitedMain():string{
+ return require('node:fs').readFileSync(require('node:path').join(process.cwd(),'app/main/index.ts'),'utf8');
+}
+function awaitedUi():string{
+ return require('node:fs').readFileSync(require('node:path').join(process.cwd(),'app/ui/index.ts'),'utf8');
+}
