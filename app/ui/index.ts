@@ -1228,8 +1228,12 @@ gmStatusButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.gmProbeStatus();
  if(requestGeneration!==gmProbeGeneration||!gmProbeActive)return;
  if(!result.ok){
-  clearGmDisplay('没有有效的测试会话：'+(result.code??'UNKNOWN')+
-    '。如已安装临时脚本，请自行清理。');
+  // A failed status lookup is not proof that a native fixture ended. Keep
+  // the active session and its stop/cleanup control unless native explicitly
+  // reports expiration or revocation. Never promote an error to GM evidence.
+  if(retireGmIfNativeSessionGone(result.code))return;
+  if(gmResult)gmResult.textContent='读取本机测试回执受阻：'+(result.code??'UNKNOWN')+
+    '。原有测试服务可能仍在运行；可重试查看或主动关闭。未取得新的 GM 或业务验证。';
   return;
  }
  const renderModeReport=(mode:'broken'|'fixed')=>{
