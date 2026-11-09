@@ -20,6 +20,7 @@ export type LimitedHistoryView=
    'SCENARIO_NOT_READONLY_ELIGIBLE'|'HISTORY_UNAVAILABLE'}&typeof noAuthority>
  |Readonly<{ok:true;status:'UNVERIFIED_SESSION_HISTORY_ONLY';
    currentStatus:LimitedHealthStatus;
+   archiveUnavailable?:true;
    events:readonly Readonly<{observedAtMs:number;
      status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}>[]
   }&typeof noAuthority>;
@@ -58,6 +59,25 @@ export function readLimitedSessionHistory(
   return Object.freeze({ok:false as const,
     code:'HISTORY_UNAVAILABLE' as const,...noAuthority});
  }
+}
+
+/** TASK-015 / TEST-024: a BLOCKED durable archive is not an empty
+ * archive. Keep genuine current-window observations available, but explicitly
+ * disclose that earlier persisted entries could not be read. Never promote
+ * historical or session DOM hints to manager, business or repair authority.
+ * The caller passes only the native readLimitedSessionHistory projection.
+ */
+export function markLimitedSessionArchiveUnavailable(
+ current:LimitedHistoryView
+):LimitedHistoryView{
+ if(!current.ok||current.events.length===0)return Object.freeze({
+  ok:false as const,code:'HISTORY_UNAVAILABLE' as const,...noAuthority
+ });
+ return Object.freeze({
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus:current.currentStatus,events:current.events,
+  archiveUnavailable:true as const,...noAuthority
+ });
 }
 
 /** TypeScript discriminants cannot authenticate records provided directly to
