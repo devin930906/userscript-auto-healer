@@ -670,8 +670,8 @@ try {
      [StringComparison]::OrdinalIgnoreCase)) {
     throw 'TEST-028: disposable ACL fixture must reside on runner volume'
   }
-  $ambiguousSource='\\'+$controlSource.Substring($controlVolume.Length)
-  $ambiguousRunner='\\'+$aclRealRunner.Substring($runnerVolume.Length)
+  $ambiguousSource='\'+$controlSource.Substring($controlVolume.Length)
+  $ambiguousRunner='\'+$aclRealRunner.Substring($runnerVolume.Length)
   if(-not [IO.Path]::IsPathRooted($ambiguousSource) -or
      [IO.Path]::IsPathFullyQualified($ambiguousSource) -or
      -not [IO.Path]::IsPathRooted($ambiguousRunner) -or
