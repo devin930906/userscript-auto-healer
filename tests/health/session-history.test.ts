@@ -1328,7 +1328,9 @@ test('TASK-015/TEST-024/026: unavailable archive projection refuses impossible t
  const candidate=(time:number)=>({
   ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
   currentStatus:'ELEMENT_FOUND_ONLY' as const,
-  events:[{observedAtMs:time,status:'ELEMENT_FOUND_ONLY' as const}]
+  events:[{observedAtMs:time,status:'ELEMENT_FOUND_ONLY' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
  });
  for(const invalid of [-1,-100,Date.now()+24*60*60*1000]){
   assert.deepEqual(project(candidate(invalid)),blocked,
