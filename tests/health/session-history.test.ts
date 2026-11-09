@@ -1317,3 +1317,29 @@ test('TASK-015/TEST-024/026: blocked archive projection refuses out-of-order or 
   assert.equal(projected.businessVerified,false);
  }
 });
+
+
+test('TASK-015/TEST-024/026: unavailable archive projection refuses impossible timestamps',()=>{
+ const {markLimitedSessionArchiveUnavailable:project}=
+  require('../../src/health/session-history') as typeof import('../../src/health/session-history');
+ const blocked={ok:false,code:'HISTORY_UNAVAILABLE',
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false};
+ const candidate=(time:number)=>({
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus:'ELEMENT_FOUND_ONLY' as const,
+  events:[{observedAtMs:time,status:'ELEMENT_FOUND_ONLY' as const}]
+ });
+ for(const invalid of [-1,-100,Date.now()+24*60*60*1000]){
+  assert.deepEqual(project(candidate(invalid)),blocked,
+   'blocked persisted history must not display impossible session chronology');
+ }
+ const valid=project(candidate(Date.now()-1000));
+ assert.equal(valid.ok,true,'valid recent native-only session evidence is retained');
+ if(valid.ok){
+  assert.equal(valid.archiveUnavailable,true);
+  assert.equal(valid.automaticPatchAllowed,false);
+  assert.equal(valid.automaticRollbackAllowed,false);
+  assert.equal(valid.businessVerified,false);
+ }
+});
