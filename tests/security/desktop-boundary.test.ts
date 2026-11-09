@@ -1727,3 +1727,50 @@ test('TASK-017/TEST-022: transient GM status failure preserves active fixture an
   'do not erase the only instructions for cleanup on a query error');
  assert.match(result.textContent,/失败|受阻|无法确认/);
 });
+
+
+/** TASK-017 / TEST-022: an absent manager self-report is UNKNOWN, not FALSE.
+ * Execute the actual renderer GM status handler so presentation cannot
+ * convert nullable GM/fixture evidence into a misleading negative claim.
+ * No real Tampermonkey or business validation is inferred from these fixtures.
+ */
+test('TASK-017/TEST-022: GM status summary preserves unknown versus explicit negative receipts',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf("gmStatusButton?.addEventListener('click'");
+ const end=ui.indexOf("gmReportButton?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'exercise the real GM status handler');
+ const source=ts.transpileModule(ui.slice(start,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ let click:(()=>void)|undefined;
+ const result={textContent:''};
+ const state:any={
+  gmStatusButton:{addEventListener:(name:string,fn:()=>void)=>{
+   if(name==='click')click=fn;
+  }},
+  gmProbeGeneration:1,gmProbeActive:true,gmResult:result,
+  browserAction:(fn:()=>Promise<void>)=>fn(),
+  retireGmIfNativeSessionGone:()=>false,
+  window:{healer:{gmProbeStatus:async()=>({
+   ok:true,observedModes:0,
+   reportedGmDefaultMatched:null,
+   reportedGmStorageRoundtripMatched:false,
+   reportedBrokenFailed:null,
+   reportedFixedRecovered:true,
+   consistencyStatus:'UNVERIFIED_FIXTURE_ONLY',comparedModes:0
+  })}}
+ };
+ runInNewContext(source,state);
+ assert.ok(click,'the GM status handler must register');
+ click();
+ for(let i=0;i<3;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.match(result.textContent,/自报 GM 默认值匹配：未报告/,
+  'missing self-report must remain unknown, not be converted to false');
+ assert.match(result.textContent,/自报 GM 存储写入读回：否/,
+  'a genuine false receipt must be distinguishable from missing evidence');
+ assert.match(result.textContent,/自报 broken 失败：未报告/);
+ assert.match(result.textContent,/自报 fixed 动作：是/);
+ assert.match(result.textContent,/不证明真实 GM 或业务恢复/);
+});
