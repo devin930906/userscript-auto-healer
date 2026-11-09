@@ -4,12 +4,15 @@
  * installing, applying, restoring, or executing any script.
  */
 import {constants} from 'node:fs';
+import {types as nodeTypes} from 'node:util';
 import type {BigIntStats} from 'node:fs';
 import {lstat,open} from 'node:fs/promises';
 import {MAX_SCRIPT_BYTES} from '../import/import-service';
 import {hasUnsafePathLink} from './path-boundary';
 
 export type CandidateBytesCheck='MATCH'|'CHANGED'|'MISMATCH';
+const NATIVE_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
+ Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
 const same=(a:BigIntStats,b:BigIntStats)=>
   a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&
   a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
@@ -23,11 +26,20 @@ export async function verifyExactCandidateBytesReadOnly(
   path:string,expected:Buffer
 ):Promise<CandidateBytesCheck>{
   try{
-  if(!Buffer.isBuffer(expected)||!expected.length||
-     expected.length>MAX_SCRIPT_BYTES)return 'CHANGED';
-  // Fix the approved comparison bytes synchronously, before the first await.
-  // A caller may mutate its Buffer while pathname/disk checks are pending.
-  const originalBytes=Buffer.from(expected);
+  if(nodeTypes.isProxy(expected)||!Buffer.isBuffer(expected)||
+     !NATIVE_BYTE_LENGTH||
+     // Buffer.length can be shadowed by a caller-owned getter. Never invoke
+     // that getter or allow it to redefine the native byte boundary.
+     Object.prototype.hasOwnProperty.call(expected,'length'))
+    return 'CHANGED';
+  const length=NATIVE_BYTE_LENGTH.call(expected) as number;
+  if(!Number.isSafeInteger(length)||length<=0||length>MAX_SCRIPT_BYTES)
+    return 'CHANGED';
+  // Snapshot native slots synchronously before any await. Buffer.from(Buffer)
+  // can observe a caller's own length getter; the intrinsic TypedArray.set
+  // copies bytes without executing caller-owned iterators or length accessors.
+  const originalBytes=Buffer.allocUnsafe(length);
+  Uint8Array.prototype.set.call(originalBytes,expected);
   if(await hasUnsafePathLink(path))return 'CHANGED';
   const before=await lstat(path,{bigint:true});
   if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||
