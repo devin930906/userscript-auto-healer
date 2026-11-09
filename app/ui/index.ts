@@ -229,6 +229,7 @@ function shouldAcceptNativeImportProgress(
  const currentRank=phaseRank[current.phase!];
  if(incomingRank<currentRank)return false;
  if(incomingRank===currentRank&&(
+   next.total!<current.total!||
    next.processed!<current.processed!||
    next.accepted!<current.accepted!||
    next.duplicates!<current.duplicates!||
