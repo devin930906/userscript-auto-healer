@@ -605,6 +605,9 @@ test('TASK-017/TEST-022: native import progress ignores stale batches and out-of
  assert.match(ui,/if\(incomingRank<currentRank\)return false;/);
  assert.match(ui,/if\(incomingRank===currentRank&&/);
  assert.match(ui,/next\.processed!<current\.processed!/);
+ // A delayed progress receipt must not shrink the promised batch total
+ // while keeping the same phase and moving processed counters forward.
+ assert.match(ui,/next\.total!<current\.total!/);
  assert.match(ui,/shouldAcceptNativeImportProgress\(liveNativeImportProgress,result\)/);
 });
 
