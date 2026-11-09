@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash,randomUUID} from 'node:crypto';
-import {link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
+import {chmod,link,lstat,mkdir,mkdtemp,readFile,readdir,rename,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {removeOwnedStagingPending} from '../../src/version/staging-pending-ownership';
@@ -410,4 +410,29 @@ test('TASK-011/TEST-020/026: persisted recovery checkpoint decoding rejects loss
   'the decoder preserves an unexpected BOM for wire-format rejection');
  assert.equal(decode(Buffer.from([0xc3])),null,
   'truncated multibyte sequence is invalid');
+});
+
+test('TASK-011/TEST-020/026: changed published staging permissions preserve pending evidence',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-pending-permissions-'));
+ try{
+  const parentOwned=await lstat(root,{bigint:true});
+  const id=randomUUID();
+  const pending=join(root,'.'+id+'.pending');
+  const published=join(root,'original.'+id+'.backup.user.js');
+  await writeFile(pending,'recovery evidence');
+  const owned=await lstat(pending,{bigint:true});
+  await link(pending,published);
+  // Hard-link creation changes ctime legitimately, but permission changes
+  // do not alter mtime/size. Do not retire a now-foreign staged inode.
+  await chmod(pending,0o444);
+  const modified=await lstat(pending,{bigint:true});
+  assert.notEqual(modified.mode&0o222n,owned.mode&0o222n,
+   'fixture must actually change file write permissions');
+  assert.equal(modified.mtimeNs,owned.mtimeNs);
+  assert.equal(await removeOwnedStagingPending(pending,owned,parentOwned,published),false,
+   'unexpected mode changes must block native pending cleanup');
+  assert.equal((await readFile(pending)).toString(),'recovery evidence');
+  assert.equal((await readFile(published)).toString(),'recovery evidence');
+  assert.equal((await lstat(pending,{bigint:true})).nlink,2n);
+ }finally{await rm(root,{recursive:true,force:true});}
 });
