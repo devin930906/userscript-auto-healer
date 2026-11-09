@@ -521,7 +521,8 @@ export function createManualDiagnosticConsentWindow(
      wallNow>=expiresAt||elapsed>=ttlMs)revoked=true;
   return !revoked;
  };
- registeredDiagnosticLeases.add(active);
+ // This exported timer helper alone cannot attest an app-owned session.
+ // Only the approved startup path registers its private ready() callback.
  return active;
 }
 
