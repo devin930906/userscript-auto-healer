@@ -451,6 +451,17 @@ export async function inspectNativeRestoreIntentReadOnly(
   if(!journalAfter.isFile()||journalAfter.isSymbolicLink()||
      journalAfter.nlink!==1n||!sameFile(journalBefore,journalAfter)||
      journalBefore.mode!==journalAfter.mode)return deny('UNSAFE_JOURNAL');
+  // Independent recovery evidence can appear in the directory while the
+  // final source/journal checks await I/O. A directory's inode is unchanged
+  // by adding a new pending intent; compare namespace metadata at receipt.
+  // This is conservative observation only, NOT an OS-enforced directory lock.
+  const directoryAtReceipt=await lstat(x.backupDirectory,{bigint:true});
+  if(!directoryAtReceipt.isDirectory()||directoryAtReceipt.isSymbolicLink()||
+     !sameDir(dirStart,directoryAtReceipt)||
+     dirStart.mtimeNs!==directoryAtReceipt.mtimeNs||
+     dirStart.ctimeNs!==directoryAtReceipt.ctimeNs||
+     await hasUnsafePathLink(x.backupDirectory))
+   return deny('UNSAFE_JOURNAL');
   return Object.freeze({status:'RESTORE_INTENT_OBSERVED_READ_ONLY' as const,
    sourceState,originalSha256:j.originalSha256,
    displacedSha256:j.displacedSha256,...noAuthority});
