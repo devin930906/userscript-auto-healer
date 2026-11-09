@@ -842,7 +842,9 @@ test('TASK-007/TEST-017/026: desktop diagnostic lease lookup never invokes hosti
  const {isCurrentManualDiagnosticSession:check}=require('../../src/manager/tampermonkey-diagnostic') as typeof import('../../src/manager/tampermonkey-diagnostic');
  const expiresAt=Date.now()+60000;
  let getterCalls=0,trapCalls=0,callbackCalls=0;
- const guarded={expiresAt,isActive:()=>{callbackCalls++;return true;}};
+ const guarded={expiresAt,isActive:createManualDiagnosticConsentWindow(
+  expiresAt,60000,performance.now())};
+ const untrusted={expiresAt,isActive:()=>{callbackCalls++;return true;}};
  const getter=Object.defineProperty({...guarded},'expiresAt',{
   get(){getterCalls++;return expiresAt;}
  });
@@ -865,6 +867,9 @@ test('TASK-007/TEST-017/026: desktop diagnostic lease lookup never invokes hosti
  assert.equal(getterCalls,0,'accessors must not execute');
  assert.equal(trapCalls,0,'proxy traps must not execute');
  assert.equal(callbackCalls,0,'hostile inputs must not invoke the lease callback');
- assert.equal(check(guarded),true,'native active lease stays supported');
- assert.equal(callbackCalls,1);
+ assert.equal(check(untrusted),false,
+  'an unregistered plain callback must not execute or authorize diagnostics');
+ assert.equal(callbackCalls,0,'unregistered callback must never execute');
+ assert.equal(check(guarded),true,'registered native consent lease stays supported');
+ assert.equal(callbackCalls,0);
 });
