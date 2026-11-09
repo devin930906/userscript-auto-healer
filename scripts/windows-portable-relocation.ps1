@@ -198,7 +198,13 @@ function Get-CandidatePortableFileShareSummary(
       if(-not $full.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
         return 'scan=unavailable stage=manifest-scope'
       }
-      $null=$manifestFiles.Add($full)
+      # The manifest is a set of currently existing candidate files.
+      # A duplicate inflates the reported probe count, while a vanished
+      # member must fail as bad input rather than a later native lock result.
+      if(-not [IO.File]::Exists($full) -or
+         -not $manifestFiles.Add($full)) {
+        return 'scan=unavailable stage=manifest-scope'
+      }
       $parent=[IO.Path]::GetDirectoryName($full)
       while($parent.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
         if($seen.Add($parent)) { $targets.Add($parent) }

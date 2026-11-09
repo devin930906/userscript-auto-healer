@@ -738,6 +738,20 @@ try {
       throw "TEST-028 ambiguous file-sharing diagnostic paths must fail closed: source=[$ambiguousSource] file=[$ambiguousFile]"
     }
     Write-Output 'PASS: file-sharing diagnostic rejects ambiguous drive-rooted-relative source and file inputs'
+    # TASK-020 / TEST-028: a manifest is evidence of unique, existing
+    # candidate FILES, not merely a list of path spellings. A duplicate
+    # must not inflate the probed count; a vanished member must be rejected
+    # before opening any native DELETE-access diagnostic handles.
+    $duplicateShare=Get-CandidatePortableFileShareSummary $permanent @(
+      $permanentFile,$permanentFile)
+    $vanishedFile=Join-Path $permanent 'not-present.user.js'
+    $vanishedShare=Get-CandidatePortableFileShareSummary $permanent @(
+      $permanentFile,$vanishedFile)
+    if($duplicateShare -cne 'scan=unavailable stage=manifest-scope' -or
+       $vanishedShare -cne 'scan=unavailable stage=manifest-scope') {
+      throw "TEST-028 candidate sharing manifest must reject duplicate/missing members before native probe: duplicate=[$duplicateShare] missing=[$vanishedShare]"
+    }
+    Write-Output 'PASS: candidate sharing diagnostic requires unique existing file manifest'
     # ISSUE-215: the real post-Electron failure currently reports
     # scan=unavailable, discarding the stage needed to locate the limitation.
     # Force a read-only enumeration failure without changing candidate files;
