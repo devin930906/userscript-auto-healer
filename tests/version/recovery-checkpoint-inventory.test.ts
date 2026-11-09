@@ -350,3 +350,38 @@ test('TASK-011/TEST-020/026: truncated source-bound checkpoint name cannot masqu
     assert.equal(await readFile(options.sourcePath,'utf8'),source);
   });
 });
+
+test('TASK-011/TEST-020/026: final inventory source check rejects external edit after last hash',async t=>{
+ await fixture(async options=>{
+  const realSource=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const verify=realSource.verifyApprovedSourceFingerprint;
+  let checks=0;
+  t.mock.method(realSource,'verifyApprovedSourceFingerprint',
+   async (...args:Parameters<typeof verify>)=>{
+    const result=await verify(...args);
+    if(++checks===2){
+     assert.equal(result.status,'MATCHED_READ_ONLY',
+      'second source hash must match before the injected concurrent edit');
+     // After the inventory's final source digest, but before its last
+     // awaited directory receipt, a foreign editor changes selected bytes.
+     // A zero-checkpoint result must not return a stale clean observation.
+     await writeFile(options.sourcePath,source+'// changed after hash\n');
+    }
+    return result;
+   });
+  const result=await inspectRecoveryCheckpointInventoryReadOnly(request,options);
+  assert.ok(checks>=2,'test must cross the post-verification async window');
+  assert.equal(result.status,'BLOCKED',
+   'source edited after the prior final digest invalidates the inventory');
+  if(result.status==='BLOCKED')assert.equal(result.reason,'SOURCE_UNVERIFIED');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(result.tampermonkeyVerified,false);
+  assert.equal(result.businessVerified,false);
+  assert.equal(await readFile(options.sourcePath,'utf8'),
+   source+'// changed after hash\n');
+  assert.deepEqual(await readdir(options.backupDirectory),[],
+   'the read-only inventory must preserve an empty independent backup store');
+ });
+});
