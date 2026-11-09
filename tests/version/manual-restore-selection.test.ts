@@ -210,3 +210,36 @@ test('TASK-011/TEST-020/026: same-byte replacement inode cannot keep native rest
   }finally{intercepted.mock.restore();}
  });
 });
+
+test('TASK-011/TEST-020/026: same-byte backup inode swap during final source check refuses native consent',async t=>{
+ await fixture(async({source,backupFile})=>{
+  const sourceSnapshot=require('../../src/version/source-snapshot') as
+   typeof import('../../src/version/source-snapshot');
+  const verify=sourceSnapshot.verifyApprovedSourceFingerprint;
+  const before=await lstat(backupFile,{bigint:true});
+  let sourceChecks=0,swapped=false;
+  t.mock.method(sourceSnapshot,'verifyApprovedSourceFingerprint',
+   async(...args:Parameters<typeof verify>)=>{
+    const outcome=await verify(...args);
+    if(outcome.status==='MATCHED_READ_ONLY'&&++sourceChecks===3){
+     // The last backup verification has completed; an independent
+     // filesystem actor swaps the selected backup while the final source
+     // verification is awaiting I/O. Bytes and SHA-256 are unchanged.
+     const replacement=backupFile+'.independent-copy';
+     await writeFile(replacement,original);
+     await rename(replacement,backupFile);
+     const after=await lstat(backupFile,{bigint:true});
+     assert.notEqual(after.ino,before.ino,
+      'fixture must replace the backup inode without changing its bytes');
+     swapped=true;
+    }
+    return outcome;
+   });
+  const selection=await prepareManualOriginalRestoreSelection(source,backupFile);
+  assert.equal(swapped,true,'must exercise a swap after the final backup read');
+  assert.deepEqual(selection,{status:'BLOCKED',reason:'BACKUP_UNVERIFIED'},
+   'a different backup inode cannot be advertised for native restore consent');
+  assert.deepEqual(await readFile(source),changed,'preflight never writes the original');
+  assert.deepEqual(await readFile(backupFile),original,'external same-byte copy remains untouched');
+ });
+});

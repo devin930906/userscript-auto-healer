@@ -39,6 +39,12 @@ export async function prepareManualOriginalRestoreSelection(
   const sourceStart=await lstat(selectedSource,{bigint:true});
   if(!sourceStart.isFile()||sourceStart.isSymbolicLink()||
      sourceStart.nlink!==1n)return deny('SOURCE_UNVERIFIED');
+  // Bind the user-picked backup to its original filesystem object before
+  // any asynchronous import and recovery-source verification. Matching
+  // bytes alone cannot detect a same-byte replacement after the last check.
+  const backupStart=await lstat(selectedBackup,{bigint:true});
+  if(!backupStart.isFile()||backupStart.isSymbolicLink()||
+     backupStart.nlink!==1n)return deny('BACKUP_UNVERIFIED');
   const current=await importApprovedPaths([selectedSource]);
   if(current.errors.length||current.scripts.length!==1||
      current.scripts[0].sourcePath!==selectedSource)
@@ -97,6 +103,20 @@ export async function prepareManualOriginalRestoreSelection(
      sourceAtReceipt.ctimeNs!==sourceStart.ctimeNs||
      sourceAtReceipt.mode!==sourceStart.mode)
    return deny('SOURCE_UNVERIFIED');
+  // The final source check awaits I/O after the backup's last fingerprint.
+  // A foreign actor can replace the selected backup with identical bytes
+  // during that gap; its new inode was never the originally selected file.
+  // This remains only a read-only snapshot, not a restore permission.
+  const backupAtReceipt=await lstat(selectedBackup,{bigint:true});
+  if(!backupAtReceipt.isFile()||backupAtReceipt.isSymbolicLink()||
+     backupAtReceipt.nlink!==1n||
+     backupAtReceipt.dev!==backupStart.dev||
+     backupAtReceipt.ino!==backupStart.ino||
+     backupAtReceipt.size!==backupStart.size||
+     backupAtReceipt.mtimeNs!==backupStart.mtimeNs||
+     backupAtReceipt.ctimeNs!==backupStart.ctimeNs||
+     backupAtReceipt.mode!==backupStart.mode)
+   return deny('BACKUP_UNVERIFIED');
   return Object.freeze({
    status:'AWAITING_NATIVE_RESTORE_CONSENT' as const,
    sourcePath:selectedSource,backupDirectory,backupFileName:name,
