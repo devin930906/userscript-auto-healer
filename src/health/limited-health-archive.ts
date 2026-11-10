@@ -356,8 +356,22 @@ export async function saveLimitedHealthArchive(
   if(bytes.length>MAX_BYTES)return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const out=await open(pending,'wx',0o600);
   created=true;
-  try{await out.writeFile(bytes);await out.sync();staged=await out.stat({bigint:true});}
-  finally{await out.close();}
+  try{
+   // Capture this writer's inode as soon as exclusive creation succeeds.
+   // If writeFile or fsync fails, cleanup can still authenticate the
+   // temporary pathname without deleting another process's replacement.
+   staged=await out.stat({bigint:true});
+   if(!staged.isFile()||staged.isSymbolicLink()||staged.nlink!==1n)
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
+   const openedIdentity=staged;
+   await out.writeFile(bytes);
+   await out.sync();
+   const written=await out.stat({bigint:true});
+   if(!written.isFile()||written.isSymbolicLink()||written.nlink!==1n||
+      !directorySame(openedIdentity,written))
+    return Object.freeze({status:'BLOCKED',...emptyAuthority});
+   staged=written;
+  }finally{await out.close();}
   if(!staged||staged.nlink!==1n)return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const current=await inspectFile(target,key);
   if(!owner||!directorySame(owner,await lstat(mutex,{bigint:true}))||
