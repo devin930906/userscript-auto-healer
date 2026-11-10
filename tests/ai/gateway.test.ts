@@ -446,14 +446,14 @@ test('TASK-014/TEST-015/026: untrusted AI text cannot carry terminal or bidi dis
 
 test('TASK-014/TEST-015/026: AI output refuses invisible format controls without changing ordinary text',async()=>{
  const hidden=['\\u00ad','\\u034f','\\u180e','\\u200b','\\u200c','\\u200d','\\u2060','\\u206a'];
- let output='普通中文文本\\nSecond line\\tDone';
- const gateway=new OptionalAiGateway({...options(),maxRequests:8},async()=>
+ let output='普通中文文本'+String.fromCharCode(10)+'Second line'+String.fromCharCode(9)+'Done';
+ const gateway=new OptionalAiGateway({...options(),maxRequests:9},async()=>
    Response.json({choices:[{message:{role:'assistant',content:output}}]}));
  assert.equal(gateway.enable(approval()),true);
  const ordinary=await gateway.suggest(approval(),evidence);
  assert.equal(ordinary.ok,true,'normal multilingual text and newlines remain reviewable');
  if(ordinary.ok)assert.equal(ordinary.candidateText,output);
- for(const escape of hidden.slice(0,7)){
+ for(const escape of hidden){
    // A model-controlled invisible mark can visually disguise a misleading
    // instruction in review-only advice; reject it before renderer display.
    output='Review'+JSON.parse('"'+escape+'"')+'ONLY';
