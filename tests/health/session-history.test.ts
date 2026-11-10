@@ -1219,7 +1219,8 @@ test('TASK-015/TEST-024: blocked durable archive is visibly unavailable without 
  assert.equal(typeof feature.markLimitedSessionArchiveUnavailable,'function');
  if(!feature.markLimitedSessionArchiveUnavailable)return;
  const session=new DesktopScenarioSession();
- const history=new LimitedHealthRegistry(()=>1000);
+ const now=Date.now();
+ const history=new LimitedHealthRegistry(()=>now);
  assert.equal(stage(session,'archive-blocked',A).ok,true);
  const key=limitedScenarioHistoryKey(A,'archive-blocked');
  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
@@ -1229,7 +1230,7 @@ test('TASK-015/TEST-024: blocked durable archive is visibly unavailable without 
  assert.deepEqual(partial,{
   ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
   currentStatus:'ELEMENT_FOUND_ONLY',
-  events:[{observedAtMs:1000,status:'ELEMENT_FOUND_ONLY'}],
+  events:[{observedAtMs:now,status:'ELEMENT_FOUND_ONLY'}],
   archiveUnavailable:true,
   tampermonkeyVerified:false,businessVerified:false,
   automaticPatchAllowed:false,automaticRollbackAllowed:false
