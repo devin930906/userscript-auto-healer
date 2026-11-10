@@ -6,6 +6,7 @@
  * A completed result is untrusted model metadata, never script-write authority.
  */
 import {open,lstat} from 'node:fs/promises';
+import {types as nodeTypes} from 'node:util';
 import {OptionalAiGateway,type GatewayCode} from './model-gateway';
 
 const MAX_NATIVE_CONFIG_BYTES=4096;
@@ -49,6 +50,21 @@ export async function readNativeSelectedAiConfig(path:unknown):Promise<string|nu
   }catch{return null;}
 }
 
+/** A native OS consent callback is privileged. Before reading .aborted or
+ * opening its dialog, reject any Proxy, fake signal or accessor override.
+ * The native AbortSignal getter checks the engine's internal signal slot.
+ */
+function validNativeDiscoverySignal(value:unknown):value is AbortSignal{
+  try{
+    if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+       Object.getPrototypeOf(value)!==AbortSignal.prototype||
+       ['aborted','addEventListener','removeEventListener'].some(key=>
+         Object.prototype.hasOwnProperty.call(value,key)))return false;
+    const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+    return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+  }catch{return false;}
+}
+
 /** Neither reading configuration nor native consent grants a persistent AI
  * session. The only possible network action is one bounded GET /models.
  */
@@ -58,6 +74,8 @@ export async function discoverModelsFromNativeConfig(
   signal?:AbortSignal,
   transport:typeof fetch=fetch
 ):Promise<NativeModelDiscoveryResult>{
+  if(signal!==undefined&&!validNativeDiscoverySignal(signal))
+    return blocked('INVALID_CANCEL_SIGNAL');
   if(typeof configText!=='string'||
      Buffer.byteLength(configText,'utf8')>MAX_NATIVE_CONFIG_BYTES||
      configText.length===0||signal?.aborted)return signal?.aborted

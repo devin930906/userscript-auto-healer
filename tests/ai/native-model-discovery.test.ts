@@ -89,3 +89,41 @@ test('TASK-014/TEST-016/026: native-picked config read is bounded, UTF-8 strict 
     }
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('TASK-014/TEST-015/016/026: forged native discovery cancellation never touches getters or consent',async()=>{
+  let approvals=0;
+  let requests=0;
+  let getterCalls=0;
+  const approve=async()=>{approvals++;return true;};
+  const transport:typeof fetch=async()=>{requests++;return Response.json({data:[]});};
+  const forged=Object.defineProperty({},'aborted',{get(){
+    getterCalls++;
+    throw Error('PRIVATE_FORGED_CANCEL_GETTER');
+  }});
+  const native=new AbortController().signal;
+  const proxy=new Proxy(native,{get(){
+    getterCalls++;
+    throw Error('PRIVATE_PROXY_CANCEL_GETTER');
+  }});
+  for(const signal of [forged,proxy] as unknown as AbortSignal[]){
+    assert.deepEqual(await discoverModelsFromNativeConfig(config(),approve,signal,transport),
+      {ok:false,code:'INVALID_CANCEL_SIGNAL',automaticPatchAllowed:false});
+  }
+  assert.equal(getterCalls,0,'no forged cancellation accessor or Proxy trap can run');
+  assert.equal(approvals,0,'invalid cancellation must not reach privileged OS consent');
+  assert.equal(requests,0,'invalid cancellation must not access provider');
+});
+
+test('TASK-014/TEST-016/026: forged non-aborted cancellation is rejected before OS approval',async()=>{
+  let approvals=0;
+  let sent=0;
+  const fake={aborted:false} as AbortSignal;
+  const result=await discoverModelsFromNativeConfig(config(),async()=>{
+    approvals++;
+    return true;
+  },fake,async()=>{sent++;return Response.json({data:[]});});
+  assert.deepEqual(result,{ok:false,code:'INVALID_CANCEL_SIGNAL',automaticPatchAllowed:false});
+  assert.equal(approvals,0);
+  assert.equal(sent,0);
+});
