@@ -242,6 +242,14 @@ try {
       throw 'TEST-027: unrelated userData leaf with candidate substring was trusted'
     }
   }
+  $nestedName=Join-Path (Join-Path $syntheticRoaming 'unrelated-application') 'Userscript Auto Healer Candidate'
+  $nestedRejected=$false
+  try { $null=Assert-IsolatedDataRoot (
+    [pscustomobject]@{userDataDirectory=$nestedName}) $syntheticRoaming }
+  catch [System.Management.Automation.RuntimeException] { $nestedRejected=$true }
+  if(-not $nestedRejected) {
+    throw 'TEST-027: nested foreign application userData directory was trusted'
+  }
   $fullyQualified=Join-Path $syntheticRoaming 'Userscript Auto Healer Candidate'
   $driveRoot=[IO.Path]::GetPathRoot($fullyQualified)
   $rootRelative=[string][IO.Path]::DirectorySeparatorChar+
