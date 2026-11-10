@@ -127,10 +127,10 @@ export function markLimitedSessionArchiveUnavailable(
       (row.status.value!=='ELEMENT_FOUND_ONLY'&&row.status.value!=='INDETERMINATE'))
     return blocked();
    previous=row.observedAtMs.value as number;
-   events.push(Object.freeze({
+   events[i]=Object.freeze({
     observedAtMs:row.observedAtMs.value as number,
     status:row.status.value as 'ELEMENT_FOUND_ONLY'|'INDETERMINATE'
-   }));
+   });
   }
   // An unverified DOM-hit summary must agree with the latest native row.
   // An untested summary cannot coexist with recorded observations. An

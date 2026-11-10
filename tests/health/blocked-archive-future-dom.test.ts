@@ -42,6 +42,31 @@ test('TASK-015/TEST-024: recent native-only DOM observation survives blocked arc
  assert.equal(response.automaticRollbackAllowed,false);
 });
 
+test('TASK-015/TEST-024/026: blocked archive projection does not invoke a replaceable Array push',()=>{
+ const observedAtMs=Date.now()-1000;
+ const view={
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus:'ELEMENT_FOUND_ONLY' as const,
+  events:[{observedAtMs,status:'ELEMENT_FOUND_ONLY' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const originalPush=Array.prototype.push;
+ let calls=0;
+ let response:ReturnType<typeof markLimitedSessionArchiveUnavailable>;
+ try{
+  Array.prototype.push=()=>{
+   calls++;
+   throw Error('UNTRUSTED_ARRAY_PUSH_EXECUTED');
+  };
+  response=markLimitedSessionArchiveUnavailable(view);
+ }finally{
+  Array.prototype.push=originalPush;
+ }
+ assert.equal(calls,0);
+ assert.deepEqual(response,{...view,archiveUnavailable:true});
+});
+
 test('TASK-015/TEST-024/026: blocked archive refuses expired positive DOM observation',()=>{
  const now=Date.now();
  // Live limited registry freshness is ten minutes, not the archive's
