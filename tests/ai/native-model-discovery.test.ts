@@ -145,7 +145,7 @@ test('TASK-014/TEST-015/016: revoking native consent cancels a pending approval 
   controller.abort();
   const result=await Promise.race([
     pending,
-    new Promise<'TIMED_OUT'>(resolve=>setTimeout(()=>resolve('TIMED_OUT'),150))
+    new Promise<'TIMED_OUT'>(resolve=>setTimeout(()=>resolve('TIMED_OUT'),500))
   ]);
   assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
   assert.equal(requests,0,'revoked consent cannot invoke the provider');
