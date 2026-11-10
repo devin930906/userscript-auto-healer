@@ -267,10 +267,20 @@ jobs:
           UAH_TEST_CHROME_CPU_PRESSURE: ${{ inputs.chrome_cpu_pressure && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
-          # Each Node invocation owns a new disposable profile and browser.
-          # On the first failure stop and keep only the existing redacted
-          # stage/marker/listener diagnostics in Actions logs. Chrome raw
-          # diagnostic files stay in RUNNER_TEMP and are never uploaded.
+          # First test the COMPLETE Chrome fixture file in one Node test
+          # process, not just the selected startup case. This distinguishes
+          # intra-file order/lifecycle interference from cross-file full-suite
+          # interference, without replacing the mandatory ordinary CI suite.
+          # A failure stops diagnosis: never reinterpret a later green sample
+          # as permission to erase or retry an earlier failing fixture.
+          Write-Output 'Owned Chrome complete fixture-file control (TASK-008)'
+          node --test --test-concurrency=1 dist/tests/browser/owned-chrome.test.js
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Complete Chrome fixture-file control failed; preserve its redacted diagnostics.'
+          }
+          # Each subsequent focused Node invocation owns a new disposable
+          # profile and browser. Preserve existing redacted stages only.
+          # Chrome raw logs remain in RUNNER_TEMP and are never uploaded.
           for ($sample = 1; $sample -le 3; $sample++) {
             Write-Output "Bounded isolated Chrome startup sample $sample/3"
             node --test --test-concurrency=1 "--test-name-pattern=TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only" dist/tests/browser/owned-chrome.test.js
