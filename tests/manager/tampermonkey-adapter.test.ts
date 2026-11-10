@@ -385,7 +385,7 @@ test('TASK-007/TEST-017/026: raw extension target URLs must not become hints thr
 // before reporting a stale listener error or starting CDP communication.
 test('TASK-007/TEST-017/026: cancellation wins after first async listener owner check',()=>{
  const source=readFileSync(join(process.cwd(),'src','manager','tampermonkey-adapter.ts'),'utf8');
- const start=source.indexOf('const owned=await verifyWindowsLoopbackListenerPid(port,session.pid);');
+ const start=source.indexOf('const owned=await awaitListenerProofOrRevocation(port,session.pid,signal);');
  const second=source.indexOf('const payload=await readBoundedTargets(session.browserWebsocket,signal);',start);
  assert.ok(start>=0&&second>start,'bounded first ownership and CDP steps are present');
  const between=source.slice(start,second);
