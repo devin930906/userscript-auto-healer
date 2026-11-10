@@ -386,3 +386,23 @@ test('TASK-007/TEST-017/026: CDP target hints reject hidden or accessor-only ext
  }
  assert.equal(getterCalls,0,'no metadata accessor may execute while inspecting targets');
 });
+
+
+test('TASK-007/TEST-017/026: CDP receipt enforces UTF-8 byte budget, not UTF-16 code units',()=>{
+ const {readTampermonkeyCdpTargetReceipt:read}=
+   require('../../src/manager/tampermonkey-adapter') as typeof import('../../src/manager/tampermonkey-adapter');
+ const withinBudget=JSON.stringify({id:1,result:{targetInfos:[
+   {...worker,title:'界'.repeat(80_000)}
+ ]}});
+ assert.ok(Buffer.byteLength(withinBudget,'utf8')<256*1024);
+ assert.equal((read(withinBudget) as unknown[])?.length,1,
+   'ordinary browser metadata inside the declared byte budget remains eligible');
+ const oversized=JSON.stringify({id:1,result:{targetInfos:[
+   {...worker,title:'界'.repeat(90_000)}
+ ]}});
+ assert.ok(oversized.length<256*1024,
+   'the regression specifically fits the old UTF-16 code-unit check');
+ assert.ok(Buffer.byteLength(oversized,'utf8')>256*1024);
+ assert.equal(read(oversized),null,
+   'a multibyte page title cannot bypass the CDP 256 KiB raw message limit');
+});

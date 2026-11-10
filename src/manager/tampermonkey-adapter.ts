@@ -112,7 +112,10 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
  * An unrelated CDP event ID is ignored; malformed/binary data fails closed.
  */
 export function readTampermonkeyCdpTargetReceipt(raw:unknown):unknown|null|undefined{
- if(typeof raw!=='string'||raw.length>256*1024)return null;
+ // CDP transport budgets are bytes, not JavaScript UTF-16 code units.
+ // A large multibyte page title must not bypass the 256 KiB receipt cap.
+ if(typeof raw!=='string'||raw.length>256*1024||
+    Buffer.byteLength(raw,'utf8')>256*1024)return null;
  try{
   const parsed:unknown=JSON.parse(raw);
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return null;
