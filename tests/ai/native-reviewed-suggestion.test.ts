@@ -185,3 +185,16 @@ test('TASK-014/TEST-015/026: reject forged cancellation before native disclosure
  assert.equal(approvals,0);
  assert.equal(requests,0);
 });
+
+test('TASK-014/TEST-015/026: native AI receipts refuse invisible selector controls before review',()=>{
+  const store=new NativeAiEvidenceStore();
+  const hidden=['\u0085','\u00ad','\u034f','\u061c','\u180e','\u200b','\u200c','\u200d','\u200e',
+    '\u202a','\u202e','\u2060','\u2066','\u2069','\ufeff'];
+  for(const [index,mark] of hidden.entries()){
+    assert.equal(store.record('hidden_'+index,A,'div'+mark+'.target','UNKNOWN'),false,
+      'unseen selector formatting must not mint review evidence');
+    assert.equal(store.resolve('hidden_'+index),null);
+  }
+  assert.equal(store.record('visible_ok',A,'div.target','UNKNOWN'),true);
+  assert.ok(store.resolve('visible_ok'));
+});
