@@ -1345,3 +1345,43 @@ test('TASK-015/TEST-024/026: unavailable archive projection refuses impossible t
   assert.equal(valid.businessVerified,false);
  }
 });
+
+
+test('TASK-015/TEST-024/026: failed pending archive write removes only its own staging inode',async()=>{
+ // A real filesystem open succeeds; fail the FileHandle write before its
+ // post-write stat. The archive must leave no unverified pending bytes on disk.
+ const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-pending-write-failure-'));
+ const nativeOpen=fsPromises.open;
+ const userData=join(home,'user-data');
+ const key=limitedScenarioHistoryKey(A,'pending-write-failure');
+ let injected=0;
+ try{
+  await mkdir(userData);
+  const registry=new LimitedHealthRegistry(()=>Date.now()-1000);
+  registry.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  (fsPromises as {open:typeof nativeOpen}).open=(async(path,flags,mode)=>{
+   const handle=await nativeOpen(path,flags,mode);
+   if(typeof path==='string'&&path.endsWith('.pending')){
+    injected++;
+    Object.defineProperty(handle,'writeFile',{configurable:true,
+     value:async()=>{throw Error('INJECTED_PENDING_WRITE_FAILURE');}});
+   }
+   return handle;
+  }) as typeof nativeOpen;
+  const blocked=await saveLimitedHealthArchive(userData,registry.snapshot(key));
+  assert.equal(injected,1,'must exercise a real opened pending file');
+  assert.equal(blocked.status,'BLOCKED','failed staging write cannot publish history');
+  assert.deepEqual(await readdir(join(userData,'limited-health-history-v1')),[],
+   'failed write must not retain an orphan .pending file or native mutex');
+  assert.equal((await readLimitedHealthArchive(userData,key)).status,'NOT_FOUND');
+  (fsPromises as {open:typeof nativeOpen}).open=nativeOpen;
+  assert.equal((await saveLimitedHealthArchive(userData,registry.snapshot(key))).status,
+   'ARCHIVE_SAVED_UNVERIFIED','clean failure permits a later fresh legitimate save');
+ }finally{
+  (fsPromises as {open:typeof nativeOpen}).open=nativeOpen;
+  await rm(home,{recursive:true,force:true});
+ }
+});
