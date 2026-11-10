@@ -289,3 +289,17 @@ jobs:
             }
           }
           Write-Output 'Three bounded isolated Chrome startup samples passed; intermittent reliability remains unproven.'
+          # Issue #480 / TEST-013: the historical candidate failure happened
+          # here, not in the isolated Chrome startup test above. Run the exact
+          # real-owned-Chrome scenario in separate Node processes so each
+          # sample has a disposable profile, probe and CDP lifecycle.
+          # The test itself preserves fixed, URL-free stage counts on failure.
+          # Stop at the FIRST red sample; never retry it to manufacture green.
+          for ($sample = 1; $sample -le 3; $sample++) {
+            Write-Output "Owned Chrome TEST-013 main-frame sample $sample/3"
+            node --test --test-concurrency=1 "--test-name-pattern=TEST-013: Windows owned Chrome yields limited selector triage without a script" dist/tests/diagnostics/scenario-dom-diagnostic.test.js
+            if ($LASTEXITCODE -ne 0) {
+              throw 'TEST-013 main-frame diagnostic failed; preserve stage counts and original failure.'
+            }
+          }
+          Write-Output 'Three isolated TEST-013 main-frame samples passed; sporadic failure remains possible.'
