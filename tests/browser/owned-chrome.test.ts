@@ -891,6 +891,44 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const address=fixture.address();
     if(!address||typeof address==='string')throw Error('MISSING_LOCAL_FIXTURE');
     const site='http://127.0.0.1:'+address.port+'/';
+    // TASK-008 / TEST-013/026: consent can expire while the initial native
+    // Windows listener/PID proof is still pending. No target creation or
+    // script action may follow a revoked pre-navigation capability.
+    const ownerModule=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+    const realOwnerProof=ownerModule.verifyWindowsLoopbackListenerPid;
+    const revokedConsent=new AbortController();
+    let ownerEntered!:()=>void;
+    const ownerPending=new Promise<void>(resolve=>{ownerEntered=resolve;});
+    let releaseOwner!:()=>void;
+    const parkedOwner=new Promise<void>(resolve=>{releaseOwner=resolve;});
+    let parkedCalls=0;
+    (ownerModule as {verifyWindowsLoopbackListenerPid:typeof realOwnerProof})
+      .verifyWindowsLoopbackListenerPid=async(...args)=>{
+        parkedCalls++;ownerEntered();
+        await parkedOwner;
+        return realOwnerProof(...args);
+      };
+    const revokedStages:TargetNavigationStage[]=[];
+    try{
+      const pending= openApprovedTarget(result,site,true,revokedConsent.signal,
+        stage=>revokedStages.push(stage));
+      await Promise.race([ownerPending,delay(5000).then(()=>{
+        throw Error('INITIAL_OWNER_PROOF_NOT_REACHED');
+      })]);
+      revokedConsent.abort();
+      const observed=await Promise.race([pending,delay(700).then(()=>({
+        ok:false as const,code:'CANCELLATION_STALLED' as const
+      }))]);
+      assert.deepEqual(observed,{ok:false,code:'CANCELLED'},
+        'revocation must not wait for the initial read-only Windows PID query');
+      assert.equal(parkedCalls,1);
+      assert.deepEqual(revokedStages,[],
+        'no newly created target or navigation stage is permitted after cancellation');
+    }finally{
+      releaseOwner();
+      (ownerModule as {verifyWindowsLoopbackListenerPid:typeof realOwnerProof})
+        .verifyWindowsLoopbackListenerPid=realOwnerProof;
+    }
     assert.deepEqual(await openApprovedTarget(result,site,false),
       {ok:false,code:'NOT_AUTHORIZED'});
     const targetStages=createBoundedTargetNavigationStageCounts();

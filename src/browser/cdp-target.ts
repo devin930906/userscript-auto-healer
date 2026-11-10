@@ -383,6 +383,31 @@ function validNativeCancelSignal(value:unknown):value is AbortSignal{
  }catch{return false;}
 }
 
+/** Native, read-only listener ownership may wait on an OS process. Only the
+ * first, pre-navigation proof can safely be abandoned on consent revocation:
+ * there is no created tab to clean up. A late proof is never accepted.
+ * This does not skip validation of any live, authorized navigation. */
+async function initialOwnerProofOrCancellation(
+  port:number,pid:number,signal?:AbortSignal
+):Promise<'OWNED'|'UNOWNED'|'CANCELLED'>{
+  if(signal?.aborted)return 'CANCELLED';
+  let abortListener=()=>{};
+  const cancelled=new Promise<'CANCELLED'>(resolve=>{
+    abortListener=()=>resolve('CANCELLED');
+    signal?.addEventListener('abort',abortListener,{once:true});
+  });
+  try{
+    // Attach rejection handling before racing, even when cancellation wins.
+    const proof=verifyWindowsLoopbackListenerPid(port,pid).then(
+      result=>result.ok?'OWNED' as const:'UNOWNED' as const,
+      ()=>'UNOWNED' as const);
+    if(signal?.aborted)return 'CANCELLED';
+    return signal?await Promise.race([proof,cancelled]):await proof;
+  }finally{
+    signal?.removeEventListener('abort',abortListener);
+  }
+}
+
 /** Never accept a raw third-party CDP socket or an unapproved website. */
 export async function openApprovedTarget(
   session:ManagedLaunchResult,targetUrl:string,userApproved:boolean,
@@ -413,9 +438,9 @@ export async function openApprovedTarget(
      socket.username||socket.password||socket.search||socket.hash||
      !Number.isInteger(port)||port<1024||port>65535)
     return {ok:false,code:'UNVERIFIED_BROWSER'};
-  const owns=await verifyWindowsLoopbackListenerPid(port,session.pid);
-  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
-  if(!owns.ok)return {ok:false,code:'UNOWNED_LISTENER'};
+  const owns=await initialOwnerProofOrCancellation(port,session.pid,signal);
+  if(signal?.aborted||owns==='CANCELLED')return {ok:false,code:'CANCELLED'};
+  if(owns!=='OWNED')return {ok:false,code:'UNOWNED_LISTENER'};
   if(!isLiveApprovedChromeSession(session))
     return {ok:false,code:'UNVERIFIED_BROWSER'};
   const created=await requestNewTab(session.browserWebsocket,targetUrl,signal);
