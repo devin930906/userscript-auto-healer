@@ -443,3 +443,29 @@ test('TASK-014/TEST-015/026: untrusted AI text cannot carry terminal or bidi dis
   }
   assert.equal(gateway.status().remainingRequests,0);
 });
+
+test('TASK-014/TEST-015/026: AI output refuses invisible format controls without changing ordinary text',async()=>{
+ const hidden=['\u00ad','\u034f','\u180e','\u200b','\u200c','\u200d','\u2060','\u206a'];
+ let output='普通中文文本'+String.fromCharCode(10)+'Second line'+String.fromCharCode(9)+'Done';
+ const transport:typeof fetch=async()=>Response.json({choices:[{
+   message:{role:'assistant',content:output}
+ }]});
+ // Preserve the real 8-request gateway cap: the normal-text receipt and
+ // eight rejected model responses are checked in independent sessions.
+ const normal=new OptionalAiGateway({...options(),maxRequests:1},transport);
+ assert.equal(normal.enable(approval()),true);
+ const ordinary=await normal.suggest(approval(),evidence);
+ assert.equal(ordinary.ok,true,'normal multilingual text and newlines remain reviewable');
+ if(ordinary.ok)assert.equal(ordinary.candidateText,output);
+ const gateway=new OptionalAiGateway({...options(),maxRequests:8},transport);
+ assert.equal(gateway.enable(approval()),true);
+ for(const escape of hidden){
+   // A model-controlled invisible mark can visually disguise instructions
+   // in review-only advice; no request may promote it to trusted evidence.
+   output='Review'+escape+'ONLY';
+   assert.deepEqual(await gateway.suggest(approval(),evidence),{
+     ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+   },'reject invisible mark U+'+escape.codePointAt(0)?.toString(16));
+ }
+ assert.equal(gateway.status().remainingRequests,0);
+});
