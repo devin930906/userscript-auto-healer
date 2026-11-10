@@ -42,7 +42,7 @@ test('TASK-015/TEST-024: recent native-only DOM observation survives blocked arc
  assert.equal(response.automaticRollbackAllowed,false);
 });
 
-test('TASK-015/TEST-024/026: blocked archive projection does not invoke a replaceable Array push',()=>{
+test('TASK-015/TEST-024/026: blocked archive projection does not invoke mutable Array prototype hooks',()=>{
  const observedAtMs=Date.now()-1000;
  const view={
   ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
@@ -52,18 +52,30 @@ test('TASK-015/TEST-024/026: blocked archive projection does not invoke a replac
   automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
  };
  const originalPush=Array.prototype.push;
- let calls=0;
+ const originalIndex=Object.getOwnPropertyDescriptor(Array.prototype,'0');
+ let pushCalls=0;
+ let setterCalls=0;
  let response:ReturnType<typeof markLimitedSessionArchiveUnavailable>;
  try{
   Array.prototype.push=()=>{
-   calls++;
+   pushCalls++;
    throw Error('UNTRUSTED_ARRAY_PUSH_EXECUTED');
   };
+  Object.defineProperty(Array.prototype,'0',{
+   configurable:true,
+   set(){
+    setterCalls++;
+    throw Error('UNTRUSTED_ARRAY_INDEX_SETTER_EXECUTED');
+   }
+  });
   response=markLimitedSessionArchiveUnavailable(view);
  }finally{
+  if(originalIndex)Object.defineProperty(Array.prototype,'0',originalIndex);
+  else Reflect.deleteProperty(Array.prototype,'0');
   Array.prototype.push=originalPush;
  }
- assert.equal(calls,0);
+ assert.equal(pushCalls,0);
+ assert.equal(setterCalls,0);
  assert.deepEqual(response,{...view,archiveUnavailable:true});
 });
 

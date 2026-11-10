@@ -127,9 +127,13 @@ export function markLimitedSessionArchiveUnavailable(
       (row.status.value!=='ELEMENT_FOUND_ONLY'&&row.status.value!=='INDETERMINATE'))
     return blocked();
    previous=row.observedAtMs.value as number;
-   events[i]=Object.freeze({
-    observedAtMs:row.observedAtMs.value as number,
-    status:row.status.value as 'ELEMENT_FOUND_ONLY'|'INDETERMINATE'
+   // Define an own slot without invoking Array.prototype.push or an inherited setter.
+   Object.defineProperty(events,i,{
+    enumerable:true,
+    value:Object.freeze({
+     observedAtMs:row.observedAtMs.value as number,
+     status:row.status.value as 'ELEMENT_FOUND_ONLY'|'INDETERMINATE'
+    })
    });
   }
   // An unverified DOM-hit summary must agree with the latest native row.
