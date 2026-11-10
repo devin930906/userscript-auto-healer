@@ -148,3 +148,40 @@ test('TASK-014/TEST-015/026: native AI evidence clock failures fail closed witho
   'a fresh genuine inspection can create a new bounded receipt');
  assert.ok(store.resolve('new'));
 });
+
+
+test('TASK-014/TEST-015/026: reject forged cancellation before native disclosure or network effects',async()=>{
+ const store=new NativeAiEvidenceStore();
+ assert.equal(store.record('native_scope',A,'#private-selector','UNKNOWN'),true);
+ const evidence=store.resolve('native_scope');
+ let attackerCalls=0,approvals=0,requests=0;
+ const poison=():never=>{attackerCalls++;throw Error('PRIVATE_SIGNAL_GETTER_EXECUTED');};
+ const accessor={get aborted(){return poison();}};
+ const proxy=new Proxy(new AbortController().signal,{
+  get:poison,getPrototypeOf:poison,ownKeys:poison,
+  getOwnPropertyDescriptor:poison
+ });
+ const revoked=Proxy.revocable(new AbortController().signal,{});
+ revoked.revoke();
+ const spoof=Object.create(AbortSignal.prototype) as AbortSignal;
+ const shadow=new AbortController().signal;
+ Object.defineProperty(shadow,'aborted',{get:poison});
+ const listenerShadow=new AbortController().signal;
+ Object.defineProperty(listenerShadow,'addEventListener',{value:poison});
+ const approve=async()=>{approvals++;return true;};
+ const transport:typeof fetch=async()=>{requests++;return response();};
+ for(const bad of [accessor,proxy,revoked.proxy,spoof,shadow,listenerShadow]){
+  const outcome=await requestNativeReviewedAiSuggestion(
+    config(),evidence,approve,bad as AbortSignal,transport);
+  assert.deepEqual(outcome,{ok:false,code:'INVALID_CANCEL_SIGNAL',automaticPatchAllowed:false});
+ }
+ assert.equal(attackerCalls,0,'no hostile signal getter or Proxy trap may execute');
+ assert.equal(approvals,0,'invalid cancellation must not show native AI disclosure');
+ assert.equal(requests,0,'invalid cancellation must not initiate network traffic');
+ const cancelled=new AbortController();cancelled.abort();
+ assert.deepEqual(await requestNativeReviewedAiSuggestion(
+   config(),evidence,approve,cancelled.signal,transport),
+   {ok:false,code:'CANCELLED',automaticPatchAllowed:false});
+ assert.equal(approvals,0);
+ assert.equal(requests,0);
+});
