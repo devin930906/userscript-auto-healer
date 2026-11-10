@@ -209,6 +209,20 @@ try {
     throw 'TEST-028: test-only PRs must trigger Windows candidate EXE and ZIP checks'
   }
   Write-Output 'PASS: test-only PR changes trigger mandatory Windows EXE/ZIP candidate checks'
+  # TASK-020 / TEST-028: concurrent conversations may need distinct Windows
+  # candidate proof runs on the SAME ref. The candidate job writes only to
+  # its run-scoped RUNNER_TEMP and per-run artifact; no shared deployment.
+  # An unqualified ref-based concurrency group can cancel a running validation
+  # or replace a pending one before its logs and checks exist. Preserve each
+  # independently requested candidate run rather than silently discarding it.
+  $candidateConcurrency=[regex]::Match($candidateWorkflow,
+    '(?ms)^concurrency:\s*\r?\n(?:(?!^[^\s#]).*\r?\n)*')
+  if($candidateConcurrency.Success -and
+     $candidateConcurrency.Value -notmatch 'github\.run_id') {
+    throw 'TEST-028: candidate workflow can discard independent same-ref Windows runs'
+  }
+  Write-Output 'PASS: independent same-ref candidate Windows runs cannot cancel or replace each other'
+
 
   # TASK-019 / REQ-027 / TEST-027: the installer/userData canary must
   # reject unrelated directories even if their name happens to CONTAIN
