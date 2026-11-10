@@ -135,8 +135,12 @@ export function markLimitedSessionArchiveUnavailable(
   // An unverified DOM-hit summary must agree with the latest native row.
   // An untested summary cannot coexist with recorded observations. An
   // expired or insufficient observation may correctly be INDETERMINATE.
+  // The five-minute clock-skew allowance protects unverified chronology,
+  // not the current positive DOM summary. A future observation cannot
+  // justify ELEMENT_FOUND_ONLY while the durable archive is unavailable.
   if((currentStatus==='ELEMENT_FOUND_ONLY'&&
-      events[events.length-1].status!=='ELEMENT_FOUND_ONLY')||
+      (events[events.length-1].status!=='ELEMENT_FOUND_ONLY'||
+       events[events.length-1].observedAtMs>now))||
      currentStatus==='UNTESTED')return blocked();
   return Object.freeze({
    ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
