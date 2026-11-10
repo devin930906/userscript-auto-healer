@@ -331,7 +331,7 @@ export class OptionalAiGateway {
     // Invisible joiners/soft-hyphen and deprecated bidi format marks must
     // not disguise instructions in a human-reviewed AI response.
     const unsafeDisplay=typeof content==='string'&&
-      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u.test(content);
+      /[\u0000-\u0008\u000b-\u000d\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u.test(content);
     if(message.role!=='assistant'||typeof content!=='string'||!content.trim()||
        content.length>4096||unsafeDisplay||message.tool_calls!==undefined||
        message.function_call!==undefined)return failure('INVALID_RESPONSE');

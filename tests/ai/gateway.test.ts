@@ -469,3 +469,19 @@ test('TASK-014/TEST-015/026: AI output refuses invisible format controls without
  }
  assert.equal(gateway.status().remainingRequests,0);
 });
+
+// TASK-014 / TEST-015/026: CR is a terminal line-overwrite control, not a
+// printable line break. Keep LF and tab for legitimate multilingual guidance.
+test('TASK-014/TEST-015/026: model-origin carriage return cannot overwrite reviewed advice',async()=>{
+  let output='reviewed\rVERIFIED';
+  const gateway=new OptionalAiGateway({...options(),maxRequests:2},
+    async()=>Response.json({choices:[{message:{role:'assistant',content:output}}]}));
+  assert.equal(gateway.enable(approval()),true);
+  assert.deepEqual(await gateway.suggest(approval(),evidence),{
+    ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false
+  },'a literal carriage return must be rejected before display');
+  output='reviewed\nnext\tstep';
+  const safe=await gateway.suggest(approval(),evidence);
+  assert.equal(safe.ok,true,'ordinary LF and tab are still permitted');
+  if(safe.ok)assert.equal(safe.candidateText,output);
+});
