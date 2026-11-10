@@ -110,6 +110,38 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
  // it before the test exits; no browser/process or user script is modified.
  const listenerModule=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
  const originalVerify=listenerModule.verifyWindowsLoopbackListenerPid;
+ // Either Windows PID ownership query can stall in an OS subprocess.
+ // Revoked consent must not wait for an eventual answer from that process.
+ for(const blockedCheck of [1,2]){
+  const controller=new AbortController();
+  let checks=0;
+  let signalEntered!:()=>void;
+  const entered=new Promise<void>(resolve=>{signalEntered=resolve;});
+  let release!:()=>void;
+  (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+   .verifyWindowsLoopbackListenerPid=async(...args)=>{
+    checks++;
+    if(checks!==blockedCheck)return originalVerify(...args);
+    await new Promise<void>(resolve=>{release=resolve;signalEntered();});
+    return originalVerify(...args);
+   };
+  try{
+   const pending=inspectApprovedTampermonkeyRuntime(session,true,controller.signal);
+   await Promise.race([entered,new Promise<never>((_,reject)=>
+    setTimeout(()=>reject(Error('PID_PROBE_NOT_REACHED')),9000))]);
+   controller.abort();
+   const result=await Promise.race([pending,new Promise<never>((_,reject)=>
+    setTimeout(()=>reject(Error('CONSENT_REVOCATION_STALLED_ON_PID')),1000))]);
+   assert.deepEqual(result,{ok:false,code:'CANCELLED'},
+    'cancelled native scope must not await a stalled OS listener query');
+   assert.equal(checks,blockedCheck);
+  }finally{
+   release?.();
+   (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
+    .verifyWindowsLoopbackListenerPid=originalVerify;
+  }
+ }
+
  const abort=new AbortController();
  let ownerChecks=0;
  (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
@@ -353,12 +385,12 @@ test('TASK-007/TEST-017/026: raw extension target URLs must not become hints thr
 // before reporting a stale listener error or starting CDP communication.
 test('TASK-007/TEST-017/026: cancellation wins after first async listener owner check',()=>{
  const source=readFileSync(join(process.cwd(),'src','manager','tampermonkey-adapter.ts'),'utf8');
- const start=source.indexOf('const owned=await verifyWindowsLoopbackListenerPid(port,session.pid);');
+ const start=source.indexOf('const owned=await awaitListenerProofOrRevocation(port,session.pid,signal);');
  const second=source.indexOf('const payload=await readBoundedTargets(session.browserWebsocket,signal);',start);
  assert.ok(start>=0&&second>start,'bounded first ownership and CDP steps are present');
  const between=source.slice(start,second);
  const cancelled=between.indexOf("if(signal?.aborted)return {ok:false,code:'CANCELLED'};");
- const ownerFailure=between.indexOf("if(!owned.ok||!isLiveApprovedChromeSession(session))");
+ const ownerFailure=between.indexOf("if(owned.cancelled||!owned.ok||!isLiveApprovedChromeSession(session))");
  assert.ok(cancelled>=0&&ownerFailure>cancelled,
   'revoked consent must be observed before an in-flight owner lookup error');
 });

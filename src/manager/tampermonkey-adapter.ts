@@ -169,6 +169,28 @@ async function readBoundedTargets(websocketUrl:string,signal?:AbortSignal):Promi
   }catch{finish(null);}
  });
 }
+/** A Windows PID/netstat proof is a read-only OS query, not a cancellable
+ * permission grant. A revoked native consent must retire the caller without
+ * waiting for that subprocess; its later result has no authority. Attach a
+ * rejection handler so a late OS error cannot become unhandled. */
+async function awaitListenerProofOrRevocation(port:number,pid:number,signal?:AbortSignal):
+  Promise<{readonly cancelled:true}|{readonly cancelled:false;readonly ok:boolean}>{
+  if(signal?.aborted)return {cancelled:true};
+  let onAbort=()=>{};
+  const revoked=new Promise<{readonly cancelled:true}>(resolve=>{
+    onAbort=()=>resolve({cancelled:true});
+    signal?.addEventListener('abort',onAbort,{once:true});
+  });
+  try{
+    const pending=verifyWindowsLoopbackListenerPid(port,pid).then(
+      result=>({cancelled:false as const,ok:result.ok}),
+      ()=>({cancelled:false as const,ok:false}));
+    if(signal?.aborted)return {cancelled:true};
+    return signal?await Promise.race([pending,revoked]):await pending;
+  }finally{
+    signal?.removeEventListener('abort',onAbort);
+  }
+}
 /** Query only the browser websocket from a live application-owned Chrome session.
  * This intentionally never starts/enables/installs an extension or reads script data.
  */
@@ -189,20 +211,21 @@ export async function inspectApprovedTampermonkeyRuntime(
     !Number.isInteger(port)||port<1024||port>65535||ws.username||ws.password||
     ws.search||ws.hash||!/^\/devtools\/browser\/[a-zA-Z0-9-]{8,128}$/.test(ws.pathname))
    return {ok:false,code:'UNVERIFIED_BROWSER'};
- const owned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+ const owned=await awaitListenerProofOrRevocation(port,session.pid,signal);
  // A user can revoke consent while Windows listener ownership is pending.
  // Report cancellation before a stale PID result and never start CDP afterward.
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
- if(!owned.ok||!isLiveApprovedChromeSession(session))
+ if(owned.cancelled||!owned.ok||!isLiveApprovedChromeSession(session))
    return {ok:false,code:'UNOWNED_LISTENER'};
  const payload=await readBoundedTargets(session.browserWebsocket,signal);
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(payload===null)return {ok:false,code:'CDP_FAILED'};
  if(!isLiveApprovedChromeSession(session))return {ok:false,code:'UNVERIFIED_BROWSER'};
- const stillOwned=await verifyWindowsLoopbackListenerPid(port,session.pid);
+ const stillOwned=await awaitListenerProofOrRevocation(port,session.pid,signal);
  // An asynchronous listener ownership query may complete after consent
  // has been cancelled; it must never revive a stale runtime observation.
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+ if(stillOwned.cancelled)return {ok:false,code:'CANCELLED'};
  if(!stillOwned.ok)return {ok:false,code:'UNOWNED_LISTENER'};
  // The session may be stopped while the final asynchronous owner check runs.
  // Its old PID result cannot re-authorize an ended app-owned Chrome process.
