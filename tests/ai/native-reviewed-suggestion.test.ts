@@ -198,3 +198,25 @@ test('TASK-014/TEST-015/026: native AI receipts refuse invisible selector contro
   assert.equal(store.record('visible_ok',A,'div.target','UNKNOWN'),true);
   assert.ok(store.resolve('visible_ok'));
 });
+
+test('TASK-014/TEST-015/026: distinct unpaired UTF-16 selectors cannot alias native review evidence',()=>{
+  const store=new NativeAiEvidenceStore();
+  // Node crypto UTF-8 encoding substitutes the replacement character for
+  // either lone surrogate; without rejection, different selectors collapse
+  // to identical HMAC labels despite having distinct raw JavaScript text.
+  for(const [id,selector] of [
+    ['lone_high','div\uD800.target'],
+    ['lone_low','div\uDC00.target'],
+    ['embedded_high','a\uD83Db'],
+    ['embedded_low','a\uDE00b']
+  ] as const){
+    assert.equal(store.record(id,A,selector,'UNKNOWN'),false,
+      'ill-formed UTF-16 must not produce a native evidence receipt');
+    assert.equal(store.resolve(id),null);
+  }
+  // A legitimate Unicode supplementary character consists of a valid
+  // surrogate pair and must not be mistaken for an unpaired surrogate.
+  assert.equal(store.record('paired_ok',A,'div.\uD83D\uDE00','UNKNOWN'),true);
+  assert.ok(store.resolve('paired_ok'));
+  assert.equal(store.record('ordinary_ok',A,'div.target','UNKNOWN'),true);
+});
