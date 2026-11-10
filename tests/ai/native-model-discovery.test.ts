@@ -127,3 +127,26 @@ test('TASK-014/TEST-016/026: forged non-aborted cancellation is rejected before 
   assert.equal(approvals,0);
   assert.equal(sent,0);
 });
+
+
+test('TASK-014/TEST-015/016: revoking native consent cancels a pending approval before any provider request',async()=>{
+  const controller=new AbortController();
+  let approvalStarted:()=>void=()=>{};
+  const started=new Promise<void>(resolve=>{approvalStarted=resolve;});
+  let requests=0;
+  const pending=discoverModelsFromNativeConfig(config(),async()=>{
+    approvalStarted();
+    return new Promise<boolean>(()=>{});
+  },controller.signal,async()=>{
+    requests++;
+    return Response.json({data:[]});
+  });
+  await started;
+  controller.abort();
+  const result=await Promise.race([
+    pending,
+    new Promise<'TIMED_OUT'>(resolve=>setTimeout(()=>resolve('TIMED_OUT'),150))
+  ]);
+  assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
+  assert.equal(requests,0,'revoked consent cannot invoke the provider');
+});
