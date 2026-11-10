@@ -390,7 +390,7 @@ test('TASK-007/TEST-017/026: cancellation wins after first async listener owner 
  assert.ok(start>=0&&second>start,'bounded first ownership and CDP steps are present');
  const between=source.slice(start,second);
  const cancelled=between.indexOf("if(signal?.aborted)return {ok:false,code:'CANCELLED'};");
- const ownerFailure=between.indexOf("if(!owned.ok||!isLiveApprovedChromeSession(session))");
+ const ownerFailure=between.indexOf("if(owned.cancelled||!owned.ok||!isLiveApprovedChromeSession(session))");
  assert.ok(cancelled>=0&&ownerFailure>cancelled,
   'revoked consent must be observed before an in-flight owner lookup error');
 });
