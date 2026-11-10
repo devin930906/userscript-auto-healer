@@ -11,14 +11,24 @@ function Require-File([string]$path) {
 function Assert-IsolatedDataRoot([object]$receipt,[string]$roamingRoot) {
   if($null -eq $receipt -or $receipt.userDataDirectory -isnot [string] -or
      [string]::IsNullOrWhiteSpace($receipt.userDataDirectory) -or
-     -not [IO.Path]::IsPathRooted($receipt.userDataDirectory)) {
-    throw 'Electron smoke did not report an absolute userData directory'
+     [string]::IsNullOrWhiteSpace($roamingRoot) -or
+     -not [IO.Path]::IsPathFullyQualified($receipt.userDataDirectory) -or
+     -not [IO.Path]::IsPathFullyQualified($roamingRoot)) {
+    throw 'Electron smoke did not report a fully qualified userData directory'
   }
   $actual=[IO.Path]::GetFullPath([string]$receipt.userDataDirectory).TrimEnd([char[]]@('\','/'))
   $root=[IO.Path]::GetFullPath($roamingRoot).TrimEnd([char[]]@('\','/'))
-  if (-not $actual.StartsWith(($root + [IO.Path]::DirectorySeparatorChar),
-                              [StringComparison]::OrdinalIgnoreCase) -or
-      -not (Split-Path -Leaf $actual).ToLowerInvariant().Contains('candidate')) {
+  $parent=[IO.Path]::GetDirectoryName($actual)
+  $leaf=[IO.Path]::GetFileName($actual)
+  # Only the two native Electron names derived from the candidate-only
+  # resources/app/package.json are trusted. A substring match could accept an
+  # unrelated Windows profile, and a nested path could target another app.
+  $namedCandidate=[string]::Equals($leaf,'Userscript Auto Healer Candidate',
+    [StringComparison]::OrdinalIgnoreCase) -or
+    [string]::Equals($leaf,'userscript-auto-healer-candidate',
+      [StringComparison]::OrdinalIgnoreCase)
+  if(-not $namedCandidate -or -not [string]::Equals($parent,$root,
+      [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Electron userData is not isolated to the disposable candidate namespace'
   }
   return $actual
