@@ -137,7 +137,9 @@ export function markLimitedSessionArchiveUnavailable(
   // expired or insufficient observation may correctly be INDETERMINATE.
   // The five-minute clock-skew allowance protects unverified chronology,
   // not the current positive DOM summary. A future observation cannot
-  // justify ELEMENT_FOUND_ONLY while the durable archive is unavailable.\n  // Likewise, an observation past the live registry's freshness window\n  // can remain visible as chronology, but cannot represent current health.
+  // justify ELEMENT_FOUND_ONLY while the durable archive is unavailable.
+  // Likewise, an observation past the live registry's freshness window
+  // can remain visible as chronology, but cannot represent current health.
   if((currentStatus==='ELEMENT_FOUND_ONLY'&&
       (events[events.length-1].status!=='ELEMENT_FOUND_ONLY'||
        events[events.length-1].observedAtMs>now||
