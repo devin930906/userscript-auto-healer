@@ -254,9 +254,22 @@ export function mergeLimitedSessionArchive(
  const observed=sessionRows.value as
   readonly Readonly<{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}>[];
  const oldLast=archived[archived.length-1].observedAtMs;
- const recent=observed.filter(event=>event.observedAtMs>oldLast);
- const events=Object.freeze([...archived,...recent].slice(-32).map(
-  event=>Object.freeze({observedAtMs:event.observedAtMs,status:event.status})));
+ // Never delegate a native evidence boundary to replaceable Array.prototype
+ // iteration hooks. Both dense input arrays passed own-descriptor validation.
+ let firstRecent=0;
+ while(firstRecent<observed.length&&observed[firstRecent].observedAtMs<=oldLast)
+  firstRecent++;
+ const total=archived.length+observed.length-firstRecent;
+ const firstRetained=Math.max(0,total-32);
+ const events:{observedAtMs:number;status:'ELEMENT_FOUND_ONLY'|'INDETERMINATE'}[]=[];
+ for(let i=firstRetained;i<total;i++){
+  const event=i<archived.length?archived[i]:
+   observed[firstRecent+i-archived.length];
+  events[events.length]=Object.freeze({
+   observedAtMs:event.observedAtMs,status:event.status
+  });
+ }
+ Object.freeze(events);
  const currentLast=observed[observed.length-1]?.observedAtMs;
  // Equal timestamps cannot establish ordering across a retained archive and
  // this independent session. Never promote an archived INDETERMINATE row.
