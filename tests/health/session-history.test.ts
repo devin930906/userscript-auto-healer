@@ -1386,3 +1386,46 @@ test('TASK-015/TEST-024/026: failed pending archive write removes only its own s
   await rm(home,{recursive:true,force:true});
  }
 });
+
+
+test('TASK-015/TEST-024/026: native archive merge never invokes replaceable Array prototype iteration hooks',()=>{
+ const now=Date.now();
+ const current={
+  ok:true as const,status:'UNVERIFIED_SESSION_HISTORY_ONLY' as const,
+  currentStatus:'ELEMENT_FOUND_ONLY' as const,
+  events:[{observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const archived={
+  status:'ARCHIVE_READ_UNVERIFIED' as const,
+  currentStatus:'INDETERMINATE' as const,
+  events:[{observedAtMs:now-2000,status:'INDETERMINATE' as const}],
+  tampermonkeyVerified:false as const,businessVerified:false as const,
+  automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const
+ };
+ const originalFilter=Object.getOwnPropertyDescriptor(Array.prototype,'filter');
+ const originalMap=Object.getOwnPropertyDescriptor(Array.prototype,'map');
+ let result:ReturnType<typeof mergeLimitedSessionArchive>|undefined;
+ let failure:unknown;
+ try{
+  Object.defineProperty(Array.prototype,'filter',{configurable:true,writable:true,
+   value:()=>{throw Error('UNTRUSTED_ARRAY_FILTER_EXECUTED');}});
+  Object.defineProperty(Array.prototype,'map',{configurable:true,writable:true,
+   value:()=>{throw Error('UNTRUSTED_ARRAY_MAP_EXECUTED');}});
+  try{result=mergeLimitedSessionArchive(current,archived);}
+  catch(error){failure=error;}
+ }finally{
+  if(originalFilter)Object.defineProperty(Array.prototype,'filter',originalFilter);
+  if(originalMap)Object.defineProperty(Array.prototype,'map',originalMap);
+ }
+ assert.equal(failure,undefined,'native merge must not execute mutable array prototype methods');
+ assert.equal(result?.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.deepEqual(result?.events,[
+  {observedAtMs:now-2000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ assert.equal(result?.tampermonkeyVerified,false);
+ assert.equal(result?.businessVerified,false);
+ assert.equal(result?.automaticPatchAllowed,false);
+});
