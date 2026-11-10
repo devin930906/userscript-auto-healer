@@ -115,9 +115,9 @@ function parseDefinition(input:unknown):CompatibilityVersion {
       binding.selector.length===0||binding.selector.length>256||
       binding.selector.trim()!==binding.selector||
       // Reject invisible formatting and bidi direction markers (including
-      // ALM, LRM and RLM) so a
+      // C1 controls, ALM, LRM, RLM and deprecated bidi controls) so a
       // shared selector cannot be visually disguised in an offline review.
-      /[\x00-\x1f\x7f\u00ad\u034f\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(binding.selector)||
+      /[\x00-\x1f\x7f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/.test(binding.selector)||
       !Number.isSafeInteger(binding.attempts)||
       (binding.attempts as number)<1||(binding.attempts as number)>5||
       !Number.isSafeInteger(binding.delayMs)||
