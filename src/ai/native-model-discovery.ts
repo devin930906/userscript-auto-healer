@@ -90,7 +90,23 @@ export async function discoverModelsFromNativeConfig(
   }catch{return blocked('INVALID_CONFIGURATION');}
   try{
     if(signal?.aborted)return blocked('CANCELLED');
-    const approved=await authorizeOrigin(origin);
+    // A native consent dialog can remain pending after revocation. Race only
+    // the approval wait against this already-validated native AbortSignal;
+    // a late approval is ignored and must never enable the provider gateway.
+    let onAbort:(()=>void)|undefined;
+    const revoked=signal?new Promise<false>(resolve=>{
+      onAbort=()=>resolve(false);
+      signal.addEventListener('abort',onAbort,{once:true});
+    }):undefined;
+    let approved:boolean;
+    try{
+      if(signal?.aborted)return blocked('CANCELLED');
+      const approval=Promise.resolve().then(()=>
+        signal?.aborted?false:authorizeOrigin(origin));
+      approved=revoked?await Promise.race([approval,revoked]):await approval;
+    }finally{
+      if(signal&&onAbort)signal.removeEventListener('abort',onAbort);
+    }
     if(!approved||signal?.aborted)return blocked('CANCELLED');
     const consent={userApproved:true as const,approvedOrigin:origin};
     if(!gateway.enable(consent))return blocked('NOT_AUTHORIZED');
