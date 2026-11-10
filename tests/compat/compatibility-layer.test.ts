@@ -222,3 +222,22 @@ test('TASK-016/TEST-025/026: Arabic and left/right direction marks cannot disgui
       'all current shared-script mappings must remain pinned');
   }
 });
+
+
+test('TASK-016/TEST-025/026: other invisible format marks cannot enter shared selector metadata',()=>{
+  // Soft hyphen, combining grapheme joiner, Mongolian vowel separator and
+  // invisible mathematical operators can hide selector differences in review.
+  for(const mark of ['\u00ad','\u034f','\u180e','\u2061','\u2062','\u2063','\u2064','\u2065']){
+    const selector='#new-submit'+mark;
+    assert.throws(()=>new LimitedCompatibilityLayer({...initial,bindings:[
+      {...initial.bindings[0],selector},initial.bindings[1]
+    ]}),/INVALID_COMPAT_BINDING/);
+    const layer=new LimitedCompatibilityLayer(initial);
+    const result=layer.previewUpgrade({...newer,bindings:[
+      {...newer.bindings[0],selector},newer.bindings[1]
+    ]},checks);
+    assert.equal(result.status,'BLOCKED');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+  }
+});
