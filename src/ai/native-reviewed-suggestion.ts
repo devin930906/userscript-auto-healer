@@ -21,6 +21,22 @@ const MAX_SESSION_RECORDS=100;
 const blocked=(code:Failure['code']):Failure=>
   Object.freeze({ok:false,code,automaticPatchAllowed:false as const});
 
+/** A native AI disclosure must never inspect a caller-controlled cancellation
+ * getter or attach a hostile listener. Reject forged signals before touching
+ * the evidence, authorizer or network. The gateway has the same boundary,
+ * but validation here must precede the privileged approval callback.
+ */
+function isNativeReviewSignal(value:unknown):value is AbortSignal{
+  try{
+    if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||
+       Object.getPrototypeOf(value)!==AbortSignal.prototype||
+       ['aborted','addEventListener','removeEventListener'].some(name=>
+         Object.prototype.hasOwnProperty.call(value,name)))return false;
+    const getter=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted')?.get;
+    return typeof getter==='function'&&typeof getter.call(value)==='boolean';
+  }catch{return false;}
+}
+
 export class NativeAiEvidenceStore{
   private readonly salt=randomBytes(32);
   private readonly receipts=new Map<string,{evidence:Evidence;created:number}>();
@@ -88,6 +104,9 @@ export async function requestNativeReviewedAiSuggestion(
   signal?:AbortSignal,
   transport:typeof fetch=fetch
 ):Promise<NativeReviewedSuggestionResult>{
+  if(signal!==undefined&&!isNativeReviewSignal(signal))
+    return blocked('INVALID_CANCEL_SIGNAL');
+  if(signal?.aborted)return blocked('CANCELLED');
   if(evidenceInput===null||evidenceInput===undefined)
     return blocked('NO_REVIEW_EVIDENCE');
   let evidence:Evidence;
