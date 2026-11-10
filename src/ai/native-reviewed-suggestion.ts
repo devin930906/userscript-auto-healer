@@ -55,6 +55,10 @@ export class NativeAiEvidenceStore{
        typeof scriptSha256!=='string'||!HASH.test(scriptSha256)||
        typeof selector!=='string'||!selector||selector.length>256||
        selector.trim()!==selector||/[\x00-\x1f\x7f-\u009f\u00ad\u034f\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/.test(selector)||
+       // UTF-8 HMAC encoding replaces lone surrogate code units with U+FFFD;
+       // distinct malformed selectors must not alias one review evidence hash.
+       // Unicode mode treats a valid surrogate pair as one code point.
+       /[\uD800-\uDFFF]/u.test(selector)||
        (code!=='SELECTOR_ASSERTION'&&code!=='UNKNOWN'))return false;
     const created=this.readClock();
     if(created===null)return false;
