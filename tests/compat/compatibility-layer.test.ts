@@ -241,3 +241,25 @@ test('TASK-016/TEST-025/026: other invisible format marks cannot enter shared se
     assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   }
 });
+
+
+test('TASK-016/TEST-025/026: C1 and deprecated bidi controls cannot mask shared selector edits',()=>{
+  // C1 (U+0080..009F) and deprecated directional controls (U+206A..206F)
+  // must be rejected in both active metadata and proposed offline upgrades.
+  // No claim about real Tampermonkey, GM APIs or business recovery is made.
+  const marks=['\u0080','\u0085','\u009b','\u009f',
+    '\u206a','\u206b','\u206c','\u206d','\u206e','\u206f'];
+  for(const mark of marks){
+    const selector='#new-submit'+mark;
+    assert.throws(()=>new LimitedCompatibilityLayer({...initial,bindings:[
+      {...initial.bindings[0],selector},initial.bindings[1]
+    ]}),/INVALID_COMPAT_BINDING/);
+    const layer=new LimitedCompatibilityLayer(initial);
+    assert.equal(layer.previewUpgrade({...newer,bindings:[
+      {...newer.bindings[0],selector},newer.bindings[1]
+    ]},checks).status,'BLOCKED');
+    assert.equal(layer.snapshot().preview,null);
+    assert.equal(layer.snapshot().active.version,'1.0.0');
+    assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+  }
+});
