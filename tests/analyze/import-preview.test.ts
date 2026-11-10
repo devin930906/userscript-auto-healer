@@ -1,8 +1,28 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
+import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {importDroppedBytes} from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,previewImportedBatch} from '../../src/analyze/import-preview';
 import {previewImportedBatchOffMain,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
+
+// TASK-013 / TEST-022: two independent workflow_dispatch diagnostics on the
+// same Git ref must not cancel or replace one another before their genuine
+// Worker lifecycle evidence has been captured. Ordinary push/PR check
+// cancellation behavior is deliberately outside this targeted regression.
+test('TASK-013/TEST-022: isolated AST diagnostics preserve independent same-ref runs',()=>{
+ const yaml=readFileSync(
+  resolve(__dirname,'../../../.github/workflows/app-check.yml'),'utf8');
+ const block=yaml.match(/^concurrency:\r?\n(?:^[ \t]+[^\r\n]*\r?\n)+/m)?.[0];
+ assert.ok(block,'Application CI must declare its workflow concurrency policy');
+ const group=block.split(/\r?\n/).find(line=>/^\s+group:/.test(line));
+ assert.ok(group,'Application CI must declare its concurrency group');
+ assert.match(block,/cancel-in-progress:\s*true/);
+ assert.match(group,/inputs\.ast_worker_diagnostic/);
+ const workerSegment=group.split('inputs.ast_worker_diagnostic')[1]?.split('||')[0]??'';
+ assert.match(workerSegment,/github\.run_id/,
+  'independently triggered AST diagnostics must not share a cancellable group');
+});
 
 const header='// ==UserScript==\n// @name preview-test\n// @match https://example.org/*\n// ==/UserScript==\n';
 function imported(code:string){
