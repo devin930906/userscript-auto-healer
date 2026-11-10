@@ -20,9 +20,9 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: windows-candidate-${{ github.ref }}
-  cancel-in-progress: true
+# Each candidate validation is read-only outside its own GitHub runner and
+# run-scoped artifact; independent same-ref PR/manual runs must keep their
+# own logs and checks instead of cancelling/replacing each other.
 
 jobs:
   candidate-windows-packaging:
