@@ -210,6 +210,59 @@ try {
   }
   Write-Output 'PASS: test-only PR changes trigger mandatory Windows EXE/ZIP candidate checks'
 
+  # TASK-019 / REQ-027 / TEST-027: the installer/userData canary must
+  # reject unrelated directories even if their name happens to CONTAIN
+  # candidate, and never resolve a drive-rooted path against cwd.
+  # Load ONLY the static helper definition from this reviewed packaging file;
+  # do not execute its actual packaging/install operations in this test.
+  $identityStart=$packageScript.IndexOf('function Assert-IsolatedDataRoot(')
+  $identityEnd=$packageScript.IndexOf('function Assert-RetainedData(',$identityStart)
+  if($identityStart -lt 0 -or $identityEnd -le $identityStart) {
+    throw 'TEST-027: candidate userData identity helper unavailable'
+  }
+  Invoke-Expression $packageScript.Substring($identityStart,$identityEnd-$identityStart)
+  $syntheticRoaming=Join-Path $root 'isolated-candidate-roaming'
+  New-Item -ItemType Directory -Path $syntheticRoaming | Out-Null
+  foreach($name in @('Userscript Auto Healer Candidate','userscript-auto-healer-candidate')) {
+    $expectedPath=Join-Path $syntheticRoaming $name
+    $receipt=[pscustomobject]@{userDataDirectory=$expectedPath}
+    $identity=Assert-IsolatedDataRoot $receipt $syntheticRoaming
+    if(-not [string]::Equals($identity,$expectedPath,
+       [StringComparison]::OrdinalIgnoreCase)) {
+      throw 'TEST-027: canonical candidate userData identity rejected'
+    }
+  }
+  foreach($name in @('not-a-candidate','candidate-foreign','mycandidateprivate')) {
+    $unrelated=Join-Path $syntheticRoaming $name
+    $rejected=$false
+    try { $null=Assert-IsolatedDataRoot (
+      [pscustomobject]@{userDataDirectory=$unrelated}) $syntheticRoaming }
+    catch [System.Management.Automation.RuntimeException] { $rejected=$true }
+    if(-not $rejected) {
+      throw 'TEST-027: unrelated userData leaf with candidate substring was trusted'
+    }
+  }
+  $nestedName=Join-Path (Join-Path $syntheticRoaming 'unrelated-application') 'Userscript Auto Healer Candidate'
+  $nestedRejected=$false
+  try { $null=Assert-IsolatedDataRoot (
+    [pscustomobject]@{userDataDirectory=$nestedName}) $syntheticRoaming }
+  catch [System.Management.Automation.RuntimeException] { $nestedRejected=$true }
+  if(-not $nestedRejected) {
+    throw 'TEST-027: nested foreign application userData directory was trusted'
+  }
+  $fullyQualified=Join-Path $syntheticRoaming 'Userscript Auto Healer Candidate'
+  $driveRoot=[IO.Path]::GetPathRoot($fullyQualified)
+  $rootRelative=[string][IO.Path]::DirectorySeparatorChar+
+    $fullyQualified.Substring($driveRoot.Length)
+  $rootRelativeRejected=$false
+  try { $null=Assert-IsolatedDataRoot (
+    [pscustomobject]@{userDataDirectory=$rootRelative}) $syntheticRoaming }
+  catch [System.Management.Automation.RuntimeException] { $rootRelativeRejected=$true }
+  if(-not $rootRelativeRejected) {
+    throw 'TEST-027: drive-rooted userData path was resolved using ambient drive'
+  }
+  Write-Output 'PASS: exact candidate data namespace and fully qualified path required'
+
   $verified=$packageScript.IndexOf('PASS: complete ZIP file manifest and SHA-256 round trip')
   $movedAt=$packageScript.IndexOf('Move-CandidatePortableDirectory $expanded $moved')
   $externalCwd=$packageScript.IndexOf(
