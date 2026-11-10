@@ -30,13 +30,23 @@ on:
         type: boolean
         required: false
         default: false
+      chrome_startup_diagnostic:
+        description: 'Run bounded isolated Chrome CDP startup samples (TASK-008)'
+        type: boolean
+        required: false
+        default: false
+      chrome_cpu_pressure:
+        description: 'Opt in to synthetic CPU pressure for Chrome startup samples only'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
   # Isolate optional diagnostic runs from required push/PR checks on the same ref.
-  group: app-check-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic && '-worker-diagnostic' || '' }}
+  group: app-check-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic && '-worker-diagnostic' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.chrome_startup_diagnostic && '-chrome-diagnostic' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -231,3 +241,41 @@ jobs:
           }
           $budget.Stop()
           Write-Output "Ten serial samples and three concurrent Worker probes passed in $($budget.ElapsedMilliseconds) ms; intermittent reliability remains unproven."
+
+  chrome-startup-diagnostic:
+    # No browser-authorization or acceptance criteria are changed by this job.
+    # It uses existing real Chrome tests with their original 20s CDP deadline,
+    # clean disposable profiles and fail-closed ownership checks.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_startup_diagnostic }}
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install locked compile-time toolchain
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile existing isolated Chrome test fixture
+        shell: pwsh
+        run: npm run build
+      - name: Observe bounded Chrome CDP startup (TASK-008, not product acceptance)
+        shell: pwsh
+        env:
+          UAH_TEST_CHROME_BOOT_LOG: 'true'
+          UAH_TEST_CHROME_CPU_PRESSURE: ${{ inputs.chrome_cpu_pressure && 'true' || 'false' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Each Node invocation owns a new disposable profile and browser.
+          # On the first failure stop and keep only the existing redacted
+          # stage/marker/listener diagnostics in Actions logs. Chrome raw
+          # diagnostic files stay in RUNNER_TEMP and are never uploaded.
+          for ($sample = 1; $sample -le 3; $sample++) {
+            Write-Output "Bounded isolated Chrome startup sample $sample/3"
+            node --test --test-concurrency=1 "--test-name-pattern=TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only" dist/tests/browser/owned-chrome.test.js
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Isolated Chrome startup sample failed; preserve original redacted test diagnostics.'
+            }
+          }
+          Write-Output 'Three bounded isolated Chrome startup samples passed; intermittent reliability remains unproven.'
