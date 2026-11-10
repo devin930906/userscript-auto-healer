@@ -46,7 +46,7 @@ permissions:
 
 concurrency:
   # Isolate optional diagnostic runs from required push/PR checks on the same ref.
-  group: app-check-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic && '-worker-diagnostic' || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.chrome_startup_diagnostic && '-chrome-diagnostic' || '' }}
+  group: app-check-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.ast_worker_diagnostic && format('-worker-diagnostic-{0}', github.run_id) || '' }}${{ github.event_name == 'workflow_dispatch' && inputs.chrome_startup_diagnostic && '-chrome-diagnostic' || '' }}
   cancel-in-progress: true
 
 jobs:
