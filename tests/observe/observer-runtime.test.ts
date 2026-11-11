@@ -35,7 +35,9 @@ test('TASK-008/TEST-013: observer fixture page-served receipt remains a bounded 
 });
 
 test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscript verification)',async t=>{
- if(process.platform!=='win32'){t.skip('Requires real Windows Chrome');return;}
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+  t.skip('Dedicated signed Chrome Windows Actions only');return;
+ }
  let chrome:string|undefined;
  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
    if(!base)continue;
@@ -141,7 +143,9 @@ test('TEST-010/012: real owned Chrome DOM + delayed SPA transition (not userscri
 
 
 test('TEST-010/012/026: unverified initial navigation must not leave a newly created Chrome tab',async t=>{
- if(process.platform!=='win32'){t.skip('Requires actual Windows Chrome');return;}
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+  t.skip('Dedicated signed Chrome Windows Actions only');return;
+ }
  let chrome:string|undefined;
  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
    if(!base)continue;

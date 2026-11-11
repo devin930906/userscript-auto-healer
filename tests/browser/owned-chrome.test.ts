@@ -732,7 +732,9 @@ test('TASK-008/TEST-013: owned Chrome target fixture diagnostics remain bounded 
 });
 
 test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',async t=>{
-  if(process.platform!=='win32')return;
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+    t.skip('Dedicated signed Chrome Windows Actions only');return;
+  }
   let chrome:string|undefined;
   for(const base of [process.env['PROGRAMFILES'],process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]) {
     if(!base)continue;
@@ -1037,7 +1039,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
  * not the root cause of the historical intermittent #510 failure.
  */
 test('TASK-005/TEST-006/009: port claimed during signed Chrome inspection fails before launch',async t=>{
-  if(process.platform!=='win32')return;
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+    t.skip('Dedicated signed Chrome Windows Actions only');return;
+  }
   let chrome:string|undefined;
   for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],
     process.env.LOCALAPPDATA]){
@@ -1091,7 +1095,9 @@ test('TASK-005/TEST-006/009: port claimed during signed Chrome inspection fails 
 });
 
 test('TASK-007/TEST-017: unexpected exit of a verified owned Chrome notifies its owner exactly once',async t=>{
-  if(process.platform!=='win32')return;
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+    t.skip('Dedicated signed Chrome Windows Actions only');return;
+  }
   let chrome:string|undefined;
   for(const base of [process.env['PROGRAMFILES'],process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
     if(!base)continue;
