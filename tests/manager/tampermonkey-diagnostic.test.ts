@@ -505,7 +505,10 @@ test('TASK-007/TEST-018/026: two DOM observations cannot span different five-min
  * real Tampermonkey/GM and repaired userscript business acceptance.
  */
 test('TEST-018 stage: real isolated Windows Chrome never reports a repair without a userscript',async t=>{
- if(process.platform!=='win32'){t.skip('Requires real signed Chrome on Windows');return;}
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+  t.skip('Dedicated signed Chrome Windows Actions only');
+  return;
+ }
  let chrome:string|undefined;
  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
    if(!base)continue;
