@@ -10,6 +10,11 @@ const ISS_PATH = join(ROOT, 'packaging', 'windows', 'installer.iss');
 
 test('TASK-021/GATE-008/011: production packaging script exists and is readable', () => {
   assert.equal(existsSync(SCRIPT_PATH), true, 'scripts/windows-package-production.ps1 must exist');
+  const rawBytes = readFileSync(SCRIPT_PATH);
+  assert.equal(rawBytes[0], 0xef, 'Byte 0 must be UTF-8 BOM 0xEF');
+  assert.equal(rawBytes[1], 0xbb, 'Byte 1 must be UTF-8 BOM 0xBB');
+  assert.equal(rawBytes[2], 0xbf, 'Byte 2 must be UTF-8 BOM 0xBF');
+  assert.equal(rawBytes[3], 0x23, 'Byte 3 must be # (0x23), preventing duplicate BOM or corrupt leading token');
   const content = readFileSync(SCRIPT_PATH, 'utf8');
   assert.ok(content.length > 500, 'production packaging script must contain comprehensive logic');
 });
