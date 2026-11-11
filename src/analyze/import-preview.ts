@@ -9,6 +9,7 @@ import {parseUserscriptMetadata,readUserscriptSource,type MetadataStatus} from '
 import {analyzeSelectors,type SelectorKind} from './selector-analyzer';
 
 export const MAX_ANALYSIS_BYTES=256*1024;
+export const MAX_ISOLATED_ANALYSIS_BYTES=512*1024;
 const MAX_VISIBLE_SITES=8;
 export const MAX_BATCH_PREVIEW_BYTES=1024*1024;
 export const MAX_BATCH_PREVIEW_FILES=16;
@@ -40,15 +41,18 @@ export function unavailableImportPreview(status:ImportPreviewStatus,metadataStat
  return Object.freeze({status,metadataStatus,totalSites:0,literalSites:0,
    runtimeConfirmationSites:0,sites:Object.freeze([]),...flags});
 }
-/** A user script can be many MiB: do not parse large or deeply nested source
- * on Electron's main thread for a convenience preview. Larger scripts remain
- * importable, but need a later cancellable isolated AST analysis worker.
- */
+/** Keep direct synchronous preview and manual repair within the smaller budget. */
 export function previewImportedScriptAnalysis(
  script:Pick<ImportedScript,'bytes'|'textEncoding'>
 ):ImportAnalysisPreview{
+ return previewScript(script,MAX_ANALYSIS_BYTES);
+}
+
+function previewScript(
+ script:Pick<ImportedScript,'bytes'|'textEncoding'>,maxBytes:number
+):ImportAnalysisPreview{
  try{
-  if(!(script?.bytes instanceof Uint8Array)||script.bytes.byteLength>MAX_ANALYSIS_BYTES)
+  if(!(script?.bytes instanceof Uint8Array)||script.bytes.byteLength>maxBytes)
     return unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED');
   const metadata=parseUserscriptMetadata(script);
   if(metadata.status==='INVALID_ENCODING')
@@ -75,24 +79,21 @@ export function previewImportedScriptAnalysis(
  }
 }
 
-/** Bound the synchronous AST budget for one native-picker/folder response.
- * A batch may contain 1000 approved files; full batch analysis belongs in a
- * future cancellable worker, not the privileged Electron main event loop.
- */
-export function previewImportedBatch(
+/** Only the isolated worker uses this larger per-file budget. */
+export function previewIsolatedImportedBatch(
  scripts:readonly Pick<ImportedScript,'bytes'|'textEncoding'>[]
 ):ImportAnalysisPreview[]{
  let analyzedFiles=0;
  let bytesBudgetUsed=0;
  return scripts.map(script=>{
   if(!(script.bytes instanceof Uint8Array)||
-     script.bytes.byteLength>MAX_ANALYSIS_BYTES)
-   return previewImportedScriptAnalysis(script);
+     script.bytes.byteLength>MAX_ISOLATED_ANALYSIS_BYTES)
+   return unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED');
   if(analyzedFiles>=MAX_BATCH_PREVIEW_FILES||
      bytesBudgetUsed+script.bytes.byteLength>MAX_BATCH_PREVIEW_BYTES)
    return unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
   analyzedFiles++;
   bytesBudgetUsed+=script.bytes.byteLength;
-  return previewImportedScriptAnalysis(script);
+  return previewScript(script,MAX_ISOLATED_ANALYSIS_BYTES);
  });
 }

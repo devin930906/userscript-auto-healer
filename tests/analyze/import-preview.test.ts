@@ -3,7 +3,7 @@ import {strict as assert} from 'node:assert';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {importDroppedBytes} from '../../src/import/import-service';
-import {previewImportedScriptAnalysis,previewImportedBatch} from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,previewIsolatedImportedBatch,MAX_ISOLATED_ANALYSIS_BYTES} from '../../src/analyze/import-preview';
 import {previewImportedBatchOffMain,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
 
 // TASK-013 / TEST-022: two independent workflow_dispatch diagnostics on the
@@ -73,9 +73,24 @@ test('TEST-011: large imports remain readable but synchronous AST preview is bou
  assert.equal(analyzed.automaticPatchAllowed,false);
 });
 
+test('TEST-004/011/022: isolated preview analyzes a complete script above the synchronous limit',async()=>{
+ const tail='\ndocument.querySelector("#large-script-tail");\n';
+ const source=header+'/*'+'x'.repeat(351133-header.length-tail.length-4)+'*/'+tail;
+ const script=imported(source);
+ assert.equal(script.byteLength,351133);
+ assert.equal(previewImportedScriptAnalysis(script).status,'SKIPPED_TOO_LARGE');
+ const [report]=await previewImportedBatchOffMain([script]);
+ assert.equal(report.status,'STATIC_ANALYSIS_ONLY');
+ assert.equal(report.metadataStatus,'OK');
+ assert.equal(report.totalSites,1);
+ assert.deepEqual(report.sites.map(site=>site.method),['querySelector']);
+ assert.equal(report.automaticPatchAllowed,false);
+ assert.equal(report.businessVerified,false);
+});
+
 test('TEST-011: batch AST work is bounded without dropping imported scripts',()=>{
  const scripts=Array.from({length:24},()=>imported(header+'document.querySelector("#item");'));
- const previews=previewImportedBatch(scripts);
+ const previews=previewIsolatedImportedBatch(scripts);
  assert.equal(previews.length,24);
  assert.equal(previews.filter(x=>x.status==='STATIC_ANALYSIS_ONLY').length,16);
  assert.equal(previews.filter(x=>x.status==='SKIPPED_BATCH_BUDGET').length,8);
@@ -607,7 +622,7 @@ test('TASK-013/TEST-022/026: native AST refuses shared backing memory before Wor
 
 test('TASK-013/TEST-022/026: oversized TypedArray prototype getter never executes during native AST skip',async()=>{
  // Eligible files are copied using native byte-length slots. Oversized
- // scripts stay un-copied to respect the 256 KiB AST processing boundary:
+ // scripts stay un-copied to respect the isolated AST processing boundary:
  // no inherited subclass getter may run while classifying that skip.
  let invoked=0;
  class HostileOversizedBytes extends Uint8Array {
@@ -616,7 +631,7 @@ test('TASK-013/TEST-022/026: oversized TypedArray prototype getter never execute
    throw Error('UNTRUSTED_OVERSIZED_BYTE_LENGTH_HOOK');
   }
  }
- const bytes=new HostileOversizedBytes(256*1024+1);
+ const bytes=new HostileOversizedBytes(MAX_ISOLATED_ANALYSIS_BYTES+1);
  const output=await previewImportedBatchOffMain([
   {bytes,textEncoding:'utf-8'} as ReturnType<typeof imported>
  ]);
@@ -638,7 +653,7 @@ test('TASK-013/TEST-022/026: cancelled AST segment never reads oversized inherit
   }
  }
  const small=imported(header+'document.querySelector("#safe-bounded");');
- const oversized={bytes:new HostileSkippedBytes(256*1024+1),textEncoding:'utf-8'};
+ const oversized={bytes:new HostileSkippedBytes(MAX_ISOLATED_ANALYSIS_BYTES+1),textEncoding:'utf-8'};
  const abort=new AbortController();
  const batch=[
   ...Array.from({length:16},()=>small),
