@@ -361,7 +361,9 @@ test('TEST-013: blocked scenario attempts write only sanitized unknown entries',
 });
 
 test('TEST-013: Windows owned Chrome yields limited selector triage without a script',async t=>{
- if(process.platform!=='win32'){t.skip('Requires actual signed Chrome on Windows');return;}
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+  t.skip('Dedicated signed Chrome Windows Actions only');return;
+ }
  let chrome:string|undefined;
  for(const dir of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
    if(!dir)continue;
