@@ -78,7 +78,11 @@ function safeArray(input:unknown,limit:number):readonly unknown[] {
     const field=descriptors[String(i)];
     if(!field||!Object.prototype.hasOwnProperty.call(field,'value'))
       throw Error('INVALID_COMPAT_ARRAY');
-    out.push(field.value);
+    // Define an own element without invoking mutable Array.prototype.push
+    // or an inherited numeric setter at this untrusted native boundary.
+    Object.defineProperty(out,i,{
+      configurable:true,enumerable:true,writable:true,value:field.value
+    });
   }
   return out;
 }
