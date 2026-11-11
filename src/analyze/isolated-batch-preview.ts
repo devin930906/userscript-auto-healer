@@ -13,8 +13,8 @@ import {types as nodeTypes} from 'node:util';
 import {join} from 'node:path';
 import {MAX_SELECTED_FILES,MAX_TOTAL_IMPORTED_BYTES,type ImportedScript} from '../import/import-service';
 import {
- MAX_ANALYSIS_BYTES,MAX_BATCH_PREVIEW_BYTES,MAX_BATCH_PREVIEW_FILES,
- previewImportedScriptAnalysis,unavailableImportPreview,
+ MAX_ISOLATED_ANALYSIS_BYTES,MAX_BATCH_PREVIEW_BYTES,MAX_BATCH_PREVIEW_FILES,
+ unavailableImportPreview,
  type ImportAnalysisPreview
 } from './import-preview';
 
@@ -96,7 +96,7 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
    // Scripts larger than the per-file AST budget are never sent to a worker.
    // Do not copy entire oversized scripts merely to report SKIPPED_TOO_LARGE.
    let stableBytes=bytes;
-   if(length<=MAX_ANALYSIS_BYTES){
+   if(length<=MAX_ISOLATED_ANALYSIS_BYTES){
     // The native importer already enforces this 128 MiB total byte cap;
     // reject forged direct calls before allocating an unbounded snapshot.
     if(copiedBytes+length>MAX_TOTAL_IMPORTED_BYTES)return null;
@@ -184,7 +184,7 @@ export function validateIsolatedPreviewReply(
       x.automaticPatchAllowed!==false||x.tampermonkeyVerified!==false||
       x.businessVerified!==false||
       !Number.isSafeInteger(x.totalSites)||!(x.totalSites as number>=0)||
-      (x.totalSites as number)>MAX_ANALYSIS_BYTES||
+      (x.totalSites as number)>MAX_ISOLATED_ANALYSIS_BYTES||
       !Number.isSafeInteger(x.literalSites)||!(x.literalSites as number>=0)||
       !Number.isSafeInteger(x.runtimeConfirmationSites)||
       !(x.runtimeConfirmationSites as number>=0)||
@@ -212,9 +212,9 @@ export function validateIsolatedPreviewReply(
    for(const item of sitesRaw){
     const s=replyRecord(item,SITE_KEYS);
     if(!s||!Number.isSafeInteger(s.line)||!(s.line as number>=1)||
-       (s.line as number)>MAX_ANALYSIS_BYTES+1||
+       (s.line as number)>MAX_ISOLATED_ANALYSIS_BYTES+1||
        !Number.isSafeInteger(s.column)||!(s.column as number>=1)||
-       (s.column as number)>MAX_ANALYSIS_BYTES+1||
+       (s.column as number)>MAX_ISOLATED_ANALYSIS_BYTES+1||
        typeof s.method!=='string'||!SELECTOR_METHODS.has(s.method)||
        (s.kind!=='literal'&&s.kind!=='needs-runtime-confirmation')||
        (s.method==='<dynamic-member>'&&s.kind!=='needs-runtime-confirmation'))
@@ -270,7 +270,7 @@ async function previewImportedChunkOffMain(
   // before deciding that it must stay outside the isolated AST Worker.
   const size=script?.bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH
    ?NATIVE_BYTE_LENGTH.call(script.bytes) as number:Infinity;
-  if(size>MAX_ANALYSIS_BYTES){
+  if(size>MAX_ISOLATED_ANALYSIS_BYTES){
    slots.push(null);
    output.push(unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
   }else if(selected.length>=MAX_BATCH_PREVIEW_FILES||
@@ -441,7 +441,7 @@ export async function previewImportedBatchOffMain(
     // Preserve oversized skip status on cancellation without calling
     // an un-copied Uint8Array subclass's inherited byteLength getter.
     results.push(bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH&&
-      (NATIVE_BYTE_LENGTH.call(bytes) as number)<=MAX_ANALYSIS_BYTES
+      (NATIVE_BYTE_LENGTH.call(bytes) as number)<=MAX_ISOLATED_ANALYSIS_BYTES
        ?unavailableImportPreview(status,'NOT_CHECKED')
        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
    }

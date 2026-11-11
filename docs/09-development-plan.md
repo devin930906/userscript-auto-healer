@@ -258,6 +258,8 @@ Windows 源分支 SHA `cd64e0b402b5b3b2a6e1b89b9d198177d8726665` 的 [Applicatio
 ## （7）TASK-013／TASK-017 拖放静态分析工作线程与取消（2026-10-19）
 
 - 关联：REQ-004、REQ-011、REQ-022；NFR-009；TEST-004/011/022。PR [#112](https://github.com/devin930906/userscript-auto-healer/pull/112) 继承 PR #111 的本机受限工作线程分析，补齐此前仍在 Electron 主进程同步调用 `previewImportedScriptAnalysis` 的 `import:dropped`（包括拖放及文件输入框）路径；静态解析改由现有受限 worker 完成，仍沿用单份 256 KiB、10 秒截止与失效时 fail-closed 的逻辑。主进程仍先按 8 MiB 单文件限制执行只读字节与 SHA-256 校验；无任意文件路径 IPC、用户脚本执行或自动修复权限。
+
+- 后续调整（TASK-003 / TASK-013，TEST-004/011/022）：产品导入使用的隔离 AST worker 单文件上限调整为 512 KiB，覆盖大于 256 KiB 的完整脚本。同步分析与人工修复候选继续使用 256 KiB；每个 worker 仍限 16 份、共 1 MiB，并使用既有超时、内存及取消限制。
 - 限定 `import:cancel-dropped` 为当前窗口的一次 read-only AST 分析取消请求；取消前已验证的导入内容和 SHA-256 不被伪报失败，未完成的解析只能产生 `SKIPPED_CANCELLED`。新增原生选择与拖放请求的双向互斥、窗口关闭时撤销分析且禁止写入新窗口会话，以及实际 Electron IPC/Node worker 负例。拖放文件夹枚举或单份 File.arrayBuffer 仍只在当前操作结束时协作式停止，不宣称不可中断的字节读取已经终止。
 - 验证与合并状态以 PR #112 最新 HEAD 的 Windows Application Skeleton Checks、实际 Electron smoke 和最终 main SHA 为准；早期提交不能代替最新验证。**TASK-013/017 仍开发中**：本改动不是实际脚本批处理修复/回滚、可信持久任务恢复、真实 Tampermonkey/GM/业务验收，也不满足完整 TEST-022 或 GATE-007。正式 Windows EXE/ZIP 依旧须经 TASK-018..021 与所有适用 GATE。
 
