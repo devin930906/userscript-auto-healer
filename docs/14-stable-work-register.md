@@ -396,6 +396,17 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   - 本地 `.github/scripts/verify-predevelopment.py`：28 REQ/TEST 矩阵、21 tasks、11 gates 机器核验 100% PASS。
 - **GATE-001..011 最终签署状态**：全部 11 项质量门槛与真实世界测试已通过 DevinOoi 现场实测与机器审计验收，正式发布 GitHub Release `v1.0.0`。
 
+## 2026-11-12 窗口标题 Development 后缀移除与正式 Stable v1.0.1 修复发布
+
+- **工程事实与修复依据**：
+  DevinOoi 实机运行验收发现主窗口标题显示为 `Userscript Auto Healer — Development`。经查证，`app/ui/index.html` 的 `<title>` 标签保留了开发阶段的静态文本，且主进程 `app/main/index.ts` 创建窗口时未显式锁定产品标题。
+- **代码修复**：
+  1. `app/ui/index.html`：移除残留的 `— Development` 后缀，将标题修正为正式标准名称 `<title>Userscript Auto Healer</title>`。
+  2. `app/main/index.ts`：在 `BrowserWindow` 配置中显式加入 `title: 'Userscript Auto Healer'`，确保原生窗口创建与渲染页面均采用统一规范名称。
+  3. 版本号正式推进至 **`1.0.1`**。
+- **自动化验证**：全量 1075 项测试 100% 绿灯（1065 pass, 0 fail, 10 conditional skip），预开发追踪矩阵 100% 通过。
+
+
 
 
 
