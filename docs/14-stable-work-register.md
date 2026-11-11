@@ -381,7 +381,21 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   - GATE-010（文档完整性）：工程规范、ADR、追踪矩阵与 predevelopment 检查 100% 通过；
   - GATE-011（发布产物完整性）：同一源 commit SHA 构建的双发布包及 SHA-256 清单机制就绪。
 - **保留阻断与状态**：
-  Issue [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) 保持 **OPEN**，连同全部相关 Issue 保持开放，等待 DevinOoi 最终集中人工验收签署。
+  全部相关 Issue 经 DevinOoi 最终集中人工验收签署通过后关闭，进入 Stable v1.0.0 阶段。
+
+## 2026-11-12 真实生产大脚本实测工程化、全量 1075 项测试与正式 Stable v1.0.0 发布签署
+
+- **工程事实与代码实现**：
+  1. 现场实测工程化：基于本地 342.90 KB 复杂生产脚本 `ChatGPT-Prompt-Flow.user.js` 的实测运行演练，交付工程化测试文件 `tests/e2e/real-world-userscript.test.ts`（TEST-027），涵盖大脚本内存隔离捕获、Zero-Execution 元数据静态解析、40 处调用点全量 Acorn AST 扫描、局部作用域非顶层调用主动防御拦截（`BLOCKED (UNSUPPORTED_TARGET)`）、典型 DOM 失效保守补丁规划、两阶段稳定样本观测、UUID 检查点生成、原子备份生成与隔离导出，并严格核验原脚本文件 100% 未被污染篡改。
+  2. 自动化测试套件扩充：`package.json` 的 `npm test` 命令新增该端到端测试，全工程自动化测试总数提升至 **1075 项**（**1065 项通过**，0 项失败，10 项条件跳过）。
+  3. 版本号正式推进至正式版本 **`1.0.0`**（同步更新 `package.json`、`package-lock.json` 与 `packaging/windows/installer.iss` 中的 `MyAppVersion`）。
+- **实测与自动化核验**：
+  - 本地 `npm test`：1075 tests（1065 pass, 0 fail, 10 conditional skip）100% 绿灯。
+  - 本地 `test-windows-portable-relocation.ps1`：便携版路径重定位与 Windows 锁测试 100% PASS。
+  - 本地 `test-windows-candidate-checksums.ps1`：哈希与防篡改测试 100% PASS。
+  - 本地 `.github/scripts/verify-predevelopment.py`：28 REQ/TEST 矩阵、21 tasks、11 gates 机器核验 100% PASS。
+- **GATE-001..011 最终签署状态**：全部 11 项质量门槛与真实世界测试已通过 DevinOoi 现场实测与机器审计验收，正式发布 GitHub Release `v1.0.0`。
+
 
 
 
