@@ -33,6 +33,15 @@ export type ArchiveRead=
 export type ArchiveSave=Readonly<{status:'ARCHIVE_SAVED_UNVERIFIED'|'BLOCKED'}&typeof emptyAuthority>;
 const blocked=():ArchiveRead=>Object.freeze({status:'BLOCKED' as const,...emptyAuthority});
 const MAX_BYTES=8192;
+/** Native archive arrays must not dispatch replaceable Array.prototype.push.
+ * Indexed own definitions also bypass inherited numeric setters. The target
+ * is always an internal dense array, never a renderer-provided object.
+ */
+function appendNative<T>(target:T[],value:T):void{
+ Object.defineProperty(target,target.length,{
+  value,writable:true,configurable:true,enumerable:true
+ });
+}
 // A far-future local clock or modified archive must not silently prevent
 // new consented observations from entering the bounded timeline.
 // This remains clock-sanity checking, NOT authentication of old evidence.
@@ -95,7 +104,7 @@ async function inspectFile(path:string,key:string):Promise<Entry|'NOT_FOUND'|nul
     if(!read.bytesRead)break;
     total+=read.bytesRead;
     if(total>MAX_BYTES)return null;
-    chunks.push(Buffer.from(buf.subarray(0,read.bytesRead)));
+    appendNative(chunks,Buffer.from(buf.subarray(0,read.bytesRead)));
    }
    const final=await h.stat({bigint:true});
    const byPath=await lstat(path,{bigint:true});
@@ -125,7 +134,7 @@ async function inspectFile(path:string,key:string):Promise<Entry|'NOT_FOUND'|nul
        (e.status!=='ELEMENT_FOUND_ONLY'&&e.status!=='INDETERMINATE')||
        (events.length>0&&(e.observedAtMs as number)<=events[events.length-1].observedAtMs))
      return null;
-    events.push(Object.freeze({observedAtMs:e.observedAtMs as number,status:e.status}));
+    appendNative(events,Object.freeze({observedAtMs:e.observedAtMs as number,status:e.status}));
    }
    return {events,bytes,identity:final};
   }finally{await h.close();}
@@ -206,7 +215,7 @@ function newEvents(snapshot:LimitedHealthSnapshot):ArchiveEvent[]|null{
    const row=Object.freeze({observedAtMs:event.observedAtMs,status:event.status});
    if(result.length>0&&row.observedAtMs===result[result.length-1].observedAtMs)
     result[result.length-1]=row;
-   else result.push(row);
+   else appendNative(result,row);
   }
   // A native archive has no VERIFIED status. A positive top-level status
   // also cannot contradict the final observed event; a stale genuine
@@ -279,7 +288,7 @@ export async function saveLimitedHealthArchive(
   if(!descriptor||!Object.prototype.hasOwnProperty.call(descriptor,'value'))
    return Object.freeze({status:'BLOCKED',...emptyAuthority});
   const event=descriptor.value as LimitedHealthSnapshot['history'][number];
-  originalObservations.push(Object.freeze({
+  appendNative(originalObservations,Object.freeze({
    observedAtMs:event.observedAtMs,status:event.status
   }));
  }
@@ -349,7 +358,7 @@ export async function saveLimitedHealthArchive(
     }
     continue;
    }
-   all.push(event);
+   appendNative(all,event);
   }
   const latestHistory=all.slice(-32);
   bytes=marshal(key,latestHistory);
