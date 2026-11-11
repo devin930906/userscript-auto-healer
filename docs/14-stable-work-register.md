@@ -358,11 +358,14 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 
 ## 2026-11-11 TASK-021 / Issue #610 全量 Stable 发布门槛机器整合与最终人工验收审计
 
+- **集成事实**：PR [#841](https://github.com/devin930906/userscript-auto-healer/pull/841) 已通过 Squash 合并至主干 `main@a30136b6920fca56a73c1d51a6603a11957c5054`。
 - **工程事实与代码实现**：
-  1. 交付生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)：配置受保护 tag `v*` 与 `workflow_dispatch` 触发、`windows-2025` 独立运行环境、TypeScript 类型严格检查、真实 Windows 锁与重定位测试、全量自动化测试、生产环境 Inno Setup 与真实便携 ZIP 构建及 GitHub Releases 自动化发布发布。
-  2. 交付生产发布构建脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)：基于 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立生产 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户最低特权、升级目录保持），构建生产环境交付产物 `Userscript-Auto-Healer-v0.0.1-Setup.exe`、`Userscript-Auto-Healer-v0.0.1-Portable.zip` 与 `SHA256SUMS.txt`；严格执行 147+ 文件哈希一致性比对、ZIP 文件头与相对路径安全审计、NTFS ACL 只读目录直启测试、静默安装/升级/卸载数据保持测试及清单双向验签。
+  1. 交付生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)：配置受保护 tag `v*` 与 `workflow_dispatch` 触发、`windows-2025` 独立运行环境、TypeScript 类型严格检查、真实 Windows 锁与重定位测试、全量自动化测试、生产环境 Inno Setup 与真实便携 ZIP 构建及 GitHub Releases 自动化发布。
+  2. 交付生产发布构建脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)：基于 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立生产 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户最低特权、升级目录保持），构建生产环境交付产物 `Userscript-Auto-Healer-v0.0.1-Setup.exe`、`Userscript-Auto-Healer-v0.0.1-Portable.zip` 与 `SHA256SUMS.txt`；严格执行 155 个文件哈希一致性比对、ZIP 文件头与相对路径安全审计、NTFS ACL 只读目录直启测试、静默安装/升级/卸载数据保持测试及清单双向验签。
   3. 交付生产发布规范自动化回归测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试用例全部通过），全工程测试用例总数提升至 **1073 项**（**1063 项通过**，0 项失败，10 项条件跳过）。
   4. 版本号正式推进至正式稳定版 `0.0.1`。
+- **测试与 CI 实证**：全量 1073 项测试 100% 绿灯（1063 pass, 0 fail, 10 conditional skip）；PR #841 云端工作流（Fence 9s, Boundary 2m42s, Smoke 38s, Portable Chrome 53s, Packaging 6m54s）全部通过。
+- **发行构建产物**：Actions Run [#43040889627](https://github.com/devin930906/userscript-auto-healer/actions/runs/43040889627)，Artifact ID `13865347719`（278,021,169 字节），候选 EXE SHA-256 `7f67adccb897a96f50b0738388a18df552c7506e98d36ddbfaae7efcc9921824`，候选 ZIP SHA-256 `33537afbcf5311ad27047ec8611d3d4f0ea6d2bef7a1394502b56e530f868625`。
 - **GATE-001..011 机器核验状态**：
   - GATE-001（功能完整性）：全部 28 项 REQ 对应功能与测试 100% 交付；
   - GATE-002（需求符合性）：全部行为契约与 Fail-Closed 不变量严格保持；

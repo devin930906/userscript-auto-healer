@@ -101,10 +101,12 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 ## （8）2026-11-11 TASK-021 / Issue #610 全量 Stable 发布门槛机器整合与最终人工验收审计
 
 - **工程事实与代码就绪**：
+  - PR [#841](https://github.com/devin930906/userscript-auto-healer/pull/841) 已通过 Squash 合并至主干 `main@a30136b6920fca56a73c1d51a6603a11957c5054`。
   - 新增生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)，支持受保护 tag `v*` 与 `workflow_dispatch` 触发，包含完整的 TypeScript 类型检查、真实 Windows 锁与重定位回归、全量 1073 项自动化测试、生产安装包与便携包构建及 GitHub Releases 自动发布。
-  - 新增生产发布脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)，使用生产 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户安装 `PrivilegesRequired=lowest`、覆盖升级目录保持 `UsePreviousAppDir=yes`），并构建真实便携 ZIP，执行全量 147+ 文件哈希一致性比对、NTFS ACL 只读直启验证、静默安装/升级/卸载保留测试与 `SHA256SUMS.txt` 双向自校验。
+  - 新增生产发布脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)，使用生产 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户安装 `PrivilegesRequired=lowest`、覆盖升级目录保持 `UsePreviousAppDir=yes`），并构建真实便携 ZIP，执行全量 155 个文件哈希一致性比对、NTFS ACL 只读直启验证、静默安装/升级/卸载保留测试与 `SHA256SUMS.txt` 双向自校验。
   - 新增发布规范自动化测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试全绿），全工程本地测试总数达到 **1073 项**（**1063 项 pass**、0 fail、10 项条件 skip）。
   - 版本号由 `0.0.1-dev` 正式提升为正式稳定版 `0.0.1`。
+  - 云端 Candidate Packaging 运行 [#43040889627](https://github.com/devin930906/userscript-auto-healer/actions/runs/43040889627)（Artifact ID `13865347719`，278,021,169 字节）成功验证 155 个文件哈希一致性、3 轮重定位、NTFS ACL 只读直启及 Inno Setup 安装升级与数据保留。当前候选 EXE SHA-256：`7f67adccb897a96f50b0738388a18df552c7506e98d36ddbfaae7efcc9921824`，候选 ZIP SHA-256：`33537afbcf5311ad27047ec8611d3d4f0ea6d2bef7a1394502b56e530f868625`。
 - **GATE-001..011 逐项机器验证审计**：
   - **GATE-001（功能完整性）**：REQ-001..028 全部功能代码、元数据解析、场景诊断、DOM 观察、油猴适配、原子备份与恢复、GUI 与多脚本兼容全部交付并纳入自动化套件。
   - **GATE-002（需求符合性）**：`docs/10-traceability.md` 28 项需求矩阵逐行映射完整，Fail-Closed 不变量（`automaticActivationAllowed: false`, `automaticPatchAllowed: false`, `automaticRollbackAllowed: false`）全链条保持。
