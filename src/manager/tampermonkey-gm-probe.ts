@@ -21,7 +21,8 @@ export type GmProbeRunAt=
 export const SUPPORTED_GM_RUN_AT:readonly GmProbeRunAt[]=
  Object.freeze(['document-start','document-body','document-end','document-idle']);
 export function isSupportedGmProbeRunAt(value:unknown):value is GmProbeRunAt{
- return typeof value==='string'&&SUPPORTED_GM_RUN_AT.some(mode=>mode===value);
+ return value==='document-start'||value==='document-body'||
+  value==='document-end'||value==='document-idle';
 }
 export interface GmProbeReceipt {
  readonly status:'SELF_REPORTED_FIXTURE_ONLY';
