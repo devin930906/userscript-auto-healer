@@ -1,4 +1,4 @@
-# TASK-019/020 / REQ-027/028 / TEST-027/028.
+﻿# TASK-019/020 / REQ-027/028 / TEST-027/028.
 # Candidate namespace is deliberately different from any production installation
 # and Electron userData identity; never upgrade/overwrite future Stable users.
 # ACTUAL compiled Electron Windows EXE/ZIP development candidates only.
@@ -96,7 +96,16 @@ $sha=(& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[a-f0-9]{40}$') { throw 'Source SHA unavailable' }
 $short=$sha.Substring(0,12)
 $prefix="Userscript-Auto-Healer-v$version-$short-CANDIDATE"
-$temp=Join-Path $env:RUNNER_TEMP "uah-candidate-$short-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  $env:RUNNER_TEMP = $env:TEMP
+}
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  throw 'Neither RUNNER_TEMP nor TEMP environment variable is available'
+}
+$env:RUNNER_TEMP = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$runId = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ID)) { 'local' } else { $env:GITHUB_RUN_ID }
+$runAttempt = if ([string]::IsNullOrWhiteSpace($env:GITHUB_RUN_ATTEMPT)) { '1' } else { $env:GITHUB_RUN_ATTEMPT }
+$temp = Join-Path $env:RUNNER_TEMP "uah-candidate-$short-$runId-$runAttempt"
 if (Test-Path -LiteralPath $temp) { throw 'Refusing to overwrite prior candidate' }
 New-Item -ItemType Directory -Path $temp | Out-Null
 $out=Join-Path $temp 'deliverables'
