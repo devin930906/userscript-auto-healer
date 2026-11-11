@@ -334,3 +334,14 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
 - 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
+
+## 2026-11-11 TASK-018 / REQ-001..026 / TEST-007/018/026 安全审计与产品级 E2E 回归（PR #837 合并实证）
+
+- **集成事实**：PR [#837](https://github.com/devin930906/userscript-auto-healer/pull/837) 已通过 Squash 合并至主干 `main@507a0b230230283ca462ebcfa419358dbb8e1467`。
+- **新增模块与测试**：
+  1. `tests/security/permissions.test.ts`（系统级权限与边界审计，15 项测试用例）：覆盖 Chrome 执行文件规范与 Profile 隔离（拒绝日常 Chrome/Edge/Chromium Profile、根目录、父目录、NTFS ADS 及 DOS 预留设备）、CDP 端口范围与 127.0.0.1 绑定限制、渲染层沙箱与 Shell 不变性（`automaticRepairAvailable: false`, `aiEnabled: false`, `automaticApplyEnabled: false`）、受信任 main frame 检验、恶意脚本载荷的 Acorn AST 纯静态离线解析安全隔离、业务门控与原子变更的非提权 Fail-Closed 保证、多脚本升级 All-or-Nothing 拦截及导出状态隔离。
+  2. `tests/e2e/tampermonkey-userscript.test.ts`（产品级生命周期端到端回归，5 项测试用例）：覆盖完整的脚本导入 -> 元数据提取 -> 故障诊断（`missing-target`）-> 保守 AST 补丁计划（`REVIEWABLE_ONLY`）-> 独立备份隔离创建（`.bak-<timestamp>`）-> 真实 Tampermonkey 业务验收门控判定（`BUSINESS_ACCEPTED_AWAITING_TRANSACTION`）-> 具备互斥锁与日志恢复保障的原子变更执行（`APPLIED_NATIVE_ONLY`）-> 磁盘字节比对 -> 操作员触发的可逆无损回滚（`RESTORED_NATIVE_ONLY`），验证回滚后源文件 100% 恢复为原始字节及哈希。并包含反向时序检测、候选未验证拦截、TOCTOU 外部修改防护、多脚本依赖图安全回归（TEST-025）与导出/扩展存储状态分离（TEST-023）。
+- **测试与 CI 实证**：全量 1062 项测试 100% 绿灯（1052 pass, 0 fail, 10 conditional skip）；PR #837 云端工作流（Fence 8s, Boundary 2m35s, Smoke 40s, Portable Chrome 58s, Packaging 7m48s）全部通过。
+- **发行构建产物**：Actions Run [#43029276318](https://github.com/devin930906/userscript-auto-healer/actions/runs/43029276318)，Artifact ID `13860497743`（277,997,371 字节），候选 EXE SHA-256 `d856d31b5f4354b4130ce42337616ef0b8683b46cf45badeab6452179cfa3e93`，候选 ZIP SHA-256 `daff28207acd0159307556add13285ba3ca806f2b435961847ca2188b77dea77`。
+- **保留阻断与状态**：Issue [#608](https://github.com/devin930906/userscript-auto-healer/issues/608) 保持 **OPEN**，等待最终集中人工验收与全量 Stable GATE-001..011 签署。
+
