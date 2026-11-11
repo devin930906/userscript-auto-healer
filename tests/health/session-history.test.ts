@@ -1450,7 +1450,8 @@ test('TASK-015/TEST-024/026: archive read/write never dispatches inherited Array
     configurable:true,writable:true,value:function(...values:unknown[]){
      // Observe only calls from this privileged archive module. Preserve
      // normal Node internals and never leak caller data into the test log.
-     if(new Error().stack?.includes('limited-health-archive'))
+     const immediateCaller=new Error().stack?.split('\n')[2]??'';
+     if(immediateCaller.includes('limited-health-archive'))
       archivePushCalls++;
      return Reflect.apply(original!.value,this,values);
     }
