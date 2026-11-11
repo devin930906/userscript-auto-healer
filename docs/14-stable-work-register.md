@@ -28,9 +28,9 @@
 | TASK-015 | REQ-024；TEST-024 | 阶段代码已整合，正式监控未验证 | 会话内短历史已实现；缺已授权周期复检、持久记录和管理器业务真实性 | 健康监控 | TASK-010/013 | src/health/；docs/09-development-plan.md | 验证明确同意的复检计划、数据生命周期与真实业务信号 | TEST-024 完整正反例和过期恢复通过 |
 | TASK-016 | REQ-025；TEST-025 | 阶段代码已整合，真实兼容回归未验证 | 只读内存兼容层不能证明真实多脚本替换/回滚 | 共享兼容行为 | TASK-009/010/015 | src/compat/；docs/09-development-plan.md | 在独立 Tampermonkey 样本中复核多脚本冲突与回退 | TEST-025 真实多脚本不回归 |
 | TASK-017 | REQ-001..025；TEST-002/022 | 阶段 UI 已整合，完整用户旅程未完成 | 导入/场景/只读检查/手动导出为局部旅程；缺可信修复/批处理/恢复端到端 | 完整 GUI 用户路径 | TASK-013..016 | app/ui/；docs/09-development-plan.md | 组合受支持场景，覆盖异常、取消及权限拒绝 | 完整实际用户流程与关联测试通过 |
-| TASK-018 | REQ-001..026；TEST-007/018/026 | 正式整合安全审计未开始 | 已有组件负例与 Electron smoke，但缺正式全量安全、Tampermonkey E2E、隐私与供应链验收 | GATE-003..007 | TASK-017 和可信管理器矩阵 | docs/09-development-plan.md；docs/06-security-risk.md | 完整威胁复核与真实 Windows+管理器 E2E | 所有高严重度风险受控，要求的真实测试证据齐全 |
-| TASK-019 | REQ-027；TEST-027 | 候选构建已整合，正式发布未通过 | 候选 EXE 已验证局部安装/卸载/哈希；缺升级、清洁用户环境、业务与数据持久性正式验收 | GATE-008/011 | TASK-018；正式版本与签名策略 | docs/08-release.md；scripts/windows-package-candidate.ps1 | 从最终来源提交构建正式安装器，检查安装/升级/卸载数据 | TEST-027 与 GATE-008/011 完整通过 |
-| TASK-020 | REQ-028；TEST-028 | 候选构建已整合，正式发布未通过 | 真实候选 ZIP/哈希/只读路径有限通过；缺完整用户便携/首次运行/配置迁移验收 | GATE-009/011 | TASK-018；正式版本 | docs/08-release.md；.github/workflows/windows-candidate-packages.yml | 以最终同源提交重新构建完整 ZIP、解压运行并实测数据策略 | TEST-028 与 GATE-009/011 完整通过 |
+| TASK-018 | REQ-001..026；TEST-007/018/026 | 已完成并整合至 main（PR #837） | 完整安全权限审计（15项）与端到端生命周期回归（5项）100%通过；Issue #608 保持 Open 待人工集中签署 | GATE-003..007 | TASK-017 | tests/security/；tests/e2e/；docs/14-stable-work-register.md | 已完成 1062 项测试 100% 绿灯与云端 Windows 运行验证 | TEST-007/018/026 与 GATE-003..007 审计项通过 |
+| TASK-019 | REQ-027；TEST-027 | 生产安装规范已整合，候选验证通过（PR #839） | 生产 Inno Setup 规范（packaging/windows/installer.iss）与 6 项规范测试已整合；候选 EXE 逐项文件哈希比对、合成升级与卸载保留通过；Issue #609 保持 Open 待人工集中签署 | GATE-008/011 | TASK-018；正式版本与签名策略 | docs/08-release.md；packaging/windows/installer.iss；scripts/windows-package-candidate.ps1 | 从最终来源提交构建正式安装器，检查安装/升级/卸载数据 | TEST-027 规范与候选打包通过，GATE-008/011 待签署 |
+| TASK-020 | REQ-028；TEST-028 | 便携重定位路径规范化已整合（PR #839） | 53 项真实 Windows 锁/重定位/Restart Manager 回归通过；RUNNER_TEMP 规范化及 8.3 短路径修复已整合；候选 ZIP 逐项 147+ 文件哈希对照与只读 ACL 直启通过；Issue #215 保持 Open 待人工集中签署 | GATE-009/011 | TASK-018；正式版本 | docs/08-release.md；scripts/windows-portable-relocation.ps1；scripts/test-windows-portable-relocation.ps1 | 以最终同源提交重新构建完整 ZIP、解压运行并实测数据策略 | TEST-028 规范与候选打包通过，GATE-009/011 待签署 |
 | TASK-021 | REQ-001..028；TEST-001..028 | 未开始最终发布验收 | 11 项 GATE 无完整合格证据；未发现 GitHub Release | 最终 Stable；GATE-001..011 | TASK-018..020 和全部适用需求 | docs/08-release.md；GitHub releases（2026-10-21 返回空） | 汇总各项可复核证据、同 SHA 双包构建验签/校验并审查授权 | 全部 GATE 通过、版本/提交/真实双包/SHA256/发行说明一致 |
 
 ## 证据与跨会话续接规则
@@ -344,4 +344,16 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **测试与 CI 实证**：全量 1062 项测试 100% 绿灯（1052 pass, 0 fail, 10 conditional skip）；PR #837 云端工作流（Fence 8s, Boundary 2m35s, Smoke 40s, Portable Chrome 58s, Packaging 7m48s）全部通过。
 - **发行构建产物**：Actions Run [#43029276318](https://github.com/devin930906/userscript-auto-healer/actions/runs/43029276318)，Artifact ID `13860497743`（277,997,371 字节），候选 EXE SHA-256 `d856d31b5f4354b4130ce42337616ef0b8683b46cf45badeab6452179cfa3e93`，候选 ZIP SHA-256 `daff28207acd0159307556add13285ba3ca806f2b435961847ca2188b77dea77`。
 - **保留阻断与状态**：Issue [#608](https://github.com/devin930906/userscript-auto-healer/issues/608) 保持 **OPEN**，等待最终集中人工验收与全量 Stable GATE-001..011 签署。
+
+## 2026-11-11 TASK-019/020 / REQ-027/028 / TEST-027/028 Windows 安装器规范与便携重定位加固（PR #839 合并实证）
+
+- **集成事实**：PR [#839](https://github.com/devin930906/userscript-auto-healer/pull/839) 已通过 Squash 合并至主干 `main@c27ac6210f01a3556df2bf67bc4ae8ecad62cb24`。
+- **新增模块与测试**：
+  1. `packaging/windows/installer.iss`（生产 Inno Setup 6 规范）：正式定义生产独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`（与候选版本隔离）、最低权限要求（`PrivilegesRequired=lowest`，免管理员 UAC）、单用户安装目录（`{localappdata}\Programs\UserscriptAutoHealer`）、升级目录保持（`UsePreviousAppDir=yes`）、固实 LZMA 压缩（`Compression=lzma2/ultra64`, `SolidCompression=yes`）与桌面快捷方式默认不勾选。
+  2. `tests/packaging/installer-spec.test.ts`（安装器规范回归，6 项测试用例）：覆盖生产 Inno Setup 脚本存在性、生产 AppId 隔离与格式有效性、最低特权与用户目录规范、覆盖升级目录保持、卸载图标与固实压缩配置、桌面快捷方式默认未选中。
+  3. `scripts/test-windows-portable-relocation.ps1` 与 `scripts/test-windows-candidate-checksums.ps1` 路径规范化加固：统一使用 `[IO.Path]::GetFullPath` 展开 `$env:RUNNER_TEMP`，消除 Windows 8.3 短路径名（如 `ADMINI~1`）与 .NET CIM 进程映像解析结果不一致造成的偶发字符串匹配失败，并支持本地 `$env:TEMP` 自动安全回退；同时加固 `scripts/windows-package-candidate.ps1` 在辅助环境下的运行期目录解析。
+- **测试与 CI 实证**：全量 1068 项测试 100% 绿灯（1058 pass, 0 fail, 10 conditional skip）；PR #839 云端工作流（Fence 7s, Boundary 2m27s, Smoke 41s, Portable Chrome 57s, Packaging 7m33s）全部通过。
+- **发行构建产物**：Actions Run [#43035037457](https://github.com/devin930906/userscript-auto-healer/actions/runs/43035037457)，Artifact ID `13861984916`（278,000,653 字节），候选 EXE SHA-256 `fb7147c5bd73bf218c756dae7bf24237b7baf45c511fca39fe267d3e77c61fb7`，候选 ZIP SHA-256 `8b5f7161c9d462b2dd261f83833a470d7472e69a1eb1d3bd5b7d11e633a7b37c`。
+- **保留阻断与状态**：Issue [#609](https://github.com/devin930906/userscript-auto-healer/issues/609) 与 Issue [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) 保持 **OPEN**，等待最终集中人工验收与全量 Stable GATE-001..011 签署。
+
 
