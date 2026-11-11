@@ -94,7 +94,10 @@ export function classifyMainFrameUrl(actual:unknown,expected:string):TargetNavig
 export function classifyMainFrameResponse(
   raw:unknown, expectedUrl:string
 ):TargetNavigationStage|null{
-  if(typeof raw!=='string'||raw.length>16384)return 'MAIN_FRAME_RESPONSE_INVALID';
+  // CDP WebSocket transport budgets are bytes, not UTF-16 code units.
+  // A long multibyte frame name must never bypass the 16 KiB receipt cap.
+  if(typeof raw!=='string'||raw.length>16384||
+     Buffer.byteLength(raw,'utf8')>16384)return 'MAIN_FRAME_RESPONSE_INVALID';
   try{
     const parsed:unknown=JSON.parse(raw);
     if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
