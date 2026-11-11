@@ -129,7 +129,9 @@ test('TASK-015/TEST-024/026: archive merge does not invoke inherited array index
  const stored={
   status:'ARCHIVE_READ_UNVERIFIED',
   currentStatus:'INDETERMINATE',
-  events:[{observedAtMs:now-5000,status:'INDETERMINATE'}]
+  events:[{observedAtMs:now-5000,status:'INDETERMINATE'}],
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false
  } as Parameters<typeof mergeLimitedSessionArchive>[1];
  const previous=Object.getOwnPropertyDescriptor(Array.prototype,'0');
  let setterCalls=0;
