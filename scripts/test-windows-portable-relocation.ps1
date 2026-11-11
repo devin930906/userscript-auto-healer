@@ -1,9 +1,16 @@
-# TASK-020 / REQ-028 / TEST-028: Windows-only relocation regression.
+﻿# TASK-020 / REQ-028 / TEST-028: Windows-only relocation regression.
 # Operates solely on fresh, disposable runner temp directories. No user data.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$root=Join-Path $env:RUNNER_TEMP ("uah-relocation-test-"+[Guid]::NewGuid().ToString('N'))
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  $env:RUNNER_TEMP = $env:TEMP
+}
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  throw 'Neither RUNNER_TEMP nor TEMP environment variable is available'
+}
+$env:RUNNER_TEMP = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$root = Join-Path $env:RUNNER_TEMP ("uah-relocation-test-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
 try {
   # Red scenario: the old direct Move-Item really fails for a Windows

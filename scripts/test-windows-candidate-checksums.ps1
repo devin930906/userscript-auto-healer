@@ -3,7 +3,14 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'windows-candidate-checksums.ps1')
-$root=Join-Path $env:RUNNER_TEMP ('uah-checksum-test-'+[guid]::NewGuid().ToString('N'))
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  $env:RUNNER_TEMP = $env:TEMP
+}
+if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+  throw 'Neither RUNNER_TEMP nor TEMP environment variable is available'
+}
+$env:RUNNER_TEMP = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$root = Join-Path $env:RUNNER_TEMP ('uah-checksum-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
 $setup='UAH-v0.1.0-abc-CANDIDATE-Setup.exe'
 $portable='UAH-v0.1.0-abc-CANDIDATE-Portable.zip'
