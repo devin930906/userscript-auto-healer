@@ -263,3 +263,48 @@ test('TASK-016/TEST-025/026: C1 and deprecated bidi controls cannot mask shared 
     assert.equal(layer.resolve('submit')?.selector,'#old-submit');
   }
 });
+
+test('TASK-016/TEST-025/026: compatibility copy never invokes mutable Array.prototype.push',()=>{
+ const original=Array.prototype.push;
+ let intercepted=0;
+ let layer:LimitedCompatibilityLayer|undefined;
+ let preview:ReturnType<LimitedCompatibilityLayer['previewUpgrade']>|undefined;
+ try{
+  Array.prototype.push=function(){
+   intercepted++;
+   throw Error('UNTRUSTED_ARRAY_PUSH_CALLED');
+  };
+  layer=new LimitedCompatibilityLayer(initial);
+  preview=layer.previewUpgrade(newer,checks);
+ }finally{
+  Array.prototype.push=original;
+ }
+ assert.equal(intercepted,0,'untrusted array cloning cannot call Array.prototype.push');
+ assert.ok(layer);
+ assert.equal(preview?.status,'OFFLINE_PREVIEW_ONLY');
+ assert.equal(layer.resolve('submit')?.selector,'#old-submit');
+ assert.equal(layer.snapshot().automaticActivationAllowed,false);
+});
+
+test('TASK-016/TEST-025/026: compatibility copy defines own array slots without inherited index setters',()=>{
+ const previous=Object.getOwnPropertyDescriptor(Array.prototype,'0');
+ let intercepted=0;
+ let layer:LimitedCompatibilityLayer|undefined;
+ let preview:ReturnType<LimitedCompatibilityLayer['previewUpgrade']>|undefined;
+ try{
+  Object.defineProperty(Array.prototype,'0',{
+   configurable:true,
+   set(){intercepted++;throw Error('UNTRUSTED_ARRAY_INDEX_SETTER_CALLED');}
+  });
+  layer=new LimitedCompatibilityLayer(initial);
+  preview=layer.previewUpgrade(newer,checks);
+ }finally{
+  if(previous)Object.defineProperty(Array.prototype,'0',previous);
+  else Reflect.deleteProperty(Array.prototype,'0');
+ }
+ assert.equal(intercepted,0,'compatibility cloning must never call an inherited numeric setter');
+ assert.ok(layer);
+ assert.equal(preview?.status,'OFFLINE_PREVIEW_ONLY');
+ assert.equal(layer.resolve('status')?.selector,'.status');
+ assert.equal(layer.snapshot().automaticActivationAllowed,false);
+});
