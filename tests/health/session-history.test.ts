@@ -1429,3 +1429,40 @@ test('TASK-015/TEST-024/026: native archive merge never invokes replaceable Arra
  assert.equal(result?.businessVerified,false);
  assert.equal(result?.automaticPatchAllowed,false);
 });
+
+test('TASK-015/TEST-024/026: archive read/write never dispatches inherited Array.push',async()=>{
+ const {saveLimitedHealthArchive,readLimitedHealthArchive}=
+  require('../../src/health/limited-health-archive') as typeof import('../../src/health/limited-health-archive');
+ const home=await mkdtemp(join(tmpdir(),'uah-health-inherited-push-'));
+ try{
+  const userData=join(home,'user-data');await mkdir(userData);
+  const key=limitedScenarioHistoryKey(A,'inherited-push');
+  const history=new LimitedHealthRegistry(()=>Date.now()-1000);
+  history.record({scriptHash:key,kind:'LIMITED_DOM_OBSERVATION',evidenceHash:E});
+  const snapshot=history.snapshot(key);
+  const original=Object.getOwnPropertyDescriptor(Array.prototype,'push');
+  assert.ok(original&&typeof original.value==='function');
+  let archivePushCalls=0;
+  let saved:Awaited<ReturnType<typeof saveLimitedHealthArchive>>|undefined;
+  let restored:Awaited<ReturnType<typeof readLimitedHealthArchive>>|undefined;
+  try{
+   Object.defineProperty(Array.prototype,'push',{
+    configurable:true,writable:true,value:function(...values:unknown[]){
+     // Observe only calls from this privileged archive module. Preserve
+     // normal Node internals and never leak caller data into the test log.
+     if(new Error().stack?.includes('limited-health-archive'))
+      archivePushCalls++;
+     return Reflect.apply(original!.value,this,values);
+    }
+   });
+   saved=await saveLimitedHealthArchive(userData,snapshot);
+   restored=await readLimitedHealthArchive(userData,key);
+  }finally{
+   Object.defineProperty(Array.prototype,'push',original!);
+  }
+  assert.equal(archivePushCalls,0,
+   'native archive code must not invoke replaceable inherited array push hooks');
+  assert.equal(saved?.status,'ARCHIVE_SAVED_UNVERIFIED');
+  assert.equal(restored?.status,'ARCHIVE_READ_UNVERIFIED');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
