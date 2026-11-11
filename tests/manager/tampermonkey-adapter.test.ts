@@ -69,7 +69,10 @@ test('TEST-017 stage: user authorization and owned session are mandatory, no CDP
  * The expected isolated profile has no extensions; any detected runtime is a hint only.
  */
 test('TEST-017 stage: real owned Chrome target query remains non-verified',async t=>{
- if(process.platform!=='win32'){t.skip('Requires Windows signed Chrome');return;}
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'){
+  t.skip('Dedicated signed Chrome Windows Actions only');
+  return;
+ }
  let chrome:string|undefined;
  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
    if(!base)continue;
