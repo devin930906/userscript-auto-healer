@@ -1291,7 +1291,7 @@ test('TASK-007/TEST-017/026: GM injection-time whitelist never trusts inherited 
   typeof import('../../src/manager/tampermonkey-gm-probe');
  const original=Object.getOwnPropertyDescriptor(Array.prototype,'some');
  assert.ok(original);
- const injected='document-idle\\n// @grant GM_xmlhttpRequest';
+ const injected='document-idle\n// @grant GM_xmlhttpRequest';
  let invoked=false;
  let result:Awaited<ReturnType<typeof startIsolatedTampermonkeyGmProbe>>|undefined;
  try{
