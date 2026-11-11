@@ -1285,3 +1285,31 @@ test('TASK-007/TEST-017/026: invalid live wall clock irreversibly revokes a GM f
   'recovering system time must not revive a revoked probe');
  assert.equal((await fetch(probe.origin+'/?mode=broken')).status,403);
 });
+
+test('TASK-007/TEST-017/026: GM injection-time whitelist never trusts inherited Array.some',async()=>{
+ const {isSupportedGmProbeRunAt}=require('../../src/manager/tampermonkey-gm-probe') as
+  typeof import('../../src/manager/tampermonkey-gm-probe');
+ const original=Object.getOwnPropertyDescriptor(Array.prototype,'some');
+ assert.ok(original);
+ const injected='document-idle\\n// @grant GM_xmlhttpRequest';
+ let invoked=false;
+ let result:Awaited<ReturnType<typeof startIsolatedTampermonkeyGmProbe>>|undefined;
+ try{
+  Object.defineProperty(Array.prototype,'some',{
+   configurable:true,writable:true,value(){
+    invoked=true;return true;
+   }
+  });
+  assert.equal(isSupportedGmProbeRunAt(injected),false,
+   'a poisoned inherited array predicate must not whitelist metadata injection');
+  result=await startIsolatedTampermonkeyGmProbe(
+   true,30000,injected as 'document-idle');
+ }finally{
+  Object.defineProperty(Array.prototype,'some',original!);
+  if(result?.ok)await result.session.stop();
+ }
+ assert.equal(invoked,false,
+  'the native consent boundary must not invoke inherited array predicate hooks');
+ assert.deepEqual(result,{ok:false,code:'INVALID_OPTIONS'},
+  'invalid run-at metadata must be rejected before a loopback listener binds');
+});
