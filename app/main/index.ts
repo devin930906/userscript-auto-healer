@@ -1278,6 +1278,7 @@ function registerSafeIpc(): void {
 
 async function createMainWindow(): Promise<void> {
   const win = new BrowserWindow({
+    title: 'Userscript Auto Healer',
     width: 900,
     height: 620,
     minWidth: 650,
