@@ -365,7 +365,9 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   3. 交付生产发布规范自动化回归测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试用例全部通过），全工程测试用例总数提升至 **1073 项**（**1063 项通过**，0 项失败，10 项条件跳过）。
   4. 版本号正式推进至正式稳定版 `0.0.1`。
 - **测试与 CI 实证**：全量 1073 项测试 100% 绿灯（1063 pass, 0 fail, 10 conditional skip）；PR #841 云端工作流（Fence 9s, Boundary 2m42s, Smoke 38s, Portable Chrome 53s, Packaging 6m54s）全部通过。
-- **发行构建产物**：Actions Run [#43040889627](https://github.com/devin930906/userscript-auto-healer/actions/runs/43040889627)，Artifact ID `13865347719`（278,021,169 字节），候选 EXE SHA-256 `7f67adccb897a96f50b0738388a18df552c7506e98d36ddbfaae7efcc9921824`，候选 ZIP SHA-256 `33537afbcf5311ad27047ec8611d3d4f0ea6d2bef7a1394502b56e530f868625`。
+- **发行构建产物**：
+  - 云端生产发布工作流运行 [#43049182838](https://github.com/devin930906/userscript-auto-healer/actions/runs/43049182838)（Artifact ID `13868942959`，274,354,742 字节）在 `main@7a9fc1f` 上成功完成生产构建与全量自检：生产 Setup EXE SHA-256 `3531011ff741651b01182309e922a6f51986e5bb88f07a34431b653ae390f98c`，生产 Portable ZIP SHA-256 `cb18c26c24b026786103b3bc6d7a6d97dc4a2e5c26f970891cb427ba51301870`。
+  - 此前云端 Candidate Packaging 运行 [#43040889627](https://github.com/devin930906/userscript-auto-healer/actions/runs/43040889627)（Artifact ID `13865347719`，278,021,169 字节）候选 EXE SHA-256 `7f67adccb897a96f50b0738388a18df552c7506e98d36ddbfaae7efcc9921824`，候选 ZIP SHA-256 `33537afbcf5311ad27047ec8611d3d4f0ea6d2bef7a1394502b56e530f868625`。
 - **GATE-001..011 机器核验状态**：
   - GATE-001（功能完整性）：全部 28 项 REQ 对应功能与测试 100% 交付；
   - GATE-002（需求符合性）：全部行为契约与 Fail-Closed 不变量严格保持；
