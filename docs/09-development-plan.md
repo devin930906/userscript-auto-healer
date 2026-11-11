@@ -31,7 +31,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 | TASK-018 | 安全审计与端到端回归 | REQ-001..026 | 必须实现 | TASK-017 | tests/security tests/e2e | 预计新增：tests/security/permissions.test.ts；tests/e2e/tampermonkey-userscript.test.ts | 覆盖严重风险、真实 Tampermonkey、授权/注入模式/回滚负例，Violentmonkey 仅辅助 | 安全/回归证据 | TEST-007;TEST-018;TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已完成（PR #837 已合并入 main@507a0b2；新增 tests/security/permissions.test.ts 覆盖 Chrome 边界/沙箱/Fail-Closed 与 tests/e2e/tampermonkey-userscript.test.ts 覆盖全生命周期端到端修复、业务验收门控、原子事务与可逆回滚，全量 1062 测试 100% 绿灯；Issue #608 保持 OPEN 待最终 Stable 人工核验） |
 | TASK-019 | Windows EXE 安装版 | REQ-027 | 必须实现 | TASK-018;POC-03 | packaging/windows .github/workflows | 预计新增：packaging/windows/installer.iss；.github/workflows/build-windows.yml（预计新增；Inno Setup 候选） | 锁定安装工具/权限/升级测试，Windows 构建验收 | 真实 EXE 安装包 | TEST-027 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合生产规范与候选验证（PR #839 已合并 main@c27ac62；新增 packaging/windows/installer.iss 生产安装脚本规范与 tests/packaging/installer-spec.test.ts 6项规范回归，全量 1068 项测试 100% 绿灯；云端 Candidate Packaging Run #43035037457 验证 147+ 文件哈希、合成升级及卸载数据保留全流程成功；Issue #609 保持 OPEN 待最终 Stable 人工集中签署） |
 | TASK-020 | 真实 ZIP 便携发行 | REQ-028 | 必须实现 | TASK-018;ZIP 工具可用性验证 | packaging/portable .github/workflows | 预计新增：packaging/portable/create-zip.ps1；.github/workflows/build-windows.yml | 创建真实 ZIP，校验文件头/路径安全/文件哈希/解压/干净 Windows 直启 | 真实 ZIP 包 | TEST-028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合重定位加固与候选验证（PR #839 已合并 main@c27ac62；加固 test-windows-portable-relocation.ps1、test-windows-candidate-checksums.ps1 与 windows-package-candidate.ps1 路径规范化，支持本地与 CI 环境 8.3 短路径及未绑定 RUNNER_TEMP 安全回退，53项真实锁/重定位回归与 7项清单校验全绿；云端 Candidate Packaging Run #43035037457 真实 ZIP 验证成功；Issue #215 保持 OPEN 待最终 Stable 人工集中签署） |
-| TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 未开始 |
+| TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合正式发布工作流与全门槛机器验证（新增 .github/workflows/release.yml、scripts/windows-package-production.ps1 与 tests/packaging/production-packaging-spec.test.ts 5 项测试，版本推进至 0.0.1，全量 1073 项自动化用例 100% 绿灯；GATE-001..011 机器验证全部就绪；Issue #610 保持 OPEN 待 DevinOoi 最终集中人工签署） |
 
 ## 任务依赖
 POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/010/011→012/013/014/015/016→017/018→019/020→021。修复/安全与真实验收必须协作，不允许绕过测试门控。
@@ -388,7 +388,7 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 | `TASK-018` | 整体安全/业务集成验收待执行 | 尚未单独建 Issue；按现有依赖进入 |
 | `TASK-019` | 开发候选 EXE 已存在，正式安装验收待办 | 尚未单独建 Issue；按现有依赖进入 |
 | `TASK-020` | 开发候选 ZIP 已存在；间歇重定位故障 | [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) |
-| `TASK-021` | 全部 Stable GATE / 正式发布验收待执行 | 尚未单独建 Issue；正式发布需独立授权 |
+| `TASK-021` | 全部 Stable GATE 机器整合就绪，待最终人工集中签署 | [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) |
 
 - **编号与粒度**：TASK 编号永久沿用既有正式任务序列；Issue #N 是 GitHub 实际单独编号，不能强制一对一。历史已实现 TASK 不补建无意义 Issue；同一 TASK 可以有多个分阶段 PR，Issue 要求与 PR 的代码变更分开验收。
 - **近期执行链**：#486 / TASK-007 的真实 Tampermonkey 支持与业务证据；#480 / TASK-008 的独立 Chrome 间歇失败；#487 / TASK-009 修复候选到可信诊断链；#488 / TASK-010 真实业务门控；#489 / TASK-011 原子备份/恢复；#440 / TASK-013 AST Worker 失败；#215 / TASK-020 便携目录重命名失败。此处不是强制线性顺序，必须以原正式任务依赖与现时风险选择能执行的工作。

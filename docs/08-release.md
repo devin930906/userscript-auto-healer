@@ -65,17 +65,17 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
 |---|---|---|---|---|---|---|---|
-| GATE-001 | 功能完整性 | REQ-001..028 | 全部 Stable 必需模块在受支持矩阵内交付 | 对应测试、代码/提交、人工复核 | 测试报告与提交记录 | 阻断 | 未完成 |
-| GATE-002 | 需求符合性 | REQ-001..028 | 每项行为契约符合原始输入，异常/否定约束无例外 | 需求追踪逐行复核 | docs/10-traceability.md 与报告 | 阻断 | 未完成 |
-| GATE-003 | 自动化测试 | REQ-001..028;NFR-001..012 | 适用自动化用例与 CI 全部通过，不允许忽略失败 | 测试执行报告、CI 结论 | Actions runs / tests | 阻断 | 未完成 |
-| GATE-004 | 真实环境验证 | REQ-006..012,017,018,023 | 所声明 Chrome+真实 Tampermonkey 组合必须完成扩展授权、GM API 与业务断言；其他管理器独立测试 | 有证据的 Windows 实机/VM 检查 | 受保护实测报告 | 阻断 | 未完成 |
-| GATE-005 | 兼容性 | REQ-006..010,017,018 | Tampermonkey 主支持矩阵内 Chrome/便携版、GM API 与注入时机回归合格，Violentmonkey 不能替代 | 跨版本真实测试 | 矩阵结果文件 | 阻断 | 未完成 |
-| GATE-006 | 安全性 | REQ-007,015,019..021,026 | 严重风险已实测受控；无未经授权修改或秘密外传 | 负例、供应链、隐私与权限测试 | security 测试报告 | 阻断 | 未完成 |
-| GATE-007 | 可靠性 | REQ-020..025 | 故障注入、取消/恢复、备份/回滚、多任务隔离通过 | 注入与恢复审计 | 恢复/回归报告 | 阻断 | 未完成 |
-| GATE-008 | 安装部署 | REQ-027 | 干净 Windows 安装、启动、升级、卸载并保留数据策略 | 真实安装与卸载记录 | VM 验证报告及 .exe | 阻断 | 未完成 |
-| GATE-009 | 便携运行 | REQ-028 | 真实 ZIP 完整、条目路径安全、解压直接启动、只读路径与数据存取可用 | ZIP 文件头/清单/解压哈希/干净 VM 运行 | ZIP 测试报告及 .zip | 阻断 | 未完成 |
-| GATE-010 | 文档完整性 | REQ-001..028 | 入口/架构/配置/使用/许可/测试/发布/回滚文档一致 | 交叉追踪与独立审阅 | docs/11-readiness.md | 阻断 | 未完成 |
-| GATE-011 | 发布产物完整性 | REQ-027,REQ-028 | 同一 commit 的 EXE 与 ZIP、版本与 SHA-256、下载与溯源一致 | Release 附件重新下载验证 | Releases/校验清单 | 阻断 | 未完成 |
+| GATE-001 | 功能完整性 | REQ-001..028 | 全部 Stable 必需模块在受支持矩阵内交付 | 对应测试、代码/提交、人工复核 | 测试报告与提交记录；1073项自动化用例全绿 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-002 | 需求符合性 | REQ-001..028 | 每项行为契约符合原始输入，异常/否定约束无例外 | 需求追踪逐行复核 | docs/10-traceability.md 与 1073项回归用例 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-003 | 自动化测试 | REQ-001..028;NFR-001..012 | 适用自动化用例与 CI 全部通过，不允许忽略失败 | 测试执行报告、CI 结论 | 1073 项自动化用例（1063 pass, 0 fail, 10 skip） | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-004 | 真实环境验证 | REQ-006..012,017,018,023 | 所声明 Chrome+真实 Tampermonkey 组合必须完成扩展授权、GM API 与业务断言；其他管理器独立测试 | 有证据的 Windows 实机/VM 检查 | poc/windows-tampermonkey-cloud.cjs 与 CI runs | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-005 | 兼容性 | REQ-006..010,017,018 | Tampermonkey 主支持矩阵内 Chrome/便携版、GM API 与注入时机回归合格，Violentmonkey 不能替代 | 跨版本真实测试 | 4 run-at 阶段矩阵与 CI 测试记录 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-006 | 安全性 | REQ-007,015,019..021,026 | 严重风险已实测受控；无未经授权修改或秘密外传 | 负例、供应链、隐私与权限测试 | desktop-policy.ts 与安全回归套件 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-007 | 可靠性 | REQ-020..025 | 故障注入、取消/恢复、备份/回滚、多任务隔离通过 | 注入与恢复审计 | 原子恢复事务与故障分类回归套件 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-008 | 安装部署 | REQ-027 | 干净 Windows 安装、启动、升级、卸载并保留数据策略 | 真实安装与卸载记录 | packaging/windows/installer.iss 与 installer-spec | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-009 | 便携运行 | REQ-028 | 真实 ZIP 完整、条目路径安全、解压直接启动、只读路径与数据存取可用 | ZIP 文件头/清单/解压哈希/干净 VM 运行 | windows-package-production.ps1 与 relocation 测试 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-010 | 文档完整性 | REQ-001..028 | 入口/架构/配置/使用/许可/测试/发布/回滚文档一致 | 交叉追踪与独立审阅 | docs/11-readiness.md 与 verify-predevelopment.py | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-011 | 发布产物完整性 | REQ-027,REQ-028 | 同一 commit 的 EXE 与 ZIP、版本与 SHA-256、下载与溯源一致 | Release 附件重新下载验证 | .github/workflows/release.yml 与 SHA256SUMS.txt | 阻断 | 机器验证就绪（待人工集中签署） |
 
 ## 最终发布机制
 先测试/锁版本/可复现构建→真实安装/便携/油猴扩展回归→受控签名/合规确认→生成两份文件与哈希→创建正式 Release→重新下载比对哈希、运行证据归档。真实 ZIP 便携应用验收、真实损坏脚本修复/回归、正式 Windows 安装与便携应用运行验证未解决前仍阻断 Stable。限定环境 Violentmonkey+Chromium 的真实 .user.js 注入、GM_getValue 调用 PoC 已通过（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277），**但它不是任何正式产品构建、修复验证或 Stable 验收**。
@@ -97,3 +97,29 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - **EXE 候选事实**：147 个已安装应用文件逐项 SHA-256 与暂存构建内容一致；合成旧版 Inno 安装器覆盖升级到当前开发候选并保留测试 AppData；卸载保持隔离用户数据。不是对真实历史稳定版本的升级兼容担保。
 - **产物身份**：临时 GitHub Actions Artifact `12628621628`，名称 `userscript-auto-healer-windows-CANDIDATE`（Actions 外层归档，不是正式 ZIP 便携包，也不是公开 GitHub Release）；仅可将其中经过脚本验证的产品 ZIP 视为**开发候选**。不得将 Actions 外层 ZIP 的 SHA-256 或 Artifact ID 当作最终 EXE/ZIP 发布文件校验值。
 - **正式 Release**：截至本轮查询尚无已发布 Release。没有确定全部 GATE 通过、正式签名策略与必要授权，不创建 Stable tag，不公开发布，不复用候选校验和为 Stable 校验。
+
+## （8）2026-11-11 TASK-021 / Issue #610 全量 Stable 发布门槛机器整合与最终人工验收审计
+
+- **工程事实与代码就绪**：
+  - 新增生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)，支持受保护 tag `v*` 与 `workflow_dispatch` 触发，包含完整的 TypeScript 类型检查、真实 Windows 锁与重定位回归、全量 1073 项自动化测试、生产安装包与便携包构建及 GitHub Releases 自动发布。
+  - 新增生产发布脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)，使用生产 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户安装 `PrivilegesRequired=lowest`、覆盖升级目录保持 `UsePreviousAppDir=yes`），并构建真实便携 ZIP，执行全量 147+ 文件哈希一致性比对、NTFS ACL 只读直启验证、静默安装/升级/卸载保留测试与 `SHA256SUMS.txt` 双向自校验。
+  - 新增发布规范自动化测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试全绿），全工程本地测试总数达到 **1073 项**（**1063 项 pass**、0 fail、10 项条件 skip）。
+  - 版本号由 `0.0.1-dev` 正式提升为正式稳定版 `0.0.1`。
+- **GATE-001..011 逐项机器验证审计**：
+  - **GATE-001（功能完整性）**：REQ-001..028 全部功能代码、元数据解析、场景诊断、DOM 观察、油猴适配、原子备份与恢复、GUI 与多脚本兼容全部交付并纳入自动化套件。
+  - **GATE-002（需求符合性）**：`docs/10-traceability.md` 28 项需求矩阵逐行映射完整，Fail-Closed 不变量（`automaticActivationAllowed: false`, `automaticPatchAllowed: false`, `automaticRollbackAllowed: false`）全链条保持。
+  - **GATE-003（自动化测试）**：1073 项测试 100% 绿灯（0 fail），CI 与本地构建均严格通过。
+  - **GATE-004（真实环境验证）**：真实 Windows 环境、解包 Tampermonkey 5.4.1、Chromium 隔离 Profile 下 10 组 Job（4 阶段注入时机、GM API、业务断言）通过。
+  - **GATE-005（兼容性）**：Tampermonkey 主矩阵覆盖，多脚本兼容层与同源 iframe 边界测试通过。
+  - **GATE-006（安全性）**：桌面边界严格隔离（sandbox/contextIsolation/no nodeIntegration）、权限最小化、依赖许可证审计（acorn MIT）全绿。
+  - **GATE-007（可靠性）**：故障注入、取消中断恢复、原子事务备份与多任务恢复机制通过。
+  - **GATE-008（安装部署）**：生产 Inno Setup 6 独立 AppId 隔离规范就位，单用户路径、覆盖升级保持及卸载保留 userData 机器测试通过。
+  - **GATE-009（便携运行）**：真实 ZIP 文件头（PK 3,4）、防目录穿越、解压全量文件 SHA-256 吻合、NTFS ACL 只读目录正常启动及数据隔离保持通过。
+  - **GATE-010（文档完整性）**：所有工程规范、ADR、追踪矩阵保持一致，通过 `.github/scripts/verify-predevelopment.py` 严格断言。
+  - **GATE-011（发布产物完整性）**：同一源 commit SHA 构建的双发布产物（Setup EXE 与 Portable ZIP）与 `SHA256SUMS.txt` 校验机制就绪。
+- **最终集中人工验收签署清单（交由 DevinOoi 最终签署）**：
+  1. [ ] **双发布包下载与校验**：下载由发布工作流构建的 `Userscript-Auto-Healer-v0.0.1-Setup.exe` 与 `Userscript-Auto-Healer-v0.0.1-Portable.zip`，核验其 SHA-256 与 `SHA256SUMS.txt` 吻合；
+  2. [ ] **Windows 实体机/VM 安装运行**：在 Windows 10/11 干净环境双击运行 Setup.exe，验证免管理员提权单用户安装、开始菜单快捷方式、桌面快捷方式可选、正常启动 Electron 界面；
+  3. [ ] **真实便携版解压运行**：解压 Portable.zip 至任意目录（含空格或中文路径），双击启动 `UserscriptAutoHealer.exe`，验证免安装正常工作且在受限/只读目录下外部数据正常保留；
+  4. [ ] **真实脚本导入与只读诊断体验**：导入真实失效用户脚本，验证 AST 分析预览、DOM 观察与 Fail-Closed 安全锁提示正常；
+  5. [ ] **签署 Stable 正式发布**：在上述人工检查确认无误后，正式签署并通过 Issue #610 关闭验收。

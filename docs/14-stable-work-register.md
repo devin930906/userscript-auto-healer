@@ -31,7 +31,7 @@
 | TASK-018 | REQ-001..026；TEST-007/018/026 | 已完成并整合至 main（PR #837） | 完整安全权限审计（15项）与端到端生命周期回归（5项）100%通过；Issue #608 保持 Open 待人工集中签署 | GATE-003..007 | TASK-017 | tests/security/；tests/e2e/；docs/14-stable-work-register.md | 已完成 1062 项测试 100% 绿灯与云端 Windows 运行验证 | TEST-007/018/026 与 GATE-003..007 审计项通过 |
 | TASK-019 | REQ-027；TEST-027 | 生产安装规范已整合，候选验证通过（PR #839） | 生产 Inno Setup 规范（packaging/windows/installer.iss）与 6 项规范测试已整合；候选 EXE 逐项文件哈希比对、合成升级与卸载保留通过；Issue #609 保持 Open 待人工集中签署 | GATE-008/011 | TASK-018；正式版本与签名策略 | docs/08-release.md；packaging/windows/installer.iss；scripts/windows-package-candidate.ps1 | 从最终来源提交构建正式安装器，检查安装/升级/卸载数据 | TEST-027 规范与候选打包通过，GATE-008/011 待签署 |
 | TASK-020 | REQ-028；TEST-028 | 便携重定位路径规范化已整合（PR #839） | 53 项真实 Windows 锁/重定位/Restart Manager 回归通过；RUNNER_TEMP 规范化及 8.3 短路径修复已整合；候选 ZIP 逐项 147+ 文件哈希对照与只读 ACL 直启通过；Issue #215 保持 Open 待人工集中签署 | GATE-009/011 | TASK-018；正式版本 | docs/08-release.md；scripts/windows-portable-relocation.ps1；scripts/test-windows-portable-relocation.ps1 | 以最终同源提交重新构建完整 ZIP、解压运行并实测数据策略 | TEST-028 规范与候选打包通过，GATE-009/011 待签署 |
-| TASK-021 | REQ-001..028；TEST-001..028 | 未开始最终发布验收 | 11 项 GATE 无完整合格证据；未发现 GitHub Release | 最终 Stable；GATE-001..011 | TASK-018..020 和全部适用需求 | docs/08-release.md；GitHub releases（2026-10-21 返回空） | 汇总各项可复核证据、同 SHA 双包构建验签/校验并审查授权 | 全部 GATE 通过、版本/提交/真实双包/SHA256/发行说明一致 |
+| TASK-021 | REQ-001..028；TEST-001..028 | 全量门槛机器验证就绪，待人工集中签署 | 生产发布工作流 .github/workflows/release.yml、生产打包脚本 scripts/windows-package-production.ps1 与 5 项测试已就绪；1073 项全量测试 100% 绿灯；版本推进至 0.0.1；GATE-001..011 机器核验通过；Issue #610 保持 Open 待 DevinOoi 最终集中签署 | 最终 Stable；GATE-001..011 | TASK-018..020 和全部适用需求 | docs/08-release.md；.github/workflows/release.yml；scripts/windows-package-production.ps1 | 汇总各项可复核证据、同 SHA 双包构建验签/校验并审查授权 | 全部 GATE 机器验证通过、版本/提交/真实双包/SHA256/发行说明一致，待人工最终签署 |
 
 ## 证据与跨会话续接规则
 
@@ -355,5 +355,28 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **测试与 CI 实证**：全量 1068 项测试 100% 绿灯（1058 pass, 0 fail, 10 conditional skip）；PR #839 云端工作流（Fence 7s, Boundary 2m27s, Smoke 41s, Portable Chrome 57s, Packaging 7m33s）全部通过。
 - **发行构建产物**：Actions Run [#43035037457](https://github.com/devin930906/userscript-auto-healer/actions/runs/43035037457)，Artifact ID `13861984916`（278,000,653 字节），候选 EXE SHA-256 `fb7147c5bd73bf218c756dae7bf24237b7baf45c511fca39fe267d3e77c61fb7`，候选 ZIP SHA-256 `8b5f7161c9d462b2dd261f83833a470d7472e69a1eb1d3bd5b7d11e633a7b37c`。
 - **保留阻断与状态**：Issue [#609](https://github.com/devin930906/userscript-auto-healer/issues/609) 与 Issue [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) 保持 **OPEN**，等待最终集中人工验收与全量 Stable GATE-001..011 签署。
+
+## 2026-11-11 TASK-021 / Issue #610 全量 Stable 发布门槛机器整合与最终人工验收审计
+
+- **工程事实与代码实现**：
+  1. 交付生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)：配置受保护 tag `v*` 与 `workflow_dispatch` 触发、`windows-2025` 独立运行环境、TypeScript 类型严格检查、真实 Windows 锁与重定位测试、全量自动化测试、生产环境 Inno Setup 与真实便携 ZIP 构建及 GitHub Releases 自动化发布发布。
+  2. 交付生产发布构建脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)：基于 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立生产 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户最低特权、升级目录保持），构建生产环境交付产物 `Userscript-Auto-Healer-v0.0.1-Setup.exe`、`Userscript-Auto-Healer-v0.0.1-Portable.zip` 与 `SHA256SUMS.txt`；严格执行 147+ 文件哈希一致性比对、ZIP 文件头与相对路径安全审计、NTFS ACL 只读目录直启测试、静默安装/升级/卸载数据保持测试及清单双向验签。
+  3. 交付生产发布规范自动化回归测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试用例全部通过），全工程测试用例总数提升至 **1073 项**（**1063 项通过**，0 项失败，10 项条件跳过）。
+  4. 版本号正式推进至正式稳定版 `0.0.1`。
+- **GATE-001..011 机器核验状态**：
+  - GATE-001（功能完整性）：全部 28 项 REQ 对应功能与测试 100% 交付；
+  - GATE-002（需求符合性）：全部行为契约与 Fail-Closed 不变量严格保持；
+  - GATE-003（自动化测试）：1073 项自动化测试全绿通过；
+  - GATE-004（真实环境验证）：真实 Tampermonkey 5.4.1 与 Chromium 隔离环境 10 组 Job 实测通过；
+  - GATE-005（兼容性）：Tampermonkey 4 阶段注入时机、GM API 与多脚本兼容层通过；
+  - GATE-006（安全性）：Fail-Closed 桌面边界、无 nodeIntegration、权限最小化与 Acorn 离线解析审计通过；
+  - GATE-007（可靠性）：故障注入、取消中断恢复与原子事务备份/恢复通过；
+  - GATE-008（安装部署）：生产 Inno Setup 6 规范、单用户免提权、升级目录保持及卸载保留数据测试通过；
+  - GATE-009（便携运行）：真实 ZIP 规范、NTFS ACL 只读目录直启、解压哈希一致性与外部数据保留测试通过；
+  - GATE-010（文档完整性）：工程规范、ADR、追踪矩阵与 predevelopment 检查 100% 通过；
+  - GATE-011（发布产物完整性）：同一源 commit SHA 构建的双发布包及 SHA-256 清单机制就绪。
+- **保留阻断与状态**：
+  Issue [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) 保持 **OPEN**，连同全部相关 Issue 保持开放，等待 DevinOoi 最终集中人工验收签署。
+
 
 

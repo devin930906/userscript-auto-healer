@@ -1,0 +1,125 @@
+name: Stable Release Windows Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish production release on GitHub Releases (true/false)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  production-windows-release:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Install locked development toolchain
+        shell: pwsh
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify TypeScript contracts
+        shell: pwsh
+        run: npm run typecheck
+
+      - name: Test real Windows portable relocation, file locks and no overwrite
+        shell: pwsh
+        run: ./scripts/test-windows-portable-relocation.ps1
+
+      - name: Verify Windows EXE and ZIP checksum manifest refusal cases
+        shell: pwsh
+        run: ./scripts/test-windows-candidate-checksums.ps1
+
+      - name: Run registered regressions and compile production app
+        shell: pwsh
+        run: npm test
+
+      - name: Download pinned Electron runtime on demand
+        shell: pwsh
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            $downloadOutput = (& npx --no-install install-electron --no 2>&1 | Out-String)
+            $exitCode = $LASTEXITCODE
+            if ($downloadOutput) { Write-Output $downloadOutput.TrimEnd() }
+            if ($exitCode -eq 0) { break }
+            if ($downloadOutput -notmatch 'HTTPError:\s+Response code (?:502|503|504)\b' -or
+                $attempt -eq $maxAttempts) {
+              throw "Pinned Electron download failed (attempt $attempt/$maxAttempts, exit $exitCode)"
+            }
+            Write-Warning "Transient Electron release gateway error; retrying attempt $($attempt + 1)/$maxAttempts"
+            Start-Sleep -Seconds (5 * $attempt)
+          }
+
+      - name: Package production Windows deliverables and verify
+        id: package
+        shell: pwsh
+        run: ./scripts/windows-package-production.ps1
+
+      - name: Upload production deliverables to workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: userscript-auto-healer-windows-v${{ steps.package.outputs.release_version }}-STABLE
+          path: ${{ steps.package.outputs.release_directory }}/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create or update official GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releaseDir = "${{ steps.package.outputs.release_directory }}"
+          $version = "${{ steps.package.outputs.release_version }}"
+          $tag = if ($env:GITHUB_REF -match '^refs/tags/(v.+)$') { $Matches[1] } else { "v$version" }
+          $files = Get-ChildItem -LiteralPath $releaseDir -File | ForEach-Object { $_.FullName }
+
+          Write-Output "Preparing release for tag: $tag with $($files.Count) assets"
+          $releaseNotes = @"
+          ## Userscript Auto Healer v$version (Windows Stable Release)
+
+          Official Stable release built from commit `${{ github.sha }}` on Windows 2025 runner.
+
+          ### Deliverables
+          - **Inno Setup Installer (EXE)**: `${{ steps.package.outputs.setup_exe_name }}`
+          - **True Portable Archive (ZIP)**: `${{ steps.package.outputs.portable_zip_name }}`
+          - **Integrity Manifest**: `SHA256SUMS.txt`
+
+          ### Security and Invariants
+          - Safe Fail-Closed architecture: `automaticActivationAllowed: false`, `automaticPatchAllowed: false`, `automaticRollbackAllowed: false`
+          - Full source code audit, IPC isolation, and NTFS ACL read-only validation
+          - Verified identical source build SHA for both EXE installer and Portable ZIP
+          "@
+
+          $notesPath = Join-Path $env:RUNNER_TEMP "release_notes.md"
+          $releaseNotes | Out-File -FilePath $notesPath -Encoding utf8
+
+          $existing = (& gh release view $tag --json id 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "Updating existing release $tag"
+            & gh release upload $tag @files --clobber
+          } else {
+            Write-Output "Creating new release $tag"
+            & gh release create $tag @files --title "Userscript Auto Healer v$version" --notes-file $notesPath
+          }
