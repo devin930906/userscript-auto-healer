@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {markLimitedSessionArchiveUnavailable} from '../../src/health/session-history';
+import {markLimitedSessionArchiveUnavailable,mergeLimitedSessionArchive} from '../../src/health/session-history';
 
 // TASK-015 / REQ-024 / TEST-024/026. A bounded future timestamp may be
 // retained as unverified chronology, but it must never support a current
@@ -115,4 +115,44 @@ test('TASK-015/TEST-024: expired unverified chronology can remain INDETERMINATE 
  assert.equal(response.businessVerified,false);
  assert.equal(response.automaticPatchAllowed,false);
  assert.equal(response.automaticRollbackAllowed,false);
+});
+
+test('TASK-015/TEST-024/026: archive merge does not invoke inherited array index setter during merge',()=>{
+ const now=Date.now();
+ const current={
+  ok:true,status:'UNVERIFIED_SESSION_HISTORY_ONLY',
+  currentStatus:'ELEMENT_FOUND_ONLY',
+  events:[{observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}],
+  tampermonkeyVerified:false,businessVerified:false,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false
+ } as Parameters<typeof mergeLimitedSessionArchive>[0];
+ const stored={
+  status:'ARCHIVE_READ_UNVERIFIED',
+  currentStatus:'INDETERMINATE',
+  events:[{observedAtMs:now-5000,status:'INDETERMINATE'}]
+ } as Parameters<typeof mergeLimitedSessionArchive>[1];
+ const previous=Object.getOwnPropertyDescriptor(Array.prototype,'0');
+ let setterCalls=0;
+ let merged:ReturnType<typeof mergeLimitedSessionArchive>|undefined;
+ try{
+  Object.defineProperty(Array.prototype,'0',{
+   configurable:true,
+   set(){setterCalls++;throw Error('UNTRUSTED_MERGE_INDEX_SETTER_EXECUTED');}
+  });
+  merged=mergeLimitedSessionArchive(current,stored);
+ }finally{
+  if(previous)Object.defineProperty(Array.prototype,'0',previous);
+  else Reflect.deleteProperty(Array.prototype,'0');
+ }
+ assert.equal(setterCalls,0);
+ assert.ok(merged);
+ assert.deepEqual(merged.events,[
+  {observedAtMs:now-5000,status:'INDETERMINATE'},
+  {observedAtMs:now-1000,status:'ELEMENT_FOUND_ONLY'}
+ ]);
+ assert.equal(merged.currentStatus,'ELEMENT_FOUND_ONLY');
+ assert.equal(merged.tampermonkeyVerified,false);
+ assert.equal(merged.businessVerified,false);
+ assert.equal(merged.automaticPatchAllowed,false);
+ assert.equal(merged.automaticRollbackAllowed,false);
 });
