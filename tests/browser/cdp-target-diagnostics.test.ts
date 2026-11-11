@@ -389,3 +389,24 @@ test('TASK-008/TEST-013/026: create and close receipts reject ambiguous success 
  assert.equal(closed(JSON.stringify({id:19,result:{success:true,unexpected:true}})),
   undefined,'unrelated command IDs are ignored');
 });
+
+test('TASK-008/TEST-013/026: main-frame CDP response budget uses UTF-8 bytes, not UTF-16 characters',()=>{
+ const classify=moduleUnderTest.classifyMainFrameResponse;
+ assert.equal(typeof classify,'function');
+ if(!classify)return;
+ const url='https://example.com/fixture';
+ const frameId='0123456789abcdef0123456789abcdef';
+ const receipt=(name:string)=>JSON.stringify({
+  id:1,result:{frameTree:{frame:{id:frameId,url,name}}}
+ });
+ const allowed=receipt('界'.repeat(2000));
+ assert.ok(Buffer.byteLength(allowed,'utf8')<16384);
+ assert.equal(classify(allowed,url),'MAIN_FRAME_CONFIRMED',
+  'ordinary bounded multilingual frame metadata remains supported');
+ const oversized=receipt('界'.repeat(6000));
+ assert.ok(oversized.length<16384,'oversized multibyte receipt bypasses the old string-length check');
+ assert.ok(Buffer.byteLength(oversized,'utf8')>16384,
+  'the actual CDP message exceeds the native 16 KiB budget');
+ assert.equal(classify(oversized,url),'MAIN_FRAME_RESPONSE_INVALID',
+  'oversized UTF-8 main-frame metadata must never mint a navigation confirmation');
+});
