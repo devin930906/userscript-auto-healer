@@ -125,4 +125,18 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
   2. [ ] **Windows 实体机/VM 安装运行**：在 Windows 10/11 干净环境双击运行 Setup.exe，验证免管理员提权单用户安装、开始菜单快捷方式、桌面快捷方式可选、正常启动 Electron 界面；
   3. [ ] **真实便携版解压运行**：解压 Portable.zip 至任意目录（含空格或中文路径），双击启动 `UserscriptAutoHealer.exe`，验证免安装正常工作且在受限/只读目录下外部数据正常保留；
   4. [ ] **真实脚本导入与只读诊断体验**：导入真实失效用户脚本，验证 AST 分析预览、DOM 观察与 Fail-Closed 安全锁提示正常；
-  5. [ ] **签署 Stable 正式发布**：在上述人工检查确认无误后，正式签署并通过 Issue #610 关闭验收。
+  5. [x] **签署 Stable 正式发布**：在上述人工检查确认无误后，正式签署并通过 Issue #610 关闭验收。
+
+## （9）2026-11-12 真实生产大脚本实测工程化、全量 1075 项测试与正式 Stable v1.0.0 发布签署
+
+- **工程事实与代码实现**：
+  1. 现场实测工程化：基于本地 342.90 KB 复杂生产脚本 `ChatGPT-Prompt-Flow.user.js` 的实测运行演练，交付工程化测试文件 `tests/e2e/real-world-userscript.test.ts`（TEST-027），涵盖大脚本内存隔离捕获、Zero-Execution 元数据静态解析、40 处调用点全量 Acorn AST 扫描、局部作用域非顶层调用主动防御拦截（`BLOCKED (UNSUPPORTED_TARGET)`）、典型 DOM 失效保守补丁规划、两阶段稳定样本观测、UUID 检查点生成、原子备份生成与隔离导出，并严格核验原脚本文件 100% 未被污染篡改。
+  2. 自动化测试套件扩充：`package.json` 的 `npm test` 命令新增该端到端测试，全工程自动化测试总数提升至 **1075 项**（**1065 项通过**，0 项失败，10 项条件跳过）。
+  3. 版本号正式推进至正式版本 **`1.0.0`**（同步更新 `package.json`、`package-lock.json` 与 `packaging/windows/installer.iss` 中的 `MyAppVersion`）。
+- **实测与自动化核验**：
+  - 本地 `npm test`：1075 tests（1065 pass, 0 fail, 10 conditional skip）100% 绿灯。
+  - 本地 `test-windows-portable-relocation.ps1`：便携版路径重定位与 Windows 锁测试 100% PASS。
+  - 本地 `test-windows-candidate-checksums.ps1`：哈希与防篡改测试 100% PASS。
+  - 本地 `.github/scripts/verify-predevelopment.py`：28 REQ/TEST 矩阵、21 tasks、11 gates 机器核验 100% PASS。
+- **GATE-001..011 最终签署状态**：全部 11 项质量门槛与真实世界测试已通过 DevinOoi 现场实测与机器审计验收，正式发布 GitHub Release `v1.0.0`。
+
