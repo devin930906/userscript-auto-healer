@@ -269,8 +269,12 @@ export function mergeLimitedSessionArchive(
  for(let i=firstRetained;i<total;i++){
   const event=i<archived.length?archived[i]:
    observed[firstRecent+i-archived.length];
-  events[events.length]=Object.freeze({
-   observedAtMs:event.observedAtMs,status:event.status
+  // Define a dense own slot; assignment can invoke a poisoned inherited
+  // numeric setter and turn an otherwise valid native history merge into
+  // attacker-controlled code execution or a false failure.
+  Object.defineProperty(events,i-firstRetained,{
+   configurable:true,enumerable:true,writable:true,
+   value:Object.freeze({observedAtMs:event.observedAtMs,status:event.status})
   });
  }
  Object.freeze(events);
