@@ -681,9 +681,15 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:stop',async event=>{
     authorizeSender(event);
+    const hasOwned=!!readOwnedBrowser();
+    const hasExisting=!!existingBrowser;
+    const isBusy=launchInProgress||existingConnectInProgress;
+    const killed=await terminateMatchingChromeProcesses(selectedChrome,selectedProfile);
     stopOnlyOwnedBrowser();
     if(existingBrowser){existingBrowser.stop();existingBrowser=null;}
-    await terminateMatchingChromeProcesses(selectedChrome,selectedProfile);
+    if(!hasOwned&&!hasExisting&&!isBusy&&killed===0){
+      return {ok:false,code:'BROWSER_NOT_RUNNING'};
+    }
     return {ok:true,status:'OWNED_BROWSER_STOP_REQUESTED'};
   });
 
