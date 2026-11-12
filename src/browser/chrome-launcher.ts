@@ -75,6 +75,37 @@ export async function preflightChrome(input:unknown):Promise<BrowserPreflight>{
   return {ok:true,status:'PATH_AND_PORT_CHECKED_ONLY',config,runtimeIdentityVerified:false};
 }
 
+/** Read-only path preflight for explicitly approved attachment to a running
+ * Chrome. Unlike owned launch, this deliberately accepts a live profile and
+ * occupied CDP port; the caller must prove that both belong to the selected
+ * signed Chrome and exact user-data directory before making a WebSocket.
+ */
+export type ExistingChromePreflight =
+  | {readonly ok:true;readonly status:'EXISTING_PATHS_CHECKED_ONLY';
+     readonly config:BrowserConfig;readonly runtimeIdentityVerified:false}
+  | {readonly ok:false;readonly code:'INVALID_CONFIG'|'UNSUPPORTED_PLATFORM'|
+     'EXECUTABLE_NOT_FOUND'|'EXECUTABLE_LINK_REJECTED'|'EXECUTABLE_NOT_FILE'|
+     'UNSAFE_PROFILE'|'PROFILE_NOT_FOUND'|'PROFILE_LINK_REJECTED'|'PROFILE_NOT_DIRECTORY'};
+export async function preflightExistingChrome(input:unknown):Promise<ExistingChromePreflight>{
+  if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
+  const parsed=validateBrowserConfig(input);
+  if(!parsed.ok)return {ok:false,code:'INVALID_CONFIG'};
+  const config=parsed.config;
+  if(isDefaultBrowserProfilePath(config.userDataDir))return {ok:false,code:'UNSAFE_PROFILE'};
+  try{
+    if(await hasLinkedComponent(config.executablePath))return {ok:false,code:'EXECUTABLE_LINK_REJECTED'};
+    const exe=await lstat(config.executablePath);
+    if(!exe.isFile())return {ok:false,code:'EXECUTABLE_NOT_FILE'};
+  }catch{return {ok:false,code:'EXECUTABLE_NOT_FOUND'};}
+  try{
+    if(await hasLinkedComponent(config.userDataDir))return {ok:false,code:'PROFILE_LINK_REJECTED'};
+    const profile=await lstat(config.userDataDir);
+    if(!profile.isDirectory())return {ok:false,code:'PROFILE_NOT_DIRECTORY'};
+    await readdir(config.userDataDir);
+  }catch{return {ok:false,code:'PROFILE_NOT_FOUND'};}
+  return {ok:true,status:'EXISTING_PATHS_CHECKED_ONLY',config,runtimeIdentityVerified:false};
+}
+
 
 /** Read-only executable identity gate for selected standard/portable official Chrome.
  * File version metadata is not enough: an unsigned renamed EXE is rejected.

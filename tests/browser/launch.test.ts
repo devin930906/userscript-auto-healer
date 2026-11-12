@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtemp, mkdir, rm, writeFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, lstat, readFile, readdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { preflightChrome, prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
+import { preflightChrome, preflightExistingChrome, prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 
 async function fixture(t:{after:(cb:()=>Promise<void>)=>void}){
   const root=await mkdtemp(join(tmpdir(),'uah-browser-preflight-'));
@@ -91,9 +91,57 @@ test('TEST-008: occupied CDP port is rejected without contacting existing servic
   assert.deepEqual(result,{ok:false,code:'CDP_PORT_IN_USE'});
   assert.equal(occupied.listening,true);
 });
+test('TASK-005: existing custom Profile path preflight permits reused data and makes no changes',async t=>{
+  if(process.platform!=='win32')return;
+  const f=await fixture(t);
+  await mkdir(join(f.profile,'Default'));
+  const lock=join(f.profile,'lockfile');
+  await writeFile(lock,'existing browser owns this data');
+  const markerBefore=await readFile(lock);
+  const entriesBefore=(await readdir(f.profile)).sort();
+  const busy=createServer();
+  await new Promise<void>((resolve,reject)=>{busy.once('error',reject);busy.listen({host:'127.0.0.1',port:0},resolve);});
+  t.after(()=>new Promise<void>(resolve=>busy.close(()=>resolve())));
+  const address=busy.address();
+  if(!address||typeof address==='string')throw Error('NO_PORT');
+  const result=await preflightExistingChrome(config(f.executable,f.profile,address.port));
+  assert.equal(result.ok,true,JSON.stringify(result));
+  assert.deepEqual(await readFile(lock),markerBefore,'attachment preflight must not remove/alter Chrome lock markers');
+  assert.deepEqual((await readdir(f.profile)).sort(),entriesBefore,'attachment preflight must not change profile contents');
+  assert.equal(busy.listening,true,'attachment preflight must not contact or claim the existing CDP listener');
+  assert.deepEqual(await preflightChrome(config(f.executable,f.profile,address.port)),
+    {ok:false,code:'PROFILE_IN_USE'},'owned launch must retain its existing active-profile protection');
+});
 
 
 import { inspectWindowsChromeBinary } from '../../src/browser/chrome-launcher';
+import { parseDevToolsActivePort,parseWindowsCommandLine,chromeProcessMatches } from '../../src/browser/existing-chrome';
+test('TASK-005: existing Chrome attachment accepts only a strict DevToolsActivePort receipt',()=>{
+  assert.deepEqual(parseDevToolsActivePort('9223\n/devtools/browser/01234567-89ab-cdef-0123-456789abcdef\n'),
+    {port:9223,path:'/devtools/browser/01234567-89ab-cdef-0123-456789abcdef'});
+  for(const invalid of [
+    '', '9223', '9223\n/devtools/page/01234567-89ab-cdef-0123-456789abcdef',
+    '9223\n/devtools/browser/short', '9223\n/devtools/browser/01234567-89ab-cdef-0123-456789abcdef\nextra',
+    '9223\n/devtools/browser/01234567-89ab-cdef-0123-456789abcdef?host=evil',
+    '65536\n/devtools/browser/01234567-89ab-cdef-0123-456789abcdef'
+  ])assert.equal(parseDevToolsActivePort(invalid),null,JSON.stringify(invalid));
+});
+test('TASK-005: existing Chrome attachment requires exact executable and user-data-dir command line',()=>{
+  const exe=String.raw`E:\【Devin】\【Devin超级笔记】\99【草稿文件夹】\2\【Codex Chrome】\App\Chrome.exe`;
+  const profile=String.raw`E:\【Devin】\【Devin超级笔记】\99【草稿文件夹】\2\【Codex Chrome】\Data`;
+  const matching={ExecutablePath:exe.toLowerCase(),CommandLine:
+    '"'+exe+'" --no-first-run --user-data-dir="'+profile+'" --remote-debugging-port=9223'};
+  assert.equal(chromeProcessMatches(matching,exe,profile),true);
+  assert.equal(chromeProcessMatches({...matching,CommandLine:
+    '"'+exe+'" --user-data-dir="E:\\Other Data"'},exe,profile),false);
+  assert.equal(chromeProcessMatches({...matching,ExecutablePath:'C:\\Other\\chrome.exe'},exe,profile),false);
+  assert.equal(chromeProcessMatches({...matching,CommandLine:
+    '"'+exe+'" --user-data-dir="'+profile+'" --user-data-dir="E:\\Other"'},exe,profile),false);
+  assert.equal(chromeProcessMatches({...matching,CommandLine:
+    '"'+exe+'" --user-data-dir="'+profile+'" --user-data-dir="'+profile+'"'},exe,profile),false);
+  assert.deepEqual(parseWindowsCommandLine('"C:\\Program Files\\Chrome\\chrome.exe" --user-data-dir="E:\\Codex Data"'),
+    ['C:\\Program Files\\Chrome\\chrome.exe','--user-data-dir=E:\\Codex Data']);
+});
 test('TEST-006: a renamed executable fixture cannot pass signed Chrome identity',async t=>{
   if(process.platform!=='win32')return;
   const f=await fixture(t);

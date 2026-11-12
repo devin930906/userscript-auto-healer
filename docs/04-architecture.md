@@ -47,3 +47,7 @@ CDP 断线→撤销该会话验收；脚本 hash 不匹配→冲突停止；备�
 
 ## 架构限制
 普通 Chrome 136+ 调试须非默认用户数据目录。现代正式 Chrome 的扩展侧载/油猴管理器安装不保证能全自动完成。CDP 看得到 DOM 不等于管理器正常执行。Windows runner 中的 CDP/独立 Profile 及原 RAR5 试用已进行历史限定验证（现行 ZIP 发行见 ADR-004），Violentmonkey 2.49.0 的标准 HTTPS 脚本及 GM_getValue 实际调用已通过（POC-02D）；现已另有用户 Chrome+Tampermonkey 5.5.1 的限定 POC-02T-LIVE 真 .user.js/GM/人工 broken/fixed 证据（docs/evidence/2026-10-18-tampermonkey-live-browser-qa.md），**但独立云端 Tampermonkey、产品真正自动修复、所有便携 Chrome 与正式 ZIP 应用便携启动仍未验证**。对非标准端口与脚本匹配必须给出诊断和验证提示，不得把脚本未运行直接归因为选择器故障。相应阻断见 03/11。
+
+### 已运行 Chrome 的独立连接能力（2026-11-12）
+
+外部会话与自启动会话使用独立身份和生命周期。应用从所选自定义 Data 发现调试端口，核查回环监听进程、Chrome 路径和 Data 参数，通过 Chrome 原生授权建立持久 WebSocket；当前仅开放 Target.getTargets。关闭外部会话只断开本应用的 WebSocket，不结束浏览器。真实 Chrome 原生授权与现有用户设备仍需独立验收。

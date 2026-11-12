@@ -11,8 +11,9 @@ import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
 import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../src/security/desktop-policy';
 import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
+import { connectApprovedExistingChrome, isLiveApprovedExistingChromeSession, type ExistingChromeResult } from '../../src/browser/existing-chrome';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
-import { inspectApprovedTampermonkeyRuntime } from '../../src/manager/tampermonkey-adapter';
+import { inspectApprovedTampermonkeyRuntime, inspectTampermonkeyTargetHints } from '../../src/manager/tampermonkey-adapter';
 import { startApprovedTampermonkeyDiagnostic, isCurrentManualDiagnosticSession, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
@@ -71,7 +72,9 @@ const trustedUrl = pathToFileURL(uiFile).href;
 let selectedChrome: string | null = null;
 let selectedProfile: string | null = null;
 let ownedBrowser: Extract<ManagedLaunchResult,{ok:true}> | null = null;
+let existingBrowser: Extract<ExistingChromeResult,{ok:true}> | null = null;
 let launchInProgress = false;
+let existingConnectInProgress = false;
 let profilePreparationInProgress = false;
 let launchAbort: AbortController | null = null;
 let probeInProgress = false;
@@ -123,6 +126,16 @@ function stopOnlyOwnedBrowser():void {
   stopOnlyGmProbe();
   launchAbort?.abort();
   if(ownedBrowser){ownedBrowser.stop();ownedBrowser=null;}
+}
+function stopAllBrowserSessions():void {
+  stopOnlyOwnedBrowser();
+  if(existingBrowser){existingBrowser.stop();existingBrowser=null;}
+}
+function readExistingBrowser(){
+  if(existingBrowser&&!isLiveApprovedExistingChromeSession(existingBrowser)){
+    existingBrowser=null;
+  }
+  return existingBrowser;
 }
 function readOwnedBrowser(){
   if(ownedBrowser && !isLiveApprovedChromeSession(ownedBrowser)){
@@ -284,7 +297,7 @@ function registerSafeIpc(): void {
   ipcMain.handle('browser:choose-chrome',async event=>{
     authorizeSender(event);
     if(nativeSelectionInProgress||nativeImportController||droppedImportController||
-        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser()||readExistingBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     nativeSelectionInProgress=true;
@@ -306,7 +319,7 @@ function registerSafeIpc(): void {
   ipcMain.handle('browser:choose-profile',async event=>{
     authorizeSender(event);
     if(nativeSelectionInProgress||nativeImportController||droppedImportController||
-        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY'};
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser()||readExistingBrowser())return {ok:false,code:'BROWSER_BUSY'};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     nativeSelectionInProgress=true;
@@ -325,7 +338,7 @@ function registerSafeIpc(): void {
   ipcMain.handle('browser:create-profile',async event=>{
     authorizeSender(event);
     if(nativeSelectionInProgress||nativeImportController||droppedImportController||
-        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser()||readExistingBrowser())
       return {ok:false,code:'BROWSER_BUSY'};
     if(!selectedChrome)return {ok:false,code:'CONFIG_NOT_SELECTED'};
     const win=mainWindow;
@@ -371,7 +384,7 @@ function registerSafeIpc(): void {
   ipcMain.handle('browser:start',async (event,port:unknown)=>{
     authorizeSender(event);
     if(nativeSelectionInProgress||nativeImportController||droppedImportController||
-        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
+        manualExportInProgress||launchInProgress||profilePreparationInProgress||readOwnedBrowser()||readExistingBrowser())return {ok:false,code:'BROWSER_BUSY',...unverified};
     if(!selectedChrome||!selectedProfile)
       return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
     const win=mainWindow;
@@ -426,25 +439,89 @@ function registerSafeIpc(): void {
       if(launchAbort===controller)launchAbort=null;
     }
   });
+  // Attaching to a user's running browser is a separate, revocable capability;
+  // renderer input cannot select a profile, endpoint or process ID.
+  ipcMain.handle('browser:connect-existing',async event=>{
+    authorizeSender(event);
+    if(nativeSelectionInProgress||nativeImportController||droppedImportController||
+       manualExportInProgress||launchInProgress||profilePreparationInProgress||
+       readOwnedBrowser()||readExistingBrowser())
+      return {ok:false,code:'BROWSER_BUSY',...unverified};
+    if(!selectedChrome||!selectedProfile)
+      return {ok:false,code:'CONFIG_NOT_SELECTED',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const config=validateBrowserConfig({executablePath:selectedChrome,
+      userDataDir:selectedProfile,remoteDebuggingPort:9223,bindAddress:'127.0.0.1'});
+    if(!config.ok)return {ok:false,code:config.code,...unverified};
+    launchInProgress=true;
+    existingConnectInProgress=true;
+    const controller=new AbortController();
+    launchAbort=controller;
+    try{
+      const decision=await dialog.showMessageBox(win,{
+        type:'warning',buttons:['允许连接','取消'],defaultId:1,cancelId:1,noLink:true,
+        message:'连接正在运行的 Chrome？',
+        detail:'将连接所选 Chrome 和 Data 中已经运行的浏览器。请在 Chrome 的 chrome://inspect/#remote-debugging 开启远程调试，并确认 Chrome 自身的连接提示。'+
+          '\n连接可访问该浏览器的页面和扩展信息；断开只关闭本程序的连接，不关闭 Chrome。'+
+          '\nChrome: '+selectedChrome+'\nData: '+selectedProfile
+      });
+      if(decision.response!==0||controller.signal.aborted||win.isDestroyed()||win!==mainWindow)
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const result=await connectApprovedExistingChrome(config.config,
+        {userApproved:true,signal:controller.signal});
+      if(!result.ok)return {ok:false,code:result.code,...unverified};
+      if(controller.signal.aborted||win.isDestroyed()||win!==mainWindow){
+        result.stop();return {ok:false,code:'ABORTED',...unverified};
+      }
+      existingBrowser=result;
+      return {ok:true,status:'AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED',
+        chromeVersion:result.chromeVersion,...unverified};
+    }catch{return {ok:false,code:'CONNECT_FAILED',...unverified};}
+    finally{existingConnectInProgress=false;launchInProgress=false;if(launchAbort===controller)launchAbort=null;}
+  });
+  ipcMain.handle('browser:disconnect-existing',event=>{
+    authorizeSender(event);
+    if(existingConnectInProgress){
+      launchAbort?.abort();
+      return {ok:true,status:'EXISTING_BROWSER_DISCONNECTED'};
+    }
+    const existing=readExistingBrowser();
+    if(!existing)return {ok:false,code:'BROWSER_NOT_RUNNING'};
+    existingBrowser=null;existing.stop();
+    return {ok:true,status:'EXISTING_BROWSER_DISCONNECTED'};
+  });
   ipcMain.handle('browser:tampermonkey-hint',async event=>{
     authorizeSender(event);
     if(probeInProgress)return {ok:false,code:'PROBE_BUSY',...unverified};
     const owned=readOwnedBrowser();
-    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const attached=readExistingBrowser();
+    if(!owned&&!attached)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
     probeInProgress=true;
     try{
       const decision=await dialog.showMessageBox(win,{
         type:'question',buttons:['允许只读探测','取消'],defaultId:1,cancelId:1,
-        noLink:true,message:'检查独立 Chrome 中的 Tampermonkey 运行目标？',
-        detail:'只读取当前由本程序启动的浏览器 CDP 目标信息。'+
+        noLink:true,message:'检查 Chrome 中的 Tampermonkey 运行目标？',
+        detail:'只读取已授权浏览器的 CDP 目标信息。'+
           '\\n不会读取或修改任何已安装脚本，也不证明 GM API 或业务恢复。'
       });
-      if(decision.response!==0||!isLiveApprovedChromeSession(owned)||
+      if(decision.response!==0||(!owned&&!attached)||
+         (owned&&!isLiveApprovedChromeSession(owned))||
+         (attached&&!isLiveApprovedExistingChromeSession(attached))||
          win.isDestroyed()||win!==mainWindow)
         return {ok:false,code:'NOT_AUTHORIZED',...unverified};
-      const status=await inspectApprovedTampermonkeyRuntime(owned,true);
+      let status;
+      if(owned)status=await inspectApprovedTampermonkeyRuntime(owned,true);
+      else if(attached){
+        const result=await attached.sendCommand('Target.getTargets');
+        if(!isLiveApprovedExistingChromeSession(attached)||readExistingBrowser()!==attached||
+           win.isDestroyed()||win!==mainWindow)
+          return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+        const record=result as {targetInfos?:unknown}|null;
+        status=inspectTampermonkeyTargetHints(record?.targetInfos);
+      }else return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
       if(!status.ok)return {...status,...unverified};
       return {ok:true,status:status.status,manager:status.manager,
         matchedRuntimeTargets:status.matchedRuntimeTargets,
@@ -456,7 +533,7 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:stop',event=>{
     authorizeSender(event);
-    if(!readOwnedBrowser()&&!launchInProgress)
+    if(!readOwnedBrowser()&&(!launchInProgress||existingConnectInProgress))
       return {ok:false,code:'BROWSER_NOT_RUNNING'};
     stopOnlyOwnedBrowser();
     return {ok:true,status:'OWNED_BROWSER_STOP_REQUESTED'};
@@ -1306,7 +1383,7 @@ async function createMainWindow(): Promise<void> {
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
       droppedImportController?.abort();
-      stopOnlyOwnedBrowser();
+      stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
       scenarioSession=new DesktopScenarioSession();
@@ -1906,9 +1983,9 @@ app.on('before-quit',()=>{
   nativeAiDiscoveryController?.abort();
   nativeImportController?.abort();
   droppedImportController?.abort();
-  stopOnlyOwnedBrowser();
+  stopAllBrowserSessions();
 });
 app.on('window-all-closed', () => {
-  stopOnlyOwnedBrowser();
+  stopAllBrowserSessions();
   if (process.platform !== 'darwin') app.quit();
 });
