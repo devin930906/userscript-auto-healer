@@ -1,127 +1,240 @@
-/* TASK-017 / TEST-002/022: readable, CSP-safe Electron workspace.
- * Layout only. No user consent, persistence, IPC or script behavior is altered.
- */
+/* TASK-017 / TEST-002/022: deep indigo console, shared with the desktop tab layout. */
 :root {
-  color-scheme: light;
-  font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
-  background: #f7f8fa;
-  color: #1d2732;
-  line-height: 1.55;
+  color-scheme: dark;
+  --canvas: #111b3a;
+  --surface: #19274d;
+  --nav: #0d1531;
+  --accent: #66f3df;
+  --accent-ink: #121620;
+  --info: #a9affb;
+  --muted: #aab9e1;
+  --ink: #eff5ff;
+  --raised: #223157;
+  --line: #3c4d7a;
+  --selected: #254962;
+  --warning: #ffd0a2;
+  --warning-bg: #402d35;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 14px/1.55 Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; min-width: 0; }
-/* TASK-017: let keyboard users bypass the repeated workspace navigation.
- * The button is visually hidden until focused and uses the existing
- * in-document focus handler; no fragment navigation, native script, or IPC.
- */
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template: "header header" auto "nav content" minmax(0, 1fr) "status status" auto / 196px minmax(0, 1fr);
+}
+h1, h2, h3, p { margin: 0; }
+p, li, code, button { overflow-wrap: anywhere; }
+svg { display: block; flex: none; width: 19px; height: 19px; }
+::selection { color: var(--accent-ink); background: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .skip-workspaces {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 10;
-  transform: translateY(-200%);
-  padding: 0.55rem 0.75rem;
-  border: 2px solid #1760a8;
-  border-radius: 0.35rem;
-  background: #fff;
-  color: #163d64;
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  transform: translateY(calc(-100% - 12px));
 }
 .skip-workspaces:focus-visible { transform: none; }
-
-main {
-  width: min(100% - 2rem, 78rem);
-  margin: 0 auto;
-  padding: 1.5rem 0 3rem;
-}
-h1 { margin: 0 0 1rem; font-size: 1.65rem; line-height: 1.25; }
-h2 { margin: 0 0 0.75rem; font-size: 1.25rem; line-height: 1.35; }
-h3 { font-size: 1.05rem; }
-p { max-width: 75ch; margin: 0.8rem 0; }
-nav[aria-label="工作区导航"] {
+.appbar {
+  grid-area: header;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
   align-items: center;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  background: #fff;
-  border: 1px solid #dce2e8;
-  border-radius: 0.5rem;
+  gap: 11px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
-/* Location feedback is separate from the section's keyboard focus ring. */
-nav[aria-label="工作区导航"] button[aria-current="location"] {
-  background: #dbeaf8;
-  border-color: #1760a8;
-  color: #163d64;
-  font-weight: 600;
+.brandmark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--selected);
+  color: var(--accent);
 }
-section {
-  margin: 1.25rem 0;
-  padding: 1.5rem;
-  border: 1px solid #dce2e8;
-  background: #fff;
-  border-radius: 0.5rem;
+.appbar h1 { font-size: 15px; line-height: 1.3; }
+.appbar p { color: var(--muted); font-size: 12px; }
+
+.workspace-tabs {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   min-width: 0;
+  padding: 10px 8px;
+  overflow: auto;
+  scrollbar-color: var(--line) var(--nav);
+  background: var(--nav);
+  border-right: 1px solid var(--line);
 }
-section:focus { outline: 2px solid #1760a8; outline-offset: 2px; }
-button, input, select { font: inherit; color: inherit; }
+.workspace-tabs button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-inline-start: 2px solid transparent;
+  border-radius: 4px;
+  text-align: start;
+  white-space: nowrap;
+}
+.workspace-tabs button:hover { color: var(--ink); background: var(--raised); }
+.workspace-tabs button[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--selected);
+  border-inline-start-color: var(--accent);
+  font-weight: 650;
+}
+.workspace-tabs button:focus-visible { outline-offset: -3px; }
+.workspace-tabs svg { color: var(--info); }
+.workspace-tabs button[aria-selected="true"] svg { color: var(--accent); }
+
+.workspace-content {
+  grid-area: content;
+  min-width: 0;
+  overflow: auto;
+  padding: 20px 24px 24px;
+  scrollbar-color: var(--line) var(--canvas);
+}
+[role="tabpanel"] { width: min(100%, 74rem); margin-inline: auto; }
+[role="tabpanel"]:focus-visible { outline-offset: 5px; }
+.page-heading {
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.page-heading h2 { font-size: 24px; font-weight: 680; letter-spacing: -.02em; }
+.page-heading p { margin-top: 3px; color: var(--muted); }
+.panel, .scenario-context {
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.panel h3 { margin-bottom: 9px; font-size: 15px; }
+.panel > :last-child, .panel > div > :last-child { margin-bottom: 0; }
+.panel > p { margin: 0 0 10px; color: var(--muted); }
+.panel-grid { display: grid; gap: 12px; }
+@media (min-width: 1050px) {
+  .panel-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); align-items: start; }
+}
+.scenario-context { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.context-field { flex: 1 1 240px; min-width: 0; }
+.context-field > label { margin-top: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 9px 0; }
+#drop-area {
+  padding: 12px;
+  background: var(--canvas);
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+}
+#drop-area > :first-child { margin-top: 0; }
+#cancel-import { margin-top: 8px; }
+button, input, select { color: inherit; font: inherit; }
 button {
-  padding: 0.5rem 0.8rem;
-  border: 1px solid #9ba9b8;
-  border-radius: 0.35rem;
-  background: #f8fafc;
-  cursor: pointer;
+  min-height: 36px;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  padding: 6px 11px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
 }
-button:hover:not(:disabled) { background: #eaf1f8; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-/* TASK-017/TEST-002/022: manual restore can replace a local userscript.
- * Distinguish this write-capable control from adjacent read-only checks
- * with a strong border and weight, not color alone. Its existing native
- * double confirmation and disabled/busy gates remain authoritative.
- */
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .56; cursor: default; }
+button:is(.primary, #launch-chrome, #ai-reviewed-suggest) { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 650; }
+button:is(.primary, #launch-chrome, #ai-reviewed-suggest):hover:not(:disabled) { filter: brightness(1.08); }
+button.secondary { color: var(--info); }
 #manual-restore-risk {
-  max-width: none;
-  padding: 0.75rem 0.9rem;
-  border-inline-start: 0.35rem solid #9b4d12;
-  background: #fff4e7;
-  color: #58300d;
+  padding: 9px 11px;
+  color: var(--warning);
+  border-inline-start: 0.35rem solid var(--warning);
+  background: var(--warning-bg);
+  border-radius: 4px;
 }
 #restore-manual-original {
-  border: 2px solid #9b4d12;
-  background: #fff0d9;
-  color: #58300d;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 2px solid var(--warning);
   font-weight: 700;
 }
-#restore-manual-original:hover:not(:disabled) { background: #ffe1b9; }
-:focus-visible { outline: 3px solid #1760a8; outline-offset: 3px; }
-section > button, #drop-area > button { margin: 0.35rem 0.4rem 0.35rem 0; }
-label[for] { display: block; margin-top: 1rem; margin-bottom: 0.3rem; }
-label:has(input[type="checkbox"]) { display: block; margin: 0.65rem 0; }
+label[for], label:has(input[type="checkbox"]) { display: block; margin: 9px 0 4px; }
+label:has(input[type="checkbox"]) { color: var(--muted); }
+input[type="checkbox"] { accent-color: var(--accent); vertical-align: middle; }
 input:not([type="checkbox"]), select {
-  width: min(100%, 42rem);
-  max-width: 100%;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid #9ba9b8;
-  border-radius: 0.3rem;
-  background: #fff;
+  display: block;
+  width: min(100%, 44rem);
+  min-height: 36px;
+  padding: 6px 8px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 4px;
 }
-input[type="file"] { display: block; }
+input::placeholder { color: var(--muted); }
+input[type="file"]::file-selector-button {
+  color: var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 3px 8px;
+  margin-inline-end: 8px;
+  cursor: pointer;
+}
+input + p, select + p { margin-top: 9px !important; }
 [role="status"] {
-  max-width: none;
-  min-width: 0;
-  padding: 0.65rem 0.8rem;
-  background: #f3f6f9;
-  border: 1px solid #e0e5eb;
-  border-radius: 0.3rem;
-  overflow-wrap: anywhere;
+  margin: 9px 0;
+  padding: 8px 10px;
+  background: var(--raised);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
 }
-ul, ol, li, p, code { overflow-wrap: anywhere; }
-code { font-family: Consolas, "Cascadia Mono", monospace; }
+ul, ol { margin: 9px 0; padding-inline-start: 24px; }
+li + li { margin-top: 7px; }
+ul:empty, ol:empty { display: none; }
+code { font-family: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace; }
+.statusbar {
+  grid-area: status;
+  min-width: 0;
+  padding: 6px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.statusbar #status {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  body { grid-template: "header" auto "nav" auto "content" minmax(0, 1fr) "status" auto / minmax(0, 1fr); }
+  .workspace-tabs {
+    flex-direction: row;
+    padding: 5px 6px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .workspace-tabs button { gap: 5px; padding-inline: 5px; font-size: 13px; }
+  .workspace-tabs svg { width: 14px; height: 14px; }
+  .workspace-tabs button[aria-selected="true"] { border-inline-start-color: transparent; border-bottom-color: var(--accent); }
+  .workspace-content { padding: 14px 16px 16px; }
+}
 @media (max-width: 640px) {
-  main { width: min(100% - 1rem, 78rem); padding-top: 0.75rem; }
-  section { padding: 0.85rem; }
-  nav[aria-label="工作区导航"] button { flex: 1 1 calc(50% - 0.5rem); }
-  button, input, select { min-height: 2.4rem; }
+  .appbar { padding: 9px 12px; }
+  .workspace-content { padding: 12px; }
+  .panel, .scenario-context { padding: 10px 12px; }
+  .statusbar { padding-inline: 12px; }
 }

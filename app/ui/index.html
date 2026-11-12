@@ -8,127 +8,218 @@
   <title>Userscript Auto Healer</title>
 </head>
 <body>
-  <button class="skip-workspaces" id="skip-workspaces" type="button" aria-controls="import-workspace">跳至工作区内容</button>
-  <main>
-    <h1>Userscript Auto Healer</h1>
-    <nav aria-label="工作区导航">
-      <button type="button" aria-controls="import-workspace" data-workspace-target="import-workspace">导入脚本</button>
-      <button type="button" aria-controls="scenario-workspace" data-workspace-target="scenario-workspace">测试场景</button>
-      <button type="button" aria-controls="restore-workspace" data-workspace-target="restore-workspace">手动恢复</button>
-      <button type="button" aria-controls="ai-workspace" data-workspace-target="ai-workspace">AI 模型</button>
-      <button type="button" aria-controls="browser-workspace" data-workspace-target="browser-workspace">Chrome 诊断</button>
-    </nav>
-    <p>当前支持只读导入、静态选择器分析与获授权的独立 Chrome/CDP 连接；默认不修改原始脚本或自动安装脚本。只有在单独的原生手动恢复流程中，经过两次系统确认才会尝试替换用户选定的本地脚本。只有经过独立原生授权的双选择器场景才可生成新的人工审核候选文件。静态结果或管理器运行目标提示不代表 Tampermonkey、GM API 或真实业务恢复验证，自动修复尚未开放。</p>
-    <section id="import-workspace" tabindex="-1" aria-labelledby="import-heading">
-      <h2 id="import-heading">导入油猴脚本（只读）</h2>
-      <div id="drop-area">
-      <button id="choose-files" type="button">选择 .user.js 文件（多选）</button>
-      <button id="choose-folder" type="button">选择脚本文件夹</button>
-      <label for="select-files">也可选择或拖放 .user.js 文件：</label>
-      <input id="select-files" type="file" multiple accept=".user.js">
-      <button id="cancel-import" type="button" disabled>取消当前批次（完成当前文件后停止）</button>
-      <p id="import-summary" role="status" aria-live="polite">尚未导入脚本。</p>
-      <ul id="import-list" aria-labelledby="import-summary"></ul>
+  <button class="skip-workspaces" id="skip-workspaces" type="button" aria-controls="import-workspace">跳至当前工作区</button>
+  <header class="appbar">
+    <span class="brandmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm8 0v6h6m-8 3v6m-3-3h6"/></svg></span>
+    <div><h1>Userscript Auto Healer</h1><p>油猴脚本诊断工具</p></div>
+  </header>
+  <nav class="workspace-tabs" aria-label="工作区导航" role="tablist" aria-orientation="vertical">
+    <button type="button" role="tab" id="tab-import-workspace" aria-selected="true" tabindex="0" aria-controls="import-workspace" data-workspace-target="import-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 9l-3 3 3 3m4-6 3 3-3 3"/></svg><span>脚本库</span></button>
+    <button type="button" role="tab" id="tab-browser-workspace" aria-selected="false" tabindex="-1" aria-controls="browser-workspace" data-workspace-target="browser-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18m-14-2h.01M10 7h.01"/></svg><span>浏览器环境</span></button>
+    <button type="button" role="tab" id="tab-scenario-workspace" aria-selected="false" tabindex="-1" aria-controls="scenario-workspace" data-workspace-target="scenario-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10v18H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm-2 14h12M9 8h5m-5 4h5"/></svg><span>测试场景</span></button>
+    <button type="button" role="tab" id="tab-diagnosis-workspace" aria-selected="false" tabindex="-1" aria-controls="diagnosis-workspace" data-workspace-target="diagnosis-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>诊断与记录</span></button>
+    <button type="button" role="tab" id="tab-candidate-workspace" aria-selected="false" tabindex="-1" aria-controls="candidate-workspace" data-workspace-target="candidate-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v16M5 8l-3 4 3 4m14-8 3 4-3 4"/></svg><span>候选与导出</span></button>
+    <button type="button" role="tab" id="tab-restore-workspace" aria-selected="false" tabindex="-1" aria-controls="restore-workspace" data-workspace-target="restore-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 3 7m-3-7V5m0 6h6m3-4v5l3 2"/></svg><span>备份与恢复</span></button>
+    <button type="button" role="tab" id="tab-ai-workspace" aria-selected="false" tabindex="-1" aria-controls="ai-workspace" data-workspace-target="ai-workspace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5L12 2Z"/></svg><span>AI 工具</span></button>
+  </nav>
+  <main class="workspace-content">
+    <section id="import-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-import-workspace">
+      <header class="page-heading"><h2>脚本库</h2><p>只读导入 .user.js 文件，查看脚本预检与静态分析结果。</p></header>
+      <div class="panel">
+        <h3>导入脚本</h3>
+        <div id="drop-area">
+          <div class="actions">
+            <button id="choose-files" type="button" class="primary">选择 .user.js 文件（多选）</button>
+            <button id="choose-folder" type="button">选择脚本文件夹</button>
+          </div>
+          <label for="select-files">也可选择或拖放 .user.js 文件：</label>
+          <input id="select-files" type="file" multiple accept=".user.js">
+          <button id="cancel-import" type="button" disabled>取消当前批次（完成当前文件后停止）</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>导入结果</h3>
+        <p id="import-summary" role="status" aria-live="polite">尚未导入脚本。</p>
+        <ul id="import-list" aria-labelledby="import-summary"></ul>
+        <div class="actions">
+          <button type="button" class="secondary" data-open-workspace="scenario-workspace">前往测试场景</button>
+        </div>
       </div>
     </section>
-    <section id="scenario-workspace" tabindex="-1" aria-labelledby="scenario-heading">
-      <h2 id="scenario-heading">导入脚本的测试场景登记（当前会话）</h2>
-      <p id="scenario-consent-scope">仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
-      <label for="scenario-script">已导入脚本：</label>
-      <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
-      <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
-      <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
-      <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
-      <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
-      <label for="scenario-selector">当前脚本使用的 CSS 选择器（只读检查）：</label>
-      <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
-      <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
-      <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
-      <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
-      <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
-      <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
-      <label><input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
-      <button id="scenario-register" type="button" disabled>登记只读测试场景</button>
-      <label for="scenario-inspect-id">只读检查已登记场景：</label>
-      <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
-      <button id="scenario-inspect" type="button" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
-      <button id="scenario-recheck-start" type="button" disabled>开始三轮定时只读复检（间隔一分钟，每轮重新授权）</button>
-      <button id="scenario-recheck-stop" type="button" disabled>停止后续复检／取消当前检查</button>
-      <p id="scenario-recheck-status" role="status" aria-live="polite">定时复检未启动；只有本窗口打开并主动启动时运行。每轮需再次确认原生授权，拒绝或失败将停止后续轮次。</p>
-      <button id="scenario-history" type="button" disabled>查看此场景脚本的当前会话观察历史</button>
-      <p id="scenario-history-summary" role="status" aria-live="polite">尚未查询观察历史；此功能不需要启动 Chrome。</p>
-      <ol id="scenario-history-entries" aria-labelledby="scenario-history-summary"></ol>
-      <button id="scenario-export-manual" type="button" disabled aria-describedby="scenario-export-risk">单独授权实时 DOM 复核并导出人工候选（不改原脚本）</button>
-      <p id="scenario-export-risk">人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。导出前会在独立备份目录持久保存恢复检查点；若检查点不能核验则不会继续导出。恢复检查点不提供自动应用或回滚权限。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
-      <button id="scenario-cancel" type="button" disabled>取消 DOM 检查或人工导出准备（写入前）</button>
-      <p>人工导出在最终系统写入确认之前可以取消；开始创建独立备份／候选之后不能撤销既有文件，原始脚本仍不被覆盖。若中断请检查所选输出目录。</p>
-      <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
-      <p>每次通过授权的完整只读 DOM 与短时异常检查后，本窗口保留最多 32 条有限观察历史，并尝试在本机程序数据目录保存最多 32 条脱敏历史；关闭窗口后当前状态不会作为健康认证恢复。可随时查看逐次观察时间与保守结果；此界面不显示脚本路径、源码或证据哈希。元素存在不代表油猴脚本运行正常；异常或选择器缺失只记为证据不足，不表示自动修复或恢复。未授权、取消或失败的检查不写入历史。</p>
-      <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
-      <ul id="scenario-list" aria-labelledby="scenario-status"></ul>
+    <section id="browser-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-browser-workspace" hidden>
+      <header class="page-heading"><h2>浏览器环境</h2><p>配置独立 Chrome，探测 Tampermonkey 或执行隔离 GM 测试。</p></header>
+      <div class="panel">
+        <h3>独立 Chrome / CDP</h3>
+        <p id="chrome-profile-safety">先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
+        <div class="actions">
+          <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>
+          <button id="choose-profile" type="button" aria-describedby="chrome-profile-safety">选择已有独立 Profile</button>
+          <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
+        </div>
+        <label for="chrome-port">本机 CDP 端口：</label>
+        <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
+        <div class="actions">
+          <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
+          <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
+          <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
+        </div>
+        <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
+        <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
+      </div>
+      <div class="panel">
+        <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
+        <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
+        测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
+        然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
+        必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
+        HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
+        <label for="gm-run-at">临时脚本注入时机：</label>
+        <select id="gm-run-at">
+          <option value="document-idle">document-idle（页面空闲后）</option>
+          <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
+          <option value="document-body">document-body（页面正文开始加载，必要时等待 DOM 就绪后检查）</option>
+          <option value="document-end">document-end（文档结构加载后，必要时等待 DOM 就绪后检查）</option>
+        </select>
+        <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
+        <div class="actions">
+          <button id="gm-probe-start" type="button" class="primary">授权开始本机 GM 测试</button>
+          <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
+          <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
+          <button id="gm-probe-visit-fixed" type="button">授权打开 fixed 测试页</button>
+          <button id="gm-probe-observe-fixed" type="button">授权对照 fixed DOM</button>
+          <button id="gm-probe-status" type="button">查看回执与 DOM 对照（未经认证）</button>
+          <button id="gm-probe-save-report" type="button">保存脱敏测试摘要 JSON（未经认证）</button>
+          <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
+        </div>
+        <p id="gm-probe-links" aria-live="polite"></p>
+        <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
+      </div>
     </section>
-    <section id="restore-workspace" tabindex="-1" aria-labelledby="manual-restore-heading">
-      <h2 id="manual-restore-heading">手动恢复原始脚本（需要两次系统确认）</h2>
-      <p id="manual-restore-risk">此功能仅供已拥有本工具生成的、与当前脚本完整路径绑定的独立 .backup.user.js 备份时使用。先选择需要恢复的本地 .user.js，再选择原始备份；将严格比对两者身份与字节。最终确认后，程序先独立备份当前被替换版本，再写恢复意图并尝试原子替换。操作不能被视为脚本自动修复，也不更新 Tampermonkey 已安装版本。</p>
-      <button id="restore-manual-original" type="button" aria-describedby="manual-restore-risk">独立授权手动恢复原版（将改写所选文件）</button>
-      <p id="restore-manual-result" role="status" aria-live="polite">尚未请求恢复。若出现中断或错误，请检查所选备份目录和原始文件；不要盲目重复操作。</p>
-      <p>如果手动恢复曾中断或返回错误，可先使用下方只读核对：独立选择当前脚本和先前生成的恢复意图 .journal.json 文件；程序只会核对当前原版/被替换版本及两份备份的字节关系，不重试写入、不安装 Tampermonkey 脚本。结果只是本机文件状态，不证明脚本业务功能恢复。</p>
-      <button id="restore-inspect-intent" type="button">只读核对恢复意图（不会覆盖文件）</button>
-      <p id="restore-inspect-result" role="status" aria-live="polite">尚未执行只读核对。</p>
-      <p>若恢复意图不止一份，可只读扫描整个恢复文件夹。先通过系统对话框选择当前脚本及恢复目录，最多检查 32 份意图与 1024 个目录条目；输出只有经过核验的数量，不列出路径或摘要，不执行回滚。</p>
-      <button id="restore-inspect-inventory" type="button">批量只读核对恢复目录（不改动文件）</button>
-      <p id="restore-inventory-result" role="status" aria-live="polite">尚未扫描恢复目录。</p>
+    <section id="scenario-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-scenario-workspace" hidden>
+      <header class="page-heading"><h2>测试场景</h2><p>登记本次会话要检查的目标网址和 CSS 选择器。</p></header>
+      <div class="panel">
+        <p id="scenario-consent-scope">仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
+        <label for="scenario-script">已导入脚本：</label>
+        <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
+        <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
+        <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
+        <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
+        <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
+        <label for="scenario-selector">当前脚本使用的 CSS 选择器（只读检查）：</label>
+        <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
+        <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
+        <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
+        <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
+        <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
+        <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
+        <label><input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
+        <div class="actions">
+          <button id="scenario-register" type="button" class="primary" disabled>登记只读测试场景</button>
+          <button type="button" class="secondary" data-open-workspace="diagnosis-workspace">前往诊断与记录</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>已登记的场景</h3>
+        <div data-scenario-status-slot>
+          <p id="scenario-status" role="status" aria-live="polite">尚未登记场景。</p>
+        </div>
+        <ul id="scenario-list" aria-labelledby="scenario-status"></ul>
+      </div>
     </section>
-    <section id="ai-workspace" tabindex="-1" aria-labelledby="ai-heading">
-      <h2 id="ai-heading">可选 AI 模型发现（单次本机授权）</h2>
-      <p>默认完全关闭。仅在点击按钮后通过 Windows 系统选择器选取自己准备的 JSON 配置（不从网页获取文件路径），再由系统对话框确认具体服务来源，才会发送一次带 Bearer Key 的模型列表查询。配置和密钥不保存、不传给页面或任意脚本；拒绝或取消时不会联网。</p>
-      <p>配置文件应包含 baseUrl（受限的 HTTPS 服务或 127.0.0.1 本机 HTTP）、apiKey、manualModel（名称或 null）、maxRequests（1–8）、timeoutMs（500–10000）与 maxOutputTokens（32–256）。例如：<code>{"baseUrl":"https://models.example.com/v1","apiKey":"YOUR_KEY","manualModel":"example-model","maxRequests":2,"timeoutMs":1200,"maxOutputTokens":64}</code>。请自行妥善保管这个含密钥的本地文件。</p>
-      <button id="ai-model-discover" type="button">从本机配置授权查询一次模型列表</button>
-      <p id="ai-model-discovery-result" role="status" aria-live="polite">未授权，也没有执行 AI 网络请求。查询结果仅是未经验证的模型元数据，绝不表示脚本已经修复、安装或通过业务验收。</p>
-      <p>仅对已经在独立 Chrome 完成原生授权和真实只读检查的已登记场景，允许查询一次 AI 文字建议。先在场景检查区选定场景；会再次选择本地 JSON 配置，并在系统对话框看到将外发的三项随机密钥加盐摘要及服务来源。必须在配置中填写 manualModel；不发送脚本、DOM、URL、文件路径、原始选择器，也不自动应用 AI 建议。</p>
-      <button id="ai-reviewed-suggest" type="button" disabled>人工授权：对已检查场景请求一次 AI 文字建议</button>
-      <p id="ai-reviewed-result" role="status" aria-live="polite">尚未请求任何 AI 建议；所有输出均未经实际脚本验证。</p>
+    <section id="diagnosis-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-diagnosis-workspace" hidden>
+      <header class="page-heading"><h2>诊断与记录</h2><p>发起只读 DOM 检查，管理定时复检和观察历史。</p></header>
+      <div data-scenario-context-slot>
+        <div id="scenario-context" class="scenario-context">
+          <div class="context-field">
+            <label for="scenario-inspect-id">已登记场景</label>
+            <select id="scenario-inspect-id" disabled><option value="">先登记场景</option></select>
+          </div>
+          <button id="scenario-cancel" type="button" disabled>取消 DOM 检查或人工导出准备（写入前）</button>
+        </div>
+      </div>
+      <div data-scenario-status-slot></div>
+      <div class="panel">
+        <h3>只读诊断</h3>
+        <p>检查只限独立 Chrome、无需登录且仅包含一或两项 CSS 存在性断言的场景。每次访问需要系统确认，最多三次 DOM 计数，并在同一受控标签页观察 1.2 秒页面 JavaScript 异常次数；只返回计数，不收集异常消息、堆栈或脚本源码。即使出现页面异常也无法归因 Tampermonkey；窗口没有异常不代表业务正常。</p>
+        <div class="actions">
+          <button id="scenario-inspect" type="button" class="primary" disabled>授权只读检查 DOM 与页面 JavaScript 异常</button>
+          <button type="button" class="secondary" data-open-workspace="candidate-workspace">前往候选与导出</button>
+        </div>
+      </div>
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>定时复检</h3>
+          <div class="actions">
+            <button id="scenario-recheck-start" type="button" disabled>开始三轮定时只读复检（间隔一分钟，每轮重新授权）</button>
+            <button id="scenario-recheck-stop" type="button" disabled>停止后续复检／取消当前检查</button>
+          </div>
+          <p id="scenario-recheck-status" role="status" aria-live="polite">定时复检未启动；只有本窗口打开并主动启动时运行。每轮需再次确认原生授权，拒绝或失败将停止后续轮次。</p>
+        </div>
+        <div class="panel">
+          <h3>观察历史</h3>
+          <p>每次通过授权的完整只读 DOM 与短时异常检查后，本窗口保留最多 32 条有限观察历史，并尝试在本机程序数据目录保存最多 32 条脱敏历史；关闭窗口后当前状态不会作为健康认证恢复。可随时查看逐次观察时间与保守结果；此界面不显示脚本路径、源码或证据哈希。元素存在不代表油猴脚本运行正常；异常或选择器缺失只记为证据不足，不表示自动修复或恢复。未授权、取消或失败的检查不写入历史。</p>
+          <button id="scenario-history" type="button" disabled>查看此场景脚本的当前会话观察历史</button>
+          <p id="scenario-history-summary" role="status" aria-live="polite">尚未查询观察历史；此功能不需要启动 Chrome。</p>
+          <ol id="scenario-history-entries" aria-labelledby="scenario-history-summary"></ol>
+        </div>
+      </div>
     </section>
-    <section id="browser-workspace" tabindex="-1" aria-labelledby="browser-heading">
-      <h2 id="browser-heading">独立 Chrome 诊断连接（阶段功能）</h2>
-      <p id="chrome-profile-safety">先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
-      <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>
-      <button id="choose-profile" type="button" aria-describedby="chrome-profile-safety">选择已有独立 Profile</button>
-      <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
-      <label for="chrome-port">本机 CDP 端口：</label>
-      <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
-      <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
-      <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
-      <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
-      <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
-      <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
-      <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
-      <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
-      测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
-      然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
-      必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
-      HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
-      <label for="gm-run-at">临时脚本注入时机：</label>
-      <select id="gm-run-at">
-        <option value="document-idle">document-idle（页面空闲后）</option>
-        <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
-        <option value="document-body">document-body（页面正文开始加载，必要时等待 DOM 就绪后检查）</option>
-        <option value="document-end">document-end（文档结构加载后，必要时等待 DOM 就绪后检查）</option>
-      </select>
-      <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
-      <button id="gm-probe-start" type="button">授权开始本机 GM 测试</button>
-      <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
-      <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
-      <button id="gm-probe-visit-fixed" type="button">授权打开 fixed 测试页</button>
-      <button id="gm-probe-observe-fixed" type="button">授权对照 fixed DOM</button>
-      <button id="gm-probe-status" type="button">查看回执与 DOM 对照（未经认证）</button>
-      <button id="gm-probe-save-report" type="button">保存脱敏测试摘要 JSON（未经认证）</button>
-      <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
-      <p id="gm-probe-links" aria-live="polite"></p>
-      <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
+    <section id="candidate-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-candidate-workspace" hidden>
+      <header class="page-heading"><h2>候选与导出</h2><p>在系统授权下重新核对 DOM，手动导出候选和恢复材料。</p></header>
+      <div data-scenario-context-slot></div>
+      <div data-scenario-status-slot></div>
+      <div class="panel">
+        <h3>复核与导出</h3>
+        <p id="scenario-export-risk">人工候选导出仅支持通过系统选择器导入的本地 .user.js 文件及两项已登记选择器。每次操作将重新授权在本应用归属 Chrome 中读取 DOM、通过原生选择器分别选取备份目录和候选目录，并在真正写入前再次请求系统确认。脚本 SHA 不匹配、DOM 不稳定、旧元素仍存在或新元素缺失时拒绝。导出前会在独立备份目录持久保存恢复检查点；若检查点不能核验则不会继续导出。恢复检查点不提供自动应用或回滚权限。候选不等于 Tampermonkey、GM 或业务验证，不提供自动安装和回滚。</p>
+        <div class="actions">
+          <button id="scenario-export-manual" type="button" disabled aria-describedby="scenario-export-risk" class="primary">单独授权实时 DOM 复核并导出人工候选（不改原脚本）</button>
+          <button type="button" class="secondary" data-open-workspace="diagnosis-workspace">返回诊断与记录</button>
+        </div>
+        <p>人工导出在最终系统写入确认之前可以取消；开始创建独立备份／候选之后不能撤销既有文件，原始脚本仍不被覆盖。若中断请检查所选输出目录。</p>
+      </div>
     </section>
-    <p id="status" role="status">正在检查本地应用边界…</p>
+    <section id="restore-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-restore-workspace" hidden>
+      <header class="page-heading"><h2>备份与恢复</h2><p>先只读核对恢复记录，再按需要独立授权恢复原版。</p></header>
+      <div class="panel">
+        <h3>只读核对</h3>
+        <p>如果手动恢复曾中断或返回错误，可先使用下方只读核对：独立选择当前脚本和先前生成的恢复意图 .journal.json 文件；程序只会核对当前原版/被替换版本及两份备份的字节关系，不重试写入、不安装 Tampermonkey 脚本。结果只是本机文件状态，不证明脚本业务功能恢复。</p>
+        <button id="restore-inspect-intent" type="button">只读核对恢复意图（不会覆盖文件）</button>
+        <p id="restore-inspect-result" role="status" aria-live="polite">尚未执行只读核对。</p>
+        <p>若恢复意图不止一份，可只读扫描整个恢复文件夹。先通过系统对话框选择当前脚本及恢复目录，最多检查 32 份意图与 1024 个目录条目；输出只有经过核验的数量，不列出路径或摘要，不执行回滚。</p>
+        <button id="restore-inspect-inventory" type="button">批量只读核对恢复目录（不改动文件）</button>
+        <p id="restore-inventory-result" role="status" aria-live="polite">尚未扫描恢复目录。</p>
+      </div>
+      <div class="panel">
+        <h3>手动恢复原始脚本</h3>
+        <p id="manual-restore-risk">此功能仅供已拥有本工具生成的、与当前脚本完整路径绑定的独立 .backup.user.js 备份时使用。先选择需要恢复的本地 .user.js，再选择原始备份；将严格比对两者身份与字节。最终确认后，程序先独立备份当前被替换版本，再写恢复意图并尝试原子替换。操作不能被视为脚本自动修复，也不更新 Tampermonkey 已安装版本。</p>
+        <button id="restore-manual-original" type="button" aria-describedby="manual-restore-risk">独立授权手动恢复原版（将改写所选文件）</button>
+        <p id="restore-manual-result" role="status" aria-live="polite">尚未请求恢复。若出现中断或错误，请检查所选备份目录和原始文件；不要盲目重复操作。</p>
+      </div>
+    </section>
+    <section id="ai-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-ai-workspace" hidden>
+      <header class="page-heading"><h2>AI 工具</h2><p>可选的单次模型查询和场景文字建议。</p></header>
+      <div class="panel">
+        <h3>查询模型</h3>
+        <p>默认完全关闭。仅在点击按钮后通过 Windows 系统选择器选取自己准备的 JSON 配置（不从网页获取文件路径），再由系统对话框确认具体服务来源，才会发送一次带 Bearer Key 的模型列表查询。配置和密钥不保存、不传给页面或任意脚本；拒绝或取消时不会联网。</p>
+        <p>配置文件应包含 baseUrl（受限的 HTTPS 服务或 127.0.0.1 本机 HTTP）、apiKey、manualModel（名称或 null）、maxRequests（1–8）、timeoutMs（500–10000）与 maxOutputTokens（32–256）。例如：<code>{"baseUrl":"https://models.example.com/v1","apiKey":"YOUR_KEY","manualModel":"example-model","maxRequests":2,"timeoutMs":1200,"maxOutputTokens":64}</code>。请自行妥善保管这个含密钥的本地文件。</p>
+        <button id="ai-model-discover" type="button" class="primary">从本机配置授权查询一次模型列表</button>
+        <p id="ai-model-discovery-result" role="status" aria-live="polite">未授权，也没有执行 AI 网络请求。查询结果仅是未经验证的模型元数据，绝不表示脚本已经修复、安装或通过业务验收。</p>
+      </div>
+      <div data-scenario-context-slot></div>
+      <div class="panel">
+        <h3>场景文字建议</h3>
+        <p>仅对已经在独立 Chrome 完成原生授权和真实只读检查的已登记场景，允许查询一次 AI 文字建议。在上方选定场景后，会再次选择本地 JSON 配置，并在系统对话框看到将外发的三项随机密钥加盐摘要及服务来源。必须在配置中填写 manualModel；不发送脚本、DOM、URL、文件路径、原始选择器，也不自动应用 AI 建议。</p>
+        <div class="actions">
+          <button id="ai-reviewed-suggest" type="button" disabled>人工授权：对已检查场景请求一次 AI 文字建议</button>
+          <button type="button" class="secondary" data-open-workspace="diagnosis-workspace">前往诊断与记录</button>
+        </div>
+        <p id="ai-reviewed-result" role="status" aria-live="polite">尚未请求任何 AI 建议；所有输出均未经实际脚本验证。</p>
+      </div>
+    </section>
   </main>
+  <footer class="statusbar">
+    <p id="status" role="status">正在检查本地应用边界…</p>
+  </footer>
   <script src="./index.js"></script>
 </body>
 </html>
