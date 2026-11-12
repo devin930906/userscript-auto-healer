@@ -3,7 +3,7 @@
 ; Inno Setup 6+ compatible installer script
 
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.1.0"
 #endif
 
 #ifndef MyAppPublisher
