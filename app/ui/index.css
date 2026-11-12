@@ -32,6 +32,7 @@ svg { display: block; flex: none; width: 19px; height: 19px; }
 ::selection { color: var(--accent-ink); background: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .skip-workspaces {
+  app-region: no-drag;
   position: fixed;
   top: 8px;
   left: 8px;
@@ -44,12 +45,19 @@ svg { display: block; flex: none; width: 19px; height: 19px; }
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 12px 20px;
+  min-height: max(48px, env(titlebar-area-height, 0px));
+  padding-block: 4px;
+  /* Electron reports the part of the title bar outside the system buttons. */
+  padding-left: calc(env(titlebar-area-x, 0px) + 16px);
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 16px);
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  app-region: drag;
+  user-select: none;
 }
 .brandmark {
   display: grid;
+  flex: none;
   place-items: center;
   width: 32px;
   height: 32px;
@@ -233,7 +241,6 @@ code { font-family: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace; }
   .workspace-content { padding: 14px 16px 16px; }
 }
 @media (max-width: 640px) {
-  .appbar { padding: 9px 12px; }
   .workspace-content { padding: 12px; }
   .panel, .scenario-context { padding: 10px 12px; }
   .statusbar { padding-inline: 12px; }

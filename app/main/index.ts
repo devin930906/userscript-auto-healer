@@ -1277,9 +1277,14 @@ function registerSafeIpc(): void {
 }
 
 async function createMainWindow(): Promise<void> {
+  const useWindowsTitleBar = process.platform === 'win32';
   const win = new BrowserWindow({
     title: 'Userscript Auto Healer',
     backgroundColor: '#111b3a',
+    ...(useWindowsTitleBar ? {
+      titleBarStyle: 'hidden' as const,
+      titleBarOverlay: { color: '#19274d', symbolColor: '#eff5ff', height: 48 }
+    } : {}),
     width: 900,
     height: 620,
     minWidth: 650,
@@ -1290,6 +1295,7 @@ async function createMainWindow(): Promise<void> {
       preload: join(__dirname, '..', 'preload', 'index.js')
     }
   });
+  if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -1310,6 +1316,25 @@ async function createMainWindow(): Promise<void> {
   });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
+    if (useWindowsTitleBar) {
+      const titleBarReady = await win.webContents.executeJavaScript(
+        `(() => {
+          const overlay = navigator.windowControlsOverlay;
+          if (!overlay?.visible) return false;
+          const area = overlay.getTitlebarAreaRect();
+          const bar = document.querySelector('.appbar');
+          const title = bar?.querySelector('h1');
+          if (!bar || !title || area.width >= innerWidth || area.height <= 0) return false;
+          const bounds = title.getBoundingClientRect();
+          return bounds.left >= area.left && bounds.right <= area.right
+            && bar.getBoundingClientRect().bottom >= area.bottom
+            && getComputedStyle(bar).getPropertyValue('app-region') === 'drag'
+            && getComputedStyle(bar).backgroundColor === 'rgb(25, 39, 77)';
+        })()`
+      );
+      if (win.menuBarVisible || titleBarReady !== true)
+        throw new Error('WINDOW_TITLE_BAR_SMOKE_FAILED');
+    }
     // TASK-017/TEST-002/026: exercise the real tab controls while preserving
     // the exact file URL used to verify every IPC sender.
     const navResult = await win.webContents.executeJavaScript(
