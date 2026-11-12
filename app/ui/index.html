@@ -47,22 +47,30 @@
       </div>
     </section>
     <section id="browser-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-browser-workspace" hidden>
-      <header class="page-heading"><h2>浏览器环境</h2><p>配置独立 Chrome，探测 Tampermonkey 或执行隔离 GM 测试。</p></header>
+      <header class="page-heading"><h2>浏览器环境</h2><p>连接已运行的自定义 Chrome，或启动隔离 Chrome 进行测试。</p></header>
       <div class="panel">
-        <h3>独立 Chrome / CDP</h3>
-        <p id="chrome-profile-safety">先选择 Chrome 或便携版 chrome.exe，再选择已有独立 Profile 或授权创建全新空 Profile；不允许使用日常 Chrome Profile。启动前还会显示系统授权确认。</p>
+        <h3>连接正在运行的 Chrome</h3>
+        <p id="existing-chrome-help">要沿用已有浏览器资料，请选择正在运行的便携版 Chrome 和它的 Data 文件夹，然后点击连接。先在该 Chrome 打开 <code>chrome://inspect/#remote-debugging</code> 并启用远程调试，再于 Chrome 原生确认框允许本次连接。断开连接只会断开本软件，不会关闭 Chrome。连接成功只代表浏览器连接已授权；当前连接模式暂不提供脚本修复、GM 测试或业务恢复证明。</p>
         <div class="actions">
-          <button id="choose-chrome" type="button">选择 Chrome / 便携版</button>
-          <button id="choose-profile" type="button" aria-describedby="chrome-profile-safety">选择已有独立 Profile</button>
-          <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
+          <button id="choose-chrome" type="button" aria-describedby="existing-chrome-help">选择 Chrome / 便携版</button>
+          <button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data / Profile</button>
         </div>
-        <label for="chrome-port">本机 CDP 端口：</label>
-        <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
         <div class="actions">
-          <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
-          <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
-          <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
+          <button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">授权连接正在运行的 Chrome</button>
+          <button id="disconnect-existing-chrome" type="button">断开本软件与 Chrome 的连接</button>
         </div>
+        <details>
+          <summary>使用隔离 Chrome</summary>
+          <p id="chrome-profile-safety">此模式会启动一个独立 Chrome；使用已有专用 Profile 前请先关闭正在使用该目录的 Chrome。不会使用或覆盖正在运行的 Data，也不允许使用日常 Chrome Profile。启动前会显示系统授权确认。</p>
+          <label for="chrome-port">本机 CDP 端口：</label>
+          <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
+          <div class="actions">
+            <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
+            <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
+            <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
+            <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
+          </div>
+        </details>
         <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
         <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
       </div>

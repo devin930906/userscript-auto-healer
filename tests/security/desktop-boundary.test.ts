@@ -17,7 +17,8 @@ const allowed = {
  * contract by precisely one channel, not by an arbitrary renderer gateway. */
 const approvedIpcChannels=[
  'ai:discover-native','ai:review-native','app:status','browser:choose-chrome','browser:choose-profile',
- 'browser:create-profile','browser:start','browser:stop',
+ 'browser:connect-existing','browser:create-profile','browser:disconnect-existing',
+ 'browser:start','browser:stop',
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
@@ -345,6 +346,10 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:get-progress',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
+  assert.match(preload, /connectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing'\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:connect-existing',\s*[^)]/);
+  assert.match(preload, /disconnectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:disconnect-existing'\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:disconnect-existing',\s*[^)]/);
   assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-body' \| 'document-end' \| 'document-idle'\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:start',runAt\)/);
   assert.match(preload, /ipcRenderer\.invoke\('gm-probe:status'\)/);
@@ -809,11 +814,29 @@ test('TASK-017/TEST-002/022: bounded dropped-folder scan retains discovered file
 });
 
 
-test('TASK-017/TEST-022: isolated Chrome profile warnings are tied to profile and launch controls',()=>{
+test('TASK-017/TEST-022: existing Data connection and isolated Profile safety instructions are accessible',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  assert.match(html,/<p id="chrome-profile-safety">[^<]*不允许使用日常 Chrome Profile/,
-  'the existing warning must be identifiable without replacing its approved safety copy');
- for(const id of ['choose-profile','create-profile','launch-chrome']){
+  'the isolated launch warning must remain clear');
+ assert.match(html,/<p id="existing-chrome-help">[\s\S]*?chrome:\/\/inspect\/#remote-debugging[\s\S]*?断开连接只会断开本软件[\s\S]*?<\/p>/,
+  'the existing Chrome connection must explain Chrome authorization and safe disconnect');
+ assert.match(html,/<button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data \/ Profile<\/button>/,
+  'existing Data selection must be described for assistive technology');
+ assert.match(html,/<button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">/,
+  'the running-browser connection needs a dedicated entry point');
+ assert.match(html,/<button id="disconnect-existing-chrome" type="button">断开本软件与 Chrome 的连接<\/button>/,
+  'the user needs a separate disconnect control');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const connection=ui.slice(ui.indexOf("connectExistingButton?.addEventListener('click'"),
+  ui.indexOf("disconnectExistingButton?.addEventListener('click'"));
+ assert.match(connection,/window\.healer\.connectExistingChrome\(\)/,
+  'renderer must not provide a profile path, process ID or WebSocket endpoint');
+ assert.match(connection,/existingChromeConnected=result\.ok&&result\.status==='AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED'/);
+ assert.doesNotMatch(connection,/browserConnected\s*=/,
+  'an external Chrome connection must not authorize app-owned-only workflows');
+ assert.match(ui,/if\(gmStartButton\)gmStartButton\.disabled=controlsBusy\|\|!browserConnected\|\|gmProbeActive/,
+  'the isolated GM fixture remains disabled for an externally connected Chrome');
+ for(const id of ['create-profile','launch-chrome']){
   assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety">'),
    'the Chrome safety warning must be available from the '+id+' control');
  }

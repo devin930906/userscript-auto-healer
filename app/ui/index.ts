@@ -93,6 +93,8 @@ interface Window {
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
+    connectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
+    disconnectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
     startGmProbe(runAt?:'document-start'|'document-body'|'document-end'|'document-idle'): Promise<{ok:boolean;code?:string;status?:string;runAt?:string;
@@ -666,6 +668,8 @@ const chooseChromeButton=document.getElementById('choose-chrome') as HTMLButtonE
 const chooseProfileButton=document.getElementById('choose-profile') as HTMLButtonElement|null;
 const createProfileButton=document.getElementById('create-profile') as HTMLButtonElement|null;
 const launchButton=document.getElementById('launch-chrome') as HTMLButtonElement|null;
+const connectExistingButton=document.getElementById('connect-existing-chrome') as HTMLButtonElement|null;
+const disconnectExistingButton=document.getElementById('disconnect-existing-chrome') as HTMLButtonElement|null;
 const inspectButton=document.getElementById('inspect-tampermonkey') as HTMLButtonElement|null;
 const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|null;
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
@@ -677,6 +681,11 @@ let stopInProgress=false;
 let chromeSelected=false;
 let profileSelected=false;
 let browserConnected=false;
+// A connected user Chrome stays separate from the app-owned diagnostic browser.
+// This prevents external sessions from enabling the isolated GM test workflow.
+let existingChromeConnected=false;
+let existingConnectionBusy=false;
+let existingDisconnectBusy=false;
 // Renderer-only lifecycle token: a stopped Chrome cannot be resurrected by
 // the delayed success reply of a pre-stop native launch handshake.
 let browserSessionGeneration=0;
@@ -722,13 +731,23 @@ function setBrowserStatus(value:string):void{
 function browserControls():void{
  // Keep new browser actions disabled until native stop IPC has settled.
  const controlsBusy=browserBusy||stopInProgress;
- if(chooseChromeButton)chooseChromeButton.disabled=controlsBusy||browserConnected;
- if(chooseProfileButton)chooseProfileButton.disabled=controlsBusy||browserConnected;
- if(createProfileButton)createProfileButton.disabled=controlsBusy||browserConnected||!chromeSelected;
- if(portInput)portInput.disabled=controlsBusy||browserConnected;
- if(launchButton)launchButton.disabled=controlsBusy||browserConnected||
+ const externalBusy=(typeof existingConnectionBusy!=='undefined'&&existingConnectionBusy)||
+   (typeof existingDisconnectBusy!=='undefined'&&existingDisconnectBusy);
+ const allControlsBusy=controlsBusy||externalBusy;
+ const externalConnected=typeof existingChromeConnected!=='undefined'&&existingChromeConnected;
+ const anyBrowserConnected=browserConnected||externalConnected;
+ if(chooseChromeButton)chooseChromeButton.disabled=controlsBusy||allControlsBusy||anyBrowserConnected;
+ if(chooseProfileButton)chooseProfileButton.disabled=controlsBusy||allControlsBusy||anyBrowserConnected;
+ if(createProfileButton)createProfileButton.disabled=controlsBusy||allControlsBusy||anyBrowserConnected||!chromeSelected;
+ if(portInput)portInput.disabled=controlsBusy||allControlsBusy||anyBrowserConnected;
+ if(launchButton)launchButton.disabled=controlsBusy||allControlsBusy||anyBrowserConnected||
    !chromeSelected||!profileSelected;
- if(inspectButton)inspectButton.disabled=controlsBusy||!browserConnected;
+ if(typeof connectExistingButton!=='undefined'&&connectExistingButton)connectExistingButton.disabled=controlsBusy||allControlsBusy||anyBrowserConnected||
+   !chromeSelected||!profileSelected;
+ if(typeof disconnectExistingButton!=='undefined'&&disconnectExistingButton)disconnectExistingButton.disabled=
+   (typeof existingDisconnectBusy!=='undefined'&&existingDisconnectBusy)||
+   (!externalConnected&&!(typeof existingConnectionBusy!=='undefined'&&existingConnectionBusy));
+ if(inspectButton)inspectButton.disabled=controlsBusy||allControlsBusy||!anyBrowserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
  // History is a native read-only view and does not require live Chrome.
  // Keep scenario selection available offline; every live DOM/AI/export action
@@ -1116,11 +1135,37 @@ chooseChromeButton?.addEventListener('click',()=>void browserAction(async()=>{
   setBrowserStatus('已通过系统窗口选择 Chrome；尚未启动或验证。');
  }else setBrowserStatus('Chrome 选择未完成：'+(result.code??'UNKNOWN'));
 }));
+connectExistingButton?.addEventListener('click',()=>void browserAction(async()=>{
+ existingConnectionBusy=true;browserControls();
+ setBrowserStatus('正在核对所选 Chrome 与 Data，并等待 Chrome 的原生授权提示。请在 Chrome 中确认本次连接。');
+ try{
+  const result=await window.healer.connectExistingChrome();
+  existingChromeConnected=result.ok&&result.status==='AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED';
+  setBrowserStatus(existingChromeConnected
+    ?'已获授权连接正在运行的 Chrome（'+(result.chromeVersion??'unknown')+'）。断开本软件不会关闭浏览器；目前只开放 Tampermonkey 只读探测，不代表脚本或业务已恢复。'
+    :'连接正在运行的 Chrome 未通过：'+(result.code??'UNKNOWN'));
+ }catch{
+  existingChromeConnected=false;
+  setBrowserStatus('连接请求受阻；请确认 Chrome 正在运行、已启用远程调试并允许本次连接。');
+ }finally{existingConnectionBusy=false;browserControls();}
+}));
+disconnectExistingButton?.addEventListener('click',()=>{
+ if(existingDisconnectBusy||(!existingChromeConnected&&!existingConnectionBusy))return;
+ existingDisconnectBusy=true;browserControls();
+ setBrowserStatus('正在断开本软件与 Chrome 的连接；浏览器会继续运行。');
+ void window.healer.disconnectExistingChrome().then(result=>{
+  if(result.ok&&result.status==='EXISTING_BROWSER_DISCONNECTED'){
+   existingChromeConnected=false;
+   setBrowserStatus('已断开本软件与 Chrome 的连接；Chrome 和现有 Data 均保持原状。');
+  }else setBrowserStatus('断开连接状态未确认：'+(result.code??'UNKNOWN')+'。Chrome 仍由你控制。');
+ }).catch(()=>setBrowserStatus('断开请求受阻；请在 Chrome 中检查浏览器是否仍正常运行。'))
+  .finally(()=>{existingDisconnectBusy=false;browserControls();});
+});
 chooseProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.chooseProfile();
  if(result.ok){
   profileSelected=true;
-  setBrowserStatus('已通过系统窗口选择独立 Profile；尚未启动或验证。');
+  setBrowserStatus('已通过系统窗口选择现有 Data / Profile；尚未连接或验证。');
  }else setBrowserStatus('Profile 选择未完成：'+(result.code??'UNKNOWN'));
 }));
 createProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
@@ -1152,12 +1197,18 @@ launchButton?.addEventListener('click',()=>void browserAction(async()=>{
 inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.inspectTampermonkey();
  if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
-  setBrowserStatus('发现 '+result.matchedRuntimeTargets+
+  setBrowserStatus((existingChromeConnected?'已连接的 Chrome：':'本程序启动的 Chrome：')+
+    '发现 '+result.matchedRuntimeTargets+
     ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
  else if(result.code==='BROWSER_NOT_RUNNING'){
-  clearGmDisplay('独立 Chrome 已退出；本机测试会话无法继续。');
-  browserConnected=false;
-  setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
+  if(existingChromeConnected){
+   existingChromeConnected=false;
+   setBrowserStatus('Chrome 连接已失效；浏览器可能已退出或撤销授权。');
+  }else{
+   clearGmDisplay('独立 Chrome 已退出；本机测试会话无法继续。');
+   browserConnected=false;
+   setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
+  }
  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
 }));
 // Stop is intentionally NOT gated by browserAction's busy mutex. It must

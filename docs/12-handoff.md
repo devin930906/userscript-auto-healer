@@ -354,3 +354,5 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
 - 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
+
+2026-11-12 外连续接：实现单独授权连接已有自定义 Data 的运行中 Chrome；当前只支持 Tampermonkey 目标只读提示。继续验收 Chrome 原生授权和用户真实 Data；随后分别实现并验证外连场景诊断及 GM 工作流，切勿将外连会话伪装为自启动进程或以断开结束用户 Chrome。

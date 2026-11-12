@@ -189,6 +189,10 @@ export type ListenerOwnerResult =
      readonly executableVerified:false}
   | {readonly ok:false; readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
       'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'|'LISTENER_PID_MISMATCH'};
+export type LoopbackListenerResult =
+  | {readonly ok:true;readonly status:'UNIQUE_LOOPBACK_LISTENER';readonly pid:number}
+  | {readonly ok:false;readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
+     'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'};
 /** Parse numeric Windows TCP LISTENING sockets on the exact IPv4 loopback port.
  * Only 127.0.0.1:port -> 0.0.0.0:0 qualifies, never wildcard or remote peers.
  * An invalid PID remains ambiguous, never trusted.
@@ -220,12 +224,9 @@ export function resolveWindowsNetstatExecutable(systemRoot:unknown):string|null{
       /[. ]$/.test(component)))return null;
   return win32.join(systemRoot,'System32','netstat.exe');
 }
-export async function verifyWindowsLoopbackListenerPid(
-  port:number, expectedPid:number
-):Promise<ListenerOwnerResult> {
+export async function findWindowsLoopbackListenerPid(port:number):Promise<LoopbackListenerResult>{
   if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
-  if(!Number.isInteger(port)||port<1024||port>65535 ||
-     !Number.isSafeInteger(expectedPid)||expectedPid<1)
+  if(!Number.isInteger(port)||port<1024||port>65535)
     return {ok:false,code:'INVALID_ARGUMENTS'};
   // No PATH or current-directory executable search: an imported or adjacent
   // untrusted "netstat.exe" must never run during Chrome ownership checks.
@@ -246,8 +247,18 @@ export async function verifyWindowsLoopbackListenerPid(
   if(pids.length===0)return {ok:false,code:'LISTENER_UNAVAILABLE'};
   if(pids.length!==1||!Number.isSafeInteger(pids[0])||pids[0]<1)
     return {ok:false,code:'LISTENER_AMBIGUOUS'};
-  if(pids[0]!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
-  return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid:pids[0],executableVerified:false};
+  return {ok:true,status:'UNIQUE_LOOPBACK_LISTENER',pid:pids[0]};
+}
+export async function verifyWindowsLoopbackListenerPid(
+  port:number, expectedPid:number
+):Promise<ListenerOwnerResult> {
+  if(!Number.isSafeInteger(expectedPid)||expectedPid<1)
+    return {ok:false,code:'INVALID_ARGUMENTS'};
+  const found=await findWindowsLoopbackListenerPid(port);
+  if(!found.ok)return found;
+  const pid=found.pid;
+  if(pid!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};
+  return {ok:true,status:'LISTENER_PID_MATCH_ONLY',pid,executableVerified:false};
 }
 
 
