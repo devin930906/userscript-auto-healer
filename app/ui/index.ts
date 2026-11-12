@@ -1393,40 +1393,81 @@ scenarioInspectId?.addEventListener('change',()=>{
       :'如需本场景建议，请单独授权。');
 });
 
-/** Work-area buttons scroll and move keyboard focus without modifying the
- * file:// frame URL. The main process verifies that exact URL for every IPC.
- * Do not use fragment links or history updates for in-app navigation.
+/** Keep each workspace mounted so pending operations and form values survive tab changes.
+ * Navigation stays in the document because IPC verifies the exact file URL.
  */
-const workAreaIds=[
-  'import-workspace','scenario-workspace','restore-workspace',
-  'ai-workspace','browser-workspace'
-] as const;
-// Focus may enter a work area via keyboard navigation as well as by its
-// navigation button. Keep the announced location aligned with the actual
-// focused section without changing the trusted Electron frame URL.
-function indicateCurrentWorkArea(button:HTMLButtonElement):void{
-  // All sections remain visible: this is a location, not a selected tab.
-  document.querySelectorAll<HTMLButtonElement>(
-    'nav[aria-label="工作区导航"] button[data-workspace-target]'
-  ).forEach(otherButton=>otherButton.removeAttribute('aria-current'));
-  button.setAttribute('aria-current','location');
-}
-// Keep keyboard skip navigation on the same exact file:// URL used by
-// the main-process IPC sender check. Reuse the approved workspace button.
-document.getElementById('skip-workspaces')?.addEventListener('click',()=>{
-  document.querySelector<HTMLButtonElement>(
-    'nav[aria-label="工作区导航"] button[data-workspace-target="import-workspace"]'
-  )?.click();
+const workspaceTabs = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('.workspace-tabs [role="tab"]')
+).flatMap(button => {
+  const panel = document.getElementById(button.dataset.workspaceTarget ?? '');
+  return panel ? [{ button, panel }] : [];
 });
-for(const id of workAreaIds){
-  const button=document.querySelector<HTMLButtonElement>(
-    'nav[aria-label="工作区导航"] button[data-workspace-target="'+id+'"]'
-  );
-  const area=document.getElementById(id);
-  if(!button||!area)continue;
-  area.addEventListener('focusin',()=>indicateCurrentWorkArea(button));
-  button.addEventListener('click',()=>{
-    area.scrollIntoView({block:'start'});
-    area.focus({preventScroll:true});
+const workspaceTablist = document.querySelector<HTMLElement>('.workspace-tabs');
+const workspaceContent = document.querySelector<HTMLElement>('.workspace-content');
+const skipWorkspaces = document.getElementById('skip-workspaces');
+const scenarioContext = document.getElementById('scenario-context');
+let selectedWorkspace = 0;
+
+function selectWorkspace(index: number, focus: 'tab' | 'panel' | 'none'): void {
+  const selected = workspaceTabs[index];
+  if (!selected) return;
+  const changed = index !== selectedWorkspace;
+  selectedWorkspace = index;
+  const contextSlot = selected.panel.querySelector('[data-scenario-context-slot]');
+  const statusSlot = selected.panel.querySelector('[data-scenario-status-slot]');
+  if (scenarioContext && contextSlot && scenarioContext.parentElement !== contextSlot) {
+    contextSlot.append(scenarioContext);
+  }
+  if (scenarioStatus && statusSlot && scenarioStatus.parentElement !== statusSlot) {
+    statusSlot.append(scenarioStatus);
+  }
+  workspaceTabs.forEach(({ button, panel }, position) => {
+    const active = position === index;
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+    panel.hidden = !active;
   });
+  skipWorkspaces?.setAttribute('aria-controls', selected.panel.id);
+  if (changed && workspaceContent) workspaceContent.scrollTop = 0;
+  if (focus === 'tab') selected.button.focus({ preventScroll: true });
+  if (focus === 'panel') selected.panel.focus({ preventScroll: true });
+  if (focus !== 'none' && workspaceTablist?.getAttribute('aria-orientation') === 'horizontal') {
+    selected.button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+}
+
+function updateWorkspaceOrientation(): void {
+  workspaceTablist?.setAttribute('aria-orientation', window.innerWidth > 760 ? 'vertical' : 'horizontal');
+}
+
+workspaceTabs.forEach(({ button }, index) => {
+  button.addEventListener('click', () => selectWorkspace(index, 'tab'));
+  button.addEventListener('keydown', event => {
+    const horizontal = workspaceTablist?.getAttribute('aria-orientation') === 'horizontal';
+    const previous = horizontal ? 'ArrowLeft' : 'ArrowUp';
+    const next = horizontal ? 'ArrowRight' : 'ArrowDown';
+    const count = workspaceTabs.length;
+    let target: number;
+    switch (event.key) {
+      case previous: target = (index + count - 1) % count; break;
+      case next: target = (index + 1) % count; break;
+      case 'Home': target = 0; break;
+      case 'End': target = count - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    selectWorkspace(target, 'tab');
+  });
+});
+skipWorkspaces?.addEventListener('click', () => selectWorkspace(selectedWorkspace, 'panel'));
+document.querySelectorAll<HTMLButtonElement>('[data-open-workspace]').forEach(button => {
+  button.addEventListener('click', () => {
+    const index = workspaceTabs.findIndex(({ panel }) => panel.id === button.dataset.openWorkspace);
+    selectWorkspace(index, 'panel');
+  });
+});
+if (workspaceTablist) {
+  window.addEventListener('resize', updateWorkspaceOrientation);
+  updateWorkspaceOrientation();
+  selectWorkspace(0, 'none');
 }

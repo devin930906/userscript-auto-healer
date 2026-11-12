@@ -668,55 +668,73 @@ test('TASK-017/014: disconnected Chrome cannot enable or dispatch AI review',asy
  assert.match(result.textContent,/Chrome|浏览器|连接/,'blocked user action needs explanation');
 });
 
-test('TASK-017/TEST-002/026: keyboard navigation keeps the exact trusted IPC frame URL', () => {
+test('TASK-017/TEST-002/026: seven accessible tabs switch distinct in-frame workspaces', () => {
   const html = readFileSync(join(process.cwd(), 'app', 'ui', 'index.html'), 'utf8');
   const ui = readFileSync(join(process.cwd(), 'app', 'ui', 'index.ts'), 'utf8');
   const targets = [
     ['import-workspace', '导入脚本'],
+    ['browser-workspace', 'Chrome 诊断'],
     ['scenario-workspace', '测试场景'],
-    ['restore-workspace', '手动恢复'],
-    ['ai-workspace', 'AI 模型'],
-    ['browser-workspace', 'Chrome 诊断']
+    ['diagnosis-workspace', '诊断记录'],
+    ['candidate-workspace', '候选导出'],
+    ['restore-workspace', '备份恢复'],
+    ['ai-workspace', 'AI 模型']
   ] as const;
-  assert.match(html, /<nav\b[^>]*aria-label="工作区导航"[^>]*>/);
+
+  assert.match(html, /<nav\b[^>]*aria-label="工作区导航"[^>]*role="tablist"/);
   for (const [id, label] of targets) {
+    const buttonId = 'tab-' + id;
+    const controls = 'aria-controls="' + id + '" data-workspace-target="' + id + '"';
+    assert.ok(html.includes(controls), 'each tab must name its workspace: ' + label);
+    assert.ok(html.includes('role="tab" id="' + buttonId + '"'),
+      'each tab must have a stable accessible ID: ' + label);
     assert.equal((html.match(new RegExp('id="' + id + '"', 'g')) ?? []).length, 1,
-      'each focus target must be unique: ' + id);
-    assert.ok(html.includes('data-workspace-target="' + id + '">' + label + '</button>'),
-      'navigation must use a button instead of a fragment link: ' + label);
-    assert.match(html, new RegExp('id="' + id + '"[^>]*tabindex="-1"'),
-      'each work area needs a programmatic keyboard focus destination');
+      'each workspace ID must be unique: ' + id);
+    assert.match(html, new RegExp('<button[^>]*id="' + buttonId +
+      '"[^>]*aria-selected="(?:true|false)"[^>]*tabindex="(?:0|-1)"[^>]*>'),
+      'each tab must expose its selected and focusable state: ' + label);
+    assert.match(html, new RegExp('<section id="' + id +
+      '" role="tabpanel" tabindex="0" aria-labelledby="' + buttonId + '"'),
+      'each workspace must be a labelled keyboard-focusable panel: ' + id);
     assert.ok(!html.includes('href="#' + id + '"'),
       'fragment navigation would change trustedMainFrame sender URL');
-    assert.ok(ui.includes("'" + id + "'"),
-      'renderer must recognize each approved work-area ID');
   }
-  assert.match(ui, /scrollIntoView\(/);
-  assert.match(ui, /\.focus\(\{preventScroll:true\}\)/);
+  assert.ok(ui.includes("document.getElementById(button.dataset.workspaceTarget ?? '')"),
+    'each tab resolves its declared panel in the renderer');
+
+  const navigation = html.match(/<nav\b[^>]*aria-label="工作区导航"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
+  assert.ok(navigation);
+  assert.deepEqual([...navigation.matchAll(/data-workspace-target="([^"]+)"/g)]
+    .map(match => match[1]), targets.map(([id]) => id));
+  assert.equal((navigation.match(/aria-selected="true"/g) ?? []).length, 1,
+    'exactly one tab is initially selected');
+  assert.ok(/selected\.button\.focus\s*\(\s*\{\s*preventScroll:\s*true\s*\}\s*\)/.test(ui),
+    'tab activation should retain focus');
   assert.ok(html.indexOf('aria-label="工作区导航"') < html.indexOf('id="drop-area"'),
-    'navigation must precede the long first workflow');
+    'navigation must precede the long import workflow');
 });
 
-test('TASK-017/TEST-002/022: work-area navigation indicates the latest keyboard focus destination without changing the trusted URL',()=>{
+test('TASK-017/TEST-002/022: tab keyboard navigation preserves the trusted file URL',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
- for(const id of ['import-workspace','scenario-workspace','restore-workspace',
-   'ai-workspace','browser-workspace']){
-  assert.match(html,new RegExp('aria-controls="'+id+'" data-workspace-target="'+id+'"'),
-   'each navigation control must identify its existing destination for assistive technology');
- }
- assert.ok(ui.includes("button.setAttribute('aria-current','location')"),
-  'the active work-area jump must expose a current location to assistive technology');
- assert.ok(ui.includes("otherButton.removeAttribute('aria-current')"),
-  'a later jump must remove stale location announcements from other buttons');
- assert.ok(css.includes('nav[aria-label="工作区导航"] button[aria-current="location"]'),
-  'the location currently selected with a navigation button needs a visible cue');
- assert.ok(ui.includes('area.focus({preventScroll:true})'),
-  'a navigation state indicator cannot replace actual keyboard focus transfer');
+ assert.ok(ui.includes('ArrowDown')&&ui.includes('ArrowUp'),
+  'desktop vertical tabs need up and down arrow navigation');
+ assert.ok(ui.includes('ArrowLeft')&&ui.includes('ArrowRight'),
+  'narrow horizontal tabs need left and right arrow navigation');
+ assert.ok(ui.includes("'Home'")&&ui.includes("'End'"),
+  'Home and End should reach the first and last tabs');
+ assert.ok(ui.includes('aria-orientation'),
+  'assistive technology needs the orientation of the responsive tab list');
+ assert.ok(/panel\.hidden\s*=\s*!active/.test(ui),
+  'tab selection must show one panel and hide the others');
+ assert.match(css,/@media\s*\(max-width:\s*760px\)/,
+  'the tab layout must adapt to narrow Electron windows');
+ assert.ok(ui.includes('selected.panel.focus({ preventScroll: true })'),
+  'the skip control must focus the current panel');
  assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState(')&&
    !ui.includes('history.replaceState('),
-  'the navigation indication must not mutate the exact trusted Electron file URL');
+  'tab navigation must retain the trusted Electron file URL');
 });
 
 test('TASK-017/TEST-002/022: packaged desktop workspace styling preserves focus and narrow windows',()=>{
@@ -739,18 +757,19 @@ test('TASK-017/TEST-002/022: packaged desktop workspace styling preserves focus 
   'keep the renderer CSP free from inline styling');
 });
 
-test('TASK-017/TEST-002/022: imported workspace has an accessible heading without decorative navigation text', () => {
+test('TASK-017/TEST-002/022: workspaces retain their labelled headings behind the tabs', () => {
   const html = readFileSync(join(process.cwd(), 'app/ui/index.html'), 'utf-8');
-  // This structural check does not claim a rendered Electron or screen-reader test.
-  assert.match(html, /<section id="import-workspace" tabindex="-1" aria-labelledby="import-heading">\s*<h2 id="import-heading">导入油猴脚本（只读）<\/h2>/);
-  const navigation = html.match(/<nav aria-label="工作区导航">([\s\S]*?)<\/nav>/)?.[1];
-  assert.ok(navigation, 'existing workspace navigation remains present');
+  assert.match(html, /<section id="import-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-import-workspace">\s*<header class="page-heading"><h2>脚本库<\/h2>/);
+  const navigation = html.match(/<nav\b[^>]*aria-label="工作区导航"[^>]*>([\s\S]*?)<\/nav>/)?.[1];
+  assert.ok(navigation, 'functional tab navigation remains present');
   const targets = [...navigation.matchAll(/data-workspace-target="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(targets, [
-    'import-workspace', 'scenario-workspace', 'restore-workspace',
-    'ai-workspace', 'browser-workspace'
+    'import-workspace', 'browser-workspace', 'scenario-workspace',
+    'diagnosis-workspace', 'candidate-workspace', 'restore-workspace',
+    'ai-workspace'
   ]);
-  assert.doesNotMatch(navigation, /<\/button>\s*·/, 'flex navigation uses spacing, not extra spoken separators');
+  assert.doesNotMatch(navigation, /<\/button>\s*·/,
+    'tab names do not need spoken decorative separators');
 });
 
 test('TASK-017/TEST-002/022: second drag/drop batch is rejected visibly without reading files', () => {
@@ -870,7 +889,7 @@ test('TASK-017/014 TEST-022/016: stale AI replies after selection ABA cannot rep
  const {runInNewContext}=await import('node:vm');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const start=ui.indexOf("aiReviewButton?.addEventListener('click'");
- const end=ui.indexOf('/** Work-area buttons',start);
+ const end=ui.indexOf('/** Keep each workspace mounted',start);
  assert.ok(start>=0&&end>start,'real reviewed-AI renderer handler must be present');
  const buttonHandlers=new Map<string,()=>void>();
  const selectHandlers=new Map<string,()=>void>();
@@ -916,7 +935,7 @@ test('TASK-017/TEST-022: late AI advice cannot repaint after owned Chrome stop',
  const {runInNewContext}=await import('node:vm');
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const aiStart=ui.indexOf("aiReviewButton?.addEventListener('click'");
- const aiEnd=ui.indexOf('/** Work-area buttons',aiStart);
+ const aiEnd=ui.indexOf('/** Keep each workspace mounted',aiStart);
  const stopStart=ui.indexOf("stopButton?.addEventListener('click'");
  const stopEnd=ui.indexOf("gmStartButton?.addEventListener('click'",stopStart);
  assert.ok(aiStart>=0&&aiEnd>aiStart&&stopStart>=0&&stopEnd>stopStart,
@@ -1209,16 +1228,21 @@ test('TASK-017/015: switching scenarios stops pending native rechecks and never 
 });
 
 
-test('TASK-017/TEST-002: keyboard focus moving between work areas updates current location',()=>{
+test('TASK-017/TEST-002: tab navigation follows selection and current orientation',()=>{
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
- assert.match(ui,/area\.addEventListener\('focusin',\(\)=>/);
- assert.match(ui,/indicateCurrentWorkArea\(button\)/);
- assert.match(ui,/otherButton\.removeAttribute\('aria-current'\)/);
- assert.match(ui,/button\.setAttribute\('aria-current','location'\)/);
- assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState('),
-  'keyboard focus tracking must retain the trusted frame URL');
+ const css=readFileSync(join(process.cwd(),'app/ui/index.css'),'utf8');
+ assert.ok(ui.includes("button.addEventListener('click', () => selectWorkspace(index, 'tab'));"));
+ assert.ok(ui.includes("button.addEventListener('keydown', event => {"));
+ assert.ok(ui.includes("case 'Home': target = 0"));
+ assert.ok(ui.includes("case 'End': target = count - 1"));
+ assert.match(ui,/workspaceTablist\?\.setAttribute\('aria-orientation',[^;]+window\.innerWidth > 760 \? 'vertical' : 'horizontal'\)/);
+ assert.ok(ui.includes("button.setAttribute('aria-selected', String(active))"),
+  'tabs report their selection to assistive technology');
+ assert.match(css,/@media\s*\(max-width:\s*760px\)/);
+ assert.ok(!ui.includes('location.hash=')&&!ui.includes('history.pushState(')&&
+   !ui.includes('history.replaceState('),
+  'tab navigation must keep the trusted Electron file URL');
 });
-
 
 /** TASK-017 / TEST-022: execute the real transpiled renderer handlers.
  * A stop during pending native GM fixture creation invalidates even a late

@@ -1277,8 +1277,14 @@ function registerSafeIpc(): void {
 }
 
 async function createMainWindow(): Promise<void> {
+  const useWindowsTitleBar = process.platform === 'win32';
   const win = new BrowserWindow({
     title: 'Userscript Auto Healer',
+    backgroundColor: '#111b3a',
+    ...(useWindowsTitleBar ? {
+      titleBarStyle: 'hidden' as const,
+      titleBarOverlay: { color: '#19274d', symbolColor: '#eff5ff', height: 48 }
+    } : {}),
     width: 900,
     height: 620,
     minWidth: 650,
@@ -1289,6 +1295,7 @@ async function createMainWindow(): Promise<void> {
       preload: join(__dirname, '..', 'preload', 'index.js')
     }
   });
+  if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -1309,20 +1316,57 @@ async function createMainWindow(): Promise<void> {
   });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
-    // TASK-017/TEST-002/026: real renderer navigation must retain the exact
-    // file URL; changing its fragment would invalidate every future IPC sender.
+    if (useWindowsTitleBar) {
+      const titleBarReady = await win.webContents.executeJavaScript(
+        `(() => {
+          const overlay = navigator.windowControlsOverlay;
+          if (!overlay?.visible) return false;
+          const area = overlay.getTitlebarAreaRect();
+          const bar = document.querySelector('.appbar');
+          const title = bar?.querySelector('h1');
+          if (!bar || !title || area.width >= innerWidth || area.height <= 0) return false;
+          const bounds = title.getBoundingClientRect();
+          return bounds.left >= area.left && bounds.right <= area.right
+            && bar.getBoundingClientRect().bottom >= area.bottom
+            && getComputedStyle(bar).getPropertyValue('app-region') === 'drag'
+            && getComputedStyle(bar).backgroundColor === 'rgb(25, 39, 77)';
+        })()`
+      );
+      if (win.menuBarVisible || titleBarReady !== true)
+        throw new Error('WINDOW_TITLE_BAR_SMOKE_FAILED');
+    }
+    // TASK-017/TEST-002/026: exercise the real tab controls while preserving
+    // the exact file URL used to verify every IPC sender.
     const navResult = await win.webContents.executeJavaScript(
       "(async()=>{const original=location.href;" +
-      "const controls=Array.from(document.querySelectorAll('nav[aria-label=\\\"工作区导航\\\"] button[data-workspace-target]'));" +
-      "if(controls.length!==5)return {ok:false};" +
-      "for(const button of controls){" +
-      "button.click();" +
-      "if(location.href!==original)return {ok:false};" +
-      "const id=button.getAttribute('data-workspace-target');" +
-      "if(document.activeElement?.id!==id)return {ok:false};" +
-      "const status=await window.healer.getStatus();" +
-      "if(status.shell!=='development-skeleton')return {ok:false};" +
-      "}return {ok:true};})()"
+      "const nav=document.querySelector('nav[aria-label=\\\"工作区导航\\\"]');" +
+      "const ids=['import-workspace','browser-workspace','scenario-workspace','diagnosis-workspace','candidate-workspace','restore-workspace','ai-workspace'];" +
+      "const tabs=Array.from(nav?.querySelectorAll('button[role=\\\"tab\\\"][data-workspace-target]')||[]);" +
+      "if(tabs.length!==7||tabs.some((tab,i)=>tab.id!=='tab-'+ids[i]||tab.getAttribute('aria-controls')!==ids[i]))return {ok:false,stage:'structure'};" +
+      "const panels=ids.map(id=>document.getElementById(id));" +
+      "if(panels.some((panel,i)=>!panel||panel.getAttribute('role')!=='tabpanel'||panel.getAttribute('aria-labelledby')!==tabs[i].id))return {ok:false,stage:'panels'};" +
+      "const assertOnly=(i)=>tabs.every((tab,j)=>tab.getAttribute('aria-selected')===String(j===i)&&tab.tabIndex===(j===i?0:-1))&&panels.every((panel,j)=>panel.hidden===(j!==i));" +
+      "if(!assertOnly(0))return {ok:false,stage:'initial'};" +
+      "for(let i=0;i<tabs.length;i++){tabs[i].click();if(!assertOnly(i)||document.activeElement!==tabs[i]||location.href!==original)return {ok:false,stage:'click'};const status=await window.healer.getStatus();if(status.shell!=='development-skeleton')return {ok:false,stage:'ipc'};}" +
+      "if(nav.getAttribute('aria-orientation')!=='vertical')return {ok:false,stage:'desktop-orientation'};" +
+      "tabs[0].focus();tabs[0].dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));" +
+      "if(!assertOnly(1)||document.activeElement!==tabs[1])return {ok:false,stage:'vertical-next'};" +
+      "tabs[1].dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));" +
+      "if(!assertOnly(0))return {ok:false,stage:'home'};" +
+      "tabs[0].dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));" +
+      "if(!assertOnly(6))return {ok:false,stage:'end'};" +
+      "const before=window.innerWidth;Object.defineProperty(window,'innerWidth',{configurable:true,value:700});window.dispatchEvent(new Event('resize'));" +
+      "if(nav.getAttribute('aria-orientation')!=='horizontal')return {ok:false,stage:'narrow-orientation'};" +
+      "tabs[0].dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));" +
+      "if(!assertOnly(1)||document.activeElement!==tabs[1])return {ok:false,stage:'horizontal-next'};" +
+      "Object.defineProperty(window,'innerWidth',{configurable:true,value:before});window.dispatchEvent(new Event('resize'));" +
+      "const context=document.getElementById('scenario-context'),inspect=document.getElementById('scenario-inspect-id'),scenarioStatus=document.getElementById('scenario-status');" +
+      "if(!context||!inspect||!scenarioStatus)return {ok:false,stage:'shared-elements'};" +
+      "for(const i of [3,4,6]){tabs[i].click();const slot=panels[i].querySelector('[data-scenario-context-slot]');if(!slot||context.parentElement!==slot||!panels[i].contains(context)||document.querySelectorAll('#scenario-context').length!==1)return {ok:false,stage:'shared-context'};if(!panels[i].contains(inspect)||(i!==6&&!panels[i].contains(scenarioStatus)))return {ok:false,stage:'shared-status'};}" +
+      "tabs[2].click();if(!panels[2].contains(scenarioStatus)||!panels[2].contains(document.getElementById('scenario-register')))return {ok:false,stage:'scenario-form'};if(inspect.value!=='')return {ok:false,stage:'shared-select'};" +
+      "const skip=document.getElementById('skip-workspaces');skip.click();" +
+      "if(document.activeElement!==panels[2]||skip.getAttribute('aria-controls')!==panels[2].id||location.href!==original)return {ok:false,stage:'skip-panel'};" +
+      "return {ok:true};})()"
     );
     if(navResult?.ok!==true)throw new Error('WORKSPACE_NAV_IPC_SMOKE_FAILED');
     // Fixture files live solely inside the disposable Windows Actions runner.
@@ -1499,6 +1543,11 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.includes('smoke_ui_scenario') && x.includes('READY_TO_TEST') && x.includes('未执行')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
       "const uiConsentConsumed=document.getElementById('scenario-approve').checked===false && uiScenarioButton.disabled; " +
+      "const registeredInspect=document.getElementById('scenario-inspect-id');const selectedScenario=registeredInspect.value;" +
+      "const workTabs=Array.from(document.querySelectorAll('.workspace-tabs [role=\\\"tab\\\"]'));" +
+      "const contextNode=document.getElementById('scenario-context');" +
+      "for(const index of [3,4,6]){workTabs[index].click();const slot=document.getElementById(['import-workspace','browser-workspace','scenario-workspace','diagnosis-workspace','candidate-workspace','restore-workspace','ai-workspace'][index]).querySelector('[data-scenario-context-slot]');if(!slot||contextNode.parentElement!==slot||registeredInspect.value!==selectedScenario)return false;}" +
+      "const scenarioSelectionMoved=true; " +
       "document.getElementById('scenario-approve').checked=true; " +
       "document.getElementById('scenario-approve').dispatchEvent(new Event('change',{bubbles:true})); " +
       "const uiUnknownButtonReady=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
@@ -1545,7 +1594,7 @@ async function createMainWindow(): Promise<void> {
       "noNativeExport.code === 'NO_NATIVE_SOURCE' && singleSelectorExport.code === 'TWO_SELECTORS_REQUIRED' && " +
       "noScenarioCancel.code === 'NO_ACTIVE_OBSERVATION' && invalidScenarioInspect.code === 'SCENARIO_NOT_FOUND' && " +
       "uiScenarioImported && uiScenarioButtonEnabled && uiScenarioStaged && uiHistoryAvailable && uiHistoryShown && " +
-      "uiConsentConsumed && uiUnknownConsentConsumed && uiUnknownButtonReady && uiUnknownNotOffered && " +
+      "uiConsentConsumed && scenarioSelectionMoved && uiUnknownConsentConsumed && uiUnknownButtonReady && uiUnknownNotOffered && " +
       "document.getElementById('scenario-inspect-id').value === 'smoke_ui_scenario' && " +
       "document.getElementById('scenario-inspect').disabled && document.getElementById('scenario-cancel').disabled && " +
       "document.getElementById('scenario-export-manual').disabled && " +
