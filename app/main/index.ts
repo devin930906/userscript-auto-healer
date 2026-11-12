@@ -4,8 +4,146 @@ import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../sr
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
+
+const execFileAsync = promisify(execFileCallback);
+
+interface RememberedPaths {
+  chrome?: string;
+  profile?: string;
+  createProfileParent?: string;
+  scripts?: string;
+  scriptFolder?: string;
+  backup?: string;
+  export?: string;
+  restore?: string;
+  ai?: string;
+  lastGeneral?: string;
+}
+
+let rememberedPaths: RememberedPaths = {};
+
+function getPathMemoryFile(): string | null {
+  try {
+    return join(app.getPath('userData'), 'remembered-paths.json');
+  } catch {
+    return null;
+  }
+}
+
+function loadRememberedPaths(): void {
+  try {
+    const file = getPathMemoryFile();
+    if (file && existsSync(file)) {
+      const data = JSON.parse(readFileSync(file, 'utf8'));
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        rememberedPaths = { ...data };
+      }
+    }
+  } catch {
+    // 忽略读取错误
+  }
+}
+
+function saveRememberedPath(key: keyof RememberedPaths, targetPath: string): void {
+  try {
+    if (!targetPath || typeof targetPath !== 'string') return;
+    const normalized = win32.normalize(targetPath);
+    let dir = normalized;
+    if (existsSync(normalized)) {
+      try {
+        const stat = statSync(normalized);
+        if (!stat.isDirectory()) {
+          dir = win32.dirname(normalized);
+        }
+      } catch {
+        dir = win32.dirname(normalized);
+      }
+    }
+    rememberedPaths[key] = dir;
+    rememberedPaths.lastGeneral = dir;
+    const file = getPathMemoryFile();
+    if (file) {
+      writeFileSync(file, JSON.stringify(rememberedPaths, null, 2), 'utf8');
+    }
+  } catch {
+    // 忽略保存失败
+  }
+}
+
+function getInitialDialogPath(key: keyof RememberedPaths, fallback?: string): string | undefined {
+  const candidate = rememberedPaths[key] || rememberedPaths.lastGeneral || fallback;
+  if (candidate && typeof candidate === 'string') {
+    try {
+      const normalized = win32.normalize(candidate);
+      if (existsSync(normalized)) {
+        try {
+          const stat = statSync(normalized);
+          return stat.isDirectory() ? normalized : win32.dirname(normalized);
+        } catch {
+          return win32.dirname(normalized);
+        }
+      }
+    } catch {
+      // 容错回退
+    }
+  }
+  return undefined;
+}
+
+/** 安全精确地终止匹配所选 Chrome 和/或所选 Profile 的进程并清理锁定 */
+async function terminateMatchingChromeProcesses(exePath: string | null, dataDir: string | null): Promise<number> {
+  if (process.platform !== 'win32') return 0;
+  if (!exePath && !dataDir) return 0;
+  try {
+    const normalizedExe = exePath ? win32.normalize(exePath).toLowerCase() : null;
+    const normalizedData = dataDir ? win32.normalize(dataDir).toLowerCase() : null;
+    const psScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'"
+$killed = 0
+foreach ($p in $procs) {
+  $match = $false
+  $pExe = if ($p.ExecutablePath) { $p.ExecutablePath.ToLower() } else { '' }
+  $pCmd = if ($p.CommandLine) { $p.CommandLine.ToLower() } else { '' }
+  ${normalizedData ? `if ($pCmd -like "*$($normalizedData.Replace('\\', '\\\\'))*") { $match = $true }` : ''}
+  ${normalizedExe ? `if ($pExe -eq "$($normalizedExe.Replace('\\', '\\\\'))" -and ($pCmd -like "*--remote-debugging*" -or $pCmd -like "*--user-data-dir*")) { $match = $true }` : ''}
+  if ($match) {
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    $killed++
+  }
+}
+Write-Output $killed
+`;
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    for (const shell of ['powershell.exe', 'pwsh.exe']) {
+      try {
+        const { stdout } = await execFileAsync(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
+          windowsHide: true,
+          timeout: 8000
+        });
+        const count = parseInt(stdout.trim(), 10);
+        if (dataDir) {
+          try {
+            const lockfile = win32.join(dataDir, 'lockfile');
+            if (existsSync(lockfile)) {
+              rmSync(lockfile, { force: true });
+            }
+          } catch {}
+        }
+        return Number.isSafeInteger(count) ? count : 0;
+      } catch {
+        continue;
+      }
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
 import { randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
@@ -212,11 +350,13 @@ function registerSafeIpc(): void {
     try{
       const choice=await dialog.showOpenDialog(win,{
         title:'选择本机 AI 服务 JSON 配置（含 API Key，不发送此文件）',
+        defaultPath:getInitialDialogPath('ai'),
         properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
       });
       if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
       if(choice.canceled||choice.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
+      saveRememberedPath('ai',choice.filePaths[0]);
       const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
       if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
       if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
@@ -264,10 +404,12 @@ function registerSafeIpc(): void {
     try{
       const choice=await dialog.showOpenDialog(win,{
         title:'选择本机 AI 服务 JSON 配置（仅本次建议使用）',
+        defaultPath:getInitialDialogPath('ai'),
         properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
       });
       if(revoked()||choice.canceled||choice.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
+      saveRememberedPath('ai',choice.filePaths[0]);
       const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
       if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
       if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
@@ -304,6 +446,7 @@ function registerSafeIpc(): void {
     try{
     const choice=await dialog.showOpenDialog(win,{
       title:'选择独立 Chrome 或便携版 chrome.exe',
+      defaultPath:getInitialDialogPath('chrome',selectedChrome?win32.dirname(selectedChrome):undefined),
       properties:['openFile'],filters:[{name:'Google Chrome',extensions:['exe']}]
     });
     if(choice.canceled||choice.filePaths.length!==1)return {ok:false,code:'CANCELLED'};
@@ -311,6 +454,7 @@ function registerSafeIpc(): void {
     if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     if(win32.basename(path).toLowerCase()!=='chrome.exe')
       return {ok:false,code:'INVALID_EXECUTABLE'};
+    saveRememberedPath('chrome',path);
     selectedChrome=path;
     return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',filename:'chrome.exe',
       verifiedOnDisk:false};
@@ -326,11 +470,13 @@ function registerSafeIpc(): void {
     try{
     const choice=await dialog.showOpenDialog(win,{
       title:'选择已有的独立调试 Profile 文件夹（不要选日常 Chrome 用户目录）',
+      defaultPath:getInitialDialogPath('profile',selectedProfile??undefined),
       properties:['openDirectory']
     });
     if(choice.canceled||choice.filePaths.length!==1)return {ok:false,code:'CANCELLED'};
     if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
     selectedProfile=choice.filePaths[0];
+    saveRememberedPath('profile',selectedProfile);
     return {ok:true,status:'NATIVE_PATH_SELECTED_ONLY',
       directoryName:win32.basename(selectedProfile),verifiedOnDisk:false};
     }finally{nativeSelectionInProgress=false;}
@@ -349,12 +495,14 @@ function registerSafeIpc(): void {
       // new unpredictable application-specific name, never renderer input.
       const picked=await dialog.showOpenDialog(win,{
         title:'选择用于创建全新独立 Chrome Profile 的父文件夹',
+        defaultPath:getInitialDialogPath('createProfileParent',selectedProfile?dirname(selectedProfile):undefined),
         properties:['openDirectory']
       });
       if(picked.canceled||picked.filePaths.length!==1)
         return {ok:false,code:'CANCELLED'};
       if(win!==mainWindow||win.isDestroyed())
         return {ok:false,code:'NO_WINDOW'};
+      saveRememberedPath('createProfileParent',picked.filePaths[0]);
       const candidate=win32.join(picked.filePaths[0],'uah-profile-'+randomUUID());
       const config=validateBrowserConfig({
         executablePath:selectedChrome,userDataDir:candidate,
@@ -531,11 +679,11 @@ function registerSafeIpc(): void {
       return {ok:false,code:'PROBE_FAILED',...unverified};
     }finally{probeInProgress=false;}
   });
-  ipcMain.handle('browser:stop',event=>{
+  ipcMain.handle('browser:stop',async event=>{
     authorizeSender(event);
-    if(!readOwnedBrowser()&&(!launchInProgress||existingConnectInProgress))
-      return {ok:false,code:'BROWSER_NOT_RUNNING'};
     stopOnlyOwnedBrowser();
+    if(existingBrowser){existingBrowser.stop();existingBrowser=null;}
+    await terminateMatchingChromeProcesses(selectedChrome,selectedProfile);
     return {ok:true,status:'OWNED_BROWSER_STOP_REQUESTED'};
   });
 
@@ -786,16 +934,20 @@ function registerSafeIpc(): void {
         return {ok:false,code:'CANCELLED',...unverified};
       const source=await dialog.showOpenDialog(win,{
         title:'只读批量核对：选择本地 .user.js 原文件',
+        defaultPath:getInitialDialogPath('scripts'),
         properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
       });
       if(source.canceled||source.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('scripts',source.filePaths[0]);
       const backupDirectory=await dialog.showOpenDialog(win,{
         title:'只读批量核对：选择已有的恢复意图和独立备份文件夹',
+        defaultPath:getInitialDialogPath('backup'),
         properties:['openDirectory']
       });
       if(backupDirectory.canceled||backupDirectory.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('backup',backupDirectory.filePaths[0]);
       const report=await inspectNativeRestoreIntentInventoryReadOnly({
         sourcePath:source.filePaths[0],
         backupDirectory:backupDirectory.filePaths[0],userApproved:true
@@ -840,16 +992,20 @@ function registerSafeIpc(): void {
         return {ok:false,code:'CANCELLED',...unverified};
       const selectedSource=await dialog.showOpenDialog(win,{
         title:'只读核对：选择目前的 .user.js 原文件',
+        defaultPath:getInitialDialogPath('scripts'),
         properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
       });
       if(selectedSource.canceled||selectedSource.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('scripts',selectedSource.filePaths[0]);
       const journalSelection=await dialog.showOpenDialog(win,{
         title:'只读核对：选择先前生成的 .uah-restore-*.journal.json 意图文件',
+        defaultPath:getInitialDialogPath('backup'),
         properties:['openFile'],filters:[{name:'Restore intent',extensions:['json']}]
       });
       if(journalSelection.canceled||journalSelection.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('backup',dirname(journalSelection.filePaths[0]));
       const observed=await inspectNativeRestoreIntentReadOnly({
         sourcePath:selectedSource.filePaths[0],
         backupDirectory:dirname(journalSelection.filePaths[0]),
@@ -903,16 +1059,20 @@ function registerSafeIpc(): void {
       if(initial.response!==0||revoked())return {ok:false,code:'CANCELLED',...unverified};
       const source=await dialog.showOpenDialog(win,{
         title:'手动恢复：选择要被替换的当前 .user.js 脚本',
+        defaultPath:getInitialDialogPath('scripts'),
         properties:['openFile'],filters:[{name:'Userscript',extensions:['js']}]
       });
       if(source.canceled||source.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('scripts',source.filePaths[0]);
       const backup=await dialog.showOpenDialog(win,{
         title:'手动恢复：选择本应用生成的原版 .backup.user.js 文件',
+        defaultPath:getInitialDialogPath('backup'),
         properties:['openFile'],filters:[{name:'Userscript backup',extensions:['js']}]
       });
       if(backup.canceled||backup.filePaths.length!==1||revoked())
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('backup',dirname(backup.filePaths[0]));
       const prepared=await prepareManualOriginalRestoreSelection(
         source.filePaths[0],backup.filePaths[0]);
       if(revoked())return {ok:false,code:'WINDOW_CLOSED',...unverified};
@@ -971,13 +1131,15 @@ function registerSafeIpc(): void {
     nativeImportCounters={phase:'PICKING',processed:0,total:0,accepted:0,duplicates:0,failed:0};
     try {
       const choice=await dialog.showOpenDialog(win,kind==='files'
-        ? {title:'选择 .user.js 文件',properties:['openFile','multiSelections'],
+        ? {title:'选择 .user.js 文件',defaultPath:getInitialDialogPath('scripts'),properties:['openFile','multiSelections'],
           filters:[{name:'Userscript',extensions:['js']}]}
-        : {title:'选择脚本文件夹',properties:['openDirectory']});
+        : {title:'选择脚本文件夹',defaultPath:getInitialDialogPath('scriptFolder',rememberedPaths.scripts),properties:['openDirectory']});
       if(choice.canceled||win!==mainWindow||win.isDestroyed()||
         controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
         return {canceled:true,scripts:[],errors:[],duplicates:0,
           unprocessed:controller.signal.aborted?choice.filePaths.length:0};
+      if(kind==='files'&&choice.filePaths.length>0)saveRememberedPath('scripts',choice.filePaths[0]);
+      else if(kind==='folder'&&choice.filePaths.length===1)saveRememberedPath('scriptFolder',choice.filePaths[0]);
       nativeImportCounters={phase:kind==='folder'?'SCANNING':'IMPORTING',
         processed:0,total:kind==='files'?choice.filePaths.length:0,
         accepted:0,duplicates:0,failed:0};
@@ -1276,18 +1438,22 @@ function registerSafeIpc(): void {
         return {ok:false,code:'DOM_EVIDENCE_NOT_SUFFICIENT',...unverified};
       const backup=await dialog.showOpenDialog(win,{
         title:'选择备份文件夹（只存新备份，不覆盖任何已有文件）',
+        defaultPath:getInitialDialogPath('backup'),
         properties:['openDirectory']
       });
       if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
       if(backup.canceled||backup.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('backup',backup.filePaths[0]);
       const destination=await dialog.showOpenDialog(win,{
         title:'选择独立的人工候选及原始恢复版本导出文件夹（不得与备份相同）',
+        defaultPath:getInitialDialogPath('export'),
         properties:['openDirectory']
       });
       if(revoked())return {ok:false,code:'SESSION_REVOKED',...unverified};
       if(destination.canceled||destination.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
+      saveRememberedPath('export',destination.filePaths[0]);
       // The source file may have changed while the user was inspecting the
       // page or choosing directories. Re-read it from the originally approved
       // native source path and compare to the staged scenario's exact digest.
@@ -1952,6 +2118,7 @@ async function createMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  loadRememberedPaths();
   // Shell has no need for permissions. Explicit denial prevents accidental privilege creep.
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);

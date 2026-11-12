@@ -748,7 +748,9 @@ function browserControls():void{
    (typeof existingDisconnectBusy!=='undefined'&&existingDisconnectBusy)||
    (!externalConnected&&!(typeof existingConnectionBusy!=='undefined'&&existingConnectionBusy));
  if(inspectButton)inspectButton.disabled=controlsBusy||allControlsBusy||!anyBrowserConnected;
- if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
+ if(stopButton)stopButton.disabled=stopInProgress||(!(typeof chromeSelected!=='undefined'&&chromeSelected)&&!browserConnected&&!browserBusy);
+ const closeBtn=typeof document!=='undefined'&&document?document.getElementById('close-chrome') as HTMLButtonElement|null:null;
+ if(closeBtn)closeBtn.disabled=stopInProgress||(!(typeof chromeSelected!=='undefined'&&chromeSelected)&&!browserConnected&&!existingChromeConnected);
  // History is a native read-only view and does not require live Chrome.
  // Keep scenario selection available offline; every live DOM/AI/export action
  // still enforces its own browserConnected and native authorization gates.
@@ -1215,7 +1217,7 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
 // abort a pending 20-second Chrome handshake or native-consent interaction,
 // and can stop only the exact child tracked by the privileged main process.
 stopButton?.addEventListener('click',()=>{
- if(stopInProgress||(!browserBusy&&!browserConnected))return;
+ if(stopInProgress||(!browserBusy&&!browserConnected&&!(typeof chromeSelected!=='undefined'&&chromeSelected)))return;
  // Browser shutdown must revoke a pending scheduled recheck immediately.
  // A failed native stop never grants permission for another inspection.
  if(recheckRunning){
@@ -1236,6 +1238,7 @@ stopButton?.addEventListener('click',()=>{
  void window.healer.stopBrowser().then(result=>{
   if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
    browserConnected=false;
+   if(typeof existingChromeConnected!=='undefined')existingChromeConnected=false;
    clearGmDisplay('独立 Chrome 已停止；本机测试会话结束。如曾安装临时脚本，请自行从 Tampermonkey 删除。');
   }
   setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
@@ -1522,3 +1525,8 @@ if (workspaceTablist) {
   updateWorkspaceOrientation();
   selectWorkspace(0, 'none');
 }
+
+document.getElementById('close-chrome')?.addEventListener('click', () => {
+  const stopBtn = document.getElementById('stop-chrome') as HTMLButtonElement | null;
+  stopBtn?.click();
+});
