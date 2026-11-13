@@ -9,6 +9,7 @@ import {win32} from 'node:path';
 import {preflightExistingChrome,inspectWindowsChromeBinary} from './chrome-launcher';
 import {findWindowsLoopbackListenerPid,verifyWindowsLoopbackListenerPid} from './cdp-session';
 import {hasUnsafePathLink} from '../version/path-boundary';
+import {getChromePlusPlusConfiguredDataDir} from './chrome-plus-plus';
 
 const execFileAsync=promisify(execFileCallback);
 export type ExistingChromeFailure='NOT_AUTHORIZED'|'ABORTED'|'UNSUPPORTED_PLATFORM'|
@@ -96,7 +97,16 @@ export function chromeProcessMatches(
       }else if(arg.toLowerCase().startsWith('--user-data-dir='))
         values.push(arg.slice(arg.indexOf('=')+1));
     }
-    return values.length===1&&normalizeWindowsPath(values[0])===wantedProfile;
+    if (values.length === 1 && normalizeWindowsPath(values[0]) === wantedProfile) {
+      return true;
+    }
+    if (values.length === 0) {
+      const configured = getChromePlusPlusConfiguredDataDir(executable);
+      if (configured && normalizeWindowsPath(configured) === wantedProfile) {
+        return true;
+      }
+    }
+    return false;
   }catch{return false;}
 }
 
@@ -117,18 +127,18 @@ async function readActivePort(profile:string):Promise<{port:number;path:string}|
     }finally{await handle.close();}
   }catch{return null;}
 }
-async function readChromeProcessInfo(pid:number):Promise<unknown|null>{
+export async function readChromeProcessInfo(pid:number):Promise<Record<string, unknown>|null>{
   if(!Number.isSafeInteger(pid)||pid<1)return null;
   // PID is numeric and generated locally; no path, script, or user value is
   // interpolated into PowerShell. Base64 avoids command-shell parsing.
   const script='$ErrorActionPreference="Stop";$p=Get-CimInstance Win32_Process -Filter "ProcessId = '+pid+'";'+
-    'if(!$p){exit 2};[pscustomobject]@{ExecutablePath=$p.ExecutablePath;CommandLine=$p.CommandLine}|ConvertTo-Json -Compress';
+    'if(!$p){exit 2};[pscustomobject]@{ExecutablePath=$p.ExecutablePath;CommandLine=$p.CommandLine;ParentProcessId=$p.ParentProcessId}|ConvertTo-Json -Compress';
   const encoded=Buffer.from(script,'utf16le').toString('base64');
   for(const shell of ['pwsh.exe','powershell.exe']){
     try{
       const result=await execFileAsync(shell,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],
         {windowsHide:true,timeout:5000,maxBuffer:65536});
-      return JSON.parse(result.stdout) as unknown;
+      return JSON.parse(result.stdout) as Record<string, unknown>;
     }catch(error){
       if(shell==='pwsh.exe'&&(error as NodeJS.ErrnoException).code==='ENOENT')continue;
       return null;

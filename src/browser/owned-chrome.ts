@@ -8,7 +8,8 @@ import { performance } from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
 import {isAbsolute,join,relative,resolve,sep} from 'node:path';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
-import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
+import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, findWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
+import { readChromeProcessInfo, chromeProcessMatches } from './existing-chrome';
 
 
 /** Reject oversized or invalid CDP JSON based on bytes actually streamed.
@@ -228,7 +229,14 @@ export interface ChromeLaunchOptions {
 /** Only references actually issued by this process can open CDP targets.
  * A serialized/forged success-shaped result is not an authorized session.
  */
-const liveSessions=new WeakMap<object,ChildProcess>();
+interface OwnedSessionHandle {
+  readonly child: ChildProcess;
+  readonly effectivePid: number;
+  readonly isTrampoline: boolean;
+  stopped: boolean;
+  pollTimer?: ReturnType<typeof setInterval>;
+}
+const liveSessions=new WeakMap<object,OwnedSessionHandle>();
 export function isLiveApprovedChromeSession(
   session:ManagedLaunchResult
 ):session is Extract<ManagedLaunchResult,{ok:true}> {
@@ -237,10 +245,20 @@ export function isLiveApprovedChromeSession(
   // WeakMap.get never invokes Proxy property/accessor traps, even for a
   // revoked proxy. A live registered session is frozen by the native launcher.
   if(!session||typeof session!=='object')return false;
-  const child=liveSessions.get(session);
-  if(!child)return false;
-  return session.ok===true&&session.status==='OWNED_CDP_BROWSER_VERIFIED'&&
-    child.pid===session.pid&&child.exitCode===null&&
+  const handle=liveSessions.get(session);
+  if(!handle||handle.stopped)return false;
+  if(session.ok!==true||session.status!=='OWNED_CDP_BROWSER_VERIFIED')return false;
+  if(handle.isTrampoline){
+    if(session.pid!==handle.effectivePid)return false;
+    try{
+      process.kill(handle.effectivePid,0);
+      return true;
+    }catch{
+      return false;
+    }
+  }
+  const child=handle.child;
+  return child.pid===session.pid&&child.exitCode===null&&
     !child.killed&&child.signalCode===null;
 }
 function stopOwnChild(child:ChildProcess):void {
@@ -312,6 +330,30 @@ async function awaitPrelaunchCheckOrRevocation<T>(pending:Promise<T>,
     ]);
   }finally{signal.removeEventListener('abort',onAbort);}
 }
+async function verifyWindowsOwnedListenerPid(
+  port: number,
+  expectedPid: number,
+  expectedExe: string,
+  expectedProfile: string
+): Promise<ListenerOwnerResult> {
+  const verified = await verifyWindowsLoopbackListenerPid(port, expectedPid);
+  if (verified.ok) return verified;
+  try {
+    const found = await findWindowsLoopbackListenerPid(port);
+    if (!found.ok) return found;
+    const listenerPid = found.pid;
+    const info = await readChromeProcessInfo(listenerPid);
+    if (info && typeof info === 'object') {
+      const parentPid = (info as Record<string, unknown>).ParentProcessId;
+      const matchesExe = chromeProcessMatches(info, expectedExe, expectedProfile);
+      if (parentPid === expectedPid || matchesExe) {
+        return { ok: true, status: 'LISTENER_PID_MATCH_ONLY', pid: listenerPid, executableVerified: false };
+      }
+    }
+  } catch {}
+  return verified;
+}
+
 /** Never attach to an unowned endpoint, create an unknown Profile or stop another PID. */
 export async function launchApprovedIsolatedChrome(
   input:unknown,options:ChromeLaunchOptions
@@ -374,12 +416,19 @@ export async function launchApprovedIsolatedChrome(
         CHROME_LOG_FILE:join(cfg.userDataDir,'chrome_debug.log')}}:{})
     });
   }catch{return {ok:false,code:'LAUNCH_FAILED'};}
-  let errored=false,exited=false,retained=false;
+  let errored=false,exited=false,trampolineExited=false,retained=false;
   // A terminal owned-child event must cancel an in-flight CDP probe without
   // waiting for its separate network timeout. No unrelated PID is touched.
   const childExit=new AbortController();
   child.once('error',()=>{errored=true;childExit.abort();});
-  child.once('exit',()=>{exited=true;childExit.abort();});
+  child.once('exit',(code)=>{
+    if(code===0){
+      trampolineExited=true;
+    }else{
+      exited=true;
+      childExit.abort();
+    }
+  });
   if(!child.pid){stopOwnChild(child);return {ok:false,code:'LAUNCH_FAILED'};}
   const emitStage=(stage:ChromeStartupStage):void=>{
     try{checked.onStartupStage?.(stage);}
@@ -433,8 +482,8 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'CDP_TIMEOUT'};
               }
               emitStage('CDP_PID_PROOF_STARTED');
-              const pendingOwnership=verifyWindowsLoopbackListenerPid(
-                cfg.remoteDebuggingPort,pid);
+              const pendingOwnership=verifyWindowsOwnedListenerPid(
+                cfg.remoteDebuggingPort,pid,cfg.executablePath,cfg.userDataDir);
               const remainingMs=Math.max(1,Math.ceil(
                 20000-(performance.now()-began)));
               const ownership=await awaitPrelaunchCheckOrRevocation(
@@ -453,6 +502,8 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'OWNER_MISMATCH'};
               }
               emitStage('CDP_PID_PROOF_VERIFIED');
+              const effectivePid=ownership.value.pid;
+              const isTrampoline=(effectivePid!==pid)||trampolineExited;
               // The native OS PID receipt may arrive after the 20s startup
               // deadline. Refuse any NEW browser CDP I/O after expiry.
               if(performance.now()-began>=20000){
@@ -473,7 +524,7 @@ export async function launchApprovedIsolatedChrome(
               // proof has failed its launch, even when the proof itself
               // returns false because the child-exit signal cancelled it.
               // Consent revocation above still takes precedence.
-              if(errored||exited||child.killed||child.exitCode!==null)
+              if(errored||exited||child.killed||(!isTrampoline&&child.exitCode!==null))
                 return {ok:false,code:'LAUNCH_FAILED'};
               if(performance.now()-began>=20000){
                 emitStage('CDP_POST_VERSION_DEADLINE');
@@ -484,23 +535,45 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               }
               emitStage('CDP_WS_PROOF_VERIFIED');
+              let pollTimer:ReturnType<typeof setInterval>|undefined;
+              const handle:OwnedSessionHandle={
+                child,effectivePid,isTrampoline,stopped:false
+              };
               const verified:Extract<ManagedLaunchResult,{ok:true}>=Object.freeze({
-                ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid,
+                ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid:effectivePid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
                 websocketHandshakeVerified:true,targetVerified:false,
-                stop:()=>{liveSessions.delete(verified);stopOwnChild(child);}
+                stop:()=>{
+                  handle.stopped=true;
+                  if(pollTimer)clearInterval(pollTimer);
+                  liveSessions.delete(verified);
+                  stopOwnChild(child);
+                  if(effectivePid!==child.pid){
+                    try{process.kill(effectivePid);}catch{}
+                  }
+                }
               });
-              liveSessions.set(verified,child);
+              handle.pollTimer=pollTimer;
+              liveSessions.set(verified,handle);
               // An externally closed/crashed Chrome must revoke any native
               // consented GM fixture immediately. Intentional stop() removes
               // ownership before exit, and must not invoke this callback.
               const onUnexpectedExit=()=>{
+                if(pollTimer)clearInterval(pollTimer);
                 if(!liveSessions.delete(verified))return;
                 try{checked.onUnexpectedExit?.();}
                 catch{/* Lifecycle cleanup must not crash the main process. */}
               };
-              child.once('exit',onUnexpectedExit);
-              child.once('error',onUnexpectedExit);
+              if(!isTrampoline){
+                child.once('exit',onUnexpectedExit);
+                child.once('error',onUnexpectedExit);
+              }else{
+                pollTimer=setInterval(()=>{
+                  try{process.kill(effectivePid,0);}
+                  catch{onUnexpectedExit();}
+                },1000);
+                handle.pollTimer=pollTimer;
+              }
               retained=true;
               return verified;
             }

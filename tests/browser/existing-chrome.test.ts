@@ -92,3 +92,41 @@ test('existing Chrome CDP rejects unapproved and non-loopback endpoints before o
     '157.0.8103.39',options),{ok:false,code:'INVALID_ENDPOINT'});
   assert.equal(FakeWebSocket.instances.length,0);
 });
+
+import { chromeProcessMatches } from '../../src/browser/existing-chrome';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { win32 } from 'node:path';
+
+test('chromeProcessMatches matches Chrome++ without --user-data-dir via chrome++.ini', (t) => {
+  const testRoot = win32.join(tmpdir(), 'chrome_match_test_' + Date.now());
+  const appDir = win32.join(testRoot, 'App');
+  const dataDir = win32.join(testRoot, 'Data');
+  mkdirSync(appDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
+  t.after(() => rmSync(testRoot, { recursive: true, force: true }));
+
+  const exePath = win32.join(appDir, 'chrome.exe');
+  writeFileSync(exePath, 'binary');
+  const iniPath = win32.join(appDir, 'chrome++.ini');
+  writeFileSync(iniPath, '[general]\ndata_dir=%app%\\..\\Data\n');
+
+  // Case 1: Standard Chrome CLI with explicit --user-data-dir
+  const standardProc = {
+    ExecutablePath: exePath,
+    CommandLine: `"${exePath}" --remote-debugging-port=9222 --user-data-dir="${dataDir}"`
+  };
+  assert.equal(chromeProcessMatches(standardProc, exePath, dataDir), true);
+
+  // Case 2: Chrome++ CLI without --user-data-dir
+  const chromePlusProc = {
+    ExecutablePath: exePath,
+    CommandLine: `"${exePath}" --remote-debugging-port=9222 --enable-features=WebMCP`
+  };
+  assert.equal(chromeProcessMatches(chromePlusProc, exePath, dataDir), true);
+
+  // Case 3: Chrome++ CLI but user requests a different Profile
+  const otherDataDir = win32.join(testRoot, 'OtherData');
+  assert.equal(chromeProcessMatches(chromePlusProc, exePath, otherDataDir), false);
+});
+
