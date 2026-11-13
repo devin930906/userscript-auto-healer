@@ -410,3 +410,17 @@ test('TASK-008/TEST-013/026: main-frame CDP response budget uses UTF-8 bytes, no
  assert.equal(classify(oversized,url),'MAIN_FRAME_RESPONSE_INVALID',
   'oversized UTF-8 main-frame metadata must never mint a navigation confirmation');
 });
+
+
+test('TASK-008/TEST-013/026: isClosedTargetAbsentFromValidList supports large lists beyond 16 KiB', ()=>{
+  const check=moduleUnderTest.isClosedTargetAbsentFromValidList;
+  assert.equal(typeof check,'function');
+  if(!check)return;
+  const mine='0123456789abcdef0123456789abcdef';
+  const rows=Array.from({length:50},(_,i)=>({
+    id:`target_${i}_`+'b'.repeat(32),type:'page',url:`http://127.0.0.1:9222/page_${i}`
+  }));
+  assert.equal(check(rows,mine),true,'absent from a large list of 50 valid targets');
+  rows.push({id:mine,type:'page',url:'http://127.0.0.1:9222/mine'});
+  assert.equal(check(rows,mine),false,'present in large list cannot report absent');
+});

@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {performance} from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
 import type { ManagedLaunchResult } from './owned-chrome';
-import { readBoundedCdpJson, isLiveApprovedChromeSession } from './owned-chrome';
+import { readBoundedCdpJson, isLiveApprovedChromeSession, MAX_CDP_TARGET_LIST_BYTES } from './owned-chrome';
 import { inspectCdpTargetList, verifyWindowsLoopbackListenerPid } from './cdp-session';
 
 export type OpenTargetResult =
@@ -317,7 +317,7 @@ async function closeUnverifiedNewTab(
     try{
       const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
         redirect:'error',signal:AbortSignal.timeout(1000)});
-      const json=await readBoundedCdpJson(response);
+      const json=await readBoundedCdpJson(response,undefined,MAX_CDP_TARGET_LIST_BYTES);
       if(isClosedTargetAbsentFromValidList(json,targetId))return true;
     }catch{/* bounded verification retry */}
     await delay(100);
@@ -467,7 +467,7 @@ export async function openApprovedTarget(
         redirect:'error',signal:signal?
           AbortSignal.any([signal,AbortSignal.timeout(1500)]):
           AbortSignal.timeout(1500)});
-      const json=await readBoundedCdpJson(response);
+      const json=await readBoundedCdpJson(response,signal,MAX_CDP_TARGET_LIST_BYTES);
       if(signal?.aborted)return {ok:false,code:'CANCELLED'};
       const inspected=inspectCdpTargetList(json,port,targetUrl,created);
       if(!Array.isArray(json))stage('LIST_INVALID');

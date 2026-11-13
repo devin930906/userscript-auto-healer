@@ -7,7 +7,7 @@
  */
 import {types as nodeTypes} from 'node:util';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
-import {isLiveApprovedChromeSession,readBoundedCdpJson} from '../browser/owned-chrome';
+import {isLiveApprovedChromeSession,readBoundedCdpJson,MAX_CDP_TARGET_LIST_BYTES} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
 import {inspectCdpTargetList,verifyWindowsLoopbackListenerPid} from '../browser/cdp-session';
 import {classifyFaultSignals,BoundedFaultLog,type FaultTriage} from './fault-classifier';
@@ -295,7 +295,7 @@ export async function inspectApprovedPageExceptions(
       :AbortSignal.timeout(1600);
     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
       redirect:'error',signal:requestSignal});
-    list=await readBoundedCdpJson(response);
+    list=await readBoundedCdpJson(response,signal,MAX_CDP_TARGET_LIST_BYTES);
   }catch{return blocked(signal?.aborted?'CANCELLED':'CDP_FAILED');}
   if(signal?.aborted)return blocked('CANCELLED');
   const tab=inspectCdpTargetList(list,port,expectedUrl);
