@@ -2576,3 +2576,114 @@ test('TASK-005/TEST-009/026: raw CDP response reader refuses hostile cancellatio
     new AbortController().signal),{Browser:'Chrome/155.0.1.1'},
     'a real native, unrevoked signal keeps normal CDP parsing working');
 });
+
+test('launchApprovedIsolatedChrome supports Chrome++ trampoline launcher exiting with code 0', async (t) => {
+  const launcher = await import('../../src/browser/chrome-launcher');
+  const cp = require('node:child_process') as typeof import('node:child_process');
+  const cdp = await import('../../src/browser/cdp-session');
+  const { EventEmitter } = require('node:events');
+
+  const cfg = config('C:\\synthetic\\chrome.exe', 'C:\\synthetic\\owned', 12099);
+  const child = Object.assign(new EventEmitter(), {
+    pid: 41200,
+    exitCode: null as number | null,
+    killed: false,
+    signalCode: null as string | null,
+    kill() { this.killed = true; return true; }
+  });
+
+  try {
+    t.mock.method(launcher, 'preflightChrome', async () => ({
+      ok: true as const, status: 'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config: cfg, runtimeIdentityVerified: false as const
+    }));
+    t.mock.method(launcher, 'inspectWindowsChromeBinary', async () => ({
+      ok: true as const, status: 'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version: '155.0.1.1', publisher: 'Google LLC' as const,
+      runtimeVerified: false as const
+    }));
+    t.mock.method(cp, 'spawn', () => {
+      setImmediate(() => {
+        child.exitCode = 0;
+        child.emit('exit', 0);
+      });
+      return child as unknown as import('node:child_process').ChildProcess;
+    });
+    t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+      Browser: 'Chrome/155.0.1.1',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:12099/devtools/browser/trampoline-uuid'
+    })));
+    t.mock.method(cdp, 'verifyWindowsLoopbackListenerPid', async (_port: number, expectedPid: number) => {
+      if (expectedPid === 41200) {
+        return { ok: false as const, code: 'LISTENER_PID_MISMATCH' as const };
+      }
+      return { ok: true as const, status: 'LISTENER_PID_MATCH_ONLY' as const, pid: 41201, executableVerified: true };
+    });
+    t.mock.method(cdp, 'findWindowsLoopbackListenerPid', async () => ({
+      ok: true as const, pid: 41201
+    }));
+    const existing = await import('../../src/browser/existing-chrome');
+    t.mock.method(existing, 'readChromeProcessInfo', async (pid: number) => {
+      if (pid === 41201) {
+        return {
+          ProcessId: 41201,
+          ParentProcessId: 41200,
+          ExecutablePath: 'C:\\synthetic\\chrome.exe',
+          CommandLine: '"C:\\synthetic\\chrome.exe" --remote-debugging-port=12099 --user-data-dir="C:\\synthetic\\owned"'
+        };
+      }
+      return null;
+    });
+    t.mock.method(cdp, 'verifyCdpBrowserWebSocket', async () => true);
+
+    const result = await launchApprovedIsolatedChrome(cfg, { userApproved: true });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (result.ok) {
+      assert.equal(result.pid, 41201, 'effectivePid must be the descendant browser PID');
+      assert.equal(result.status, 'OWNED_CDP_BROWSER_VERIFIED');
+      result.stop();
+    }
+  } finally {
+    t.mock.reset();
+  }
+});
+
+test('launchApprovedIsolatedChrome fails with LAUNCH_FAILED when launcher exits with non-zero code', async (t) => {
+  const launcher = await import('../../src/browser/chrome-launcher');
+  const cp = require('node:child_process') as typeof import('node:child_process');
+  const { EventEmitter } = require('node:events');
+
+  const cfg = config('C:\\synthetic\\chrome.exe', 'C:\\synthetic\\owned', 12100);
+  const child = Object.assign(new EventEmitter(), {
+    pid: 41205,
+    exitCode: null as number | null,
+    killed: false,
+    signalCode: null as string | null,
+    kill() { this.killed = true; return true; }
+  });
+
+  try {
+    t.mock.method(launcher, 'preflightChrome', async () => ({
+      ok: true as const, status: 'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config: cfg, runtimeIdentityVerified: false as const
+    }));
+    t.mock.method(launcher, 'inspectWindowsChromeBinary', async () => ({
+      ok: true as const, status: 'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version: '155.0.1.1', publisher: 'Google LLC' as const,
+      runtimeVerified: false as const
+    }));
+    t.mock.method(cp, 'spawn', () => {
+      setImmediate(() => {
+        child.exitCode = 1;
+        child.emit('exit', 1);
+      });
+      return child as unknown as import('node:child_process').ChildProcess;
+    });
+
+    const result = await launchApprovedIsolatedChrome(cfg, { userApproved: true });
+    assert.deepEqual(result, { ok: false, code: 'LAUNCH_FAILED' });
+  } finally {
+    t.mock.reset();
+  }
+});
+
