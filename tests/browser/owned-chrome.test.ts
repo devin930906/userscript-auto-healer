@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
-import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession } from '../../src/browser/owned-chrome';
+import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession, MAX_CDP_TARGET_LIST_BYTES, DEFAULT_CDP_JSON_LIMIT_BYTES } from '../../src/browser/owned-chrome';
 import { openApprovedTarget, type TargetNavigationStage } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
@@ -1171,6 +1171,31 @@ test('TEST-009: CDP response enforces actual streamed byte limit without Content
   assert.equal(await readBoundedCdpJson(new Response('{}',{
     headers:{'content-length':'17000'}})),null);
   assert.equal(await readBoundedCdpJson(new Response('{}',{status:403})),null);
+});
+
+test('TASK-008/TEST-009/026: target list responses larger than default 16 KiB succeed with MAX_CDP_TARGET_LIST_BYTES',async()=>{
+  const rows=Array.from({length:50},(_,i)=>({
+    description:'',
+    devtoolsFrontendUrl:`/devtools/inspector.html?ws=127.0.0.1:9222/devtools/page/target_${i}_`+'a'.repeat(32),
+    id:`target_${i}_`+'a'.repeat(32),
+    title:`Page ${i} with long informative title describing browser content`,
+    type:'page',
+    url:`http://127.0.0.1:9222/deeply/nested/path/to/page_${i}?query=parameter&token=sample_value_`+'b'.repeat(64),
+    webSocketDebuggerUrl:`ws://127.0.0.1:9222/devtools/page/target_${i}_`+'a'.repeat(32)
+  }));
+  const payload=JSON.stringify(rows);
+  const bytes=new TextEncoder().encode(payload).byteLength;
+  assert.ok(bytes > DEFAULT_CDP_JSON_LIMIT_BYTES, 'test payload must exceed default 16 KiB limit: '+bytes);
+  assert.equal(await readBoundedCdpJson(new Response(payload)), null,
+    'default call must reject oversized payload');
+  const parsed=await readBoundedCdpJson(new Response(payload), undefined, MAX_CDP_TARGET_LIST_BYTES);
+  assert.equal(Array.isArray(parsed), true, 'must parse valid payload under list limit');
+  assert.equal((parsed as unknown[]).length, 50);
+  const hugeStream=new Response(new ReadableStream<Uint8Array>({
+    start(controller){controller.enqueue(new Uint8Array(MAX_CDP_TARGET_LIST_BYTES+100));controller.close();}
+  }),{status:200});
+  assert.equal(await readBoundedCdpJson(hugeStream, undefined, MAX_CDP_TARGET_LIST_BYTES), null,
+    'payloads exceeding MAX_CDP_TARGET_LIST_BYTES must still fail closed');
 });
 
 test('TASK-005/TEST-009/026: declared CDP response length must match actual streamed bytes',async()=>{

@@ -15,8 +15,16 @@ import { readChromeProcessInfo, chromeProcessMatches } from './existing-chrome';
 /** Reject oversized or invalid CDP JSON based on bytes actually streamed.
  * A missing or dishonest Content-Length must not bypass this limit.
  */
-export async function readBoundedCdpJson(response:Response,signal?:AbortSignal):Promise<unknown|null> {
-  const limit=16384;
+export const DEFAULT_CDP_JSON_LIMIT_BYTES=16384;
+export const MAX_CDP_TARGET_LIST_BYTES=1048576; // 1 MiB for target list (supports up to 1000 targets)
+
+export async function readBoundedCdpJson(
+  response:Response,signal?:AbortSignal,maxBytes?:number
+):Promise<unknown|null> {
+  const limit=typeof maxBytes==='number'&&Number.isSafeInteger(maxBytes)&&
+    maxBytes>=1024&&maxBytes<=10485760
+      ?maxBytes
+      :DEFAULT_CDP_JSON_LIMIT_BYTES;
   // An early status/header rejection must not leave an unread HTTP response
   // pinned to the loopback connection. Cleanup is best-effort and must never
   // hold the security rejection open if an untrusted stream cannot cancel.

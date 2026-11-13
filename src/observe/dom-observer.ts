@@ -4,7 +4,7 @@
 import {setTimeout as delay} from 'node:timers/promises';
 import {types as nodeTypes} from 'node:util';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
-import {isLiveApprovedChromeSession,readBoundedCdpJson} from '../browser/owned-chrome';
+import {isLiveApprovedChromeSession,readBoundedCdpJson,MAX_CDP_TARGET_LIST_BYTES} from '../browser/owned-chrome';
 import type {OpenTargetResult} from '../browser/cdp-target';
 import {inspectCdpTargetList,verifyWindowsLoopbackListenerPid} from '../browser/cdp-session';
 
@@ -303,7 +303,7 @@ export async function observeApprovedDom(
       :AbortSignal.timeout(1600);
     const response=await fetch('http://127.0.0.1:'+port+'/json/list',{
       redirect:'error',signal:requestSignal});
-    json=await readBoundedCdpJson(response);
+    json=await readBoundedCdpJson(response,signal,MAX_CDP_TARGET_LIST_BYTES);
   }catch{
     return {ok:false,code:signal?.aborted?'CANCELLED':'CDP_FAILED'};
   }
