@@ -10,6 +10,8 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {types as nodeTypes} from 'node:util';
 import {
   validateBrowserConfig,
@@ -503,4 +505,38 @@ test('TASK-018/TEST-023: exported artifacts maintain strict separation from mana
   assert.equal(versionState.automaticInstallAllowed, false);
   assert.equal(versionState.automaticPatchAllowed, false);
   assert.equal(versionState.automaticRollbackAllowed, false);
+});
+
+// TASK-005 / Issue #856: source-contract regression for two real desktop IPC
+// entrypoints. These static assertions do not claim Chrome++ runtime acceptance.
+test('TASK-005/TEST-008: requested 9896 default and configurable existing Chrome port stay aligned', () => {
+  const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
+  const markup = read('app/ui/index.html');
+  const renderer = read('app/ui/index.ts');
+  const preload = read('app/preload/index.ts');
+  const main = read('app/main/index.ts');
+  assert.match(markup, /<input id="chrome-port"[^>]*value="9896"/,
+    'visible browser port must default to 9896, not the historical 9223');
+  assert.match(main, /remoteDebuggingPort:9896,bindAddress:'127\\.0\\.0\\.1'/,
+    'new Profile validation should not use an obsolete port');
+  assert.match(renderer, /window\\.healer\\.connectExistingChrome\\(port\\)/,
+    'external connection must use the same selected port as owned launch');
+  assert.match(preload,
+    /connectExistingChrome: \\(port: number\\): Promise<unknown> => ipcRenderer\\.invoke\\('browser:connect-existing', port\\)/,
+    'preload should forward only the numeric port, not a path or endpoint');
+  assert.match(main, /'browser:connect-existing',async \\(event,port:unknown\\)=>/,
+    'main-process external connection should receive and validate a port');
+  assert.match(main,
+    /userDataDir:selectedProfile,remoteDebuggingPort:port,bindAddress:'127\\.0\\.0\\.1'/,
+    'main process must validate selected port and keep loopback binding');
+  for (const port of [9896, 9223, 65535]) {
+    const result = validateBrowserConfig({
+      executablePath: 'C:\\\\Chrome\\\\chrome.exe',
+      userDataDir: 'D:\\\\UAH-Profiles\\\\test',
+      remoteDebuggingPort: port,
+      bindAddress: '127.0.0.1'
+    });
+    assert.equal(result.ok, true, 'custom CDP port should remain supported: ' + port);
+    if (result.ok) assert.equal(result.config.remoteDebuggingPort, port);
+  }
 });
