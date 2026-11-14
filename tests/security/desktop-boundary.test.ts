@@ -1942,3 +1942,67 @@ test('TASK-007/017 TEST-017/022: revoked Store navigation cannot overwrite Chrom
  await tick();
  assert.match(statuses.at(-1)??'',/打开官方安装页/);
 });
+
+
+/** TASK-007/017, TEST-017/022: a read-only manager probe is still bound to
+ * the exact Chrome renderer session. The native process remains authority;
+ * late IPC receipts are not permitted to repaint a later stop/disconnect.
+ */
+test('TASK-007/017 TEST-017/022: stale Tampermonkey inspection cannot revive a stopped browser',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const begin=ui.indexOf("inspectButton?.addEventListener('click'");
+ const end=ui.indexOf("stopButton?.addEventListener('click'",begin);
+ assert.ok(begin>=0&&end>begin,'run the actual manager inspection renderer handler');
+ const script=ts.transpileModule(ui.slice(begin,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ let click:()=>void=()=>{throw Error('MANAGER_INSPECTION_HANDLER_NOT_REGISTERED')};
+ const pending:Array<{resolve:(value:unknown)=>void;reject:(reason:Error)=>void}>=[];
+ const statuses:string[]=[];
+ const state={
+  browserSessionGeneration:1,
+  browserConnected:true,existingChromeConnected:false,
+  inspectButton:{addEventListener:(name:string,cb:()=>void)=>{if(name==='click')click=cb;}},
+  browserAction:(fn:()=>Promise<void>)=>fn().catch(()=>
+   statuses.push('浏览器操作受阻；没有获得验证成功的结果。')),
+  setBrowserStatus:(msg:string)=>statuses.push(msg),
+  clearGmDisplay:(_msg:string)=>{},
+  window:{healer:{inspectTampermonkey:()=>new Promise((resolve,reject)=>{
+   pending.push({resolve,reject});
+  })}}
+ };
+ runInNewContext(script,state);
+ const tick=async()=>{for(let i=0;i<3;i++)await new Promise<void>(r=>setImmediate(r));};
+ click();assert.equal(pending.length,1);
+ state.browserSessionGeneration++;
+ state.browserConnected=false;
+ statuses.push('已停止独立 Chrome');
+ pending[0].resolve({ok:true,status:'RUNTIME_TARGET_HINT_ONLY',matchedRuntimeTargets:1});
+ await tick();
+ assert.deepEqual(statuses,['已停止独立 Chrome'],
+  'late successful runtime hint must never overwrite stopped session feedback');
+
+ state.browserConnected=true;click();assert.equal(pending.length,2);
+ state.browserSessionGeneration++;state.browserConnected=false;
+ statuses.push('停止状态已确认');
+ pending[1].reject(Error('CHROME_STOPPED'));
+ await tick();
+ assert.equal(statuses.at(-1),'停止状态已确认',
+  'a rejected stale IPC cannot fall through to the generic browser error banner');
+
+ state.browserConnected=true;click();assert.equal(pending.length,3);
+ state.browserSessionGeneration++;state.browserConnected=false;
+ statuses.push('连接撤销完毕');
+ pending[2].resolve({ok:false,code:'BROWSER_NOT_RUNNING'});
+ await tick();
+ assert.equal(statuses.at(-1),'连接撤销完毕',
+  'late browser-not-running receipt must not overwrite newer session status');
+
+ state.browserConnected=true;click();assert.equal(pending.length,4);
+ pending[3].resolve({ok:true,status:'RUNTIME_TARGET_HINT_ONLY',matchedRuntimeTargets:2});
+ await tick();
+ assert.match(statuses.at(-1)??'',/发现 2 个疑似 Tampermonkey 运行目标/,
+  'a fresh current-session hint still remains visible but unverified');
+});
