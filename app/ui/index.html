@@ -55,16 +55,15 @@
           <button id="choose-chrome" type="button" aria-describedby="existing-chrome-help">选择 Chrome / 便携版</button>
           <button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data / Profile</button>
         </div>
+        <label for="chrome-port">本机 CDP 端口（两种模式共用，默认 9896）：</label>
+        <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9896">
         <div class="actions">
           <button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">授权连接正在运行的 Chrome</button>
           <button id="disconnect-existing-chrome" type="button">断开本软件与 Chrome 的连接</button>
-          <button id="close-chrome" type="button">关闭所选 Chrome</button>
         </div>
         <details>
           <summary>使用隔离 Chrome</summary>
           <p id="chrome-profile-safety">此模式会启动一个独立 Chrome；使用已有专用 Profile 前请先关闭正在使用该目录的 Chrome。不会使用或覆盖正在运行的 Data，也不允许使用日常 Chrome Profile。启动前会显示系统授权确认。</p>
-          <label for="chrome-port">本机 CDP 端口：</label>
-          <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9223">
           <div class="actions">
             <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
             <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>

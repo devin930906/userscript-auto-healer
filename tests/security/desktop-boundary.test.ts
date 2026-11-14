@@ -346,8 +346,9 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:get-progress',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
-  assert.match(preload, /connectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing'\)/);
-  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:connect-existing',\s*[^)]/);
+  assert.match(preload, /connectExistingChrome: \(port: number\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing', port\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:connect-existing',\s*(?:config|path|url|pid|endpoint|\{)/,
+    'external Chrome IPC accepts a numeric port, not a path or endpoint object');
   assert.match(preload, /disconnectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:disconnect-existing'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:disconnect-existing',\s*[^)]/);
   assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-body' \| 'document-end' \| 'document-idle'\)/);
@@ -829,8 +830,8 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const connection=ui.slice(ui.indexOf("connectExistingButton?.addEventListener('click'"),
   ui.indexOf("disconnectExistingButton?.addEventListener('click'"));
- assert.match(connection,/window\.healer\.connectExistingChrome\(\)/,
-  'renderer must not provide a profile path, process ID or WebSocket endpoint');
+ assert.match(connection,/window\.healer\.connectExistingChrome\(port\)/,
+  'renderer may forward only its validated numeric port, never a path, process ID or WebSocket endpoint');
  assert.match(connection,/existingChromeConnected=result\.ok&&result\.status==='AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED'/);
  assert.doesNotMatch(connection,/browserConnected\s*=/,
   'an external Chrome connection must not authorize app-owned-only workflows');
@@ -1823,4 +1824,31 @@ test('TASK-017/TEST-022: GM status summary preserves unknown versus explicit neg
  assert.match(result.textContent,/自报 broken 失败：未报告/);
  assert.match(result.textContent,/自报 fixed 动作：是/);
  assert.match(result.textContent,/不证明真实 GM 或业务恢复/);
+});
+
+
+test('TASK-005/TEST-007/026: desktop close cannot force-kill selected or external Chrome or delete Profile locks',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+
+  assert.doesNotMatch(main,/terminateMatchingChromeProcesses/,
+    'selected executable/Profile must never be used as a process-kill fallback');
+  assert.doesNotMatch(main,/Stop-Process\s+-Id[\s\S]{0,80}-Force/,
+    'desktop product code must not force-kill Chrome');
+  assert.doesNotMatch(main,/rmSync\(\s*lockfile/,
+    'desktop product code must not delete a Chrome Profile ownership lock');
+
+  const stopHandler=main.match(
+    /ipcMain\.handle\('browser:stop',async event=>\{([\s\S]*?)\n  \}\);/);
+  assert.ok(stopHandler,'browser:stop handler must remain explicit and auditable');
+  assert.doesNotMatch(stopHandler[1],/selectedChrome|selectedProfile/,
+    'stop authority comes only from a live owned/attached session, never selected paths');
+  assert.match(stopHandler[1],/EXISTING_BROWSER_DISCONNECTED/,
+    'an attached pre-existing Chrome must only be disconnected, not closed');
+
+  assert.doesNotMatch(html,/id="close-chrome"/,
+    'existing-Chrome controls must not imply the app can close an external browser');
+  assert.doesNotMatch(ui,/getElementById\('close-chrome'\)/,
+    'renderer must not proxy external Chrome close into the owned-browser stop action');
 });

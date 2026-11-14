@@ -310,3 +310,71 @@ test('TASK-008/TEST-013/026: CDP target list refuses normalized URL aliases at t
   'query data with path-like text remains inside exact consented URL matching');
  assert.equal(inspectCdpTargetList([testPage],9223,testPage.url,pageId).ok,true);
 });
+
+
+import * as cdpSessionModule from '../../src/browser/cdp-session';
+
+class FakeGracefulCloseWebSocket extends EventTarget {
+  static CONNECTING=0;static OPEN=1;static CLOSING=2;static CLOSED=3;
+  static instances:FakeGracefulCloseWebSocket[]=[];
+  readyState=FakeGracefulCloseWebSocket.CONNECTING;
+  sent:string[]=[];
+  constructor(readonly url:string){
+    super();
+    FakeGracefulCloseWebSocket.instances.push(this);
+    queueMicrotask(()=>{
+      this.readyState=FakeGracefulCloseWebSocket.OPEN;
+      this.dispatchEvent(new Event('open'));
+    });
+  }
+  send(raw:string):void{
+    this.sent.push(raw);
+    const request=JSON.parse(raw) as {id:number;method:string};
+    if(request.method==='Browser.getVersion'){
+      const event=new Event('message') as MessageEvent<string>;
+      Object.defineProperty(event,'data',{value:JSON.stringify({
+        id:request.id,result:{product:'Chrome/154.0.8037.57'}
+      })});
+      queueMicrotask(()=>this.dispatchEvent(event));
+      return;
+    }
+    if(request.method==='Browser.close'){
+      queueMicrotask(()=>this.close());
+    }
+  }
+  close():void{
+    if(this.readyState===FakeGracefulCloseWebSocket.CLOSED)return;
+    this.readyState=FakeGracefulCloseWebSocket.CLOSED;
+    this.dispatchEvent(new Event('close'));
+  }
+}
+
+test('TASK-005/TEST-007/009/026: verified owned Chrome closes through CDP Browser.close, never process termination',async()=>{
+  type CloseFn=(websocketUrl:string,expectedPort:number,expectedVersion:string,
+    signal?:AbortSignal,WebSocketImpl?:typeof WebSocket)=>Promise<boolean>;
+  const gracefulClose=(cdpSessionModule as unknown as {
+    requestVerifiedCdpBrowserClose?:CloseFn
+  }).requestVerifiedCdpBrowserClose;
+  assert.equal(typeof gracefulClose,'function',
+    'owned Chrome needs an authenticated Browser.close primitive');
+  if(typeof gracefulClose!=='function')return;
+
+  FakeGracefulCloseWebSocket.instances=[];
+  const ok=await gracefulClose(envelope.webSocketDebuggerUrl,9223,
+    '154.0.8037.57',undefined,
+    FakeGracefulCloseWebSocket as unknown as typeof WebSocket);
+  assert.equal(ok,true);
+  assert.equal(FakeGracefulCloseWebSocket.instances.length,1);
+  assert.deepEqual(FakeGracefulCloseWebSocket.instances[0].sent.map(raw=>
+    (JSON.parse(raw) as {method:string}).method),
+    ['Browser.getVersion','Browser.close'],
+    'normal close must re-verify the exact browser before sending Browser.close');
+
+  const before=FakeGracefulCloseWebSocket.instances.length;
+  assert.equal(await gracefulClose(
+    'ws://192.168.1.9:9223/devtools/browser/18ed998f-2182-41b5-9203-a6c2f45b7ccb',
+    9223,'154.0.8037.57',undefined,
+    FakeGracefulCloseWebSocket as unknown as typeof WebSocket),false);
+  assert.equal(FakeGracefulCloseWebSocket.instances.length,before,
+    'non-loopback endpoints must be rejected before opening a socket');
+});

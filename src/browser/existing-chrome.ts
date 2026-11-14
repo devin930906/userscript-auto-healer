@@ -386,6 +386,10 @@ export async function connectApprovedExistingChrome(
   const endpoint=await readActivePort(cfg.userDataDir);
   if(!endpoint)
     return {ok:false,code:'DEBUGGER_ENDPOINT_UNAVAILABLE'};
+  // Never silently attach to a listener different from the selected CDP port.
+  // The profile-owned DevToolsActivePort receipt is checked again below against the listener PID.
+  if(endpoint.port!==cfg.remoteDebuggingPort)
+    return {ok:false,code:'INVALID_ENDPOINT'};
   const listener=await findWindowsLoopbackListenerPid(endpoint.port);
   if(!listener.ok)return {ok:false,code:'LISTENER_NOT_VERIFIED'};
   const validateIdentity=async():Promise<boolean>=>{

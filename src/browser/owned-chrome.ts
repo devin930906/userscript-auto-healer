@@ -8,7 +8,7 @@ import { performance } from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
 import {isAbsolute,join,relative,resolve,sep} from 'node:path';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
-import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, findWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, type ListenerOwnerResult } from './cdp-session';
+import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, findWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, requestVerifiedCdpBrowserClose, type ListenerOwnerResult } from './cdp-session';
 import { readChromeProcessInfo, chromeProcessMatches } from './existing-chrome';
 
 
@@ -128,7 +128,7 @@ export type ManagedLaunchResult =
   | {readonly ok:true;readonly status:'OWNED_CDP_BROWSER_VERIFIED';
       readonly pid:number;readonly chromeVersion:string;readonly browserWebsocket:string;
       readonly websocketHandshakeVerified:true;readonly targetVerified:false;
-      readonly stop:()=>void};
+      readonly stop:()=>void;readonly closeGracefully?:()=>Promise<boolean>};
 export type ChromeStartupStage='CHROME_SPAWN_RETURNED'|'FETCH_FAILED'|'FETCH_REFUSED'|'FETCH_TIMEOUT'|
   'FETCH_RESET'|'CHILD_RUNNING_NO_CDP'|'HTTP_REJECTED'|'BODY_REJECTED'|
   'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR'|
@@ -547,19 +547,34 @@ export async function launchApprovedIsolatedChrome(
               const handle:OwnedSessionHandle={
                 child,effectivePid,isTrampoline,stopped:false
               };
-              const verified:Extract<ManagedLaunchResult,{ok:true}>=Object.freeze({
+              let verified!:Extract<ManagedLaunchResult,{ok:true}>;
+              const closeGracefully=async():Promise<boolean>=>{
+                if(handle.stopped)return false;
+                // Revoke application authority before any asynchronous close
+                // attempt. A failed Browser.close must never fall back to
+                // process termination or target another Chrome by path/PID.
+                handle.stopped=true;
+                if(pollTimer)clearInterval(pollTimer);
+                liveSessions.delete(verified);
+                // The endpoint was owned at launch, but a later shutdown must
+                // not trust stale ownership. Re-check the exact listener PID
+                // before sending the state-changing Browser.close command.
+                const owner=await verifyWindowsLoopbackListenerPid(
+                  cfg.remoteDebuggingPort,effectivePid);
+                if(!owner.ok||owner.pid!==effectivePid)return false;
+                return requestVerifiedCdpBrowserClose(
+                  inspected.websocketUrl,cfg.remoteDebuggingPort,binary.version);
+              };
+              verified=Object.freeze({
                 ok:true,status:'OWNED_CDP_BROWSER_VERIFIED',pid:effectivePid,
                 chromeVersion:binary.version,browserWebsocket:inspected.websocketUrl,
                 websocketHandshakeVerified:true,targetVerified:false,
-                stop:()=>{
-                  handle.stopped=true;
-                  if(pollTimer)clearInterval(pollTimer);
-                  liveSessions.delete(verified);
-                  stopOwnChild(child);
-                  if(effectivePid!==child.pid){
-                    try{process.kill(effectivePid);}catch{}
-                  }
-                }
+                // Preserve the historical synchronous lifecycle surface used
+                // by internal tests/callers, but make it graceful and
+                // non-blocking. UI shutdown paths that need confirmation use
+                // closeGracefully().
+                stop:()=>{void closeGracefully();},
+                closeGracefully
               });
               handle.pollTimer=pollTimer;
               liveSessions.set(verified,handle);
