@@ -529,6 +529,10 @@ test('TASK-005/TEST-008: requested 9896 default and configurable existing Chrome
   assert.match(main,
     /userDataDir:selectedProfile,remoteDebuggingPort:port,bindAddress:'127\.0\.0\.1'/,
     'main process must validate selected port and keep loopback binding');
+  const external = read('src/browser/existing-chrome.ts');
+  assert.match(external,
+    /if\(endpoint\.port!==cfg\.remoteDebuggingPort\)\s*return \{ok:false,code:'INVALID_ENDPOINT'\}/,
+    'existing Chrome must reject a DevToolsActivePort endpoint that differs from selected port');
   for (const port of [9896, 9223, 65535]) {
     const result = validateBrowserConfig({
       executablePath: 'C:\\Chrome\\chrome.exe',
