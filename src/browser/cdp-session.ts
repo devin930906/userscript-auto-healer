@@ -343,3 +343,89 @@ export async function verifyCdpBrowserWebSocket(
     }catch{finish(false);}
   });
 }
+
+
+/** Close an already-owned Chrome through its exact verified browser CDP
+ * endpoint. Re-check Browser.getVersion on this connection before sending the
+ * only state-changing command, Browser.close. A socket close after that
+ * command is an acceptable acknowledgement because Chrome may terminate the
+ * DevTools connection before replying. This never discovers or targets a PID.
+ */
+export async function requestVerifiedCdpBrowserClose(
+  websocketUrl:string,expectedPort:number,expectedVersion:string,
+  signal?:AbortSignal,WebSocketImpl:typeof WebSocket=WebSocket
+):Promise<boolean>{
+  if(typeof websocketUrl!=='string'||typeof expectedVersion!=='string'||
+     !/^\d+\.\d+\.\d+\.\d+$/.test(expectedVersion)||
+     !Number.isInteger(expectedPort)||expectedPort<1024||expectedPort>65535||
+     !unambiguousCdpWebSocket(websocketUrl))
+    return false;
+  let parsed:URL;
+  try{parsed=new URL(websocketUrl);}catch{return false;}
+  if(parsed.href!==websocketUrl||parsed.protocol!=='ws:'||
+     parsed.hostname!=='127.0.0.1'||Number(parsed.port)!==expectedPort||
+     parsed.username||parsed.password||parsed.search||parsed.hash||
+     !/^\/devtools\/browser\/[a-zA-Z0-9-]{8,128}$/.test(parsed.pathname))
+    return false;
+  if(signal?.aborted)return false;
+  return new Promise(resolve=>{
+    let client:WebSocket|undefined,settled=false;
+    let versionRequestSent=false,closeRequestSent=false;
+    const finish=(passed:boolean)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort',onAbort);
+      try{client?.close();}catch{/* best-effort local transport cleanup */}
+      resolve(passed);
+    };
+    const onAbort=()=>finish(false);
+    const timer=setTimeout(()=>finish(false),4000);
+    signal?.addEventListener('abort',onAbort,{once:true});
+    if(signal?.aborted){finish(false);return;}
+    try{
+      const socket=new WebSocketImpl(websocketUrl);
+      client=socket as WebSocket;
+      socket.addEventListener('open',()=>{
+        if(settled||signal?.aborted)return;
+        try{
+          socket.send(JSON.stringify({id:1,method:'Browser.getVersion'}));
+          versionRequestSent=true;
+        }catch{finish(false);}
+      });
+      socket.addEventListener('message',event=>{
+        if(settled)return;
+        try{
+          const frame:unknown=(event as MessageEvent).data;
+          if(typeof frame!=='string'||frame.length>16384||
+             Buffer.byteLength(frame,'utf8')>16384){
+            finish(false);return;
+          }
+          const payload=JSON.parse(frame) as {
+            id?:unknown;result?:{product?:unknown};error?:unknown
+          };
+          if(payload.id===1){
+            if(!versionRequestSent||
+               Object.prototype.hasOwnProperty.call(payload,'error')||
+               (payload.result?.product!=='Chrome/'+expectedVersion&&
+                payload.result?.product!=='HeadlessChrome/'+expectedVersion)){
+              finish(false);return;
+            }
+            try{
+              socket.send(JSON.stringify({id:2,method:'Browser.close'}));
+              closeRequestSent=true;
+            }catch{finish(false);}
+            return;
+          }
+          if(payload.id===2&&closeRequestSent){
+            finish(!Object.prototype.hasOwnProperty.call(payload,'error'));
+          }
+        }catch{finish(false);}
+      });
+      socket.addEventListener('error',()=>finish(false));
+      // Chrome commonly closes the DevTools browser socket as Browser.close
+      // takes effect before an id:2 response can be observed.
+      socket.addEventListener('close',()=>finish(closeRequestSent));
+    }catch{finish(false);}
+  });
+}
