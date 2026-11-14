@@ -1225,21 +1225,35 @@ managerStoreButton?.addEventListener('click',()=>void browserAction(async()=>{
  }
 }));
 inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
- const result=await window.healer.inspectTampermonkey();
- if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
-  setBrowserStatus((existingChromeConnected?'已连接的 Chrome：':'本程序启动的 Chrome：')+
-    '发现 '+result.matchedRuntimeTargets+
-    ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
- else if(result.code==='BROWSER_NOT_RUNNING'){
-  if(existingChromeConnected){
-   existingChromeConnected=false;
-   setBrowserStatus('Chrome 连接已失效；浏览器可能已退出或撤销授权。');
-  }else{
-   clearGmDisplay('独立 Chrome 已退出；本机测试会话无法继续。');
-   browserConnected=false;
-   setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
-  }
- }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
+ // Only the browser session that initiated a read-only inspection may display
+ // its receipt. Stop can revoke that session while CDP/IPC is still pending.
+ if(!browserConnected&&!existingChromeConnected)return;
+ const requestGeneration=browserSessionGeneration;
+ try{
+  const result=await window.healer.inspectTampermonkey();
+  if(requestGeneration!==browserSessionGeneration||
+     (!browserConnected&&!existingChromeConnected)||stopInProgress)return;
+  if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
+   setBrowserStatus((existingChromeConnected?'已连接的 Chrome：':'本程序启动的 Chrome：')+
+     '发现 '+result.matchedRuntimeTargets+
+     ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
+  else if(result.code==='BROWSER_NOT_RUNNING'){
+   if(existingChromeConnected){
+    existingChromeConnected=false;
+    setBrowserStatus('Chrome 连接已失效；浏览器可能已退出或撤销授权。');
+   }else{
+    clearGmDisplay('独立 Chrome 已退出；本机测试会话无法继续。');
+    browserConnected=false;
+    setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
+   }
+  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
+ }catch{
+  // A late rejected IPC must not fall into browserAction's generic catch,
+  // which would overwrite the newer Chrome stop acknowledgement.
+  if(requestGeneration!==browserSessionGeneration||
+     (!browserConnected&&!existingChromeConnected)||stopInProgress)return;
+  setBrowserStatus('Tampermonkey 只读探测受阻；没有取得有效管理器证据。');
+ }
 }));
 // Stop is intentionally NOT gated by browserAction's busy mutex. It must
 // abort a pending 20-second Chrome handshake or native-consent interaction,
