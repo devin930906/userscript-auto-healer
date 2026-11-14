@@ -506,7 +506,7 @@ function registerSafeIpc(): void {
       const candidate=win32.join(picked.filePaths[0],'uah-profile-'+randomUUID());
       const config=validateBrowserConfig({
         executablePath:selectedChrome,userDataDir:candidate,
-        remoteDebuggingPort:9223,bindAddress:'127.0.0.1'
+        remoteDebuggingPort:9896,bindAddress:'127.0.0.1'
       });
       if(!config.ok)return {ok:false,code:config.code};
       const consent=await dialog.showMessageBox(win,{
@@ -589,7 +589,7 @@ function registerSafeIpc(): void {
   });
   // Attaching to a user's running browser is a separate, revocable capability;
   // renderer input cannot select a profile, endpoint or process ID.
-  ipcMain.handle('browser:connect-existing',async event=>{
+  ipcMain.handle('browser:connect-existing',async (event,port:unknown)=>{
     authorizeSender(event);
     if(nativeSelectionInProgress||nativeImportController||droppedImportController||
        manualExportInProgress||launchInProgress||profilePreparationInProgress||
@@ -600,7 +600,7 @@ function registerSafeIpc(): void {
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
     const config=validateBrowserConfig({executablePath:selectedChrome,
-      userDataDir:selectedProfile,remoteDebuggingPort:9223,bindAddress:'127.0.0.1'});
+      userDataDir:selectedProfile,remoteDebuggingPort:port,bindAddress:'127.0.0.1'});
     if(!config.ok)return {ok:false,code:config.code,...unverified};
     launchInProgress=true;
     existingConnectInProgress=true;
