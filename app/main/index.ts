@@ -5,11 +5,8 @@ import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
-import { execFile as execFileCallback } from 'node:child_process';
-import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 
-const execFileAsync = promisify(execFileCallback);
 
 interface RememberedPaths {
   chrome?: string;
@@ -94,56 +91,6 @@ function getInitialDialogPath(key: keyof RememberedPaths, fallback?: string): st
   return undefined;
 }
 
-/** 安全精确地终止匹配所选 Chrome 和/或所选 Profile 的进程并清理锁定 */
-async function terminateMatchingChromeProcesses(exePath: string | null, dataDir: string | null): Promise<number> {
-  if (process.platform !== 'win32') return 0;
-  if (!exePath && !dataDir) return 0;
-  try {
-    const normalizedExe = exePath ? win32.normalize(exePath).toLowerCase() : null;
-    const normalizedData = dataDir ? win32.normalize(dataDir).toLowerCase() : null;
-    const psScript = `
-$ErrorActionPreference = 'SilentlyContinue'
-$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'"
-$killed = 0
-foreach ($p in $procs) {
-  $match = $false
-  $pExe = if ($p.ExecutablePath) { $p.ExecutablePath.ToLower() } else { '' }
-  $pCmd = if ($p.CommandLine) { $p.CommandLine.ToLower() } else { '' }
-  ${normalizedData ? `if ($pCmd -like "*$($normalizedData.Replace('\\', '\\\\'))*") { $match = $true }` : ''}
-  ${normalizedExe ? `if ($pExe -eq "$($normalizedExe.Replace('\\', '\\\\'))" -and ($pCmd -like "*--remote-debugging*" -or $pCmd -like "*--user-data-dir*")) { $match = $true }` : ''}
-  if ($match) {
-    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
-    $killed++
-  }
-}
-Write-Output $killed
-`;
-    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-    for (const shell of ['powershell.exe', 'pwsh.exe']) {
-      try {
-        const { stdout } = await execFileAsync(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
-          windowsHide: true,
-          timeout: 8000
-        });
-        const count = parseInt(stdout.trim(), 10);
-        if (dataDir) {
-          try {
-            const lockfile = win32.join(dataDir, 'lockfile');
-            if (existsSync(lockfile)) {
-              rmSync(lockfile, { force: true });
-            }
-          } catch {}
-        }
-        return Number.isSafeInteger(count) ? count : 0;
-      } catch {
-        continue;
-      }
-    }
-    return 0;
-  } catch {
-    return 0;
-  }
-}
 import { randomUUID, createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { validateBrowserConfig } from '../../src/security/browser-config';
@@ -257,16 +204,22 @@ function liveGmProbe():ManualTampermonkeyDiagnosticSession|null {
 const unverified = {tampermonkeyVerified:false as const,gmApiVerified:false as const,
   businessVerified:false as const,automaticPatchAllowed:false as const};
 
-function stopOnlyOwnedBrowser():void {
+async function stopOnlyOwnedBrowser():Promise<boolean> {
   nativeAiReviewEvidence.clear();
   nativeAiDiscoveryController?.abort();
   cancelScenarioObservation();
   stopOnlyGmProbe();
   launchAbort?.abort();
-  if(ownedBrowser){ownedBrowser.stop();ownedBrowser=null;}
+  const current=ownedBrowser;
+  ownedBrowser=null;
+  if(!current)return false;
+  try{return await current.stop();}
+  catch{return false;}
 }
 function stopAllBrowserSessions():void {
-  stopOnlyOwnedBrowser();
+  // Window/app shutdown may not stay alive long enough to observe the CDP
+  // acknowledgement, but it must never escalate to a process kill.
+  void stopOnlyOwnedBrowser();
   if(existingBrowser){existingBrowser.stop();existingBrowser=null;}
 }
 function readExistingBrowser(){
@@ -573,7 +526,7 @@ function registerSafeIpc(): void {
       if(!result.ok)return {ok:false,code:result.code,...unverified};
       launched=result;
       if(controller.signal.aborted||win.isDestroyed()||win!==mainWindow){
-        result.stop();
+        await result.stop();
         return {ok:false,code:'ABORTED',...unverified};
       }
       ownedBrowser=result;
@@ -681,16 +634,31 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('browser:stop',async event=>{
     authorizeSender(event);
-    const hasOwned=!!readOwnedBrowser();
-    const hasExisting=!!existingBrowser;
-    const isBusy=launchInProgress||existingConnectInProgress;
-    const killed=await terminateMatchingChromeProcesses(selectedChrome,selectedProfile);
-    stopOnlyOwnedBrowser();
-    if(existingBrowser){existingBrowser.stop();existingBrowser=null;}
-    if(!hasOwned&&!hasExisting&&!isBusy&&killed===0){
-      return {ok:false,code:'BROWSER_NOT_RUNNING'};
+    const owned=readOwnedBrowser();
+    const attached=readExistingBrowser();
+    const pending=launchInProgress||existingConnectInProgress;
+    if(pending)launchAbort?.abort();
+
+    // An attached Chrome was already running before this application received
+    // authority. "Stop" may revoke only this CDP attachment; the browser,
+    // its processes and Profile locks remain untouched.
+    if(attached){
+      existingBrowser=null;
+      attached.stop();
+      return {ok:true,status:'EXISTING_BROWSER_DISCONNECTED'};
     }
-    return {ok:true,status:'OWNED_BROWSER_STOP_REQUESTED'};
+    if(owned){
+      const closed=await stopOnlyOwnedBrowser();
+      return closed
+        ?{ok:true,status:'OWNED_BROWSER_GRACEFUL_CLOSE_REQUESTED'}
+        :{ok:false,code:'GRACEFUL_CLOSE_FAILED'};
+    }
+    if(pending){
+      // launchApprovedIsolatedChrome owns the exact child created during a
+      // failed/incomplete bootstrap and performs only that bounded cleanup.
+      return {ok:true,status:'PENDING_BROWSER_OPERATION_CANCELLED'};
+    }
+    return {ok:false,code:'BROWSER_NOT_RUNNING'};
   });
 
   // The only fixture is a bounded, local, independently consented manual
