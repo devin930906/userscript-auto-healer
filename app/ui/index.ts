@@ -96,6 +96,9 @@ interface Window {
     connectExistingChrome(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     disconnectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
+    openTampermonkeyStore(): Promise<{ok:boolean;code?:string;status?:string;
+      tampermonkeyVerified:false;gmApiVerified:false;businessVerified:false;
+      automaticPatchAllowed:false}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
     startGmProbe(runAt?:'document-start'|'document-body'|'document-end'|'document-idle'): Promise<{ok:boolean;code?:string;status?:string;runAt?:string;
       installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
@@ -671,6 +674,7 @@ const launchButton=document.getElementById('launch-chrome') as HTMLButtonElement
 const connectExistingButton=document.getElementById('connect-existing-chrome') as HTMLButtonElement|null;
 const disconnectExistingButton=document.getElementById('disconnect-existing-chrome') as HTMLButtonElement|null;
 const inspectButton=document.getElementById('inspect-tampermonkey') as HTMLButtonElement|null;
+const managerStoreButton=document.getElementById('open-tampermonkey-store') as HTMLButtonElement|null;
 const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|null;
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
@@ -753,6 +757,7 @@ function browserControls():void{
    (typeof existingDisconnectBusy!=='undefined'&&existingDisconnectBusy)||
    (!externalConnected&&!(typeof existingConnectionBusy!=='undefined'&&existingConnectionBusy));
  if(inspectButton)inspectButton.disabled=controlsBusy||allControlsBusy||!anyBrowserConnected;
+ if(managerStoreButton)managerStoreButton.disabled=allControlsBusy||!browserConnected;
  if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
  // History is a native read-only view and does not require live Chrome.
  // Keep scenario selection available offline; every live DOM/AI/export action
@@ -1201,6 +1206,12 @@ launchButton?.addEventListener('click',()=>void browserAction(async()=>{
    ? '已确认本程序启动的 Chrome CDP 连接（'+(result.chromeVersion??'unknown')+
      '）；Tampermonkey、脚本注入和业务结果仍未验证。'
    : '独立 Chrome 启动未通过：'+(result.code??'UNKNOWN'));
+}));
+managerStoreButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const result=await window.healer.openTampermonkeyStore();
+ setBrowserStatus(result.ok&&result.status==='OFFICIAL_STORE_TAB_OPENED_UNVERIFIED'
+   ?'已在本程序启动的独立 Chrome 中打开官方安装页；请在 Chrome 里自行确认安装与权限。扩展身份、GM 和业务结果仍未验证。'
+   :'官方安装页未打开：'+(result.code??'UNKNOWN')+'；未安装或修改扩展。');
 }));
 inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.inspectTampermonkey();

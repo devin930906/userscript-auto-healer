@@ -68,11 +68,13 @@
             <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
             <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
             <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
+            <button id="open-tampermonkey-store" type="button" aria-describedby="store-install-help" disabled>打开官方 Tampermonkey 安装页</button>
             <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
           </div>
         </details>
         <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
         <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
+        <p id="store-install-help">仅在本程序启动的独立 Chrome 中、另行确认后打开官方 Chrome Web Store。实际安装及权限仍需在 Chrome 中确认；打开页面不表示扩展已经安装或验证。</p>
       </div>
       <div class="panel">
         <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
