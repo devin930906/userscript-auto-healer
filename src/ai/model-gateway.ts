@@ -22,7 +22,8 @@ export type AiSuggestion = Readonly<{ok:true;status:'UNTRUSTED_AI_TEXT_ONLY';
   businessVerified:false;automaticPatchAllowed:false;automaticRollbackAllowed:false}>;
 export type GatewayStatus = Readonly<{enabled:boolean;remainingRequests:number;manualModelAvailable:boolean}>;
 type Options = Readonly<{baseUrl:string;apiKey:string;manualModel:string|null;
-  maxRequests:number;timeoutMs:number;maxOutputTokens:number}>;
+  maxRequests:number;timeoutMs:number;maxOutputTokens:number;
+  protocol:'chat-completions'|'responses'}>;
 type Consent = Readonly<{userApproved:true;approvedOrigin:string}>;
 type SafeEvidence = Readonly<{diagnosticCode:'SELECTOR_ASSERTION'|'UNKNOWN';
   scenarioHash:string;selectorHash:string}>;
@@ -50,7 +51,8 @@ function record(input:unknown,keys:readonly string[]):Record<string,unknown>|nul
   }catch{return null;}
 }
 function validateConfig(input:unknown):{options:Options;url:URL}{
-  const c=record(input,['baseUrl','apiKey','manualModel','maxRequests','timeoutMs','maxOutputTokens']);
+  const fields=['baseUrl','apiKey','manualModel','maxRequests','timeoutMs','maxOutputTokens'];
+  const c=record(input,fields)??record(input,[...fields,'protocol']);
   if(!c||typeof c.baseUrl!=='string'||c.baseUrl.length>512||
      c.baseUrl.trim()!==c.baseUrl||/[\x00-\x1f\x7f]/.test(c.baseUrl)||
      c.baseUrl.includes('%')||
@@ -76,12 +78,14 @@ function validateConfig(input:unknown):{options:Options;url:URL}{
      !Number.isSafeInteger(c.maxRequests)||Number(c.maxRequests)<1||Number(c.maxRequests)>8||
      !Number.isSafeInteger(c.timeoutMs)||Number(c.timeoutMs)<500||Number(c.timeoutMs)>10000||
      !Number.isSafeInteger(c.maxOutputTokens)||
-     Number(c.maxOutputTokens)<32||Number(c.maxOutputTokens)>256)
+     Number(c.maxOutputTokens)<32||Number(c.maxOutputTokens)>256||
+     (c.protocol!==undefined&&c.protocol!=='chat-completions'&&c.protocol!=='responses'))
     throw Error('INVALID_AI_CONFIGURATION');
   const options:Options={
     baseUrl:url.href,apiKey:c.apiKey,manualModel:c.manualModel as string|null,
     maxRequests:c.maxRequests as number,timeoutMs:c.timeoutMs as number,
-    maxOutputTokens:c.maxOutputTokens as number
+    maxOutputTokens:c.maxOutputTokens as number,
+    protocol:(c.protocol??'chat-completions') as Options['protocol']
   };
   return {options,url};
 }
@@ -199,7 +203,7 @@ export class OptionalAiGateway {
     return c&&c.userApproved===true&&c.approvedOrigin===this.origin
       ?null:failure('NOT_AUTHORIZED');
   }
-  private async request(path:'/models'|'/chat/completions',init:RequestInit,
+  private async request(path:'/models'|'/chat/completions'|'/responses',init:RequestInit,
     signal?:AbortSignal):Promise<{response:Response;value:unknown}|GatewayFailure>{
     // Reject untrusted signals before reading getters or consuming quota.
     if(signal!==undefined&&!validNativeCancelSignal(signal))
@@ -309,22 +313,50 @@ export class OptionalAiGateway {
     if(!data)return failure('INVALID_EVIDENCE');
     if(this.options.manualModel===null)return failure('MODEL_NOT_SELECTED');
     // This intentionally contains no script, selector text, DOM, URL or file path.
-    const body=JSON.stringify({model:this.options.manualModel,stream:false,
-      max_tokens:this.options.maxOutputTokens,
-      messages:[{role:'system',content:'This is unverified, privacy-minimized diagnostic metadata. Respond with high-level, review-only guidance. Never claim to have repaired or tested a script.'},
-        {role:'user',content:JSON.stringify(data)}]});
-    const fetched=await this.request('/chat/completions',{method:'POST',body},signal);
+    const instructions='This is unverified, privacy-minimized diagnostic metadata. Respond with high-level, review-only guidance. Never claim to have repaired or tested a script.';
+    const body=this.options.protocol==='responses'
+      ?JSON.stringify({model:this.options.manualModel,stream:false,store:false,
+        max_output_tokens:this.options.maxOutputTokens,instructions,
+        input:[{role:'user',content:JSON.stringify(data)}]})
+      :JSON.stringify({model:this.options.manualModel,stream:false,
+        max_tokens:this.options.maxOutputTokens,
+        messages:[{role:'system',content:instructions},
+          {role:'user',content:JSON.stringify(data)}]});
+    const fetched=await this.request(this.options.protocol==='responses'
+      ?'/responses':'/chat/completions',{method:'POST',body},signal);
     if('ok' in fetched&&fetched.ok===false)return fetched;
     if(!('value' in fetched))return failure('INVALID_RESPONSE');
-    const response=fetched.value as {choices?:unknown};
-    if(!response||typeof response!=='object'||!Array.isArray(response.choices)||
-       response.choices.length!==1)return failure('INVALID_RESPONSE');
-    const item=response.choices[0] as {message?:unknown};
-    if(!item||typeof item!=='object'||!item.message||
-       typeof item.message!=='object'||Array.isArray(item.message))
+    const response=fetched.value as Record<string,unknown>;
+    if(!response||typeof response!=='object'||Array.isArray(response))
       return failure('INVALID_RESPONSE');
-    const message=item.message as Record<string,unknown>;
-    const content=message.content;
+    let message:Record<string,unknown>;
+    let content:unknown;
+    if(this.options.protocol==='responses'){
+      // Only one completed assistant text message may be displayed. Tool
+      // calls, refusals, incomplete output or mixed content fail closed.
+      if(response.status!=='completed'||!Array.isArray(response.output)||
+         response.output.length!==1)return failure('INVALID_RESPONSE');
+      const item=response.output[0] as Record<string,unknown>;
+      if(!item||typeof item!=='object'||Array.isArray(item)||
+         item.type!=='message'||item.role!=='assistant'||
+         !Array.isArray(item.content)||item.content.length!==1)
+        return failure('INVALID_RESPONSE');
+      const textPart=item.content[0] as Record<string,unknown>;
+      if(!textPart||typeof textPart!=='object'||Array.isArray(textPart)||
+         textPart.type!=='output_text'||typeof textPart.text!=='string')
+        return failure('INVALID_RESPONSE');
+      message={role:'assistant'};
+      content=textPart.text;
+    }else{
+      if(!Array.isArray(response.choices)||response.choices.length!==1)
+        return failure('INVALID_RESPONSE');
+      const item=response.choices[0] as {message?:unknown};
+      if(!item||typeof item!=='object'||!item.message||
+         typeof item.message!=='object'||Array.isArray(item.message))
+        return failure('INVALID_RESPONSE');
+      message=item.message as Record<string,unknown>;
+      content=message.content;
+    }
     // Model text is untrusted display data. Disallow terminal controls and
     // Unicode direction overrides/isolates that can spoof a reviewed label;
     // ordinary line breaks and tabs remain available for readable guidance.
