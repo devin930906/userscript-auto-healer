@@ -485,3 +485,66 @@ test('TASK-014/TEST-015/026: model-origin carriage return cannot overwrite revie
   assert.equal(safe.ok,true,'ordinary LF and tab are still permitted');
   if(safe.ok)assert.equal(safe.candidateText,output);
 });
+
+
+test('TASK-014/TEST-015/016: Responses protocol is an explicit consented alternative',async()=>{
+ const requests:Array<{url:string;body:string;auth:string}>=[];
+ const transport:typeof fetch=async(input,init)=>{
+  requests.push({url:String(input),body:String(init?.body),
+   auth:String((init?.headers as Record<string,string>)?.Authorization)});
+  return Response.json({status:'completed',output:[{type:'message',role:'assistant',
+   content:[{type:'output_text',text:'Review the isolated selector evidence only.'}]}]});
+ };
+ const config={...options(),protocol:'responses' as const};
+ const gateway=new OptionalAiGateway(config,transport);
+ assert.equal(gateway.enable(approval()),true);
+ const result=await gateway.suggest(approval(),evidence);
+ assert.equal(result.ok,true,JSON.stringify(result));
+ if(result.ok){
+  assert.equal(result.status,'UNTRUSTED_AI_TEXT_ONLY');
+  assert.equal(result.candidateText,'Review the isolated selector evidence only.');
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.automaticRollbackAllowed,false);
+  assert.equal(result.tampermonkeyVerified,false);
+  assert.equal(result.businessVerified,false);
+ }
+ assert.equal(requests.length,1);
+ assert.equal(requests[0].url,'http://127.0.0.1:9555/v1/responses');
+ assert.equal(requests[0].auth,'Bearer canary-secret-key');
+ const payload=JSON.parse(requests[0].body);
+ assert.equal(payload.model,'example-model');
+ assert.equal(payload.max_output_tokens,128);
+ assert.equal(payload.store,false);
+ assert.equal(payload.stream,false);
+ assert.equal(payload.input.length,1);
+ assert.equal(payload.input[0].role,'user');
+ assert.deepEqual(JSON.parse(payload.input[0].content),evidence);
+ assert.equal(requests[0].body.includes('canary-secret-key'),false);
+ assert.equal(requests[0].body.includes('SENSITIVE_SCRIPT_SOURCE'),false);
+ assert.equal(gateway.status().remainingRequests,2);
+});
+
+test('TASK-014/TEST-016: Responses protocol refuses incomplete, tool or malformed outputs',async()=>{
+ const invalid=[
+  {status:'incomplete',output:[{type:'message',role:'assistant',
+   content:[{type:'output_text',text:'Partial'}]}]},
+  {status:'completed',output:[{type:'function_call',name:'dangerous',arguments:'{}'}]},
+  {status:'completed',output:[{type:'message',role:'assistant',
+   content:[{type:'refusal',refusal:'No'}]}]},
+  {status:'completed',output:[{type:'message',role:'assistant',
+   content:[{type:'output_text',text:'ok'}]},{type:'function_call',name:'x'}]},
+  {status:'completed',output:[{type:'message',role:'assistant',
+   content:[{type:'output_text',text:'\u202ehidden'}]}]},
+  {status:'completed',output:[]}
+ ];
+ for(const reply of invalid){
+  const gateway=new OptionalAiGateway({...options(),protocol:'responses'},async()=>Response.json(reply));
+  assert.equal(gateway.enable(approval()),true);
+  assert.deepEqual(await gateway.suggest(approval(),evidence),
+   {ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false},JSON.stringify(reply));
+ }
+ for(const protocol of ['auto','completions','RESPONSES',null,0]){
+  assert.throws(()=>new OptionalAiGateway({...options(),protocol}),
+    /INVALID_AI_CONFIGURATION/);
+ }
+});
