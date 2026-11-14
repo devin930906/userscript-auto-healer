@@ -1825,3 +1825,30 @@ test('TASK-017/TEST-022: GM status summary preserves unknown versus explicit neg
  assert.match(result.textContent,/自报 fixed 动作：是/);
  assert.match(result.textContent,/不证明真实 GM 或业务恢复/);
 });
+
+
+test('TASK-005/TEST-007/026: desktop close cannot force-kill selected or external Chrome or delete Profile locks',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+
+  assert.doesNotMatch(main,/terminateMatchingChromeProcesses/,
+    'selected executable/Profile must never be used as a process-kill fallback');
+  assert.doesNotMatch(main,/Stop-Process\s+-Id[\s\S]{0,80}-Force/,
+    'desktop product code must not force-kill Chrome');
+  assert.doesNotMatch(main,/rmSync\(\s*lockfile/,
+    'desktop product code must not delete a Chrome Profile ownership lock');
+
+  const stopHandler=main.match(
+    /ipcMain\.handle\('browser:stop',async event=>\{([\s\S]*?)\n  \}\);/);
+  assert.ok(stopHandler,'browser:stop handler must remain explicit and auditable');
+  assert.doesNotMatch(stopHandler[1],/selectedChrome|selectedProfile/,
+    'stop authority comes only from a live owned/attached session, never selected paths');
+  assert.match(stopHandler[1],/EXISTING_BROWSER_DISCONNECTED/,
+    'an attached pre-existing Chrome must only be disconnected, not closed');
+
+  assert.doesNotMatch(html,/id="close-chrome"/,
+    'existing-Chrome controls must not imply the app can close an external browser');
+  assert.doesNotMatch(ui,/getElementById\('close-chrome'\)/,
+    'renderer must not proxy external Chrome close into the owned-browser stop action');
+});
