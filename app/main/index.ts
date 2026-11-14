@@ -1842,7 +1842,7 @@ async function createMainWindow(): Promise<void> {
       "return {ok:s.shell === 'development-skeleton' && s.automaticRepairAvailable === false && " +
       "s.aiEnabled === false && s.automaticApplyEnabled === false && bad.ok === false && " +
       "bad.code === 'INVALID_SHAPE' && noConfig.code === 'CONFIG_NOT_SELECTED' && " +
-      "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStop.code === 'BROWSER_NOT_RUNNING' && " +
+      "noBrowser.code === 'BROWSER_NOT_RUNNING' && noStore.code === 'BROWSER_NOT_RUNNING' && noStore.tampermonkeyVerified === false && noStore.automaticPatchAllowed === false && noStop.code === 'BROWSER_NOT_RUNNING' && " +
       "noGmStart.code === 'BROWSER_NOT_RUNNING' && invalidRunAt.code === 'INVALID_OPTIONS' && " +
       "noGmStatus.code === 'NO_ACTIVE_FIXTURE' && noGmReport.code === 'NO_ACTIVE_FIXTURE' && noGmVisit.code === 'NO_ACTIVE_FIXTURE' && " +
        "noGmObserve.code === 'NO_ACTIVE_FIXTURE' && badMode.code === 'INVALID_MODE' && " +
