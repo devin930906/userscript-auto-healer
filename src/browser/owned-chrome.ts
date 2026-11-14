@@ -556,6 +556,12 @@ export async function launchApprovedIsolatedChrome(
                 handle.stopped=true;
                 if(pollTimer)clearInterval(pollTimer);
                 liveSessions.delete(verified);
+                // The endpoint was owned at launch, but a later shutdown must
+                // not trust stale ownership. Re-check the exact listener PID
+                // before sending the state-changing Browser.close command.
+                const owner=await verifyWindowsLoopbackListenerPid(
+                  cfg.remoteDebuggingPort,effectivePid);
+                if(!owner.ok||owner.pid!==effectivePid)return false;
                 return requestVerifiedCdpBrowserClose(
                   inspected.websocketUrl,cfg.remoteDebuggingPort,binary.version);
               };
