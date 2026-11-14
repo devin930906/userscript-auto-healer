@@ -18,7 +18,7 @@ const allowed = {
 const approvedIpcChannels=[
  'ai:discover-native','ai:review-native','app:status','browser:choose-chrome','browser:choose-profile',
  'browser:connect-existing','browser:create-profile','browser:disconnect-existing',
- 'browser:start','browser:stop',
+ 'browser:open-tampermonkey-store','browser:start','browser:stop',
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
@@ -1021,6 +1021,7 @@ test('TASK-017/TEST-002/022: late Chrome launch cannot reconnect UI after stop',
  let status='';
  const scope={
   launchButton:{addEventListener:(type:string,fn:()=>void)=>launchHandlers.set(type,fn)},
+   managerStoreButton:null,
   stopButton:{addEventListener:(type:string,fn:()=>void)=>stopHandlers.set(type,fn)},
   portInput:{value:'9223'},browserBusy:false,stopInProgress:false,
   browserConnected:false,gmProbeGeneration:0,aiReviewGeneration:0,
@@ -1698,7 +1699,7 @@ test('TASK-017/TEST-002/022: offline history allows switching registered scenari
  assert.ok(start>=0&&end>start,'must test the real renderer control policy');
  const names=[
   'chooseChromeButton','chooseProfileButton','createProfileButton','portInput',
-  'launchButton','inspectButton','stopButton','scenarioInspectId',
+  'launchButton','inspectButton','managerStoreButton','stopButton','scenarioInspectId',
   'scenarioInspectButton','scenarioRecheckStartButton','scenarioRecheckStopButton',
   'scenarioCancelButton','scenarioHistoryButton','scenarioExportButton',
   'aiReviewButton','gmStartButton','gmRunAtSelect','gmStatusButton',
