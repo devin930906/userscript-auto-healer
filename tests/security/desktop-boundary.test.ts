@@ -1852,3 +1852,35 @@ test('TASK-005/TEST-007/026: desktop close cannot force-kill selected or externa
   assert.doesNotMatch(ui,/getElementById\('close-chrome'\)/,
     'renderer must not proxy external Chrome close into the owned-browser stop action');
 });
+
+
+test('TASK-007/TEST-017/026: official Tampermonkey installation entry is a consented owned-Chrome navigation only',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const renderer=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const block=main.slice(
+  main.indexOf("ipcMain.handle('browser:open-tampermonkey-store'"),
+  main.indexOf("ipcMain.handle('browser:stop'")
+ );
+ assert.ok(block.startsWith("ipcMain.handle('browser:open-tampermonkey-store'"));
+ assert.match(block,/authorizeSender\(event\)/);
+ assert.match(block,/if\(args\.length\)/);
+ assert.match(block,/readOwnedBrowser\(\)/);
+ assert.match(block,/isLiveApprovedChromeSession\(owned\)/);
+ assert.match(block,/dialog\.showMessageBox/);
+ assert.match(block,/decision\.response!==0/);
+ assert.match(block,/controller\.signal\.aborted/);
+ assert.match(block,/openApprovedTarget\(owned,page,true,controller\.signal\)/);
+ assert.match(block,/chromewebstore\.google\.com\/detail\/tampermonkey/);
+ assert.match(block,/dhdgffkkebhmkfjojejmpbldmpobfkfo/);
+ assert.match(block,/OFFICIAL_STORE_TAB_OPENED_UNVERIFIED/);
+ assert.doesNotMatch(block,/installExtension|chrome\.management|shell\.openExternal/);
+ assert.match(main,/managerStoreAbort\?\.abort\(\)/);
+ assert.match(preload,/openTampermonkeyStore: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:open-tampermonkey-store'\)/);
+ assert.match(html,/id="open-tampermonkey-store"/);
+ assert.match(html,/Chrome 中确认/);
+ assert.match(renderer,/managerStoreButton\.disabled=allControlsBusy\|\|!browserConnected/);
+ assert.match(renderer,/window\.healer\.openTampermonkeyStore\(\)/);
+ assert.match(renderer,/扩展身份、GM 和业务结果仍未验证/);
+});
