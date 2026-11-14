@@ -1208,10 +1208,21 @@ launchButton?.addEventListener('click',()=>void browserAction(async()=>{
    : '独立 Chrome 启动未通过：'+(result.code??'UNKNOWN'));
 }));
 managerStoreButton?.addEventListener('click',()=>void browserAction(async()=>{
- const result=await window.healer.openTampermonkeyStore();
- setBrowserStatus(result.ok&&result.status==='OFFICIAL_STORE_TAB_OPENED_UNVERIFIED'
-   ?'已在本程序启动的独立 Chrome 中打开官方安装页；请在 Chrome 里自行确认安装与权限。扩展身份、GM 和业务结果仍未验证。'
-   :'官方安装页未打开：'+(result.code??'UNKNOWN')+'；未安装或修改扩展。');
+ // A native Chrome stop increments this lifecycle token before awaiting IPC.
+ // A late Store result (or rejection) belongs to the revoked session and
+ // must not overwrite the newer stop/disconnect status.
+ if(!browserConnected)return;
+ const requestGeneration=browserSessionGeneration;
+ try{
+  const result=await window.healer.openTampermonkeyStore();
+  if(requestGeneration!==browserSessionGeneration||!browserConnected)return;
+  setBrowserStatus(result.ok&&result.status==='OFFICIAL_STORE_TAB_OPENED_UNVERIFIED'
+    ?'已在本程序启动的独立 Chrome 中打开官方安装页；请在 Chrome 里自行确认安装与权限。扩展身份、GM 和业务结果仍未验证。'
+    :'官方安装页未打开：'+(result.code??'UNKNOWN')+'；未安装或修改扩展。');
+ }catch{
+  if(requestGeneration!==browserSessionGeneration||!browserConnected)return;
+  setBrowserStatus('官方安装页请求受阻；没有证据证明页面已打开或扩展已安装。');
+ }
 }));
 inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
  const result=await window.healer.inspectTampermonkey();
