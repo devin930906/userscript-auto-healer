@@ -163,6 +163,9 @@ let existingConnectInProgress = false;
 let profilePreparationInProgress = false;
 let launchAbort: AbortController | null = null;
 let probeInProgress = false;
+// One fixed official Store page in the app-owned browser. No renderer URL or install authority.
+let managerStoreInProgress = false;
+let managerStoreAbort: AbortController | null = null;
 // Serialize native Chrome/Profile selection: IPC dialogs must not race each other
 // or a consented browser launch. This flag is not proof of user authorization.
 let nativeSelectionInProgress = false;
@@ -210,6 +213,7 @@ async function stopOnlyOwnedBrowser():Promise<boolean> {
   cancelScenarioObservation();
   stopOnlyGmProbe();
   launchAbort?.abort();
+  managerStoreAbort?.abort();
   const current=ownedBrowser;
   ownedBrowser=null;
   if(!current)return false;
@@ -637,6 +641,49 @@ function registerSafeIpc(): void {
     }catch{
       return {ok:false,code:'PROBE_FAILED',...unverified};
     }finally{probeInProgress=false;}
+  });
+  // TASK-007 / REQ-017: open the verified official Store listing in the
+  // app-owned isolated Chrome only after a fresh native confirmation.
+  // This DOES NOT install an extension, grant browser permissions, or verify
+  // the manager. Chrome's own Store install dialog remains mandatory.
+  ipcMain.handle('browser:open-tampermonkey-store',async(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(managerStoreInProgress||probeInProgress||launchInProgress)
+      return {ok:false,code:'BROWSER_BUSY',...unverified};
+    const owned=readOwnedBrowser();
+    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    managerStoreInProgress=true;
+    const controller=new AbortController();
+    managerStoreAbort=controller;
+    try{
+      const decision=await dialog.showMessageBox(win,{
+        type:'question',buttons:['在独立 Chrome 中打开官方安装页','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'打开 Tampermonkey 官方 Chrome Web Store 页面？',
+        detail:'只在本程序已启动的独立 Chrome 中打开固定的官方扩展页面。'+
+          '\\n不会自动安装、修改 Profile 或跳过 Chrome 原生扩展权限确认。'
+      });
+      if(decision.response!==0||controller.signal.aborted||
+         win.isDestroyed()||win!==mainWindow||
+         readOwnedBrowser()!==owned||!isLiveApprovedChromeSession(owned))
+        return {ok:false,code:'NOT_AUTHORIZED',...unverified};
+      const page='https://chromewebstore.google.com/detail/tampermonkey/'+
+        'dhdgffkkebhmkfjojejmpbldmpobfkfo';
+      const opened=await openApprovedTarget(owned,page,true,controller.signal);
+      if(controller.signal.aborted||readOwnedBrowser()!==owned||
+         win.isDestroyed()||win!==mainWindow)
+        return {ok:false,code:'SESSION_REVOKED',...unverified};
+      return opened.ok
+        ?{ok:true,status:'OFFICIAL_STORE_TAB_OPENED_UNVERIFIED',...unverified}
+        :{ok:false,code:opened.code,...unverified};
+    }catch{return {ok:false,code:'STORE_NAVIGATION_FAILED',...unverified};}
+    finally{
+      managerStoreInProgress=false;
+      if(managerStoreAbort===controller)managerStoreAbort=null;
+    }
   });
   ipcMain.handle('browser:stop',async event=>{
     authorizeSender(event);
