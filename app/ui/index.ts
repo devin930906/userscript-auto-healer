@@ -753,9 +753,7 @@ function browserControls():void{
    (typeof existingDisconnectBusy!=='undefined'&&existingDisconnectBusy)||
    (!externalConnected&&!(typeof existingConnectionBusy!=='undefined'&&existingConnectionBusy));
  if(inspectButton)inspectButton.disabled=controlsBusy||allControlsBusy||!anyBrowserConnected;
- if(stopButton)stopButton.disabled=stopInProgress||(!(typeof chromeSelected!=='undefined'&&chromeSelected)&&!browserConnected&&!browserBusy);
- const closeBtn=typeof document!=='undefined'&&document?document.getElementById('close-chrome') as HTMLButtonElement|null:null;
- if(closeBtn)closeBtn.disabled=stopInProgress||(!(typeof chromeSelected!=='undefined'&&chromeSelected)&&!browserConnected&&!existingChromeConnected);
+ if(stopButton)stopButton.disabled=stopInProgress||(!browserConnected&&!browserBusy);
  // History is a native read-only view and does not require live Chrome.
  // Keep scenario selection available offline; every live DOM/AI/export action
  // still enforces its own browserConnected and native authorization gates.
@@ -1244,12 +1242,21 @@ stopButton?.addEventListener('click',()=>{
   '已请求停止独立 Chrome；先前的 AI 文字建议已隐藏，停止状态仍待系统确认。';
  stopInProgress=true;browserControls();
  void window.healer.stopBrowser().then(result=>{
-  if(result.ok||result.code==='BROWSER_NOT_RUNNING'){
+  if(result.ok||result.code==='BROWSER_NOT_RUNNING'||
+     result.code==='GRACEFUL_CLOSE_FAILED'){
    browserConnected=false;
    if(typeof existingChromeConnected!=='undefined')existingChromeConnected=false;
-   clearGmDisplay('独立 Chrome 已停止；本机测试会话结束。如曾安装临时脚本，请自行从 Tampermonkey 删除。');
+   clearGmDisplay('浏览器控制会话已结束；本机测试会话也已撤销。如曾安装临时脚本，请自行从 Tampermonkey 删除。');
   }
-  setBrowserStatus(result.ok?'已请求停止本程序启动的独立 Chrome。':
+  if(result.ok&&result.status==='OWNED_BROWSER_GRACEFUL_CLOSE_REQUESTED')
+   setBrowserStatus('已通过经过身份复核的 Chrome CDP 请求正常关闭本程序启动的独立 Chrome。');
+  else if(result.ok&&result.status==='EXISTING_BROWSER_DISCONNECTED')
+   setBrowserStatus('已断开本软件与原本正在运行的 Chrome；浏览器与 Data 保持原状。');
+  else if(result.ok&&result.status==='PENDING_BROWSER_OPERATION_CANCELLED')
+   setBrowserStatus('已取消尚未完成的浏览器启动或连接操作。');
+  else if(result.code==='GRACEFUL_CLOSE_FAILED')
+   setBrowserStatus('未能确认 Chrome 正常关闭；本软件已撤销控制，不会强制结束进程。请手动关闭该独立 Chrome。');
+  else setBrowserStatus(result.ok?'浏览器控制操作已完成。':
     '停止操作：'+(result.code??'UNKNOWN'));
  }).catch(()=>{
   setBrowserStatus('停止操作受阻；仍需确认独立 Chrome 状态。');
@@ -1534,7 +1541,3 @@ if (workspaceTablist) {
   selectWorkspace(0, 'none');
 }
 
-document.getElementById('close-chrome')?.addEventListener('click', () => {
-  const stopBtn = document.getElementById('stop-chrome') as HTMLButtonElement | null;
-  stopBtn?.click();
-});
