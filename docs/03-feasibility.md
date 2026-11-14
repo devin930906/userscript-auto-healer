@@ -2,6 +2,8 @@
 
 > 核验日期：2026-10-18。状态：Windows 托管环境中的 Chrome/CDP、Violentmonkey 真实 .user.js 注入及 GM_getValue 调用、临时 EXE 与历史 RAR5 工具链有正向 PoC；现行便携发行改为 ZIP，目标管理器、真实故障回归、正式应用 EXE+ZIP 仍待验收。
 
+> 2026-11-15 现行规格校准：本文件 2026-10-18 的 `9223` 是 PoC 当时运行参数与历史设计快照，**不是**当前默认值。当前 REQ-008 与已验证的产品配置以 `127.0.0.1:9896` 为默认、允许配置其他合法空闲回环端口，并独立核验目标 Chrome/Profile 与监听归属；Chrome++/真实 Tampermonkey、实际脚本自动修复及人工验收仍需按 TASK-005/007/009..013 与 TEST/GATE 独立取证。参见 [原始需求校准](product-rebaseline.md)。
+
 ## 技术候选
 A: Electron + TypeScript/Node（统一 GUI、AST、CDP、Windows 安装器）；B: .NET 桌面 UI + Node/JS 分析器（Windows 原生集成但双语言接口成本较高）；C: Python + 桌面 UI（AST JS/打包与浏览器管理增加异构依赖）。需求满足：A 高、B 高、C 中；兼容性：均须验证真实 Chrome；复杂度：A 中、B 高、C 中高；安全性：均需主动设计隔离；维护：A 统一 TS 优、B 双运行时负担；云端构建：A/B/C 理论可行未实证；许可成本：正式 ZIP 可使用 Windows 原生压缩工具，不需 WinRAR 创建许可证；其他依赖仍需核验；主要风险：A 的 Electron 安全默认配置、扩展自动化验证与产物体积。
 
