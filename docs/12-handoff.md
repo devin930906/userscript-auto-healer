@@ -1,5 +1,7 @@
 # 项目开发交接
 
+> WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
+
 > **2026-11-02 最新续接**：按 `docs/19-stable-v7-migration.md`、`AGENTS.md` 新版规则和真实 GitHub 远端状态继续。以下旧版认领/签名/HANDOFF_BLOCKED 均保留为历史资料，不再是产品开发准入条件；真实产品安全和 Stable GATE 未取消。
 
 

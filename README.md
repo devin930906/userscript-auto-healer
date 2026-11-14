@@ -1,5 +1,7 @@
 # Userscript Auto Healer
 
+> **当前产品需求与续接**：以 [原始需求校准](docs/product-rebaseline.md) 为本轮入口。下文含历史开发状态；历史发布不代表新基线已经验收。
+
 > **2026-11-02 现行（4）/（7）入口**：原有开发成果继续有效；新版取消 Issue 独占锁、使用独立分支／PR／最新 SHA 与 CI 检查控制并发。参见 [迁移与正式交接](docs/19-stable-v7-migration.md)。**目前仍非正式 Stable。**
 
 
