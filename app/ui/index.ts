@@ -674,6 +674,7 @@ const launchButton=document.getElementById('launch-chrome') as HTMLButtonElement
 const connectExistingButton=document.getElementById('connect-existing-chrome') as HTMLButtonElement|null;
 const disconnectExistingButton=document.getElementById('disconnect-existing-chrome') as HTMLButtonElement|null;
 const inspectButton=document.getElementById('inspect-tampermonkey') as HTMLButtonElement|null;
+const managerStoreButton=document.getElementById('open-tampermonkey-store') as HTMLButtonElement|null;
 const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|null;
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
