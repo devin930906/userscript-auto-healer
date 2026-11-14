@@ -517,22 +517,22 @@ test('TASK-005/TEST-008: requested 9896 default and configurable existing Chrome
   const main = read('app/main/index.ts');
   assert.match(markup, /<input id="chrome-port"[^>]*value="9896"/,
     'visible browser port must default to 9896, not the historical 9223');
-  assert.match(main, /remoteDebuggingPort:9896,bindAddress:'127\\.0\\.0\\.1'/,
+  assert.match(main, /remoteDebuggingPort:9896,bindAddress:'127\.0\.0\.1'/,
     'new Profile validation should not use an obsolete port');
-  assert.match(renderer, /window\\.healer\\.connectExistingChrome\\(port\\)/,
+  assert.match(renderer, /window\.healer\.connectExistingChrome\(port\)/,
     'external connection must use the same selected port as owned launch');
   assert.match(preload,
-    /connectExistingChrome: \\(port: number\\): Promise<unknown> => ipcRenderer\\.invoke\\('browser:connect-existing', port\\)/,
+    /connectExistingChrome: \(port: number\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing', port\)/,
     'preload should forward only the numeric port, not a path or endpoint');
-  assert.match(main, /'browser:connect-existing',async \\(event,port:unknown\\)=>/,
+  assert.match(main, /'browser:connect-existing',async \(event,port:unknown\)=>/,
     'main-process external connection should receive and validate a port');
   assert.match(main,
-    /userDataDir:selectedProfile,remoteDebuggingPort:port,bindAddress:'127\\.0\\.0\\.1'/,
+    /userDataDir:selectedProfile,remoteDebuggingPort:port,bindAddress:'127\.0\.0\.1'/,
     'main process must validate selected port and keep loopback binding');
   for (const port of [9896, 9223, 65535]) {
     const result = validateBrowserConfig({
-      executablePath: 'C:\\\\Chrome\\\\chrome.exe',
-      userDataDir: 'D:\\\\UAH-Profiles\\\\test',
+      executablePath: 'C:\\Chrome\\chrome.exe',
+      userDataDir: 'D:\\UAH-Profiles\\test',
       remoteDebuggingPort: port,
       bindAddress: '127.0.0.1'
     });
