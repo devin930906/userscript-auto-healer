@@ -2712,3 +2712,59 @@ test('launchApprovedIsolatedChrome fails with LAUNCH_FAILED when launcher exits 
   }
 });
 
+
+
+test('TASK-005/TEST-007/009/026: graceful close rechecks the original listener PID before Browser.close',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned-close',12189);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41889,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  let ownerChecks=0,closeCalls=0;
+  try{
+    t.mock.method(launcher,'preflightChrome',async()=>({
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>({
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async(port:number,pid:number)=>{
+      assert.equal(port,12189);
+      assert.equal(pid,41889);
+      ownerChecks++;
+      return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+        pid:41889,executableVerified:false as const};
+    });
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>true);
+    t.mock.method(cdp,'requestVerifiedCdpBrowserClose',async()=>{
+      closeCalls++;
+      return true;
+    });
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12189/devtools/browser/abcdefgh-1234'
+    })));
+
+    const session=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    assert.equal(session.ok,true,JSON.stringify(session));
+    if(!session.ok)return;
+    const initialChecks=ownerChecks;
+    assert.equal(initialChecks,1,'launch must establish listener ownership once');
+    assert.equal(typeof session.closeGracefully,'function');
+    const closed=await session.closeGracefully!();
+    assert.equal(closed,true);
+    assert.equal(ownerChecks,initialChecks+1,
+      'shutdown must re-check that the same PID still owns the CDP listener');
+    assert.equal(closeCalls,1,
+      'Browser.close is allowed only after the fresh listener-owner proof');
+  }finally{
+    t.mock.reset();
+  }
+});
