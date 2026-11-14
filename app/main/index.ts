@@ -1703,7 +1703,7 @@ async function createMainWindow(): Promise<void> {
       "const singleSelectorExport=await a.exportManualScenario('smoke_scenario'); " +
       "const noScenarioCancel=await a.cancelScenarioInspection(); " +
       "const invalidScenarioInspect=await a.inspectScenario('unauthorized'); " +
-      "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); " +
+      "const noConfig=await a.startBrowser(9223); const noBrowser=await a.inspectTampermonkey(); const noStore=await a.openTampermonkeyStore(); " +
       "const noStop=await a.stopBrowser(); " +
       "const noGmStart=await a.startGmProbe(); const invalidRunAt=await a.startGmProbe('document-end;unsafe'); " +
       "const noGmStatus=await a.gmProbeStatus(); const noGmReport=await a.saveGmReport(); " +
@@ -2023,7 +2023,7 @@ async function createMainWindow(): Promise<void> {
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
