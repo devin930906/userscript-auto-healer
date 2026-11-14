@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   startBrowser: (port: number): Promise<unknown> => ipcRenderer.invoke('browser:start', port),
   // Connect to the native-authorized Chrome already using the selected custom Data directory.
   // The renderer provides no path, PID, endpoint, or authorization value.
-  connectExistingChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:connect-existing'),
+  connectExistingChrome: (port: number): Promise<unknown> => ipcRenderer.invoke('browser:connect-existing', port),
   // Drops this application's connection only; it does not close external Chrome.
   disconnectExistingChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:disconnect-existing'),
   inspectTampermonkey: (): Promise<unknown> => ipcRenderer.invoke('browser:tampermonkey-hint'),
