@@ -93,7 +93,7 @@ interface Window {
     chooseProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     createProfile(): Promise<{ok:boolean;code?:string;directoryName?:string}>;
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
-    connectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
+    connectExistingChrome(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     disconnectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
@@ -675,6 +675,11 @@ const stopButton=document.getElementById('stop-chrome') as HTMLButtonElement|nul
 const portInput=document.getElementById('chrome-port') as HTMLInputElement|null;
 const browserStatus=document.getElementById('browser-status');
 let browserBusy=false;
+function selectedCdpPort():number|null{
+ const value=portInput?.value??'';
+ const port=Number(value);
+ return /^\d{4,5}$/.test(value)&&Number.isInteger(port)&&port>=1024&&port<=65535?port:null;
+}
 let scenarioInspectionBusy=false;
 let manualExportBusy=false;
 let stopInProgress=false;
@@ -1138,10 +1143,14 @@ chooseChromeButton?.addEventListener('click',()=>void browserAction(async()=>{
  }else setBrowserStatus('Chrome 选择未完成：'+(result.code??'UNKNOWN'));
 }));
 connectExistingButton?.addEventListener('click',()=>void browserAction(async()=>{
+ const port=selectedCdpPort();
+ if(port===null){
+  setBrowserStatus('CDP 端口必须是 1024 至 65535 的整数。');return;
+ }
  existingConnectionBusy=true;browserControls();
  setBrowserStatus('正在核对所选 Chrome 与 Data，并等待 Chrome 的原生授权提示。请在 Chrome 中确认本次连接。');
  try{
-  const result=await window.healer.connectExistingChrome();
+  const result=await window.healer.connectExistingChrome(port);
   existingChromeConnected=result.ok&&result.status==='AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED';
   setBrowserStatus(existingChromeConnected
     ?'已获授权连接正在运行的 Chrome（'+(result.chromeVersion??'unknown')+'）。断开本软件不会关闭浏览器；目前只开放 Tampermonkey 只读探测，不代表脚本或业务已恢复。'
@@ -1179,9 +1188,8 @@ createProfileButton?.addEventListener('click',()=>void browserAction(async()=>{
  }else setBrowserStatus('新 Profile 未创建：'+(result.code??'UNKNOWN'));
 }));
 launchButton?.addEventListener('click',()=>void browserAction(async()=>{
- const value=portInput?.value??'';
- const port=Number(value);
- if(!/^\d{4,5}$/.test(value)||!Number.isInteger(port)||port<1024||port>65535){
+ const port=selectedCdpPort();
+ if(port===null){
   setBrowserStatus('CDP 端口必须是 1024 至 65535 的整数。');return;
  }
  setBrowserStatus('检查独立 Chrome 配置与进程归属中；请在系统确认窗口授权。');
