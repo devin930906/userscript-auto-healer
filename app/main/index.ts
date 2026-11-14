@@ -213,7 +213,12 @@ async function stopOnlyOwnedBrowser():Promise<boolean> {
   const current=ownedBrowser;
   ownedBrowser=null;
   if(!current)return false;
-  try{return await current.stop();}
+  try{
+    if(typeof current.closeGracefully==='function')
+      return await current.closeGracefully();
+    current.stop();
+    return false;
+  }
   catch{return false;}
 }
 function stopAllBrowserSessions():void {
@@ -526,7 +531,8 @@ function registerSafeIpc(): void {
       if(!result.ok)return {ok:false,code:result.code,...unverified};
       launched=result;
       if(controller.signal.aborted||win.isDestroyed()||win!==mainWindow){
-        await result.stop();
+        if(typeof result.closeGracefully==='function')await result.closeGracefully();
+        else result.stop();
         return {ok:false,code:'ABORTED',...unverified};
       }
       ownedBrowser=result;
