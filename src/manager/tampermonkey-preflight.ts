@@ -382,6 +382,34 @@ export function inspectReportedTampermonkeyPreflight(
    return blocked('INVALID_SCRIPT_METADATA');
   if(!safeMetadataLines(safeMetadata.lines))
    return blocked('INVALID_SCRIPT_METADATA');
+  // A nonempty caller-supplied line report must agree with the independently
+  // reparsed header. Otherwise forged line numbers, tag names or raw source
+  // could mislead UI diagnostics into attributing a grant to the wrong code.
+  // Empty line arrays are supported for older metadata-only caller fixtures;
+  // neither shape grants execution or installation authority.
+  const sourceLines=safeMetadata.lines as unknown[];
+  if(sourceLines.length>0){
+   if(typeof safeMetadata.header!=='string'||safeMetadata.header.length>65536)
+    return blocked('INVALID_SCRIPT_METADATA');
+   const verified=parseUserscriptMetadata({
+    bytes:new TextEncoder().encode(safeMetadata.header),textEncoding:'utf-8'
+   });
+   if(verified.status!=='OK'||verified.header!==safeMetadata.header||
+      verified.lines.length!==sourceLines.length)
+    return blocked('INVALID_SCRIPT_METADATA');
+   for(let i=0;i<sourceLines.length;i++){
+    const claimed=plainDataSnapshot(sourceLines[i]);
+    const actual=verified.lines[i];
+    if(!claimed||!actual)return blocked('INVALID_SCRIPT_METADATA');
+    const expected=actual.kind==='tag'
+     ?['line','raw','kind','name','value','known']
+     :['line','raw','kind'];
+    if(Object.keys(claimed).length!==expected.length||
+       expected.some(key=>!Object.prototype.hasOwnProperty.call(claimed,key)||
+         claimed[key]!==actual[key as keyof typeof actual]))
+     return blocked('INVALID_SCRIPT_METADATA');
+   }
+  }
   const rawTags=plainDataSnapshot(safeMetadata.tags);
   const unknownNames=stringListSnapshot(safeMetadata.unknownNames);
   if(!rawTags||!unknownNames)return blocked('INVALID_INPUT');

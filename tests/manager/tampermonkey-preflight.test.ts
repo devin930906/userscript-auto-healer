@@ -756,3 +756,29 @@ test('TASK-007/TEST-017/026: untrusted metadata line containers cannot bypass th
  assert.equal(proxyCalls,0,'never invoke metadata line proxy hooks');
  assert.equal(inspect().ok,true,'ordinary metadata remains eligible only');
 });
+
+
+test('TASK-007/TEST-017/026: reported metadata line provenance must match reparsed source',()=>{
+ const source=['// ==UserScript==','// @name Trusted diagnostic',
+  '// @match https://example.com/*','// @grant GM_getValue',
+  '// ==/UserScript==','void 0;'].join('\n');
+ const original=parseUserscriptMetadata({
+  bytes:new TextEncoder().encode(source),textEncoding:'utf-8'
+ });
+ assert.equal(original.status,'OK');
+ assert.ok(original.lines.length>0);
+ assert.equal(inspect(report,original).ok,true,
+  'authentic parser line descriptions remain metadata-only eligible');
+ const forged=[
+  {lines:original.lines.map((line,i)=>i===0?{...line,line:99}:line)},
+  {lines:original.lines.map((line,i)=>i===0?{...line,raw:'// @name Impostor'}:line)},
+  {lines:original.lines.map((line,i)=>i===0?{...line,name:'grant'}:line)},
+  {lines:original.lines.slice(1)},
+  {lines:[...original.lines,{line:999,raw:'',kind:'blank'}]}
+ ];
+ for(const change of forged){
+  const result=inspect(report,{...original,...change} as MetadataResult);
+  assert.deepEqual(result,{ok:false,status:'BLOCKED',
+   code:'INVALID_SCRIPT_METADATA',gmApiVerified:false,businessVerified:false});
+ }
+});
