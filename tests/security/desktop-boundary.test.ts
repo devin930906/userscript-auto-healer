@@ -346,8 +346,9 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:get-progress',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('import:cancel-native',\s*[^)]/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:start',\s*(?:config|path)/);
-  assert.match(preload, /connectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing'\)/);
-  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:connect-existing',\s*[^)]/);
+  assert.match(preload, /connectExistingChrome: \(port: number\): Promise<unknown> => ipcRenderer\.invoke\('browser:connect-existing', port\)/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:connect-existing',\s*(?:config|path|url|pid|endpoint|\{)/,
+    'external Chrome IPC accepts a numeric port, not a path or endpoint object');
   assert.match(preload, /disconnectExistingChrome: \(\): Promise<unknown> => ipcRenderer\.invoke\('browser:disconnect-existing'\)/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('browser:disconnect-existing',\s*[^)]/);
   assert.match(preload, /startGmProbe: \(runAt\?: 'document-start' \| 'document-body' \| 'document-end' \| 'document-idle'\)/);
@@ -829,8 +830,8 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const connection=ui.slice(ui.indexOf("connectExistingButton?.addEventListener('click'"),
   ui.indexOf("disconnectExistingButton?.addEventListener('click'"));
- assert.match(connection,/window\.healer\.connectExistingChrome\(\)/,
-  'renderer must not provide a profile path, process ID or WebSocket endpoint');
+ assert.match(connection,/window\.healer\.connectExistingChrome\(port\)/,
+  'renderer may forward only its validated numeric port, never a path, process ID or WebSocket endpoint');
  assert.match(connection,/existingChromeConnected=result\.ok&&result\.status==='AUTHORIZED_EXISTING_CDP_BROWSER_VERIFIED'/);
  assert.doesNotMatch(connection,/browserConnected\s*=/,
   'an external Chrome connection must not authorize app-owned-only workflows');
