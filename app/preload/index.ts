@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   // Drops this application's connection only; it does not close external Chrome.
   disconnectExistingChrome: (): Promise<unknown> => ipcRenderer.invoke('browser:disconnect-existing'),
   inspectTampermonkey: (): Promise<unknown> => ipcRenderer.invoke('browser:tampermonkey-hint'),
+  // Fixed official Store destination, native dialog, app-owned Chrome only.
+  openTampermonkeyStore: (): Promise<unknown> => ipcRenderer.invoke('browser:open-tampermonkey-store'),
   stopBrowser: (): Promise<unknown> => ipcRenderer.invoke('browser:stop'),
   startGmProbe: (runAt?: 'document-start' | 'document-body' | 'document-end' | 'document-idle'): Promise<unknown> =>
     ipcRenderer.invoke('gm-probe:start',runAt),
