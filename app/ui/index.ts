@@ -96,6 +96,9 @@ interface Window {
     connectExistingChrome(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     disconnectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string}>;
     inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
+    openTampermonkeyStore(): Promise<{ok:boolean;code?:string;status?:string;
+      tampermonkeyVerified:false;gmApiVerified:false;businessVerified:false;
+      automaticPatchAllowed:false}>;
     stopBrowser(): Promise<{ok:boolean;code?:string;status?:string}>;
     startGmProbe(runAt?:'document-start'|'document-body'|'document-end'|'document-idle'): Promise<{ok:boolean;code?:string;status?:string;runAt?:string;
       installUrl?:string;brokenUrl?:string;fixedUrl?:string;expiresAt?:number}>;
