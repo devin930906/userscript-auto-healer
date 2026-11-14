@@ -1963,7 +1963,7 @@ test('TASK-007/017 TEST-017/022: stale Tampermonkey inspection cannot revive a s
  const statuses:string[]=[];
  const state={
   browserSessionGeneration:1,
-  browserConnected:true,existingChromeConnected:false,
+  browserConnected:true,existingChromeConnected:false,stopInProgress:false,
   inspectButton:{addEventListener:(name:string,cb:()=>void)=>{if(name==='click')click=cb;}},
   browserAction:(fn:()=>Promise<void>)=>fn().catch(()=>
    statuses.push('浏览器操作受阻；没有获得验证成功的结果。')),
