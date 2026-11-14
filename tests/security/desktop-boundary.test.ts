@@ -1885,3 +1885,60 @@ test('TASK-007/TEST-017/026: official Tampermonkey installation entry is a conse
  assert.match(renderer,/window\.healer\.openTampermonkeyStore\(\)/);
  assert.match(renderer,/扩展身份、GM 和业务结果仍未验证/);
 });
+
+
+test('TASK-007/017 TEST-017/022: revoked Store navigation cannot overwrite Chrome stop state',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const ts=await import('typescript');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const begin=ui.indexOf("managerStoreButton?.addEventListener('click'");
+ const end=ui.indexOf("inspectButton?.addEventListener('click'",begin);
+ assert.ok(begin>=0&&end>begin,'execute the real Store UI handler');
+ assert.match(ui,/browserSessionGeneration\+\+;/,
+  'native stop must revoke earlier presentation generation');
+ const script=ts.transpileModule(ui.slice(begin,end),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+ }).outputText;
+ let click:()=>void=()=>{throw Error('STORE_HANDLER_NOT_REGISTERED')};
+ const pending:Array<{resolve:(value:unknown)=>void;reject:(error:Error)=>void}>=[];
+ const statuses:string[]=[];
+ const sandbox={
+  browserSessionGeneration:1,
+  browserConnected:true,
+  managerStoreButton:{addEventListener:(_name:string,cb:()=>void)=>{click=cb;}},
+  browserAction:(fn:()=>Promise<void>)=>fn().catch(()=>
+   statuses.push('浏览器操作受阻；没有获得验证成功的结果。')),
+  setBrowserStatus:(message:string)=>statuses.push(message),
+  window:{healer:{openTampermonkeyStore:()=>new Promise((resolve,reject)=>{
+   pending.push({resolve,reject});
+  })}}
+ };
+ runInNewContext(script,sandbox);
+ const tick=async()=>{for(let i=0;i<3;i++)await new Promise(r=>setImmediate(r));};
+ click();
+ assert.equal(pending.length,1);
+ sandbox.browserSessionGeneration++;
+ sandbox.browserConnected=false;
+ statuses.push('已撤销 Chrome 控制');
+ pending[0].resolve({ok:true,status:'OFFICIAL_STORE_TAB_OPENED_UNVERIFIED'});
+ await tick();
+ assert.deepEqual(statuses,['已撤销 Chrome 控制'],
+  'late success must not present an old Store page as a live session');
+ // A rejected IPC after the same revocation must not repaint the stop receipt.
+ sandbox.browserConnected=true;
+ click();
+ assert.equal(pending.length,2);
+ sandbox.browserSessionGeneration++;
+ sandbox.browserConnected=false;
+ statuses.push('浏览器停止状态已确认');
+ pending[1].reject(Error('REVOKED_BROWSER'));
+ await tick();
+ assert.equal(statuses.at(-1),'浏览器停止状态已确认');
+ // A fresh request in a current owned session must still present its result.
+ sandbox.browserConnected=true;
+ click();
+ assert.equal(pending.length,3);
+ pending[2].resolve({ok:true,status:'OFFICIAL_STORE_TAB_OPENED_UNVERIFIED'});
+ await tick();
+ assert.match(statuses.at(-1)??'',/打开官方安装页/);
+});
