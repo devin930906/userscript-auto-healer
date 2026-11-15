@@ -157,12 +157,22 @@ export function evaluateBusinessAcceptanceGate(
     }
 
     const audit = extractPlainDataRecord(auditReceipt, AUDIT_KEYS);
-    if (!audit || audit.status !== 'REVIEWABLE_ONLY') {
+    if (!audit || audit.status !== 'REVIEWABLE_ONLY' ||
+        audit.automaticPatchAllowed !== false ||
+        audit.tampermonkeyVerified !== false ||
+        audit.businessRecoveredVerified !== false) {
       return blocked('AUDIT_NOT_REVIEWABLE');
     }
 
     const backup = extractPlainDataRecord(backupReceipt, BACKUP_KEYS);
-    if (!backup || backup.status !== 'BACKUP_PREPARED_RUNTIME_UNVERIFIED') {
+    if (!backup || backup.status !== 'BACKUP_PREPARED_RUNTIME_UNVERIFIED' ||
+        backup.automaticPatchAllowed !== false ||
+        backup.automaticRollbackAllowed !== false ||
+        backup.tampermonkeyVerified !== false ||
+        backup.businessRecoveredVerified !== false ||
+        typeof backup.backupByteLength !== 'number' ||
+        !Number.isSafeInteger(backup.backupByteLength) ||
+        backup.backupByteLength < 1) {
       return blocked('BACKUP_NOT_VERIFIED');
     }
 
