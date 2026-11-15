@@ -57,15 +57,15 @@ test('TASK-007: manager inventory ambiguity and mismatched identity fail closed'
 
 test('TASK-007: user-script permission is reported only from one matching management toggle',()=>{
  const enabled={result:{type:'object',value:{
-  managerPage:true,allowUserScriptsAvailable:true,allowUserScripts:true
+  managerPage:true,matchingRows:1,allowUserScriptsAvailable:true,allowUserScripts:true
  }}};
  const disabled={result:{type:'object',value:{
-  managerPage:true,allowUserScriptsAvailable:true,allowUserScripts:false
+  managerPage:true,matchingRows:1,allowUserScriptsAvailable:true,allowUserScripts:false
  }}};
  assert.equal(parseTampermonkeyUserScriptsReceipt(enabled,155),'ENABLED');
  assert.equal(parseTampermonkeyUserScriptsReceipt(disabled,155),'DISABLED');
  assert.equal(parseTampermonkeyUserScriptsReceipt({
-  result:{type:'object',value:{managerPage:true,allowUserScriptsAvailable:false}}
+  result:{type:'object',value:{managerPage:true,matchingRows:0,allowUserScriptsAvailable:false}}
  },155),'UNKNOWN');
  assert.equal(parseTampermonkeyUserScriptsReceipt(enabled,137),'NOT_APPLICABLE');
 });
@@ -73,8 +73,8 @@ test('TASK-007: user-script permission is reported only from one matching manage
 test('TASK-007: user-script permission rejects malformed or ambiguous receipts',()=>{
  for(const receipt of [
   null,{},{result:{type:'string',value:'yes'}},
-  {result:{type:'object',value:{managerPage:false,allowUserScriptsAvailable:true,allowUserScripts:true}}},
-  {result:{type:'object',value:{managerPage:true,allowUserScriptsAvailable:true,allowUserScripts:'yes'}}}
+  {result:{type:'object',value:{managerPage:false,matchingRows:1,allowUserScriptsAvailable:true,allowUserScripts:true}}},
+  {result:{type:'object',value:{managerPage:true,matchingRows:1,allowUserScriptsAvailable:true,allowUserScripts:'yes'}}}
  ]){
   assert.equal(parseTampermonkeyUserScriptsReceipt(receipt,155),'UNKNOWN');
  }
