@@ -158,39 +158,8 @@ jobs:
           $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
           if ($manifest.manifest_version -ne 3) { throw 'Expected official MV3 package' }
           $verifiedPublicKey = [IO.File]::ReadAllText($verifiedKey)
-          if ([string]::IsNullOrWhiteSpace($verifiedPublicKey) -or $verifiedPublicKey -notmatch '^[A-Za-z0-9+/]+={0,2}
-          Write-Host ("MV3 manifest version: " + $manifest.version)
-          "UAH_TM_EXTENSION_DIR=$extension" >> $env:GITHUB_ENV
-          "UAH_TM_PROFILE_DIR=$(Join-Path $base 'profile')" >> $env:GITHUB_ENV
-          "UAH_TM_TOOLING_DIR=$(Join-Path $base 'tooling')" >> $env:GITHUB_ENV
-      - name: Install isolated pinned browser testing tooling
-        shell: pwsh
-        run: |
-          npm install --prefix $env:UAH_TM_TOOLING_DIR --no-audit --no-fund --ignore-scripts playwright@1.56.0
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Playwright toolchain install failed' }
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'browsers'
-          & (Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules\.bin\playwright.cmd') install chromium
-          if ($LASTEXITCODE -ne 0) { throw 'Disposable Chromium download failed' }
-          "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
-      - name: Build native product AST planner for product candidate cases
-        if: matrix.variant != 'baseline'
-        shell: pwsh
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw 'Locked application dependency installation failed' }
-          npm run build
-          if ($LASTEXITCODE -ne 0) { throw 'Native product AST planner build failed' }
-      - name: Execute real extension manager + GM API + synthetic business assertions
-        shell: pwsh
-        env:
-          UAH_TM_RUN_AT: ${{ matrix.run_at }}
-          UAH_TM_VARIANT: ${{ matrix.variant }}
-        run: |
-          $env:NODE_PATH = Join-Path $env:UAH_TM_TOOLING_DIR 'node_modules'
-          node ./poc/windows-tampermonkey-cloud.cjs
-          if ($LASTEXITCODE -ne 0) { throw 'Official Tampermonkey experimental verification incomplete; TEST-017/018 still blocked' }
-) { throw 'Verified CRX3 public key output is invalid' }
-          $keyBytes = [Convert]::FromBase64String($verifiedPublicKey)
+          if ([string]::IsNullOrWhiteSpace($verifiedPublicKey)) { throw 'Verified CRX3 public key output is empty' }
+          try { $keyBytes = [Convert]::FromBase64String($verifiedPublicKey) } catch { throw 'Verified CRX3 public key output is invalid base64' }
           if ([Convert]::ToBase64String($keyBytes) -cne $verifiedPublicKey) { throw 'Verified CRX3 public key output is not canonical base64' }
           # Chrome uses manifest.key to preserve the public-key-derived ID for an unpacked development load.
           # This is a disposable test-only runtime binding, NOT proof of Chrome Web Store installation.
