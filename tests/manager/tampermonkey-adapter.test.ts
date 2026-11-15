@@ -468,10 +468,14 @@ test('TASK-007/TEST-017/026: renderer manager hint cannot accept a replaced owne
  const end=source.indexOf("ipcMain.handle('browser:open-tampermonkey-store'",start);
  assert.ok(start>=0&&end>start,'manager hint must keep its native IPC boundary');
  const handler=source.slice(start,end);
- const inspect=handler.indexOf('inspectApprovedTampermonkeyRuntime(owned,true)');
- const finalReceipt=handler.indexOf("return {ok:true,status:status.status");
+ const inspect=handler.indexOf('inspectApprovedTampermonkeyInstallation(owned,true)');
+ const finalReceipt=handler.indexOf('return {...status,...unverified};');
  assert.ok(inspect>=0&&finalReceipt>inspect,
-   'only an inspected manager hint may reach the UI');
+   'only inspected read-only manager metadata may reach the UI');
+ assert.ok(handler.includes('chrome://extensions'),
+   'native consent must identify the Chrome extensions management page');
+ assert.ok(handler.includes('不会自动安装、启用或修改权限'),
+   'manager inspection must not imply installation or permission changes');
  // An independently authorized browser can be stopped/replaced while native
  // CDP lookup is pending. A stale success must not repaint the new session.
  const fence=handler.indexOf('readOwnedBrowser()!==owned',inspect);
