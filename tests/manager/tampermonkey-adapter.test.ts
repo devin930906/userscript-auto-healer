@@ -441,3 +441,23 @@ test('TASK-007/TEST-017/026: CDP receipt enforces UTF-8 byte budget, not UTF-16 
  assert.equal(read(oversized),null,
    'a multibyte page title cannot bypass the CDP 256 KiB raw message limit');
 });
+
+
+test('TASK-007/TEST-017/026: renderer manager hint cannot accept a replaced owned Chrome session',()=>{
+ const source=readFileSync(join(process.cwd(),'app','main','index.ts'),'utf8');
+ const start=source.indexOf("ipcMain.handle('browser:tampermonkey-hint'");
+ const end=source.indexOf("ipcMain.handle('browser:open-tampermonkey-store'",start);
+ assert.ok(start>=0&&end>start,'manager hint must keep its native IPC boundary');
+ const handler=source.slice(start,end);
+ const inspect=handler.indexOf('inspectApprovedTampermonkeyRuntime(owned,true)');
+ const finalReceipt=handler.indexOf("return {ok:true,status:status.status");
+ assert.ok(inspect>=0&&finalReceipt>inspect,
+   'only an inspected manager hint may reach the UI');
+ // An independently authorized browser can be stopped/replaced while native
+ // CDP lookup is pending. A stale success must not repaint the new session.
+ const fence=handler.indexOf('readOwnedBrowser()!==owned',inspect);
+ assert.ok(fence>inspect&&fence<finalReceipt,
+   'recheck the exact currently selected app-owned Chrome after awaited inspection');
+ assert.ok(handler.includes('readExistingBrowser()!==attached'),
+   'the already-connected Chrome path retains the same stale-session fence');
+});
