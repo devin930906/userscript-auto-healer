@@ -540,12 +540,17 @@ async function main(){
   // Do not add launch retries or extend test deadlines to conceal failures.
   const managerWorker=context.serviceWorkers().find(x=>
     x.url().startsWith('chrome-extension://'+id+'/'));
-  // Unpacked extension IDs can differ from signed Chrome Web Store IDs.
-  // Explicitly record this distinction; vendor download alone is not a
-  // cryptographic attestation of a store-signed installation.
+  // The disposable unpacked manifest carries the public key extracted only after
+  // CRX3 signature verification, so Chrome's runtime ID must match that key-derived ID.
+  // This binds this isolated runtime to the signed package key; it does NOT attest
+  // Chrome Web Store publication or installation provenance.
+  assert.equal(id,EXPECTED_ID,
+    'Unpacked Tampermonkey runtime ID must match the verified CRX3 signing-key ID');
   console.log('ISOLATED_TAMPERMONKEY_RUNTIME '+JSON.stringify({
    managerName:manager.name,version:manifest.version,manifest:manifest.manifest_version,
-   runtimeId:id,officialStoreIdMatch:id===EXPECTED_ID,
+   runtimeId:id,signedPackageKeyId:EXPECTED_ID,
+   runtimeIdMatchesSignedPackageKeyId:id===EXPECTED_ID,
+   storeAuthenticityVerified:false,
    serviceWorkerObserved:Boolean(managerWorker),
    chromeVersion:context.browser()?.version()
   }));

@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const {generateKeyPairSync,createHash,sign,constants}=require('node:crypto');
 const {verifyCrx3PackageIntegrity}=require('./crx3-package-integrity.cjs');
 const {spawnSync}=require('node:child_process');
-const {mkdtempSync,writeFileSync,existsSync,rmSync}=require('node:fs');
+const {readFileSync,mkdtempSync,writeFileSync,existsSync,rmSync}=require('node:fs');
 const {tmpdir}=require('node:os');
 const {join}=require('node:path');
 function varint(n){

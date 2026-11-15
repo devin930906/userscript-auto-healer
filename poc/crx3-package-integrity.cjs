@@ -11,7 +11,7 @@
  * this parser; it never sees the user's Chrome profile or scripts.
  */
 const {createHash,createPublicKey,verify,constants}=require('node:crypto');
-const {readFileSync,writeFileSync}=require('node:fs');
+const {readFileSync,writeFileSync,rmSync}=require('node:fs');
 const {resolve}=require('node:path');
 const MAX_CRX_BYTES=15_000_000;
 const MAX_HEADER_BYTES=1_048_576;
@@ -96,7 +96,7 @@ function verifyCrx3PackageIntegrity(input,expectedId){
  // Chromium's actual CRX3 verifier uses RSA_PKCS1_SHA256 (even
  // though older crx3.proto commentary calls these proofs PSS), and verifies
  // EVERY listed signature before accepting the full archive.
- let algorithm=null,matchedKeyId=0,parsedKeys=0,validSignatures=0;
+ let algorithm=null,matchedKeyId=0,parsedKeys=0,validSignatures=0,publicKeyBytes=null;
  const proofs=header.filter(x=>x.number===2||x.number===3);
  if(proofs.length===0||proofs.length>32)fail();
  for(const proof of proofs){
@@ -107,7 +107,11 @@ function verifyCrx3PackageIntegrity(input,expectedId){
      signature.length<32||signature.length>8192)fail();
   const keyMatchesId=createHash('sha256').update(keyBytes).digest()
     .subarray(0,16).equals(idBytes);
-  if(keyMatchesId)matchedKeyId++;
+  if(keyMatchesId){
+   matchedKeyId++;
+   if(publicKeyBytes&&!publicKeyBytes.equals(keyBytes))fail();
+   publicKeyBytes=Buffer.from(keyBytes);
+  }
   try{
    const key=createPublicKey({key:keyBytes,format:'der',type:'spki'});
    parsedKeys++;
@@ -131,13 +135,15 @@ function verifyCrx3PackageIntegrity(input,expectedId){
      ' parsedKeys='+parsedKeys+' validSignatures='+validSignatures);
   }
  }
- if(!algorithm||validSignatures!==proofs.length)fail();
- return Object.freeze({extensionId:id,algorithm,zip:Buffer.from(zip)});
+ if(!algorithm||!publicKeyBytes||matchedKeyId<1||validSignatures!==proofs.length)fail();
+ return Object.freeze({extensionId:id,algorithm,
+  publicKeyBase64:publicKeyBytes.toString('base64'),zip:Buffer.from(zip)});
 }
 if(require.main===module){
  try{
-  if(process.argv.length!==4)fail();
-  const [crxPath,zipPath]=process.argv.slice(2);
+  if(process.argv.length!==5)fail();
+  const [crxPath,zipPath,keyPath]=process.argv.slice(2);
+  if(resolve(zipPath)===resolve(keyPath))fail();
   // This CLI is ONLY the official Tampermonkey experiment. A CRX3 signed
   // with any unrelated attacker's key is still a syntactically valid CRX3;
   // explicitly pin the approved Tampermonkey signing-key-derived extension
@@ -149,10 +155,18 @@ if(require.main===module){
     readFileSync(resolve(crxPath)),expectedTampermonkeyKeyId);
   // Exclusive creation prevents an invalid package from overwriting an
   // existing extracted archive or silently continuing with stale bytes.
-  writeFileSync(resolve(zipPath),verified.zip,{flag:'wx'});
+  const resolvedZip=resolve(zipPath),resolvedKey=resolve(keyPath);
+  writeFileSync(resolvedZip,verified.zip,{flag:'wx'});
+  try{
+   writeFileSync(resolvedKey,verified.publicKeyBase64,{flag:'wx'});
+  }catch(error){
+   // Remove only the ZIP this invocation created; never touch a pre-existing key path.
+   rmSync(resolvedZip,{force:true});
+   throw error;
+  }
   process.stdout.write('CRX3 signed ZIP verified; algorithm='+verified.algorithm+
     '; developerKeyId='+verified.extensionId+
-    '; storeAuthenticityVerified=false\n');
+    '; verifiedPublicKeyOutput=true; storeAuthenticityVerified=false\n');
  }catch(e){
   const reason=String(e?.message||'UNKNOWN').replace(/[^a-zA-Z0-9 _=-]/g,'').slice(0,180);
   process.stderr.write('CRX3 signature/bounds validation failed; package NOT loaded: '+reason+'\n');
