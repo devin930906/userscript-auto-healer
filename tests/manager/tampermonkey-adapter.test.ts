@@ -467,3 +467,26 @@ test('TASK-007/TEST-017/026: renderer manager hint cannot accept a replaced owne
  assert.ok(handler.includes('readExistingBrowser()!==attached'),
    'the already-connected Chrome path retains the same stale-session fence');
 });
+
+
+test('TASK-007/TEST-017/026: ambiguous duplicate JSON keys cannot mint CDP manager hints',()=>{
+ const {readTampermonkeyCdpTargetReceipt:read}=
+   require('../../src/manager/tampermonkey-adapter') as typeof import('../../src/manager/tampermonkey-adapter');
+ const targets=JSON.stringify([worker]);
+ const valid='{"id":1,"result":{"targetInfos":'+targets+'}}';
+ assert.deepEqual(read(valid),[worker]);
+ const aliases=[
+   '{"id":1,"id":1,"result":{"targetInfos":'+targets+'}}',
+   '{"id":1,"result":{"targetInfos":'+targets+'},"result":{"targetInfos":'+targets+'}}',
+   '{"id":1,"result":{"targetInfos":'+targets+',"targetInfos":'+targets+'}}',
+   '{"id":1,"result":{"targetInfos":[{"targetId":"'+id+
+      '","type":"service_worker","url":"https://untrusted.example/",'+
+      '"url":"'+worker.url+'"}]}}',
+   // Escaped property names decode to the same key even though raw bytes differ.
+   '{"id":1,"result":{"targetInfos":'+targets+',"target\\u0049nfos":'+targets+'}}'
+ ];
+ for(const raw of aliases){
+   assert.equal(read(raw),null,
+     'duplicate JSON object keys are ambiguous CDP evidence, never a presence hint');
+ }
+});

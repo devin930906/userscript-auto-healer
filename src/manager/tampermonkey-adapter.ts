@@ -105,6 +105,43 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     gmApiVerified:false,businessVerified:false};
  }catch{return invalidTargets();}
 }
+/** JSON.parse accepts duplicate object keys and silently keeps the last one.
+ * A CDP target listing with two meanings for the same property cannot be
+ * trusted even as a limited runtime hint. This bounded scan recognizes JSON
+ * property names at every nesting depth, including \\u escape aliases.
+ * JSON.parse has already validated the full syntax before this scan runs.
+ * String contents (including commas, braces and quoted text) are skipped.
+ */
+function hasDuplicateJsonObjectKeys(raw:string):boolean{
+ const frames:Array<{kind:'object'|'array';keys?:Set<string>;nextKey?:boolean}>=[];
+ for(let i=0;i<raw.length;i++){
+  const char=raw[i];
+  if(char==='"'){
+   const start=i;
+   for(i++;i<raw.length;i++){
+    if(raw[i]==='\\'){i++;continue;}
+    if(raw[i]==='"')break;
+   }
+   const top=frames[frames.length-1];
+   if(top?.kind==='object'&&top.nextKey===true){
+    const key=JSON.parse(raw.slice(start,i+1)) as string;
+    if(top.keys!.has(key))return true;
+    top.keys!.add(key);
+    top.nextKey=false;
+   }
+   continue;
+  }
+  if(char==='{')frames.push({kind:'object',keys:new Set(),nextKey:true});
+  else if(char==='[')frames.push({kind:'array'});
+  else if(char==='}'||char===']')frames.pop();
+  else if(char===','){
+   const top=frames[frames.length-1];
+   if(top?.kind==='object')top.nextKey=true;
+  }
+ }
+ return false;
+}
+
 /** Content-blind Target.getTargets decoder. Only a matching, error-free
  * CDP success message with a native JSON array of target metadata may reach
  * the runtime hint parser. Any present error field (even false, 0, null or
@@ -119,6 +156,7 @@ export function readTampermonkeyCdpTargetReceipt(raw:unknown):unknown|null|undef
     Buffer.byteLength(raw,'utf8')>256*1024)return null;
  try{
   const parsed:unknown=JSON.parse(raw);
+  if(hasDuplicateJsonObjectKeys(raw))return null;
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return null;
   const reply=parsed as {id?:unknown;error?:unknown;result?:unknown};
   if(reply.id!==1)return undefined;
