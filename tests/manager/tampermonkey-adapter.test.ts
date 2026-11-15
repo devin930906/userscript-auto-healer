@@ -411,10 +411,16 @@ test('TASK-007/TEST-017/026: CDP target hints reject hidden or accessor-only ext
  const withHidden=Object.defineProperty({...worker},Symbol('secret'),{
   enumerable:false,get(){getterCalls++;throw Error('PRIVATE_HIDDEN_METADATA');}
  });
+ const withHiddenData=Object.defineProperty({...worker},'opaqueMetadata',{
+  enumerable:false,value:'UNTRUSTED_CDP_PAYLOAD'
+ });
+ const withHiddenRequired=Object.defineProperty({...worker},'url',{
+  enumerable:false,value:worker.url
+ });
  const withExtraSymbol=Object.defineProperty({...worker},Symbol('private'),{
   enumerable:false,value:'PRIVATE_EXTENSION_METADATA'
  });
- for(const item of [withAccessor,withHidden,withExtraSymbol]){
+ for(const item of [withAccessor,withHidden,withHiddenData,withHiddenRequired,withExtraSymbol]){
   assert.deepEqual(inspectTampermonkeyTargetHints([item]),
    {ok:false,code:'INVALID_CDP_RESPONSE'},
    'unexpected non-JSON property descriptors must not produce a manager hint');
