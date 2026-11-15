@@ -253,3 +253,39 @@ test('TASK-010 / TEST-018/021: future-dated or same-instant receipts cannot auth
  assert.equal(sameTime.status,'BLOCKED');
  assert.equal(sameTime.reason,'EVIDENCE_TEMPORAL_INVERSION');
 });
+
+
+test('TASK-010 / TEST-018/021/026: contradictory audit authority and backup verification flags fail closed', () => {
+  for (const [field,value] of [
+    ['automaticPatchAllowed',true],
+    ['tampermonkeyVerified',true],
+    ['businessRecoveredVerified',true]
+  ] as const) {
+    const audit = {...validAudit,[field]:value};
+    const result = evaluateBusinessAcceptanceGate(
+      audit,validBackup,validOriginalEvidence,validCandidateEvidence,validOptions
+    );
+    assert.equal(result.status,'BLOCKED',field);
+    assert.equal(result.reason,'AUDIT_NOT_REVIEWABLE',field);
+    assert.equal(result.automaticPatchAllowed,false,field);
+    assert.equal(result.businessVerified,false,field);
+  }
+  for (const [field,value] of [
+    ['automaticPatchAllowed',true],
+    ['automaticRollbackAllowed',true],
+    ['tampermonkeyVerified',true],
+    ['businessRecoveredVerified',true],
+    ['backupByteLength',0],
+    ['backupByteLength',-1],
+    ['backupByteLength',Number.NaN]
+  ] as const) {
+    const backup = {...validBackup,[field]:value};
+    const result = evaluateBusinessAcceptanceGate(
+      validAudit,backup,validOriginalEvidence,validCandidateEvidence,validOptions
+    );
+    assert.equal(result.status,'BLOCKED',field);
+    assert.equal(result.reason,'BACKUP_NOT_VERIFIED',field);
+    assert.equal(result.automaticPatchAllowed,false,field);
+    assert.equal(result.businessVerified,false,field);
+  }
+});
