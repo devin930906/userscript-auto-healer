@@ -2037,3 +2037,28 @@ test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diag
  assert.doesNotMatch(manualOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
  assert.match(manualOpen,/开发与验收工具：手动 GM 诊断（不属于普通修复流程）/);
 });
+
+
+test('TASK-017/TEST-002/022: manual scenario registration stays optional advanced diagnostics',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const section=html.match(/<section id="scenario-workspace"[\\s\\S]*?<\\/section>/)?.[0];
+ assert.ok(section,'the scenario workspace remains available');
+ if(!section)return;
+ const disclosure=section.match(/<details class="advanced-tools" data-advanced-workspace="manual-scenario">[\\s\\S]*?<\\/details>/)?.[0];
+ assert.ok(disclosure,'manual scenario registration must be behind an advanced disclosure');
+ if(!disclosure)return;
+ const summary=disclosure.match(/<summary>([\\s\\S]*?)<\\/summary>/)?.[1]??'';
+ assert.match(summary,/高级诊断：手动登记只读场景（可选，不属于普通流程）/);
+ for(const id of ['scenario-url','scenario-selector','scenario-replacement','scenario-register']){
+  assert.ok(disclosure.includes('id="'+id+'"'),'the existing manual control must be preserved: '+id);
+ }
+ assert.doesNotMatch(disclosure.match(/^<details[^>]*>/)?.[0]??'',/\\bopen\\b/,
+  'manual scenario controls must be collapsed by default');
+ const ordinary=section.slice(0,section.indexOf(disclosure));
+ assert.doesNotMatch(ordinary,/id="scenario-(?:url|selector|replacement)"/,
+  'ordinary scenario workspace must not require manual URL or selector entry');
+ assert.match(ordinary,/普通批量流程不要求逐脚本填写网址或 CSS 选择器/);
+ assert.match(ordinary,/UNKNOWN \\/ 受阻/);
+ assert.match(section,/id="scenario-status"/);
+ assert.match(section,/id="scenario-list"/);
+});
