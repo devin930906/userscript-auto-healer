@@ -2058,7 +2058,7 @@ test('TASK-017/TEST-002/022: manual scenario registration stays optional advance
  for(const id of ['scenario-url','scenario-selector','scenario-replacement','scenario-register']){
   assert.ok(disclosure.includes('id="'+id+'"'),'the existing manual control must be preserved: '+id);
  }
- assert.doesNotMatch(opening, /\\bopen\\b/,
+ assert.equal(opening,'<details class="advanced-tools" data-advanced-workspace="manual-scenario">',
   'manual scenario controls must be collapsed by default');
  const ordinary=section.slice(0,disclosureStart);
  assert.doesNotMatch(ordinary,/id="scenario-(?:url|selector|replacement)"/,
