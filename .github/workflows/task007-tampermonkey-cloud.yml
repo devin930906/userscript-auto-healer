@@ -62,7 +62,7 @@ jobs:
           $crx = Join-Path $base 'tampermonkey_stable.crx'
           try {
             Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 60
-            Write-Host 'CRX origin: Tampermonkey vendor official package'
+            Write-Host 'CRX origin: Tampermonkey vendor-hosted signed package'
           } catch {
             # Google/Chromium documents clients2.google.com as the official
             # Chrome Web Store update endpoint. Do not use third-party mirrors,
@@ -76,7 +76,8 @@ jobs:
           node --test ./poc/crx3-package-integrity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature parser regressions failed' }
           $verifiedZip = Join-Path $base 'verified.zip'
-          node ./poc/crx3-package-integrity.cjs $crx $verifiedZip
+          $verifiedKey = Join-Path $base 'verified-public-key.b64'
+          node ./poc/crx3-package-integrity.cjs $crx $verifiedZip $verifiedKey
           if ($LASTEXITCODE -ne 0) { throw 'Source CRX3 signature/key binding verification failed' }
           Write-Host ("Verified source CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
       - name: Upload isolated signed source for same-run manager matrix
@@ -124,6 +125,7 @@ jobs:
           New-Item -ItemType Directory -Path $base | Out-Null
           $crx = Join-Path $base 'tampermonkey_stable.crx'
           $zip = Join-Path $base 'tampermonkey.zip'
+          $verifiedKey = Join-Path $base 'verified-public-key.b64'
           $extension = Join-Path $base 'extension'
           # Artifact transport does not grant extension authenticity: copy only
           # the fixed-name CRX from our upstream job and revalidate its
@@ -135,7 +137,7 @@ jobs:
           # This still cannot attest Chrome Web Store publication/signature.
           node --test ./poc/crx3-package-integrity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature verifier regressions failed' }
-          node ./poc/crx3-package-integrity.cjs $crx $zip
+          node ./poc/crx3-package-integrity.cjs $crx $zip $verifiedKey
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signing key or ZIP integrity not verified' }
           $archive = [IO.Compression.ZipFile]::OpenRead($zip)
           try {
@@ -156,7 +158,23 @@ jobs:
           if (!(Test-Path -LiteralPath $manifestFile)) { throw 'Missing root manifest' }
           $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
           if ($manifest.manifest_version -ne 3) { throw 'Expected official MV3 package' }
-          Write-Host ("Official-hosted CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
+          $verifiedPublicKey = [IO.File]::ReadAllText($verifiedKey)
+          if ([string]::IsNullOrWhiteSpace($verifiedPublicKey)) { throw 'Verified CRX3 public key output is empty' }
+          try { $keyBytes = [Convert]::FromBase64String($verifiedPublicKey) } catch { throw 'Verified CRX3 public key output is invalid base64' }
+          if ([Convert]::ToBase64String($keyBytes) -cne $verifiedPublicKey) { throw 'Verified CRX3 public key output is not canonical base64' }
+          # Chrome uses manifest.key to preserve the public-key-derived ID for an unpacked development load.
+          # This is a disposable test-only runtime binding, NOT proof of Chrome Web Store installation.
+          if ($manifest.PSObject.Properties.Name -contains 'key') {
+            if ($manifest.key -cne $verifiedPublicKey) { throw 'Package manifest key conflicts with verified CRX3 signing key' }
+          } else {
+            $manifest | Add-Member -MemberType NoteProperty -Name key -Value $verifiedPublicKey
+          }
+          $manifestJson = $manifest | ConvertTo-Json -Depth 100
+          [IO.File]::WriteAllText($manifestFile, $manifestJson, [Text.UTF8Encoding]::new($false))
+          $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+          if ($manifest.key -cne $verifiedPublicKey) { throw 'Disposable manifest key pin did not persist' }
+          Write-Host 'Disposable manifest.key pinned to the signature-verified CRX3 public key; this is not store installation attestation'
+          Write-Host ("Downloaded CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
           Write-Host ("MV3 manifest version: " + $manifest.version)
           "UAH_TM_EXTENSION_DIR=$extension" >> $env:GITHUB_ENV
           "UAH_TM_PROFILE_DIR=$(Join-Path $base 'profile')" >> $env:GITHUB_ENV
