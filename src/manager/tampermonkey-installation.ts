@@ -40,7 +40,8 @@ export type ManagerInstallationResult =
     readonly businessVerified:false}
  | {readonly ok:false;readonly code:'CDP_FAILED';readonly stage?:'connect'|'create-target'|'attach-target'|'list-frame'|'manager-card'|'navigate-details'|'details-frame'|'permission'|'cleanup-close'|'cleanup-list'}
  | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|'INVALID_OPTIONS'|
-    'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'INSPECTION_UNAVAILABLE'|'INVALID_CDP_RESPONSE'};
+    'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'INVALID_CDP_RESPONSE'}
+ | {readonly ok:false;readonly code:'INSPECTION_UNAVAILABLE';readonly stage?:'list-frame'|'manager-card'|'details-frame'};
 
 const EXTENSIONS_LIST_URL='chrome://extensions/';
 const EXTENSIONS_DETAILS_URL='chrome://extensions/?id='+TAMPERMONKEY_EXTENSION_ID;
@@ -398,7 +399,7 @@ export async function inspectApprovedTampermonkeyInstallation(
       failureStage='list-frame';
       const listFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
       if(!isExtensionsPageUrl(frameUrl(listFrame)||'',false))
-       result={ok:false,code:'INSPECTION_UNAVAILABLE'};
+       result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'list-frame'};
       else{
        let card:ManagerInstallationResult={ok:false,code:'INSPECTION_UNAVAILABLE'};
        for(let attempt=0;attempt<4;attempt++){
@@ -411,7 +412,7 @@ export async function inspectApprovedTampermonkeyInstallation(
         if(card.ok||card.code!=='INVALID_CDP_RESPONSE')break;
         await waitBriefly(250);
        }
-       if(!card.ok)result={ok:false,code:'INSPECTION_UNAVAILABLE'};
+       if(!card.ok)result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
        else if(card.status==='NOT_INSTALLED')result=card;
        else if(signal?.aborted)result={ok:false,code:'CANCELLED'};
        else{
@@ -424,7 +425,7 @@ export async function inspectApprovedTampermonkeyInstallation(
          await waitBriefly(1200);
          failureStage='details-frame';
          const detailsFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
-         if(!isExtensionsPageUrl(frameUrl(detailsFrame)||'',true))result=card;
+         if(!isExtensionsPageUrl(frameUrl(detailsFrame)||'',true))result={...card,allowUserScripts:'UNKNOWN',permissionVerified:false};
          else{
           failureStage='permission';
           const permissionReceipt=await sendCdpCommand(socket,commandId++,'Runtime.evaluate',{
