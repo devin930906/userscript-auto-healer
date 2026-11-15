@@ -58,7 +58,7 @@
         </div>
         <label for="chrome-port">本机 CDP 端口（默认 9896）：</label>
         <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9896">
-        <p id="chrome-profile-safety">使用已有专用 Profile 前，请先关闭正在使用该目录的 Chrome。启动前会显示系统授权确认；本程序不会接管正在运行的 Chrome，也不会使用日常 Chrome Profile。</p>
+        <p id="chrome-profile-safety">使用已有专用 Profile 前，请先关闭正在使用该目录的 Chrome。启动前会显示系统授权确认；本程序不会接管正在运行的 Chrome，也不允许使用日常 Chrome Profile。</p>
         <div class="actions">
           <button id="launch-chrome" type="button" class="primary" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
           <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
