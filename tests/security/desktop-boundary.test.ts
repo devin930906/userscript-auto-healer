@@ -2070,3 +2070,14 @@ test('TASK-017/TEST-002/022: manual scenario registration stays optional advance
  assert.ok(section.includes('id="scenario-status"'));
  assert.ok(section.includes('id="scenario-list"'));
 });
+
+test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not optional manual scenarios',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const workspace=html.match(/<section id="import-workspace"[\\s\\S]*?<\\/section>/)?.[0];
+ assert.ok(workspace,'the script library workspace must remain present');
+ if(!workspace)return;
+ assert.match(workspace,/<button[^>]*data-open-workspace="browser-workspace"[^>]*>前往浏览器环境<\\/button>/,
+  'the ordinary next step after import must lead to controlled Chrome setup');
+ assert.doesNotMatch(workspace,/data-open-workspace="scenario-workspace"/,
+  'optional manual scenario registration must not be presented as the ordinary next step');
+});
