@@ -2014,7 +2014,7 @@ test('TASK-007/017 TEST-017/022: stale Tampermonkey inspection cannot revive a s
  */
 test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diagnostics stay advanced',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
- const browser=html.match(/<section id="browser-workspace"[\\s\\S]*?<\\/section>/)?.[0];
+ const browser=html.match(/<section id="browser-workspace"[\s\S]*?<\/section>/)?.[0];
  assert.ok(browser,'the browser workspace must remain present');
  if(!browser)return;
  const primary=browser.indexOf('<h3>受控 Chrome</h3>');
