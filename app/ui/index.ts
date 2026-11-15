@@ -1239,9 +1239,11 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
    const userScripts=result.allowUserScripts==='ENABLED'?'已开启':
      result.allowUserScripts==='DISABLED'?'未开启':
      result.allowUserScripts==='NOT_APPLICABLE'?'不适用':'无法确认';
+   const nextStep=result.enabled==='DISABLED'?'请在 chrome://extensions 手动启用扩展。 ':
+     result.allowUserScripts==='DISABLED'?'请在 Tampermonkey 详情页手动开启 Allow User Scripts。 ':'';
    setBrowserStatus('独立 Chrome 已检测到 Tampermonkey，版本 '+(result.version??'未知')+
-     '；扩展状态：'+enabled+'；Allow User Scripts：'+userScripts+
-     '。扩展来源、脚本安装、注入、GM API 与业务恢复仍未验证。');
+     '；扩展状态：'+enabled+'；Allow User Scripts：'+userScripts+'。'+nextStep+
+     '此检查只证明管理页面显示的安装元数据，不证明扩展来源、脚本安装/注入、GM API 或业务恢复。');
   }
   else if(result.ok&&result.status==='NOT_INSTALLED')
    setBrowserStatus('独立 Chrome 的扩展管理页未找到官方 Tampermonkey ID。可点击「打开官方安装页」，在 Chrome 原生确认后安装，再重新检查；程序没有自动安装或修改权限。');
