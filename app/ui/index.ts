@@ -1246,6 +1246,13 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
     browserConnected=false;
     setBrowserStatus('独立 Chrome 已退出，无法执行只读探测。');
    }
+  }else if(result.code==='RUNTIME_NOT_OBSERVED'){
+   // An idle extension background may have no CDP target. Absence is
+   // UNKNOWN, never evidence that Tampermonkey is uninstalled or disabled.
+   // Only app-owned Chrome may use the existing native-consented Store action.
+   setBrowserStatus(browserConnected
+     ? '独立 Chrome 未观察到 Tampermonkey 活动后台目标；无法判断是否已安装，后台可能休眠。请先在 Chrome 扩展管理中核对；若尚未安装，可点击「打开官方安装页」，安装与权限须在 Chrome 另行确认，再重新只读探测。此结果不证明 GM 或脚本业务执行。'
+     : '已连接的 Chrome 未观察到 Tampermonkey 活动后台目标；无法判断是否已安装，后台可能休眠。请先在该 Chrome 扩展管理中核对；如需本程序的官方安装页，请另行启动由本程序管理的独立 Chrome 并确认。此结果不证明 GM 或脚本业务执行。');
   }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
  }catch{
   // A late rejected IPC must not fall into browserAction's generic catch,
