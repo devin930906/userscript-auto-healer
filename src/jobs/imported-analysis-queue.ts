@@ -24,9 +24,11 @@ const unavailable=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
  'ISOLATED_ANALYSIS_FAILED')=>unavailableImportPreview(status,'NOT_CHECKED');
 
 type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
-// Invoke the native TypedArray byte-length getter, not a subclass override.
+// Invoke native TypedArray internal-slot getters, not caller-owned accessors.
 const NATIVE_TYPED_ARRAY_BYTE_LENGTH=Object.getOwnPropertyDescriptor(
  Object.getPrototypeOf(Uint8Array.prototype),'byteLength')?.get;
+const NATIVE_TYPED_ARRAY_BUFFER=Object.getOwnPropertyDescriptor(
+ Object.getPrototypeOf(Uint8Array.prototype),'buffer')?.get;
 
 /** A cancellation handle is a privileged control surface, not an arbitrary
  * object with an aborted property. Reject proxies, accessors and shadowed
@@ -56,7 +58,7 @@ export function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundSc
   // arbitrary JS even when the eventual hash check refuses its payload.
   if(nodeTypes.isProxy(scripts)||!Array.isArray(scripts)||
      Object.getPrototypeOf(scripts)!==Array.prototype||
-     !NATIVE_TYPED_ARRAY_BYTE_LENGTH)return null;
+     !NATIVE_TYPED_ARRAY_BYTE_LENGTH||!NATIVE_TYPED_ARRAY_BUFFER)return null;
   const slots=Object.getOwnPropertyDescriptors(scripts);
   if(Reflect.ownKeys(slots).length!==scripts.length+1)return null;
   const seen=new Set<string>();
@@ -78,6 +80,11 @@ export function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundSc
    const claimedByteLength:unknown=fields.byteLength.value;
    if(!original||typeof original!=='object'||nodeTypes.isProxy(original)||
       !(original instanceof Uint8Array))return null;
+   // A SharedArrayBuffer may be mutated simultaneously from another thread.
+   // Enforce the same non-shared source boundary as isolated-batch-preview.
+   // Read the native internal slot: never invoke a caller-owned .buffer getter.
+   if(nodeTypes.isSharedArrayBuffer(NATIVE_TYPED_ARRAY_BUFFER.call(original)))
+     return null;
    const actualByteLength=NATIVE_TYPED_ARRAY_BYTE_LENGTH.call(original) as number;
    if(!Number.isSafeInteger(claimedByteLength)||
       claimedByteLength!==actualByteLength||
