@@ -24,10 +24,16 @@ export type BusinessAcceptanceBlockReason =
   | 'ORIGINAL_NOT_BROKEN'
   | 'CANDIDATE_NOT_RECOVERED'
   | 'EVIDENCE_TEMPORAL_INVERSION'
+  | 'EVIDENCE_EXPIRED'
+  | 'EVIDENCE_FUTURE_DATED'
   | 'UNTRUSTED_EVIDENCE_INPUT';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+// A short-lived read-only receipt is not reusable authorization after a
+// browser/profile or userscript changes. Time bounds are necessary, not proof
+// of a trustworthy Tampermonkey evidence producer.
+const MAX_EVIDENCE_AGE_MS = 30 * 60_000;
 
 export interface VerifiedOriginalFailureEvidence {
   readonly status: 'REAL_MANAGER_ORIGINAL_EVALUATION';
@@ -202,7 +208,19 @@ export function evaluateBusinessAcceptanceGate(
 
     const origTime = Date.parse(orig.observedAt);
     const candTime = Date.parse(cand.observedAt);
-    if (!Number.isFinite(origTime) || !Number.isFinite(candTime) || candTime < origTime) {
+    if (!Number.isFinite(origTime) || !Number.isFinite(candTime)) {
+      return blocked('UNTRUSTED_EVIDENCE_INPUT');
+    }
+    const now = Date.now();
+    if (origTime > now || candTime > now) {
+      return blocked('EVIDENCE_FUTURE_DATED');
+    }
+    if (now - origTime > MAX_EVIDENCE_AGE_MS ||
+        now - candTime > MAX_EVIDENCE_AGE_MS) {
+      return blocked('EVIDENCE_EXPIRED');
+    }
+    // The candidate must be observed only AFTER the original is shown broken.
+    if (candTime <= origTime) {
       return blocked('EVIDENCE_TEMPORAL_INVERSION');
     }
 

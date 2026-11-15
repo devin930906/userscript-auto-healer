@@ -289,7 +289,7 @@ test('TASK-018/TEST-018: business acceptance gate fails closed on unconsented or
     gmVerified: true as const,
     businessOutcome: 'missing-target' as const,
     actionConfirmed: false as const,
-    observedAt: '2026-11-11T10:00:00Z'
+    observedAt: new Date(Date.now() - 5 * 60_000).toISOString()
   };
 
   const validCandidate = {
@@ -299,7 +299,7 @@ test('TASK-018/TEST-018: business acceptance gate fails closed on unconsented or
     gmVerified: true as const,
     businessOutcome: 'recovered' as const,
     actionConfirmed: true as const,
-    observedAt: '2026-11-11T10:05:00Z'
+    observedAt: new Date(Date.now() - 60_000).toISOString()
   };
 
   // Missing user approval must fail closed

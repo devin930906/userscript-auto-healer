@@ -6,6 +6,9 @@ import {
   type BusinessAcceptanceResult
 } from '../../src/acceptance/business-acceptance-gate';
 
+const fixtureNow = Date.now();
+const iso = (offsetMs: number): string => new Date(fixtureNow + offsetMs).toISOString();
+
 const origSha = createHash('sha256').update('original-source-code').digest('hex');
 const candSha = createHash('sha256').update('candidate-patched-source-code').digest('hex');
 
@@ -39,7 +42,7 @@ const validOriginalEvidence = {
   gmVerified: true as const,
   businessOutcome: 'missing-target' as const,
   actionConfirmed: false as const,
-  observedAt: '2026-11-11T12:00:00Z'
+  observedAt: iso(-5 * 60_000)
 };
 
 const validCandidateEvidence = {
@@ -49,7 +52,7 @@ const validCandidateEvidence = {
   gmVerified: true as const,
   businessOutcome: 'recovered' as const,
   actionConfirmed: true as const,
-  observedAt: '2026-11-11T12:05:00Z'
+  observedAt: iso(-60_000)
 };
 
 const validOptions = {
@@ -166,7 +169,7 @@ test('TASK-010 / TEST-018/021: original not broken or candidate not recovered is
 test('TASK-010 / TEST-018/021: temporal inversion in observation timestamps is blocked', () => {
   const invertedCandidate = {
     ...validCandidateEvidence,
-    observedAt: '2026-11-11T11:50:00Z' // before original observedAt (12:00:00Z)
+    observedAt: iso(-6 * 60_000) // before the original observation
   };
   const r = evaluateBusinessAcceptanceGate(
     validAudit,
@@ -219,4 +222,34 @@ test('TASK-010 / TEST-018/021/026: hostile Proxy and accessor inputs never execu
   assert.equal(r2.status, 'BLOCKED');
   assert.equal(r2.reason, 'AUDIT_NOT_REVIEWABLE');
   assert.equal(getterCount, 0, 'Getter accessor must not be evaluated during audit validation');
+});
+
+test('TASK-010 / TEST-018/021: expired original or candidate evidence cannot certify business recovery', () => {
+ for (const [original,candidate] of [
+   [{...validOriginalEvidence, observedAt:iso(-60 * 60_000)}, validCandidateEvidence],
+   [validOriginalEvidence, {...validCandidateEvidence, observedAt:iso(-60 * 60_000)}]
+ ] as const) {
+   const result = evaluateBusinessAcceptanceGate(
+     validAudit, validBackup, original, candidate, validOptions
+   );
+   assert.equal(result.status, 'BLOCKED');
+   assert.equal(result.reason, 'EVIDENCE_EXPIRED');
+   assert.equal(result.businessVerified, false);
+   assert.equal(result.automaticPatchAllowed, false);
+ }
+});
+
+test('TASK-010 / TEST-018/021: future-dated or same-instant receipts cannot authorize recovery', () => {
+ const future = {...validCandidateEvidence, observedAt:iso(5 * 60_000)};
+ const futureResult=evaluateBusinessAcceptanceGate(
+   validAudit,validBackup,validOriginalEvidence,future,validOptions
+ );
+ assert.equal(futureResult.status,'BLOCKED');
+ assert.equal(futureResult.reason,'EVIDENCE_FUTURE_DATED');
+ const simultaneous={...validCandidateEvidence,observedAt:validOriginalEvidence.observedAt};
+ const sameTime=evaluateBusinessAcceptanceGate(
+   validAudit,validBackup,validOriginalEvidence,simultaneous,validOptions
+ );
+ assert.equal(sameTime.status,'BLOCKED');
+ assert.equal(sameTime.reason,'EVIDENCE_TEMPORAL_INVERSION');
 });
