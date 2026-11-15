@@ -2033,7 +2033,7 @@ test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diag
  const manualOpen=browser.slice(manual,browser.indexOf('</details>',manual)+10);
  assert.match(existingOpen,/^<details[^>]*data-advanced-workspace="existing-chrome"/);
  assert.match(manualOpen,/^<details[^>]*data-advanced-workspace="manual-gm"/);
- assert.doesNotMatch(existingOpen.match(/^<details[^>]*>/)?.[0]??'','\\bopen\\b');
- assert.doesNotMatch(manualOpen.match(/^<details[^>]*>/)?.[0]??'','\\bopen\\b');
+ assert.doesNotMatch(existingOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
+ assert.doesNotMatch(manualOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
  assert.match(manualOpen,/开发与验收工具：手动 GM 诊断（不属于普通修复流程）/);
 });
