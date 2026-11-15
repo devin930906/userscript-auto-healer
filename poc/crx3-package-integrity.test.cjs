@@ -3,7 +3,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {generateKeyPairSync,createHash,sign,constants}=require('node:crypto');
-const {verifyCrx3PackageIntegrity}=require('./crx3-package-integrity.cjs');
+const {verifyCrx3PackageIntegrity,writeVerifiedCrx3Outputs}=require('./crx3-package-integrity.cjs');
 const {spawnSync}=require('node:child_process');
 const {readFileSync,mkdtempSync,writeFileSync,existsSync,rmSync}=require('node:fs');
 const {tmpdir}=require('node:os');
@@ -48,23 +48,25 @@ test('TEST-017: a signed CRX3 developer proof authenticates its exact ZIP and ke
   'returned ZIP must not change when caller mutates its CRX3 input');
 });
 
-test('TASK-007/TEST-017/026: verified CRX3 CLI writes the signing key for an ID-pinned unpacked runtime',()=>{
- const {bytes,publicDer}=fixture();
+test('TASK-007/TEST-017/026: verified CRX3 output helper writes the signing key for an ID-pinned unpacked runtime',()=>{
+ const {bytes,id,publicDer}=fixture();
  const root=mkdtempSync(join(tmpdir(),'uah-crx3-key-output-'));
  try{
-  const crx=join(root,'tampermonkey.crx');
   const zip=join(root,'verified.zip');
   const key=join(root,'verified-public-key.b64');
-  writeFileSync(crx,bytes);
-  const attempt=spawnSync(process.execPath,[require.resolve('./crx3-package-integrity.cjs'),crx,zip,key],{
-   encoding:'utf8',timeout:10000,windowsHide:true
-  });
-  assert.equal(attempt.status,0,attempt.stderr||attempt.stdout);
+  const checked=writeVerifiedCrx3Outputs(bytes,id,zip,key);
+  assert.equal(checked.extensionId,id);
   assert.equal(existsSync(zip),true);
   assert.equal(readFileSync(key,'utf8'),publicDer.toString('base64'));
+  const conflictZip=join(root,'must-not-remain.zip');
+  const conflictKey=join(root,'existing-key.b64');
+  writeFileSync(conflictKey,'preserve-existing-key');
+  assert.throws(()=>writeVerifiedCrx3Outputs(bytes,id,conflictZip,conflictKey));
+  assert.equal(existsSync(conflictZip),false,'failed paired output must remove only its newly created ZIP');
+  assert.equal(readFileSync(conflictKey,'utf8'),'preserve-existing-key',
+   'an existing public-key output must never be overwritten');
  }finally{rmSync(root,{recursive:true,force:true});}
 });
-
 test('TEST-017/026: content replacement and forged store identity never pass',()=>{
  const {bytes,id}=fixture();
  const forgedZip=Buffer.from(bytes);

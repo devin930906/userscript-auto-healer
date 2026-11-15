@@ -139,6 +139,20 @@ function verifyCrx3PackageIntegrity(input,expectedId){
  return Object.freeze({extensionId:id,algorithm,
   publicKeyBase64:publicKeyBytes.toString('base64'),zip:Buffer.from(zip)});
 }
+function writeVerifiedCrx3Outputs(input,expectedId,zipPath,keyPath){
+ const resolvedZip=resolve(zipPath),resolvedKey=resolve(keyPath);
+ if(resolvedZip===resolvedKey)fail();
+ const verified=verifyCrx3PackageIntegrity(input,expectedId);
+ writeFileSync(resolvedZip,verified.zip,{flag:'wx'});
+ try{
+  writeFileSync(resolvedKey,verified.publicKeyBase64,{flag:'wx'});
+ }catch(error){
+  // Remove only the ZIP this invocation created; never touch a pre-existing key path.
+  rmSync(resolvedZip,{force:true});
+  throw error;
+ }
+ return verified;
+}
 if(require.main===module){
  try{
   if(process.argv.length!==5)fail();
@@ -151,19 +165,9 @@ if(require.main===module){
   // ID aligned with TAMPERMONKEY_EXTENSION_ID in the application adapter.
   // Pinning the key does not independently attest Web Store installation.
   const expectedTampermonkeyKeyId='dhdgffkkebhmkfjojejmpbldmpobfkfo';
-  const verified=verifyCrx3PackageIntegrity(
-    readFileSync(resolve(crxPath)),expectedTampermonkeyKeyId);
-  // Exclusive creation prevents an invalid package from overwriting an
-  // existing extracted archive or silently continuing with stale bytes.
-  const resolvedZip=resolve(zipPath),resolvedKey=resolve(keyPath);
-  writeFileSync(resolvedZip,verified.zip,{flag:'wx'});
-  try{
-   writeFileSync(resolvedKey,verified.publicKeyBase64,{flag:'wx'});
-  }catch(error){
-   // Remove only the ZIP this invocation created; never touch a pre-existing key path.
-   rmSync(resolvedZip,{force:true});
-   throw error;
-  }
+  // Verify the pinned Tampermonkey developer key before creating either output.
+  const verified=writeVerifiedCrx3Outputs(
+    readFileSync(resolve(crxPath)),expectedTampermonkeyKeyId,zipPath,keyPath);
   process.stdout.write('CRX3 signed ZIP verified; algorithm='+verified.algorithm+
     '; developerKeyId='+verified.extensionId+
     '; verifiedPublicKeyOutput=true; storeAuthenticityVerified=false\n');
@@ -173,4 +177,4 @@ if(require.main===module){
   process.exitCode=1;
  }
 }
-module.exports={verifyCrx3PackageIntegrity};
+module.exports={verifyCrx3PackageIntegrity,writeVerifiedCrx3Outputs};
