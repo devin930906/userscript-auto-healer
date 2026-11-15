@@ -33,18 +33,38 @@ function fixture(){
  prefix.write('Cr24');prefix.writeUInt32LE(3,4);prefix.writeUInt32LE(header.length,8);
  let id='';
  for(const b of crxId)id+=String.fromCharCode(97+(b>>4),97+(b&15));
- return {bytes:Buffer.concat([prefix,header,zip]),zip,id};
+ return {bytes:Buffer.concat([prefix,header,zip]),zip,id,publicDer};
 }
 test('TEST-017: a signed CRX3 developer proof authenticates its exact ZIP and key-derived ID',()=>{
- const {bytes,zip,id}=fixture();
+ const {bytes,zip,id,publicDer}=fixture();
  const checked=verifyCrx3PackageIntegrity(bytes,id);
  assert.equal(checked.extensionId,id);
+ assert.equal(checked.publicKeyBase64,publicDer.toString('base64'),
+  'verified signing key must be exposed only after the key ID and signatures pass');
  assert.equal(checked.algorithm,'RSA-PKCS1-SHA256');
  assert.deepEqual(checked.zip,zip);
  bytes[bytes.length-1]^=1;
  assert.deepEqual(checked.zip,zip,
   'returned ZIP must not change when caller mutates its CRX3 input');
 });
+
+test('TASK-007/TEST-017/026: verified CRX3 CLI writes the signing key for an ID-pinned unpacked runtime',()=>{
+ const {bytes,publicDer}=fixture();
+ const root=mkdtempSync(join(tmpdir(),'uah-crx3-key-output-'));
+ try{
+  const crx=join(root,'tampermonkey.crx');
+  const zip=join(root,'verified.zip');
+  const key=join(root,'verified-public-key.b64');
+  writeFileSync(crx,bytes);
+  const attempt=spawnSync(process.execPath,[require.resolve('./crx3-package-integrity.cjs'),crx,zip,key],{
+   encoding:'utf8',timeout:10000,windowsHide:true
+  });
+  assert.equal(attempt.status,0,attempt.stderr||attempt.stdout);
+  assert.equal(existsSync(zip),true);
+  assert.equal(readFileSync(key,'utf8'),publicDer.toString('base64'));
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
 test('TEST-017/026: content replacement and forged store identity never pass',()=>{
  const {bytes,id}=fixture();
  const forgedZip=Buffer.from(bytes);
@@ -89,11 +109,13 @@ test('TASK-007/TEST-017/026: Tampermonkey CLI rejects a foreign signed CRX witho
  try{
   const crx=join(root,'foreign.crx');
   const zip=join(root,'must-not-exist.zip');
+  const key=join(root,'must-not-exist-key.b64');
   writeFileSync(crx,bytes);
-  const attempt=spawnSync(process.execPath,[require.resolve('./crx3-package-integrity.cjs'),crx,zip],{
+  const attempt=spawnSync(process.execPath,[require.resolve('./crx3-package-integrity.cjs'),crx,zip,key],{
    encoding:'utf8',timeout:10000,windowsHide:true
   });
   assert.equal(attempt.status,1,'foreign developer-signed CRX must not load');
   assert.equal(existsSync(zip),false,'foreign package must not create a ZIP');
+  assert.equal(existsSync(key),false,'foreign package must not publish a signing key');
  }finally{rmSync(root,{recursive:true,force:true});}
 });
