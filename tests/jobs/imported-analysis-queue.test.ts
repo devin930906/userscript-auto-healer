@@ -1,4 +1,8 @@
 import {test} from 'node:test';
+import {createHash} from 'node:crypto';
+import type {ImportedScript} from '../../src/import/import-service';
+import {snapshotNativeScripts} from '../../src/jobs/imported-analysis-queue';
+
 import {strict as assert} from 'node:assert';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -41,4 +45,43 @@ test('TASK-013/TEST-022: valid later scripts are not skipped by earlier segment 
   }
   assert.equal(counts.at(-1),3);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+/** TASK-013 / REQ-022/026 / TEST-022/026: imported byte snapshots are
+ * data-only. A caller-owned TypedArray iterator is executable JavaScript,
+ * not a safe way to read native source bytes. */
+test('TASK-013/TEST-026: snapshot never invokes a caller-owned byte iterator',()=>{
+ const original=new Uint8Array(Buffer.from('// ==UserScript==\\n// @name safe\\n// ==/UserScript==\\n'));
+ const sha256=createHash('sha256').update(original).digest('hex');
+ let invoked=0;
+ Object.defineProperty(original,Symbol.iterator,{
+  configurable:true,
+  get(){invoked++;throw Error('UNTRUSTED_ITERATOR_GETTER');}
+ });
+ const input=[{bytes:original,byteLength:original.byteLength,sha256,
+  textEncoding:'utf-8'}] as unknown as ImportedScript[];
+ const snapshot=snapshotNativeScripts(input);
+ assert.equal(invoked,0,'native byte copying must not read Symbol.iterator');
+ assert.ok(snapshot,'a valid native byte buffer must remain analyzable');
+ assert.equal(createHash('sha256').update(snapshot[0].bytes).digest('hex'),sha256);
+ assert.notEqual(snapshot[0].bytes,original,'the native boundary must copy bytes');
+ original[0]=0;
+ assert.equal(createHash('sha256').update(snapshot[0].bytes).digest('hex'),sha256,
+  'mutating the caller buffer after snapshot must not change trusted bytes');
+});
+
+test('TASK-013/TEST-026: a deceptive source iterator cannot replace original bytes',()=>{
+ const original=new Uint8Array([1,2,3,4]);
+ const sha256=createHash('sha256').update(original).digest('hex');
+ let invoked=0;
+ Object.defineProperty(original,Symbol.iterator,{
+  configurable:true,
+  value:function*(){invoked++;yield 9;yield 9;yield 9;yield 9;}
+ });
+ const input=[{bytes:original,byteLength:4,sha256,
+  textEncoding:'utf-8'}] as unknown as ImportedScript[];
+ const snapshot=snapshotNativeScripts(input);
+ assert.equal(invoked,0);
+ assert.ok(snapshot);
+ assert.deepEqual([...Uint8Array.prototype.values.call(snapshot[0].bytes)],[1,2,3,4]);
 });
