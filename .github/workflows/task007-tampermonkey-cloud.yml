@@ -125,6 +125,7 @@ jobs:
           New-Item -ItemType Directory -Path $base | Out-Null
           $crx = Join-Path $base 'tampermonkey_stable.crx'
           $zip = Join-Path $base 'tampermonkey.zip'
+          $verifiedKey = Join-Path $base 'verified-public-key.b64'
           $extension = Join-Path $base 'extension'
           # Artifact transport does not grant extension authenticity: copy only
           # the fixed-name CRX from our upstream job and revalidate its
@@ -136,7 +137,7 @@ jobs:
           # This still cannot attest Chrome Web Store publication/signature.
           node --test ./poc/crx3-package-integrity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature verifier regressions failed' }
-          node ./poc/crx3-package-integrity.cjs $crx $zip
+          node ./poc/crx3-package-integrity.cjs $crx $zip $verifiedKey
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signing key or ZIP integrity not verified' }
           $archive = [IO.Compression.ZipFile]::OpenRead($zip)
           try {
