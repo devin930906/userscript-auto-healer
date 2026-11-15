@@ -258,7 +258,7 @@ function readCdpMessage(raw:unknown):Record<string,unknown>|null{
 }
 function connectBrowserWebSocket(url:string):Promise<WebSocket|null>{
  return new Promise(resolve=>{
-  let socket:WebSocket;
+  let socket:WebSocket|undefined;
   let settled=false;
   const timer=setTimeout(()=>finish(null),CDP_COMMAND_TIMEOUT_MS);
   const finish=(value:WebSocket|null)=>{
