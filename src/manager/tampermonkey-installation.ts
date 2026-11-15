@@ -108,7 +108,7 @@ export const TAMPERMONKEY_USER_SCRIPTS_EXPRESSION =
  '    const label=(el.textContent||"")+" "+(el.shadowRoot&&el.shadowRoot.textContent||"");'+
  '    const toggle=(el.shadowRoot&&el.shadowRoot.querySelector("cr-toggle"))||'+
  '      el.querySelector("cr-toggle");'+
- '    if(/allow user scripts/i.test(label)&&toggle)rows.push(Boolean(toggle.checked));'+
+ '    if(/allow user scripts|允许用户脚本/i.test(label)&&toggle)rows.push(Boolean(toggle.checked));'+
  '   }'+
  '   if(el.shadowRoot)scan(el.shadowRoot);'+
  '  }'+
