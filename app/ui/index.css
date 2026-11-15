@@ -134,6 +134,23 @@ svg { display: block; flex: none; width: 19px; height: 19px; }
 .panel > :last-child, .panel > div > :last-child { margin-bottom: 0; }
 .panel > p { margin: 0 0 10px; color: var(--muted); }
 .panel-grid { display: grid; gap: 12px; }
+.advanced-tools {
+  margin: 0 0 12px;
+  padding: 0 14px;
+  background: var(--nav);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.advanced-tools > summary {
+  padding: 11px 0;
+  color: var(--info);
+  cursor: pointer;
+  font-weight: 650;
+}
+.advanced-tools > summary:hover { color: var(--ink); }
+.advanced-tools[open] > summary { color: var(--accent); }
+.advanced-tools > .panel { margin-bottom: 12px; }
+
 @media (min-width: 1050px) {
   .panel-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); align-items: start; }
 }

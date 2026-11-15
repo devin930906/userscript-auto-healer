@@ -47,63 +47,70 @@
       </div>
     </section>
     <section id="browser-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-browser-workspace" hidden>
-      <header class="page-heading"><h2>浏览器环境</h2><p>连接已运行的自定义 Chrome，或启动隔离 Chrome 进行测试。</p></header>
+      <header class="page-heading"><h2>浏览器环境</h2><p>先选择 Chrome 与 Data/Profile，再启动由本程序管理的独立实例。连接已有浏览器和手动 GM 夹具仅作为高级工具。</p></header>
       <div class="panel">
-        <h3>连接正在运行的 Chrome</h3>
-        <p id="existing-chrome-help">要沿用已有浏览器资料，请选择正在运行的便携版 Chrome 和它的 Data 文件夹，然后点击连接。先在该 Chrome 打开 <code>chrome://inspect/#remote-debugging</code> 并启用远程调试，再于 Chrome 原生确认框允许本次连接。断开连接只会断开本软件，不会关闭 Chrome。连接成功只代表浏览器连接已授权；当前连接模式暂不提供脚本修复、GM 测试或业务恢复证明。</p>
+        <h3>受控 Chrome</h3>
+        <p id="owned-chrome-help">选择 Chrome / 便携版及可安全使用的 Data/Profile。启动前请确认该 Data/Profile 未被其他 Chrome 使用；本程序不会接管正在运行的浏览器，也不会使用日常 Chrome Profile。</p>
         <div class="actions">
-          <button id="choose-chrome" type="button" aria-describedby="existing-chrome-help">选择 Chrome / 便携版</button>
-          <button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data / Profile</button>
+          <button id="choose-chrome" type="button" aria-describedby="owned-chrome-help">选择 Chrome / 便携版</button>
+          <button id="choose-profile" type="button" aria-describedby="owned-chrome-help">选择 Data / Profile</button>
+          <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
         </div>
-        <label for="chrome-port">本机 CDP 端口（两种模式共用，默认 9896）：</label>
+        <label for="chrome-port">本机 CDP 端口（默认 9896）：</label>
         <input id="chrome-port" type="number" min="1024" max="65535" step="1" value="9896">
+        <p id="chrome-profile-safety">使用已有专用 Profile 前，请先关闭正在使用该目录的 Chrome。启动前会显示系统授权确认；本程序不会接管正在运行的 Chrome，也不允许使用日常 Chrome Profile。</p>
         <div class="actions">
-          <button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">授权连接正在运行的 Chrome</button>
-          <button id="disconnect-existing-chrome" type="button">断开本软件与 Chrome 的连接</button>
+          <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
+          <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
+          <button id="open-tampermonkey-store" type="button" aria-describedby="store-install-help" disabled>打开官方 Tampermonkey 安装页</button>
+          <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
         </div>
-        <details>
-          <summary>使用隔离 Chrome</summary>
-          <p id="chrome-profile-safety">此模式会启动一个独立 Chrome；使用已有专用 Profile 前请先关闭正在使用该目录的 Chrome。不会使用或覆盖正在运行的 Data，也不允许使用日常 Chrome Profile。启动前会显示系统授权确认。</p>
-          <div class="actions">
-            <button id="create-profile" type="button" aria-describedby="chrome-profile-safety">创建新的独立 Profile（需确认）</button>
-            <button id="launch-chrome" type="button" aria-describedby="chrome-profile-safety">授权启动独立 Chrome</button>
-            <button id="inspect-tampermonkey" type="button">只读探测 Tampermonkey</button>
-            <button id="open-tampermonkey-store" type="button" aria-describedby="store-install-help" disabled>打开官方 Tampermonkey 安装页</button>
-            <button id="stop-chrome" type="button">停止本程序启动的 Chrome</button>
-          </div>
-        </details>
         <p id="browser-status" role="status" aria-live="polite">尚未连接；不会自动访问、安装或修复任何脚本。</p>
         <p>探测到扩展运行目标也不代表脚本已安装、GM API 已调用或业务功能恢复。</p>
         <p id="store-install-help">仅在本程序启动的独立 Chrome 中、另行确认后打开官方 Chrome Web Store。实际安装及权限仍需在 Chrome 中确认；打开页面不表示扩展已经安装或验证。</p>
       </div>
-      <div class="panel">
-        <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
-        <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
-        测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
-        然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
-        必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
-        HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
-        <label for="gm-run-at">临时脚本注入时机：</label>
-        <select id="gm-run-at">
-          <option value="document-idle">document-idle（页面空闲后）</option>
-          <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
-          <option value="document-body">document-body（页面正文开始加载，必要时等待 DOM 就绪后检查）</option>
-          <option value="document-end">document-end（文档结构加载后，必要时等待 DOM 就绪后检查）</option>
-        </select>
-        <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
-        <div class="actions">
-          <button id="gm-probe-start" type="button" class="primary">授权开始本机 GM 测试</button>
-          <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
-          <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
-          <button id="gm-probe-visit-fixed" type="button">授权打开 fixed 测试页</button>
-          <button id="gm-probe-observe-fixed" type="button">授权对照 fixed DOM</button>
-          <button id="gm-probe-status" type="button">查看回执与 DOM 对照（未经认证）</button>
-          <button id="gm-probe-save-report" type="button">保存脱敏测试摘要 JSON（未经认证）</button>
-          <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
+      <details class="advanced-tools" data-advanced-workspace="existing-chrome">
+        <summary>高级选项：连接已有 Chrome（仅连接，不接管或关闭）</summary>
+        <div class="panel">
+          <h3>连接正在运行的 Chrome</h3>
+          <p id="existing-chrome-help">要沿用已有浏览器资料，请先选择 Chrome / 便携版与对应 Data/Profile，再在该 Chrome 打开 <code>chrome://inspect/#remote-debugging</code> 并启用远程调试，然后于 Chrome 原生确认框允许本次连接。断开连接只会断开本软件，不会关闭 Chrome。连接成功只代表浏览器连接已授权；当前连接模式暂不提供脚本修复、GM 测试或业务恢复证明。</p>
+          <div class="actions">
+            <button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">授权连接正在运行的 Chrome</button>
+            <button id="disconnect-existing-chrome" type="button">断开本软件与 Chrome 的连接</button>
+          </div>
         </div>
-        <p id="gm-probe-links" aria-live="polite"></p>
-        <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
-      </div>
+      </details>
+      <details class="advanced-tools" data-advanced-workspace="manual-gm">
+        <summary>开发与验收工具：手动 GM 诊断（不属于普通修复流程）</summary>
+        <div class="panel">
+          <h3>隔离 Tampermonkey 手动 GM 测试（阶段功能）</h3>
+          <p>在本程序启动的独立 Chrome 中，经系统确认后打开最长五分钟的本机临时测试服务。
+          测试员自行将下方地址用 Tampermonkey「从 URL 导入」安装临时脚本，再分别访问 broken / fixed 页面。
+          然后通过本应用的按钮分别打开和只读观察 broken/fixed 测试页，交叉检查页面回执。
+          必须由测试员主动确认每次本机操作；结束后自行删除临时脚本。
+          HTTP 回执和 CDP DOM 对照都不能独立证明扩展真实性、GM API 或产品恢复。</p>
+          <label for="gm-run-at">临时脚本注入时机：</label>
+          <select id="gm-run-at">
+            <option value="document-idle">document-idle（页面空闲后）</option>
+            <option value="document-start">document-start（页面加载之初，等待 DOM 就绪后检查元素）</option>
+            <option value="document-body">document-body（页面正文开始加载，必要时等待 DOM 就绪后检查）</option>
+            <option value="document-end">document-end（文档结构加载后，必要时等待 DOM 就绪后检查）</option>
+          </select>
+          <p>每次测试使用独立临时脚本，切换时机需先关闭旧会话并在隔离 Tampermonkey 中移除旧脚本；这不是对真实注入时机的自动认证。</p>
+          <div class="actions">
+            <button id="gm-probe-start" type="button" class="primary">授权开始本机 GM 测试</button>
+            <button id="gm-probe-visit-broken" type="button">授权打开 broken 测试页</button>
+            <button id="gm-probe-observe-broken" type="button">授权对照 broken DOM</button>
+            <button id="gm-probe-visit-fixed" type="button">授权打开 fixed 测试页</button>
+            <button id="gm-probe-observe-fixed" type="button">授权对照 fixed DOM</button>
+            <button id="gm-probe-status" type="button">查看回执与 DOM 对照（未经认证）</button>
+            <button id="gm-probe-save-report" type="button">保存脱敏测试摘要 JSON（未经认证）</button>
+            <button id="gm-probe-stop" type="button">关闭临时测试服务</button>
+          </div>
+          <p id="gm-probe-links" aria-live="polite"></p>
+          <p id="gm-probe-result" role="status" aria-live="polite">没有正在运行的 GM 测试。</p>
+        </div>
+      </details>
     </section>
     <section id="scenario-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-scenario-workspace" hidden>
       <header class="page-heading"><h2>测试场景</h2><p>登记本次会话要检查的目标网址和 CSS 选择器。</p></header>

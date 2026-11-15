@@ -821,7 +821,7 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
   'the isolated launch warning must remain clear');
  assert.match(html,/<p id="existing-chrome-help">[\s\S]*?chrome:\/\/inspect\/#remote-debugging[\s\S]*?断开连接只会断开本软件[\s\S]*?<\/p>/,
   'the existing Chrome connection must explain Chrome authorization and safe disconnect');
- assert.match(html,/<button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data \/ Profile<\/button>/,
+ assert.match(html,/<button id="choose-profile" type="button" aria-describedby="owned-chrome-help">选择 Data \/ Profile<\/button>/,
   'existing Data selection must be described for assistive technology');
  assert.match(html,/<button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">/,
   'the running-browser connection needs a dedicated entry point');
@@ -838,7 +838,7 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
  assert.match(ui,/if\(gmStartButton\)gmStartButton\.disabled=controlsBusy\|\|!browserConnected\|\|gmProbeActive/,
   'the isolated GM fixture remains disabled for an externally connected Chrome');
  for(const id of ['create-profile','launch-chrome']){
-  assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety">'),
+  assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety"[^>]*>'),
    'the Chrome safety warning must be available from the '+id+' control');
  }
 });
@@ -2005,4 +2005,35 @@ test('TASK-007/017 TEST-017/022: stale Tampermonkey inspection cannot revive a s
  await tick();
  assert.match(statuses.at(-1)??'',/发现 2 个疑似 Tampermonkey 运行目标/,
   'a fresh current-session hint still remains visible but unverified');
+});
+
+
+/** TASK-017 / TEST-002/022: keep the ordinary browser workflow centered on
+ * the app-owned selected Chrome/Profile. Existing-browser attachment and the
+ * hand-installed GM fixture remain available only as collapsed advanced tools.
+ */
+test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diagnostics stay advanced',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const browser=html.match(/<section id="browser-workspace"[\s\S]*?<\/section>/)?.[0];
+ assert.ok(browser,'the browser workspace must remain present');
+ if(!browser)return;
+ const primary=browser.indexOf('<h3>受控 Chrome</h3>');
+ const launch=browser.indexOf('id="launch-chrome"');
+ const existing=browser.indexOf('<details class="advanced-tools" data-advanced-workspace="existing-chrome">');
+ const connect=browser.indexOf('id="connect-existing-chrome"');
+ const manual=browser.indexOf('<details class="advanced-tools" data-advanced-workspace="manual-gm">');
+ const gm=browser.indexOf('id="gm-probe-start"');
+ assert.ok(primary>=0&&launch>primary&&launch<existing,
+  'the selected app-owned Chrome launch must be visible before advanced connection tools');
+ assert.ok(existing>launch&&connect>existing&&connect<manual,
+  'attaching to an already-running Chrome must remain in a separate advanced section');
+ assert.ok(manual>connect&&gm>manual,
+  'the manual GM fixture must not appear in the ordinary browser workflow');
+ const existingOpen=browser.slice(existing,browser.indexOf('</details>',existing)+10);
+ const manualOpen=browser.slice(manual,browser.indexOf('</details>',manual)+10);
+ assert.match(existingOpen,/^<details[^>]*data-advanced-workspace="existing-chrome"/);
+ assert.match(manualOpen,/^<details[^>]*data-advanced-workspace="manual-gm"/);
+ assert.doesNotMatch(existingOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
+ assert.doesNotMatch(manualOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
+ assert.match(manualOpen,/开发与验收工具：手动 GM 诊断（不属于普通修复流程）/);
 });
