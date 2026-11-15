@@ -633,6 +633,13 @@ function registerSafeIpc(): void {
         const record=result as {targetInfos?:unknown}|null;
         status=inspectTampermonkeyTargetHints(record?.targetInfos);
       }else return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+      // A native dialog or CDP query can overlap stop/reconnect. Only the
+      // currently selected browser may paint a manager runtime hint; a stale
+      // app-owned session cannot authorize a new or detached Chrome display.
+      if((owned&&readOwnedBrowser()!==owned)||
+         (attached&&readExistingBrowser()!==attached)||
+         win.isDestroyed()||win!==mainWindow)
+        return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
       if(!status.ok)return {...status,...unverified};
       return {ok:true,status:status.status,manager:status.manager,
         matchedRuntimeTargets:status.matchedRuntimeTargets,
