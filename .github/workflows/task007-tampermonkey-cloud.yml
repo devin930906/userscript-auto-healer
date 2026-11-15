@@ -62,7 +62,7 @@ jobs:
           $crx = Join-Path $base 'tampermonkey_stable.crx'
           try {
             Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 60
-            Write-Host 'CRX origin: Tampermonkey vendor official package'
+            Write-Host 'CRX origin: Tampermonkey vendor-hosted signed package'
           } catch {
             # Google/Chromium documents clients2.google.com as the official
             # Chrome Web Store update endpoint. Do not use third-party mirrors,
@@ -174,7 +174,7 @@ jobs:
           $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
           if ($manifest.key -cne $verifiedPublicKey) { throw 'Disposable manifest key pin did not persist' }
           Write-Host 'Disposable manifest.key pinned to the signature-verified CRX3 public key; this is not store installation attestation'
-          Write-Host ("Official-hosted CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
+          Write-Host ("Downloaded CRX SHA256: " + (Get-FileHash -LiteralPath $crx -Algorithm SHA256).Hash)
           Write-Host ("MV3 manifest version: " + $manifest.version)
           "UAH_TM_EXTENSION_DIR=$extension" >> $env:GITHUB_ENV
           "UAH_TM_PROFILE_DIR=$(Join-Path $base 'profile')" >> $env:GITHUB_ENV

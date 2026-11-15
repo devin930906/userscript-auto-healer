@@ -98,7 +98,7 @@ test('TEST-017/026: forged proof, malformed protobuf and archive offsets fail cl
   /CRX3_SIGNATURE_OR_FORMAT_INVALID/);
 });
 
-// Red regression: a self-signed CRX from an unrelated developer is a
+// Negative regression: a self-signed CRX from an unrelated developer is a
 // cryptographically correct CRX3. The Tampermonkey-specific command MUST
 // reject it before writing any ZIP, even though generic proof validation
 // (correctly) accepts the key-derived ID. This also tests the real CLI used

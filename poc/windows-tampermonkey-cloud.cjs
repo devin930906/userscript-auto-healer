@@ -944,7 +944,7 @@ async function main(){
     await restoredPage.close();
    }
   }
-  console.log('NOT VERIFIED: official store-signed ID, program auto-repair, user Chrome support matrix and Stable GATE.');
+  console.log('NOT VERIFIED: Chrome Web Store installation provenance, real-user Chrome/Profile support matrix, GM storage roundtrip, production business recovery, programmatic auto-repair, automatic rollback and Stable GATE.');
  }finally{
   if(context)await context.close().catch(()=>{});
   if(nativeProbe)await nativeProbe.stop();
