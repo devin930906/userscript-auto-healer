@@ -107,7 +107,9 @@ export async function discoverModelsFromNativeConfig(
     }finally{
       if(signal&&onAbort)signal.removeEventListener('abort',onAbort);
     }
-    if(!approved||signal?.aborted)return blocked('CANCELLED');
+    // Only a literal native confirmation may authorize provider traffic.
+    // A malformed truthy IPC/dialog reply is not the user's approval.
+    if(approved!==true||signal?.aborted)return blocked('CANCELLED');
     const consent={userApproved:true as const,approvedOrigin:origin};
     if(!gateway.enable(consent))return blocked('NOT_AUTHORIZED');
     const result=await gateway.discoverModels(consent,signal);

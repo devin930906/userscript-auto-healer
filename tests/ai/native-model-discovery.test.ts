@@ -150,3 +150,23 @@ test('TASK-014/TEST-015/016: revoking native consent cancels a pending approval 
   assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
   assert.equal(requests,0,'revoked consent cannot invoke the provider');
 });
+
+
+test('TASK-014/TEST-015/016/026: native approval must be literal true, never a truthy IPC reply',async()=>{
+  let requests=0;
+  const transport:typeof fetch=async()=>{
+    requests++;
+    return Response.json({data:[{id:'unexpected-provider-request'}]});
+  };
+  for(const malformed of [1,'yes',{},[],new Boolean(true)]){
+    let prompts=0;
+    const result=await discoverModelsFromNativeConfig(config(),async()=>{
+      prompts++;
+      return malformed as unknown as boolean;
+    },undefined,transport);
+    assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false},
+      'non-boolean native confirmation must never authorize a request');
+    assert.equal(prompts,1);
+  }
+  assert.equal(requests,0,'no malformed native approval may trigger provider traffic');
+});
