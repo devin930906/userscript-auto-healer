@@ -548,3 +548,42 @@ test('TASK-014/TEST-016: Responses protocol refuses incomplete, tool or malforme
     /INVALID_AI_CONFIGURATION/);
  }
 });
+
+
+test('TASK-014/TEST-015/016: reject explicitly truncated or unfinished model messages',async()=>{
+ const cases:Array<{protocol:'chat-completions'|'responses';reply:unknown}>=[
+  {protocol:'chat-completions',reply:{choices:[{finish_reason:'length',
+    message:{role:'assistant',content:'A partial suggestion must not be reviewed as complete.'}}]}},
+  {protocol:'chat-completions',reply:{choices:[{finish_reason:'content_filter',
+    message:{role:'assistant',content:'Filtered output is not a complete suggestion.'}}]}},
+  {protocol:'responses',reply:{status:'completed',output:[{
+    type:'message',role:'assistant',status:'incomplete',
+    content:[{type:'output_text',text:'Partially generated advice.'}]
+  }]}},
+  {protocol:'responses',reply:{status:'completed',output:[{
+    type:'message',role:'assistant',status:'in_progress',
+    content:[{type:'output_text',text:'An unfinished message.'}]
+  }]}}
+ ];
+ for(const {protocol,reply} of cases){
+  const gateway=new OptionalAiGateway({...options(),protocol,maxRequests:1},
+    async()=>Response.json(reply));
+  assert.equal(gateway.enable(approval()),true);
+  assert.deepEqual(await gateway.suggest(approval(),evidence),
+    {ok:false,code:'INVALID_RESPONSE',automaticPatchAllowed:false},
+    protocol+' '+JSON.stringify(reply));
+  assert.equal(gateway.status().remainingRequests,0);
+ }
+ const completeChat=new OptionalAiGateway({...options(),maxRequests:1},
+   async()=>Response.json({choices:[{finish_reason:'stop',
+     message:{role:'assistant',content:'Review only.'}}]}));
+ assert.equal(completeChat.enable(approval()),true);
+ assert.equal((await completeChat.suggest(approval(),evidence)).ok,true);
+ const completeResponses=new OptionalAiGateway({...options(),protocol:'responses',maxRequests:1},
+   async()=>Response.json({status:'completed',output:[{
+     type:'message',role:'assistant',status:'completed',
+     content:[{type:'output_text',text:'Review only.'}]
+   }]}));
+ assert.equal(completeResponses.enable(approval()),true);
+ assert.equal((await completeResponses.suggest(approval(),evidence)).ok,true);
+});
