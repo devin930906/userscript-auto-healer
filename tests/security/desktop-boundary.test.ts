@@ -2019,9 +2019,9 @@ test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diag
  if(!browser)return;
  const primary=browser.indexOf('<h3>受控 Chrome</h3>');
  const launch=browser.indexOf('id="launch-chrome"');
- const existing=browser.indexOf('data-advanced-workspace="existing-chrome"');
+ const existing=browser.indexOf('<details class="advanced-tools" data-advanced-workspace="existing-chrome">');
  const connect=browser.indexOf('id="connect-existing-chrome"');
- const manual=browser.indexOf('data-advanced-workspace="manual-gm"');
+ const manual=browser.indexOf('<details class="advanced-tools" data-advanced-workspace="manual-gm">');
  const gm=browser.indexOf('id="gm-probe-start"');
  assert.ok(primary>=0&&launch>primary&&launch<existing,
   'the selected app-owned Chrome launch must be visible before advanced connection tools');
