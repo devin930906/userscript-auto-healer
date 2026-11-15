@@ -737,3 +737,46 @@ test('TASK-013/TEST-022: resumed AST display never retries a permanent worker bu
   assert.equal(await readFile(file,'utf8'),script);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+
+
+test('TASK-013 / TEST-022: checkpointed native AST partitions by byte budget and does not starve later valid scripts',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-byte-partition-'));
+ try{
+  const paths:string[]=[];
+  // Each script is individually eligible (under 512 KiB) but three such
+  // sources exceed a single 1 MiB isolated Worker segment.
+  for(let i=0;i<3;i++){
+   const path=join(home,'budget-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#budget-'+i+'");\n/*'+
+    'x'.repeat(400*1024)+'*/');
+   paths.push(path);
+  }
+  const imported=await importApprovedPaths(paths);
+  assert.equal(imported.errors.length,0);
+  assert.equal(imported.scripts.length,3);
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const progress:Array<[number,number]>=[];
+  const first=await runCheckpointedNativeImportAnalysis(root,imported.scripts,
+   undefined,(done,total)=>progress.push([done,total]));
+  assert.equal(first.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(first.status!=='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')return;
+  assert.deepEqual(first.previews.map(p=>p.status),[
+   'STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY'
+  ],'eligible third script must be analysed by a later Worker, not marked skipped');
+  assert.deepEqual(progress,[[2,3],[3,3]]);
+  const directory=join(root,(await readdir(root))[0]);
+  const disk=JSON.parse(await readFile(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
+  assert.deepEqual(disk.jobs.map((j:{state:string})=>j.state),[
+   'SUCCEEDED','SUCCEEDED'
+  ]);
+  const again=await runCheckpointedNativeImportAnalysis(root,imported.scripts);
+  assert.equal(again.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(again.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+   assert.equal(again.resumed,true);
+   assert.deepEqual(again.previews,first.previews);
+  }
+  for(const path of paths)
+   assert.equal((await readFile(path,'utf8')).includes('document.querySelector'),true);
+ }finally{await rm(home,{recursive:true,force:true});}
+});

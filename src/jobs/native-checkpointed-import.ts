@@ -10,7 +10,8 @@ import {types as nodeTypes} from 'node:util';
 import {lstat,mkdir} from 'node:fs/promises';
 import {dirname,isAbsolute,join,resolve} from 'node:path';
 import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
-import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
+import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
+ MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
 import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
 import {hasUnsafePathLink} from '../version/path-boundary';
@@ -77,27 +78,37 @@ export async function runCheckpointedNativeImportAnalysis(
   return fail(count,'UNSAFE_PATH');
  // No untrusted hash or path enters the directory name; the digest uses only
  // the native importer's verified bytes, ordered and domain-separated.
- // v1 and v2 durable namespaces used only raw SHA-256. The exact same
- // bytes can be imported under another explicitly selected text decoder,
- // changing AST interpretation without changing that hash. Do not resume
- // another decoding policy's retry budget or re-write old journal evidence.
- // v3 preserves both earlier directories untouched; this is still ONLY a
- // scheduling hint and every resumed preview is freshly analysed.
- const nameHash=createHash('sha256').update('uah-native-import-batch-v3\0');
+ // v1/v2 did not bind the decoder and v3 grouped only by file count,
+ // allowing the isolated Worker's 1 MiB budget to starve valid later files.
+ // v4 leaves older on-disk scheduling hints intact in separate directories.
+ // No persisted success can substitute for current-session AST evidence.
+ const nameHash=createHash('sha256').update('uah-native-import-batch-v4\0');
  const groups:Array<{scripts:typeof bound;fingerprint:string}>=[];
  for(const script of bound){
   nameHash.update(script.sha256);nameHash.update('\0');
   nameHash.update(script.textEncoding);nameHash.update('\0');
  }
- for(let offset=0;offset<bound.length;offset+=MAX_BATCH_PREVIEW_FILES){
-  const segment=bound.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
-  const h=createHash('sha256').update('uah-native-import-segment-v2\0');
+ for(let offset=0;offset<bound.length;){
+  let end=offset;
+  let eligibleBytes=0;
+  while(end<bound.length&&end-offset<MAX_BATCH_PREVIEW_FILES){
+   const size=bound[end].bytes.byteLength;
+   // Oversized files are marked SKIPPED_TOO_LARGE by the Worker and must
+   // never consume bytes reserved for otherwise eligible AST previews.
+   const charge=size<=MAX_ISOLATED_ANALYSIS_BYTES?size:0;
+   if(end>offset&&eligibleBytes+charge>MAX_BATCH_PREVIEW_BYTES)break;
+   eligibleBytes+=charge;
+   end++;
+  }
+  const segment=bound.slice(offset,end);
+  const h=createHash('sha256').update('uah-native-import-segment-v3\0');
   h.update(String(offset));h.update('\0');
   for(const item of segment){
    h.update(item.sha256);h.update('\0');
    h.update(item.textEncoding);h.update('\0');
   }
   groups.push({scripts:segment,fingerprint:h.digest('hex')});
+  offset=end;
  }
  const directory=join(journalRoot,'batch-'+nameHash.digest('hex'));
  try{
