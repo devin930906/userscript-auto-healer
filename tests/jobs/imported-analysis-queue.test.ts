@@ -85,3 +85,19 @@ test('TASK-013/TEST-026: a deceptive source iterator cannot replace original byt
  assert.ok(snapshot);
  assert.deepEqual([...Uint8Array.prototype.values.call(snapshot[0].bytes)],[1,2,3,4]);
 });
+
+/** A SharedArrayBuffer can be mutated by a different thread while the
+ * importer captures the purportedly identity-bound source. The isolated
+ * AST worker already rejects shared backing; the preceding native batch
+ * snapshot must enforce the same boundary. */
+test('TASK-013/TEST-026: native batch boundary refuses shared mutable byte backing',()=>{
+ if(typeof SharedArrayBuffer==='undefined')return;
+ const backing=new SharedArrayBuffer(4);
+ const bytes=new Uint8Array(backing);
+ Uint8Array.prototype.set.call(bytes,new Uint8Array([1,2,3,4]));
+ const sha256=createHash('sha256').update(bytes).digest('hex');
+ const input=[{bytes,byteLength:4,sha256,
+  textEncoding:'utf-8'}] as unknown as ImportedScript[];
+ assert.equal(snapshotNativeScripts(input),null,
+  'a cross-thread mutable shared buffer must never enter the native AST queue');
+});
