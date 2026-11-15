@@ -2061,6 +2061,8 @@ test('TASK-017/TEST-002/022: manual scenario registration stays optional advance
  assert.equal(opening,'<details class="advanced-tools" data-advanced-workspace="manual-scenario">',
   'manual scenario controls must be collapsed by default');
  const ordinary=section.slice(0,disclosureStart);
+ assert.ok(ordinary.includes('查看已登记场景与诊断状态；手动登记仅为可选高级辅助'));
+ assert.doesNotMatch(ordinary,/登记本次会话要检查的目标网址和 CSS 选择器/);
  assert.doesNotMatch(ordinary,/id="scenario-(?:url|selector|replacement)"/,
   'ordinary scenario workspace must not require manual URL or selector entry');
  assert.ok(ordinary.includes('普通批量流程不要求逐脚本填写网址或 CSS 选择器'));
