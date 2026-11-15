@@ -38,9 +38,9 @@ export type ManagerInstallationResult =
     readonly scriptInjectionVerified:false;
     readonly gmApiVerified:false;
     readonly businessVerified:false}
- | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|
-    'INVALID_OPTIONS'|'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'CDP_FAILED'|
-    'INSPECTION_UNAVAILABLE'|'INVALID_CDP_RESPONSE'};
+ | {readonly ok:false;readonly code:'CDP_FAILED';readonly stage?:'connect'|'create-target'|'attach-target'|'list-frame'|'manager-card'|'navigate-details'|'details-frame'|'permission'|'cleanup-close'|'cleanup-list'}
+ | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|'INVALID_OPTIONS'|
+    'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'INSPECTION_UNAVAILABLE'|'INVALID_CDP_RESPONSE'};
 
 const EXTENSIONS_LIST_URL='chrome://extensions/';
 const EXTENSIONS_DETAILS_URL='chrome://extensions/?id='+TAMPERMONKEY_EXTENSION_ID;
@@ -364,40 +364,45 @@ export async function inspectApprovedTampermonkeyInstallation(
  if(!ownership.ok||!isLiveApprovedChromeSession(session))
   return {ok:false,code:'UNOWNED_LISTENER'};
  const socket=await connectBrowserWebSocket(endpoint.url);
- if(!socket)return {ok:false,code:'CDP_FAILED'};
+ if(!socket)return {ok:false,code:'CDP_FAILED',stage:'connect'};
  let targetId:string|undefined;
  let sessionId:string|undefined;
  let createAttempted=false;
  let cleanupOk=true;
+ let failureStage:'create-target'|'attach-target'|'list-frame'|'manager-card'|'navigate-details'|'details-frame'|'permission'|'cleanup-close'|'cleanup-list'='create-target';
  let result:ManagerInstallationResult={ok:false,code:'CDP_FAILED'};
  let commandId=1;
  try{
   if(signal?.aborted){result={ok:false,code:'CANCELLED'};}
   else{
    createAttempted=true;
+   failureStage='create-target';
    const created=await sendCdpCommand(socket,commandId++,'Target.createTarget',
     {url:EXTENSIONS_LIST_URL,background:true});
    const createdId=created?ownValue(created,'targetId'):undefined;
    if(typeof createdId!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(createdId)){
-    result={ok:false,code:'CDP_FAILED'};
+    result={ok:false,code:'CDP_FAILED',stage:'create-target'};
     cleanupOk=false;
    }else{
     targetId=createdId;
     if(signal?.aborted)result={ok:false,code:'CANCELLED'};
     else{
+     failureStage='attach-target';
      const attached=await sendCdpCommand(socket,commandId++,'Target.attachToTarget',
       {targetId,flatten:true});
      const attachedId=attached?ownValue(attached,'sessionId'):undefined;
      if(typeof attachedId!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(attachedId))
-      result={ok:false,code:'CDP_FAILED'};
+      result={ok:false,code:'CDP_FAILED',stage:'attach-target'};
      else{
       sessionId=attachedId;
+      failureStage='list-frame';
       const listFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
       if(!isExtensionsPageUrl(frameUrl(listFrame)||'',false))
        result={ok:false,code:'INSPECTION_UNAVAILABLE'};
       else{
        let card:ManagerInstallationResult={ok:false,code:'INSPECTION_UNAVAILABLE'};
        for(let attempt=0;attempt<4;attempt++){
+        failureStage='manager-card';
         const receipt=await sendCdpCommand(socket,commandId++,'Runtime.evaluate',{
          expression:TAMPERMONKEY_MANAGER_CARD_EXPRESSION,
          returnByValue:true,awaitPromise:false,userGesture:false,silent:true
@@ -410,15 +415,18 @@ export async function inspectApprovedTampermonkeyInstallation(
        else if(card.status==='NOT_INSTALLED')result=card;
        else if(signal?.aborted)result={ok:false,code:'CANCELLED'};
        else{
+        failureStage='navigate-details';
         const navigated=await sendCdpCommand(socket,commandId++,'Page.navigate',
          {url:EXTENSIONS_DETAILS_URL},sessionId);
         if(!navigated||Object.prototype.hasOwnProperty.call(navigated,'errorText'))
          result=card;
         else{
          await waitBriefly(1200);
+         failureStage='details-frame';
          const detailsFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
          if(!isExtensionsPageUrl(frameUrl(detailsFrame)||'',true))result=card;
          else{
+          failureStage='permission';
           const permissionReceipt=await sendCdpCommand(socket,commandId++,'Runtime.evaluate',{
            expression:TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,
            returnByValue:true,awaitPromise:false,userGesture:false,silent:true
@@ -438,17 +446,24 @@ export async function inspectApprovedTampermonkeyInstallation(
     }
    }
   }
- }catch{result={ok:false,code:'CDP_FAILED'};}
+ }catch{result={ok:false,code:'CDP_FAILED',stage:failureStage};}
  finally{
   if(targetId&&socket.readyState===WebSocket.OPEN){
-   const closed=await sendCdpCommand(socket,commandId++,'Target.closeTarget',
+   failureStage='cleanup-close';
+   await sendCdpCommand(socket,commandId++,'Target.closeTarget',
     {targetId},undefined,2000);
-   cleanupOk=!!closed&&ownValue(closed,'success')===true;
-   if(cleanupOk){
+   cleanupOk=false;
+   for(let attempt=0;attempt<10;attempt++){
+    failureStage='cleanup-list';
     const targets=await sendCdpCommand(socket,commandId++,'Target.getTargets',{},undefined,2000);
     const infos=targets?ownValue(targets,'targetInfos'):undefined;
-    if(!Array.isArray(infos)||infos.length>1000)cleanupOk=false;
-    else cleanupOk=infos.every(info=>isPlainRecord(info)&&ownValue(info,'targetId')!==targetId);
+    if(Array.isArray(infos)&&infos.length<=1000&&
+       infos.every(info=>isPlainRecord(info))){
+     if(infos.every(info=>ownValue(info,'targetId')!==targetId)){
+      cleanupOk=true;break;
+     }
+    }else break;
+    await waitBriefly(100);
    }
   }else if(createAttempted&&isLiveApprovedChromeSession(session)){
    cleanupOk=false;
@@ -456,7 +471,7 @@ export async function inspectApprovedTampermonkeyInstallation(
   try{socket.close();}catch{/* already closed */}
  }
  if(!cleanupOk&&isLiveApprovedChromeSession(session))
-  return {ok:false,code:'CDP_FAILED'};
+  return {ok:false,code:'CDP_FAILED',stage:failureStage};
  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
  if(!isLiveApprovedChromeSession(session))return {ok:false,code:'UNVERIFIED_BROWSER'};
  const finalOwnership=await awaitListenerProofOrRevocation(endpoint.port,session.pid,signal);
