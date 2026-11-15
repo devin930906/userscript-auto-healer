@@ -269,7 +269,7 @@ function connectBrowserWebSocket(url:string):Promise<WebSocket|null>{
   };
   try{
    socket=new WebSocket(url);
-   socket.addEventListener('open',()=>finish(socket),{once:true});
+   socket.addEventListener('open',()=>{if(socket)finish(socket);else finish(null);},{once:true});
    socket.addEventListener('error',()=>finish(null),{once:true});
    socket.addEventListener('close',()=>finish(null),{once:true});
   }catch{finish(null);}
