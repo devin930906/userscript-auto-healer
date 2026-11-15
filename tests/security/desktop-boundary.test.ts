@@ -2037,3 +2037,36 @@ test('TASK-017/TEST-002/022: controlled Chrome launch is primary and manual diag
  assert.doesNotMatch(manualOpen.match(/^<details[^>]*>/)?.[0]??'',/\bopen\b/);
  assert.match(manualOpen,/开发与验收工具：手动 GM 诊断（不属于普通修复流程）/);
 });
+
+
+
+test('TASK-017/TEST-002/022: manual scenario registration stays optional advanced diagnostics',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const sectionStart=html.indexOf('<section id="scenario-workspace"');
+ const sectionClose=html.indexOf('</section>',sectionStart);
+ assert.ok(sectionStart>=0&&sectionClose>sectionStart,'the scenario workspace remains available');
+ if(sectionStart<0||sectionClose<=sectionStart)return;
+ const section=html.slice(sectionStart,sectionClose+'</section>'.length);
+ const disclosureStart=section.indexOf('<details class="advanced-tools" data-advanced-workspace="manual-scenario">');
+ const disclosureClose=section.indexOf('</details>',disclosureStart);
+ assert.ok(disclosureStart>=0&&disclosureClose>disclosureStart,
+  'manual scenario registration must be behind an advanced disclosure');
+ if(disclosureStart<0||disclosureClose<=disclosureStart)return;
+ const disclosure=section.slice(disclosureStart,disclosureClose+'</details>'.length);
+ const opening=disclosure.slice(0,disclosure.indexOf('>')+1);
+ assert.ok(disclosure.includes('<summary>高级诊断：手动登记只读场景（可选，不属于普通流程）</summary>'));
+ for(const id of ['scenario-url','scenario-selector','scenario-replacement','scenario-register']){
+  assert.ok(disclosure.includes('id="'+id+'"'),'the existing manual control must be preserved: '+id);
+ }
+ assert.equal(opening,'<details class="advanced-tools" data-advanced-workspace="manual-scenario">',
+  'manual scenario controls must be collapsed by default');
+ const ordinary=section.slice(0,disclosureStart);
+ assert.ok(ordinary.includes('查看已登记场景与诊断状态；手动登记仅为可选高级辅助'));
+ assert.doesNotMatch(ordinary,/登记本次会话要检查的目标网址和 CSS 选择器/);
+ assert.doesNotMatch(ordinary,/id="scenario-(?:url|selector|replacement)"/,
+  'ordinary scenario workspace must not require manual URL or selector entry');
+ assert.ok(ordinary.includes('普通批量流程不要求逐脚本填写网址或 CSS 选择器'));
+ assert.ok(ordinary.includes('UNKNOWN / 受阻'));
+ assert.ok(section.includes('id="scenario-status"'));
+ assert.ok(section.includes('id="scenario-list"'));
+});

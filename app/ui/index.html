@@ -113,28 +113,35 @@
       </details>
     </section>
     <section id="scenario-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-scenario-workspace" hidden>
-      <header class="page-heading"><h2>测试场景</h2><p>登记本次会话要检查的目标网址和 CSS 选择器。</p></header>
+      <header class="page-heading"><h2>测试场景</h2><p>查看已登记场景与诊断状态；手动登记仅为可选高级辅助。</p></header>
       <div class="panel">
-        <p id="scenario-consent-scope">仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
-        <label for="scenario-script">已导入脚本：</label>
-        <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
-        <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
-        <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
-        <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
-        <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
-        <label for="scenario-selector">当前脚本使用的 CSS 选择器（只读检查）：</label>
-        <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
-        <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
-        <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
-        <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
-        <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
-        <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
-        <label><input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
-        <div class="actions">
-          <button id="scenario-register" type="button" class="primary" disabled>登记只读测试场景</button>
-          <button type="button" class="secondary" data-open-workspace="diagnosis-workspace">前往诊断与记录</button>
-        </div>
+        <h3>普通流程说明</h3>
+        <p>普通批量流程不要求逐脚本填写网址或 CSS 选择器。手动场景登记只是可选的只读诊断辅助，不是导入、启动或修复的前置条件。若没有可信目标、登录条件或业务断言，结果必须保持 UNKNOWN / 受阻；空白场景或单独的 DOM 线索不代表修复成功。</p>
       </div>
+      <details class="advanced-tools" data-advanced-workspace="manual-scenario">
+        <summary>高级诊断：手动登记只读场景（可选，不属于普通流程）</summary>
+        <div class="panel">
+          <p id="scenario-consent-scope">仅为已导入且校验过字节的脚本建立本机会话场景。不会访问目标网站、执行脚本、保存凭据或验证 Tampermonkey。登记准备就绪并不等于实际测试通过。</p>
+          <label for="scenario-script">已导入脚本：</label>
+          <select id="scenario-script" disabled><option value="">先导入 .user.js 文件</option></select>
+          <label for="scenario-id">场景标识（英文、数字、- 或 _）：</label>
+          <input id="scenario-id" maxlength="64" placeholder="my_scenario_1">
+          <label for="scenario-url">用户指定目标网址（HTTP/HTTPS）：</label>
+          <input id="scenario-url" type="url" maxlength="4096" placeholder="https://example.com/page">
+          <label for="scenario-selector">当前脚本使用的 CSS 选择器（只读检查）：</label>
+          <input id="scenario-selector" maxlength="512" placeholder="#obsolete-target">
+          <label for="scenario-replacement">可选：人工提出的替代选择器（不修改脚本）：</label>
+          <input id="scenario-replacement" maxlength="256" placeholder="#current-target">
+          <p>提供替代选择器时，将在同一已授权页面检查两个选择器。只有旧选择器持续缺失且替代选择器持续存在，才展示“人工审核线索”；不自动修改或安装脚本；需要独立原生授权及真实只读 DOM 取证才能手动导出候选文件，这不视为已验证的补丁。</p>
+          <label><input id="scenario-needs-login" type="checkbox"> 此场景需要登录</label>
+          <label><input id="scenario-login-ready" type="checkbox"> 我已自行确认登录前置条件（仅登记声明，未验证）</label>
+          <label><input id="scenario-approve" type="checkbox" aria-describedby="scenario-consent-scope"> 我同意仅在当前本机会话登记这项场景；这不授权浏览器访问或脚本修改</label>
+          <div class="actions">
+            <button id="scenario-register" type="button" class="primary" disabled>登记只读测试场景</button>
+            <button type="button" class="secondary" data-open-workspace="diagnosis-workspace">前往诊断与记录</button>
+          </div>
+        </div>
+      </details>
       <div class="panel">
         <h3>已登记的场景</h3>
         <div data-scenario-status-slot>
