@@ -339,6 +339,7 @@ export class OptionalAiGateway {
       const item=response.output[0] as Record<string,unknown>;
       if(!item||typeof item!=='object'||Array.isArray(item)||
          item.type!=='message'||item.role!=='assistant'||
+         (item.status!==undefined&&item.status!=='completed')||
          !Array.isArray(item.content)||item.content.length!==1)
         return failure('INVALID_RESPONSE');
       const textPart=item.content[0] as Record<string,unknown>;
@@ -350,7 +351,11 @@ export class OptionalAiGateway {
     }else{
       if(!Array.isArray(response.choices)||response.choices.length!==1)
         return failure('INVALID_RESPONSE');
-      const item=response.choices[0] as {message?:unknown};
+      const item=response.choices[0] as {message?:unknown;finish_reason?:unknown};
+      // Explicitly truncated, filtered or tool-directed completions are not
+      // complete reviewable text, even if the provider sent an assistant body.
+      if(item&&typeof item==='object'&&item.finish_reason!==undefined&&
+         item.finish_reason!=='stop')return failure('INVALID_RESPONSE');
       if(!item||typeof item!=='object'||!item.message||
          typeof item.message!=='object'||Array.isArray(item.message))
         return failure('INVALID_RESPONSE');
