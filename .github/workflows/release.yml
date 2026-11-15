@@ -99,15 +99,15 @@ jobs:
           $releaseNotes = @"
           ## Userscript Auto Healer v$version (Windows Stable Release)
 
-          Official Stable release built from commit `${{ github.sha }}` on Windows 2025 runner.
+          Official Stable release built from commit ``${{ github.sha }}`` on Windows 2025 runner.
 
           ### Deliverables
-          - **Inno Setup Installer (EXE)**: `${{ steps.package.outputs.setup_exe_name }}`
-          - **True Portable Archive (ZIP)**: `${{ steps.package.outputs.portable_zip_name }}`
-          - **Integrity Manifest**: `SHA256SUMS.txt`
+          - **Inno Setup Installer (EXE)**: ``${{ steps.package.outputs.setup_exe_name }}``
+          - **True Portable Archive (ZIP)**: ``${{ steps.package.outputs.portable_zip_name }}``
+          - **Integrity Manifest**: ``SHA256SUMS.txt``
 
           ### Security and Invariants
-          - Safe Fail-Closed architecture: `automaticActivationAllowed: false`, `automaticPatchAllowed: false`, `automaticRollbackAllowed: false`
+          - Safe Fail-Closed architecture: ``automaticActivationAllowed: false``, ``automaticPatchAllowed: false``, ``automaticRollbackAllowed: false``
           - Full source code audit, IPC isolation, and NTFS ACL read-only validation
           - Verified identical source build SHA for both EXE installer and Portable ZIP
           "@
