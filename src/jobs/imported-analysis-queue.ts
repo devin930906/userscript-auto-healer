@@ -8,7 +8,8 @@ import {createHash} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import {MAX_SCRIPT_BYTES,MAX_TOTAL_IMPORTED_BYTES,MAX_SELECTED_FILES,
  type ImportedScript} from '../import/import-service';
-import {MAX_BATCH_PREVIEW_FILES,unavailableImportPreview,
+import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
+ MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
 import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
 import {ReadOnlyBatchCoordinator} from './batch-coordinator';
@@ -124,16 +125,31 @@ export async function runImportedReadOnlyAnalysisQueue(
  // Do not call the caller's Array.prototype.map: an already-aborted native
  // request still must avoid globally replaced/injected array methods.
  if(signal?.aborted)return Array.from({length:count},()=>unavailable('SKIPPED_CANCELLED'));
- const segmentCount=Math.ceil(count/MAX_BATCH_PREVIEW_FILES);
- const groups=Array.from({length:segmentCount},(_,index)=>{
-  const offset=index*MAX_BATCH_PREVIEW_FILES;
-  const list=boundScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
+ // Each isolated Worker has TWO independent budgets: up to 16 files
+ // and up to 1 MiB of eligible AST bytes. Count-only partitions let an
+ // early large script starve later valid scripts in the same segment.
+ // Scripts over the per-file ceiling are reported as SKIPPED_TOO_LARGE
+ // by the Worker and must not consume its eligible AST byte budget.
+ const groups:{offset:number;list:BoundScript[];hash:string}[]=[];
+ for(let offset=0;offset<count;){
+  let end=offset;
+  let eligibleBytes=0;
+  while(end<count&&end-offset<MAX_BATCH_PREVIEW_FILES){
+   const size=boundScripts[end].bytes.byteLength;
+   const charge=size<=MAX_ISOLATED_ANALYSIS_BYTES?size:0;
+   if(end>offset&&eligibleBytes+charge>MAX_BATCH_PREVIEW_BYTES)break;
+   eligibleBytes+=charge;
+   end++;
+  }
+  const list=boundScripts.slice(offset,end);
   const hash=createHash('sha256');
   hash.update('uah-native-readonly-ast-segment-v1\0');
-  hash.update(String(index));hash.update('\0');
+  hash.update(String(groups.length));hash.update('\0');
   for(const script of list)hash.update(script.sha256);
-  return {offset,list,hash:hash.digest('hex')};
- });
+  groups.push({offset,list,hash:hash.digest('hex')});
+  offset=end;
+ }
+ const segmentCount=groups.length;
  const results:(ImportAnalysisPreview|null)[]=Array(count).fill(null);
  // A transient isolated Worker failure is retryable once, but neither
  // retries nor a malformed reply may double-count completed script slots.
