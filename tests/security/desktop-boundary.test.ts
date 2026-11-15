@@ -2086,12 +2086,12 @@ test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not 
 test('TASK-007/TEST-017: silent Tampermonkey runtime produces actionable unknown-state guidance',()=>{
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
- const branch=ui.match(/else if\\(result\\.code==='RUNTIME_NOT_OBSERVED'\\)\\{([\\s\\S]*?)\\}else setBrowserStatus/);
+ const branch=ui.match(/else if\(result\.code==='RUNTIME_NOT_OBSERVED'\)\{([\s\S]*?)\}else setBrowserStatus/);
  assert.ok(branch,'a missing CDP runtime hint must be handled explicitly, not as an opaque code');
  if(!branch)return;
  assert.match(branch[1],/无法判断是否已安装/);
  assert.match(branch[1],/后台.*休眠/);
- assert.match(branch[1],/browserConnected\\s*\\?/,
+ assert.match(branch[1],/browserConnected\s*\?/,
   'owned and merely attached Chrome must have distinct safe recovery guidance');
  assert.match(branch[1],/官方安装页/);
  assert.match(branch[1],/另行.*确认/);
