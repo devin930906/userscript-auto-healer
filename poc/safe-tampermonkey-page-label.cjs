@@ -16,6 +16,11 @@ function classifyTampermonkeyPageUrl(input){
   if(url.protocol==='about:'&&url.pathname==='blank')
     return 'BLANK_PAGE';
   if(url.protocol==='chrome-extension:'){
+    // A confirmation-looking page in a different extension is NOT a
+    // Tampermonkey page. This is value-free log attribution, not extension
+    // authenticity or proof of a completed manager installation.
+    const expectedId='dhdgffkkebhmkfjojejmpbldmpobfkfo';
+    if(url.hostname!==expectedId)return 'OTHER_EXTENSION_PAGE';
     if(url.pathname==='/ask.html')return 'MANAGER_CONFIRMATION';
     if(url.pathname==='/options.html')return 'MANAGER_OPTIONS';
     return 'OTHER_EXTENSION_PAGE';
