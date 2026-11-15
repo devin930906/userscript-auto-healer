@@ -5,6 +5,7 @@ import {
  parseTampermonkeyUserScriptsReceipt
 } from '../../src/manager/tampermonkey-installation';
 import {TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
+import {TAMPERMONKEY_MANAGER_CARD_EXPRESSION,TAMPERMONKEY_USER_SCRIPTS_EXPRESSION} from '../../src/manager/tampermonkey-installation';
 
 function card(value:Record<string,unknown>){
  return {result:{type:'object',value:{managerPage:true,matchingCount:1,
@@ -78,4 +79,25 @@ test('TASK-007: user-script permission rejects malformed or ambiguous receipts',
  ]){
   assert.equal(parseTampermonkeyUserScriptsReceipt(receipt,155),'UNKNOWN');
  }
+});
+
+
+test('TASK-007: manager probes are fixed, read-only and never target extension origins',()=>{
+ assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/extensions-item/);
+ assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,new RegExp(TAMPERMONKEY_EXTENSION_ID));
+ assert.doesNotMatch(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/chrome-extension:\/\//);
+ assert.match(TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,/allow user scripts\|允许用户脚本/);
+ assert.doesNotMatch(TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,/\.click\s*\(/);
+ assert.doesNotMatch(TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,/GM_(?:getValue|setValue|deleteValue)/);
+});
+
+test('TASK-007/026: receipt parsers never execute accessors or Proxy traps',()=>{
+ let getterCalls=0,proxyCalls=0;
+ const accessor:Record<string,unknown>={};
+ Object.defineProperty(accessor,'result',{enumerable:true,get(){getterCalls++;return {type:'object',value:{managerPage:true,matchingCount:0}};}});
+ assert.deepEqual(parseTampermonkeyExtensionCardReceipt(accessor),{ok:false,code:'INVALID_CDP_RESPONSE'});
+ const hostile=new Proxy({}, {getPrototypeOf(){proxyCalls++;throw Error('trap');}});
+ assert.deepEqual(parseTampermonkeyExtensionCardReceipt(hostile),{ok:false,code:'INVALID_CDP_RESPONSE'});
+ assert.equal(getterCalls,0);
+ assert.equal(proxyCalls,0);
 });
