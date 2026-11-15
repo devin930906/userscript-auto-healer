@@ -66,7 +66,8 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
     // getters, while preserving ordinary JSON properties such as title.
     const keys=Reflect.ownKeys(fields);
     if(keys.some(key=>typeof key!=='string'||
-       !Object.prototype.hasOwnProperty.call(fields[key as string],'value')))
+       !Object.prototype.hasOwnProperty.call(fields[key as string],'value')||
+       fields[key as string].enumerable!==true))
       return invalidTargets();
     const typeField=fields.type,urlField=fields.url,idField=fields.targetId;
     if(!typeField||!urlField||!idField||
