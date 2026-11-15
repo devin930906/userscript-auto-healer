@@ -838,7 +838,7 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
  assert.match(ui,/if\(gmStartButton\)gmStartButton\.disabled=controlsBusy\|\|!browserConnected\|\|gmProbeActive/,
   'the isolated GM fixture remains disabled for an externally connected Chrome');
  for(const id of ['create-profile','launch-chrome']){
-  assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety">'),
+  assert.match(html,new RegExp('<button id="'+id+'" type="button" aria-describedby="chrome-profile-safety"[^>]*>'),
    'the Chrome safety warning must be available from the '+id+' control');
  }
 });
