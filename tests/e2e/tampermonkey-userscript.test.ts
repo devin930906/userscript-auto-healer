@@ -198,7 +198,7 @@ test('TASK-018/TEST-018: complete end-to-end userscript repair, acceptance, atom
       gmVerified: true,
       businessOutcome: 'missing-target',
       actionConfirmed: false,
-      observedAt: '2026-11-11T14:00:00Z'
+      observedAt: new Date(Date.now() - 5 * 60_000).toISOString()
     };
 
     const candidateEvidence: VerifiedCandidateRecoveryEvidence = {
@@ -208,7 +208,7 @@ test('TASK-018/TEST-018: complete end-to-end userscript repair, acceptance, atom
       gmVerified: true,
       businessOutcome: 'recovered',
       actionConfirmed: true,
-      observedAt: '2026-11-11T14:05:00Z'
+      observedAt: new Date(Date.now() - 60_000).toISOString()
     };
 
     const acceptance: BusinessAcceptanceResult = evaluateBusinessAcceptanceGate(
@@ -310,7 +310,7 @@ test('TASK-018/TEST-018: business acceptance rejects incomplete candidate eviden
     gmVerified: true,
     businessOutcome: 'missing-target',
     actionConfirmed: false,
-    observedAt: '2026-11-11T12:00:00Z'
+    observedAt: new Date(Date.now() - 5 * 60_000).toISOString()
   };
 
   // Case 1: Candidate failed action confirmation
@@ -321,7 +321,7 @@ test('TASK-018/TEST-018: business acceptance rejects incomplete candidate eviden
     gmVerified: true,
     businessOutcome: 'recovered',
     actionConfirmed: false as unknown as true,
-    observedAt: '2026-11-11T12:05:00Z'
+    observedAt: new Date(Date.now() - 60_000).toISOString()
   };
   assert.equal(
     evaluateBusinessAcceptanceGate(audit, backup, baseOriginal, unconfirmedCandidate, {userApproved: true}).status,
@@ -336,7 +336,7 @@ test('TASK-018/TEST-018: business acceptance rejects incomplete candidate eviden
     gmVerified: true,
     businessOutcome: 'recovered',
     actionConfirmed: true,
-    observedAt: '2026-11-11T11:55:00Z' // Earlier than 12:00:00Z!
+    observedAt: new Date(Date.now() - 6 * 60_000).toISOString() // Earlier than the original observation
   };
   const invertedResult = evaluateBusinessAcceptanceGate(
     audit,
@@ -356,7 +356,7 @@ test('TASK-018/TEST-018: business acceptance rejects incomplete candidate eviden
     gmVerified: false as unknown as true,
     businessOutcome: 'recovered',
     actionConfirmed: true,
-    observedAt: '2026-11-11T12:05:00Z'
+    observedAt: new Date(Date.now() - 60_000).toISOString()
   };
   assert.equal(
     evaluateBusinessAcceptanceGate(audit, backup, baseOriginal, unverifiedGmCandidate, {userApproved: true}).status,
