@@ -821,7 +821,7 @@ test('TASK-017/TEST-022: existing Data connection and isolated Profile safety in
   'the isolated launch warning must remain clear');
  assert.match(html,/<p id="existing-chrome-help">[\s\S]*?chrome:\/\/inspect\/#remote-debugging[\s\S]*?断开连接只会断开本软件[\s\S]*?<\/p>/,
   'the existing Chrome connection must explain Chrome authorization and safe disconnect');
- assert.match(html,/<button id="choose-profile" type="button" aria-describedby="existing-chrome-help">选择现有 Data \/ Profile<\/button>/,
+ assert.match(html,/<button id="choose-profile" type="button" aria-describedby="owned-chrome-help">选择 Data \/ Profile<\/button>/,
   'existing Data selection must be described for assistive technology');
  assert.match(html,/<button id="connect-existing-chrome" type="button" aria-describedby="existing-chrome-help">/,
   'the running-browser connection needs a dedicated entry point');
