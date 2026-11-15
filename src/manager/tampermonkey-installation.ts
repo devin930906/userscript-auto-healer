@@ -315,6 +315,33 @@ function sendCdpCommand(
   }catch{finish(null);}
  });
 }
+function waitForCdpEvent(
+ socket:WebSocket,method:string,sessionId:string,timeoutMs=6000
+):Promise<boolean>{
+ return new Promise(resolve=>{
+  let settled=false;
+  const finish=(value:boolean)=>{
+   if(settled)return;
+   settled=true;clearTimeout(timer);
+   socket.removeEventListener('message',onMessage);
+   socket.removeEventListener('error',onFailure);
+   socket.removeEventListener('close',onFailure);
+   resolve(value);
+  };
+  const onFailure=()=>finish(false);
+  const onMessage=(event:{data:unknown})=>{
+   const message=readCdpMessage(event.data);
+   if(!message){finish(false);return;}
+   if(ownValue(message,'method')===method&&
+      ownValue(message,'sessionId')===sessionId)finish(true);
+  };
+  const timer=setTimeout(()=>finish(false),timeoutMs);
+  if(socket.readyState!==WebSocket.OPEN){finish(false);return;}
+  socket.addEventListener('message',onMessage);
+  socket.addEventListener('error',onFailure,{once:true});
+  socket.addEventListener('close',onFailure,{once:true});
+ });
+}
 function frameUrl(result:Record<string,unknown>|null):string|null{
  if(!result)return null;
  const tree=ownValue(result,'frameTree');
@@ -379,7 +406,7 @@ export async function inspectApprovedTampermonkeyInstallation(
    createAttempted=true;
    failureStage='create-target';
    const created=await sendCdpCommand(socket,commandId++,'Target.createTarget',
-    {url:EXTENSIONS_LIST_URL,background:true});
+    {url:'about:blank',background:true});
    const createdId=created?ownValue(created,'targetId'):undefined;
    if(typeof createdId!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(createdId)){
     result={ok:false,code:'CDP_FAILED',stage:'create-target'};
@@ -397,10 +424,18 @@ export async function inspectApprovedTampermonkeyInstallation(
      else{
       sessionId=attachedId;
       failureStage='list-frame';
-      const listFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
-      if(!isExtensionsPageUrl(frameUrl(listFrame)||'',false))
-       result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'list-frame'};
+      const pageEnabled=await sendCdpCommand(socket,commandId++,'Page.enable',{},sessionId);
+      if(!pageEnabled)result={ok:false,code:'CDP_FAILED',stage:'list-frame'};
       else{
+       const listLoaded=waitForCdpEvent(socket,'Page.loadEventFired',sessionId);
+       const listNavigation=await sendCdpCommand(socket,commandId++,'Page.navigate',
+        {url:EXTENSIONS_LIST_URL},sessionId);
+       const listLoadSucceeded=await listLoaded;
+       const listFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
+       if(!listNavigation||Object.prototype.hasOwnProperty.call(listNavigation,'errorText')||
+          !listLoadSucceeded||!isExtensionsPageUrl(frameUrl(listFrame)||'',false))
+        result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'list-frame'};
+       else{
        let card:ManagerInstallationResult={ok:false,code:'INSPECTION_UNAVAILABLE'};
        for(let attempt=0;attempt<4;attempt++){
         failureStage='manager-card';
@@ -417,12 +452,13 @@ export async function inspectApprovedTampermonkeyInstallation(
        else if(signal?.aborted)result={ok:false,code:'CANCELLED'};
        else{
         failureStage='navigate-details';
+        const detailsLoaded=waitForCdpEvent(socket,'Page.loadEventFired',sessionId);
         const navigated=await sendCdpCommand(socket,commandId++,'Page.navigate',
          {url:EXTENSIONS_DETAILS_URL},sessionId);
-        if(!navigated||Object.prototype.hasOwnProperty.call(navigated,'errorText'))
+        const detailsLoadSucceeded=await detailsLoaded;
+        if(!navigated||Object.prototype.hasOwnProperty.call(navigated,'errorText')||!detailsLoadSucceeded)
          result=card;
         else{
-         await waitBriefly(1200);
          failureStage='details-frame';
          const detailsFrame=await sendCdpCommand(socket,commandId++,'Page.getFrameTree',{},sessionId);
          if(!isExtensionsPageUrl(frameUrl(detailsFrame)||'',true))result={...card,allowUserScripts:'UNKNOWN',permissionVerified:false};
