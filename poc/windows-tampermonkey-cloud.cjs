@@ -13,6 +13,12 @@ const path=require('node:path');
 const http=require('node:http');
 const {createHash}=require('node:crypto');
 const {classifyTampermonkeyPageUrl}=require('./safe-tampermonkey-page-label.cjs');
+const {
+ TAMPERMONKEY_MANAGER_CARD_EXPRESSION,
+ TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,
+ parseTampermonkeyExtensionCardReceipt,
+ parseTampermonkeyUserScriptsReceipt
+}=require('../dist/src/manager/tampermonkey-installation.js');
 const dir=process.env.UAH_TM_EXTENSION_DIR;
 const profile=process.env.UAH_TM_PROFILE_DIR;
 if(!dir||!profile||!path.isAbsolute(dir)||!path.isAbsolute(profile))
@@ -415,6 +421,34 @@ async function extensionCards(context){
   });
  }finally{await page.close();}
 }
+async function managerExpressionReceipt(context,url,expression){
+ const page=await context.newPage();
+ let cdp;
+ try{
+  await page.goto(url,{waitUntil:'domcontentloaded',timeout:20000});
+  await sleep(1200);
+  cdp=await context.newCDPSession(page);
+  return await cdp.send('Runtime.evaluate',{
+   expression,returnByValue:true,awaitPromise:false,
+   userGesture:false,silent:true
+  });
+ }finally{
+  if(cdp){try{await cdp.detach();}catch{/* session already closed */}}
+  try{await page.close();}catch{/* page already closed */}
+ }
+}
+async function readManagerMetadata(context){
+ const payload=await managerExpressionReceipt(
+  context,'chrome://extensions/',TAMPERMONKEY_MANAGER_CARD_EXPRESSION);
+ return parseTampermonkeyExtensionCardReceipt(payload);
+}
+async function readUserScriptsPermission(context,id){
+ const browserVersion=context.browser()?.version()||'';
+ const major=Number(browserVersion.split('.')[0]);
+ const payload=await managerExpressionReceipt(
+  context,'chrome://extensions/?id='+id,TAMPERMONKEY_USER_SCRIPTS_EXPRESSION);
+ return {major,state:parseTampermonkeyUserScriptsReceipt(payload,major)};
+}
 async function optIn(context,id){
  const page=await context.newPage();
  try{
@@ -533,6 +567,36 @@ async function main(){
   const manager=managerCandidates[0];
   assert.match(manager.id,/^[a-p]{32}$/);
   const id=manager.id;
+   // Exercise the exact read-only manager expression and parser used by the
+   // product against Chrome's real chrome://extensions page in this disposable
+   // profile. This proves metadata visibility only, never Store provenance.
+   const managerMetadata=await readManagerMetadata(context);
+   assert.equal(managerMetadata.ok,true,
+     'Product manager metadata expression must return a valid receipt');
+   assert.equal(managerMetadata.status,'INSTALLED_METADATA_HINT_ONLY');
+   assert.equal(managerMetadata.extensionId,EXPECTED_ID);
+   assert.equal(managerMetadata.version,manifest.version);
+   assert.equal(managerMetadata.enabled,'ENABLED');
+   assert.equal(managerMetadata.extensionAuthenticityVerified,false);
+   assert.equal(managerMetadata.storeProvenanceVerified,false);
+   assert.equal(managerMetadata.scriptInstallationVerified,false);
+   assert.equal(managerMetadata.scriptInjectionVerified,false);
+   assert.equal(managerMetadata.gmApiVerified,false);
+   assert.equal(managerMetadata.businessVerified,false);
+   const initialUserScripts=await readUserScriptsPermission(context,id);
+   assert.ok(['ENABLED','DISABLED'].includes(initialUserScripts.state),
+     'Product Allow User Scripts expression must identify exactly one real manager toggle');
+   console.log('PRODUCT_MANAGER_METADATA_PROBE '+JSON.stringify({
+    status:managerMetadata.status,extensionId:managerMetadata.extensionId,
+    version:managerMetadata.version,enabled:managerMetadata.enabled,
+    extensionAuthenticityVerified:managerMetadata.extensionAuthenticityVerified,
+    storeProvenanceVerified:managerMetadata.storeProvenanceVerified,
+    allowUserScriptsBefore:initialUserScripts.state,
+    chromeMajor:initialUserScripts.major,
+    scriptInstallationVerified:managerMetadata.scriptInstallationVerified,
+    scriptInjectionVerified:managerMetadata.scriptInjectionVerified,
+    gmApiVerified:managerMetadata.gmApiVerified,businessVerified:managerMetadata.businessVerified
+   }));
   // MV3 service workers are event-driven and may already have suspended.
   // A missing worker at THIS instant is neither proof of a broken extension
   // nor of a valid manager installation. Record a bounded observation only;
@@ -555,6 +619,19 @@ async function main(){
    chromeVersion:context.browser()?.version()
   }));
   const toggles=await optIn(context,id);
+   assert.equal(toggles.length,1,
+     'Disposable Chrome manager must expose exactly one Allow User Scripts toggle');
+   const finalUserScripts=await readUserScriptsPermission(context,id);
+   const expectedBefore=initialUserScripts.state;
+   const expectedAfter=toggles[0].after?'ENABLED':'DISABLED';
+   assert.equal(expectedBefore,toggles[0].before?'ENABLED':'DISABLED',
+     'Read-only manager expression must agree with the manager UI before opt-in');
+   assert.equal(finalUserScripts.state,expectedAfter,
+     'Read-only manager expression must agree with the manager UI after opt-in');
+   console.log('PRODUCT_USER_SCRIPTS_METADATA_PROBE '+JSON.stringify({
+    before:initialUserScripts.state,after:finalUserScripts.state,
+    chromeMajor:finalUserScripts.major,toggleCount:toggles.length
+   }));
   console.log('DISPOSABLE_USER_SCRIPTS_OPT_IN '+JSON.stringify(toggles));
   await context.close();
   context=await launch();
