@@ -2,9 +2,11 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
-> 当前续接（2026-11-16，PR #895 合并后）：远端 `main@d8d0bf7223d128f3839400689b2d1f935e52fe2e`，tree `896ee17313caeca39df2f7e61a29f983f66ce0d8`；本地任务工作区 `userscript-auto-healer-task014-ai-consent` 的产品代码提交 tree 与远端 main 一致。PR [#895](https://github.com/devin930906/userscript-auto-healer/pull/895) 增加原生桌面 AI mock flow 与授权等待取消测试；合并后 main Application Checks [#43872192593](https://github.com/devin930906/userscript-auto-healer/actions/runs/43872192593) 成功，Windows Electron shell smoke 成功。当前 Issue #604 保持 Open。
+> 当前续接（2026-11-16，PR #897 合并及 #510 对照后）：产品代码基线为 PR [#897](https://github.com/devin930906/userscript-auto-healer/pull/897) 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a`，tree `5d48b548c8be9b6c34cf3a6a27c253896ff84585`。PR #897 只增加 TASK-005 手动 cold/preinitialized Profile 诊断；没有修改产品启动实现。Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) 在同一 SHA 上成功，两个 Profile 启动都通过现有所有权校验。Issue #510 仍 Open，根因未确认。
 >
 > TASK-014/#604 仍未完成：AI 尚未进入实际批处理分析、故障诊断及候选生成链；TASK-009/TASK-013 依赖和完整 TEST-015/016 未通过。此次 Windows Candidate EXE/ZIP [#43870858176](https://github.com/devin930906/userscript-auto-healer/actions/runs/43870858176) 是未批准候选，不是 Stable 发布文件。保留 #486 与 #510 的独立开放阻断，Stable 发布仍未达到验收门槛。
+>
+> #510 限时 Profile 对照只覆盖同一 Windows runner 上一组 cold/warm 配对：预热 Chrome 无 CDP，warmup 退出码 0；cold 与 warm 两臂均在 t0/t1 秒级窗口内完成 CDP / PID / WebSocket 验证。它没有复现 t20 timeout，也没有定位原失败根因；本轮没有执行 Candidate Packaging 或生成 EXE/ZIP。
 
 > 历史快照（2026-11-16 PR #893 产品代码合并时）：产品代码合并 SHA 为 `5edebd67ef02248bae00457c14e81f1f331fd8aa`，tree 为 `804b83353d2c16d39b04d4eef598d79410b1d5c6`；当时本轮文档更新开始前，本地产品代码树与该 tree 一致。当前仓库 HEAD 应始终以 GitHub `main` 实际状态重新核对。PR [#893](https://github.com/devin930906/userscript-auto-healer/pull/893) 修复 TASK-014/#604 原生 AI 同意框与实际协议目标不一致：Chat Completions/Responses、自定义 base-path 的确切 POST URL 会显示在确认框，空 query/fragment 分隔符会在同意及网络流量前拒绝。
 >
@@ -18,7 +20,7 @@
 >
 > 先前 PR 临时合并候选 [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 来自 SHA a41f2e676da766aed184217f1d55424633d9970f，现已被后续 main 同源候选取代；历史文件 SHA 仍保留于 docs/07-testing.md。
 >
-> #510 仍 Open：原失败 [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 有 79 次 FETCH_REFUSED 至 t20、state=1/endpointMarker=0。main Application #43824662618 与当前 main Candidate #43828261977 在四次拒绝后于 t4 成功读取 CDP；这些成功样本不能证明根因已定位。
+> #510 仍 Open：原失败 [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 有 79 次 FETCH_REFUSED 至 t20、state=1/endpointMarker=0。main Application #43824662618 与当时的 main Candidate #43828261977 在四次拒绝后于 t4 成功读取 CDP；这些成功样本不能证明根因已定位。
 
 > **2026-11-02 最新续接**：按 `docs/19-stable-v7-migration.md`、`AGENTS.md` 新版规则和真实 GitHub 远端状态继续。以下旧版认领/签名/HANDOFF_BLOCKED 均保留为历史资料，不再是产品开发准入条件；真实产品安全和 Stable GATE 未取消。
 
