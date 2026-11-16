@@ -434,3 +434,11 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **正式 Release 与 Stable**：package.json 仍为 1.1.3；最近正式 Release v1.1.3 源为 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，早于本次 rebaseline。构建时 main@d647003f 的 #43828261977 仅生成候选包，未创建本轮正式 tag/Release；同源包虽通过 Windows runner 检查，最终用户集中人工验收和必要 GATE 仍未通过。
 - **本地同步**：完整克隆 worktree userscript-auto-healer-task007-worktree，分支 feat/task007-installed-probe-positive-20261116，工作树 clean；本地提交 3d484305822541d18e0d11dbae38128220e509ad 的 tree eed6e9625b859f5986d177fb0b98e8bb4f04dd4c 等于远端 PR 分支 tree。推送曾因 SEC_E_NO_CREDENTIALS 失败；源文件由 GitHub 文件 API 同步后进入 PR #886。无未同步文件差异。
 - **下一项**：继续 TASK-007 / #486，需有用户授权的隔离 Chrome/Tampermonkey 环境，完成正式支持范围/身份来源、安装/注入、GM 往返、真实业务正反例和失败恢复证据；Issue 认领/锁不是前置条件。随后复核 TASK-005/#510 的可比较因果证据、候选双包与全部 GATE，最后做集中人工验收。
+
+## 2026-11-16 TASK-005 / #510 限时 CPU 压力启动诊断
+
+- **精确源与环境**：Windows Application Skeleton Checks 的手动 run [#43834078871](https://github.com/devin930906/userscript-auto-healer/actions/runs/43834078871) 使用历史失败候选同一 SHA `f2675b9e730a76c67aad760625f04c430828fc1e`；失败 run [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 及既有成功对照均使用 runner `2.338.2` / image `windows-2025-vs2026 20261103.298.1`。
+- **干预与隔离**：`chrome_startup_diagnostic=true`、`chrome_cpu_pressure=true`。现有测试仅为被测隔离 Chrome 启动最多带入两个测试子进程，各最多 8 秒；不读取或启动用户 Chrome/Profile，不读取脚本或用户数据。20 秒 deadline、Profile 保护、PID/端口/HTTP/WebSocket 所有权校验保持不变。
+- **实际结果**：owned-Chrome 全文件控制 60 tests / 59 pass / 0 fail / 1 skipped；其中启动成功，`FETCH_REFUSED=t0..t4` 后于 t4 解析 CDP。后续 3 个 focused isolated startup sample 各 1/1 pass，分别在 t1 解析；四次均记录 `state=1 endpointMarker=0`，CPU-pressure listener probe 记录 `t0:0`。常规边界 job 1126 tests / 1125 pass / 0 fail / 1 conditional skip；Electron shell smoke 成功。总 run success。
+- **结论边界**：在该精确失败 SHA 与相同 runner image 下，所试的限时合成 CPU 压力没有复现失败，但不能代表完整 runner 资源争用，也不能确定先前 `FETCH_REFUSED=79` 的根因或修复。此诊断没有运行 Candidate Packaging、没有产出 EXE/ZIP；Issue #510 保持 Open，未提高 timeout、放宽 ownership 或宣称 TEST-006/008/009 / Stable GATE 通过。
+- **续接**：不重复相同 CPU-off/CPU-on 样本；若有新的失败，须记录可区分启动、Profile 状态、OS listener 与 HTTP endpoint 的有界证据。TASK-007/#486 仍需用户授权的隔离 Tampermonkey 环境及真实 GM/业务链路，当前 Stable 继续未完成。
