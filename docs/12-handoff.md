@@ -2,7 +2,11 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
-> 2026-11-16 PR #893 产品代码合并后的续接点：产品代码合并 SHA 为 `5edebd67ef02248bae00457c14e81f1f331fd8aa`，tree 为 `804b83353d2c16d39b04d4eef598d79410b1d5c6`；本轮文档更新开始前，本地产品代码树与该 tree 一致。当前仓库 HEAD 应始终以 GitHub `main` 实际状态重新核对。PR [#893](https://github.com/devin930906/userscript-auto-healer/pull/893) 修复 TASK-014/#604 原生 AI 同意框与实际协议目标不一致：Chat Completions/Responses、自定义 base-path 的确切 POST URL 会显示在确认框，空 query/fragment 分隔符会在同意及网络流量前拒绝。
+> 当前续接（2026-11-16，PR #895 合并后）：远端 `main@d8d0bf7223d128f3839400689b2d1f935e52fe2e`，tree `896ee17313caeca39df2f7e61a29f983f66ce0d8`；本地任务工作区 `userscript-auto-healer-task014-ai-consent` 的产品代码提交 tree 与远端 main 一致。PR [#895](https://github.com/devin930906/userscript-auto-healer/pull/895) 增加原生桌面 AI mock flow 与授权等待取消测试；合并后 main Application Checks [#43872192593](https://github.com/devin930906/userscript-auto-healer/actions/runs/43872192593) 成功，Windows Electron shell smoke 成功。当前 Issue #604 保持 Open。
+>
+> TASK-014/#604 仍未完成：AI 尚未进入实际批处理分析、故障诊断及候选生成链；TASK-009/TASK-013 依赖和完整 TEST-015/016 未通过。此次 Windows Candidate EXE/ZIP [#43870858176](https://github.com/devin930906/userscript-auto-healer/actions/runs/43870858176) 是未批准候选，不是 Stable 发布文件。保留 #486 与 #510 的独立开放阻断，Stable 发布仍未达到验收门槛。
+
+> 历史快照（2026-11-16 PR #893 产品代码合并时）：产品代码合并 SHA 为 `5edebd67ef02248bae00457c14e81f1f331fd8aa`，tree 为 `804b83353d2c16d39b04d4eef598d79410b1d5c6`；当时本轮文档更新开始前，本地产品代码树与该 tree 一致。当前仓库 HEAD 应始终以 GitHub `main` 实际状态重新核对。PR [#893](https://github.com/devin930906/userscript-auto-healer/pull/893) 修复 TASK-014/#604 原生 AI 同意框与实际协议目标不一致：Chat Completions/Responses、自定义 base-path 的确切 POST URL 会显示在确认框，空 query/fragment 分隔符会在同意及网络流量前拒绝。
 >
 > PR-head Application Checks [#43858568343](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568343)、Candidate Packaging [#43858568495](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568495) 与合并后 main Application Checks [#43860109349](https://github.com/devin930906/userscript-auto-healer/actions/runs/43860109349) 均成功；main run 的 Electron shell smoke 成功，可选启动/AST 诊断 job skipped。候选 EXE/ZIP 与校验仅为候选交付，不是正式 Stable。
 >
