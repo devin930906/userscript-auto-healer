@@ -465,3 +465,9 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - 当前 main SHA d647003f391f9c350e6efb94a3924f604bd80ead 的 Windows Candidate run #43828261977 通过。回归 1131 tests / 1129 pass / 0 fail / 2 conditional skip；EXE/ZIP 载荷检查、安装启动、userData 保留和便携重定位通过。
 - EXE 候选 SHA-256 6ac2b0530b0243b3886a9d24d61ff0263ebf69d70423ed1abd0548ec0a63c65b；ZIP 候选 SHA-256 7994ad8452cb939beb0270111e5cd0eb4f051767b217a3159a2aeaf6da80f41e；Artifact 14207796979，digest sha256:74a54016d4dbf3583a8f9fd7fb254bc4ea201dbc520c59f24f053b6c4cfe7be2，2026-11-19 到期。
 - 候选 ZIP relocation 第一轮需要 8 次尝试后通过，后两轮首试通过；记录此次成功重试，不据此推断与 #510 有共同根因。#510 仍 Open，Stable 未通过。
+
+## 2026-11-16 TASK-005 / Issue #510 限时 CPU 压力对照（根因仍未确认）
+
+- 手动 Windows run [#43834078871](https://github.com/devin930906/userscript-auto-healer/actions/runs/43834078871) 使用 `fix/task007-installation-probe-loop-closure-20261116` 精确源码 SHA `f2675b9e730a76c67aad760625f04c430828fc1e`，与失败候选 run [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 相同。诊断输入开启 `chrome_startup_diagnostic=true`、`chrome_cpu_pressure=true`；两个测试专属 CPU 子进程最多运行 8 秒，不触碰用户 Chrome/Profile，原有 20 秒 CDP deadline、失败关闭和所有权检查未更改。
+- 与失败及先前成功运行使用相同 `windows-2025-vs2026` runner image `20261103.298.1`。完整 owned-Chrome 测试文件 60 项为 59 pass / 0 fail / 1 skip，随后 3 个独立启动样本全部通过；CDP 分别于 t4、t1、t1、t1 解析，固定端口标记均为 `state=1 endpointMarker=0`，压力期间记录到的监听器时间线仅为 `t0:0`。同一 run 的常规 Windows 回归为 1126 tests / 1125 pass / 0 fail / 1 conditional skip，Electron shell smoke 成功。
+- 限时合成 CPU 压力未复现 `CDP_TIMEOUT`；它不证明或排除更广泛的 runner/resource 时序因素，也没有给出确定根因或修复。该 run 未执行 Candidate Packaging、没有生成 EXE/ZIP；#510 保持 Open，TEST-006/008/009 与 Stable GATE 不因该结果判为通过。
