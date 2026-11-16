@@ -1,11 +1,13 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {access,mkdtemp,rm} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {access,mkdir,mkdtemp,realpath,rm,symlink} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {createServer} from 'node:net';
 import {join,win32} from 'node:path';
 import {tmpdir} from 'node:os';
-import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession} from '../../src/browser/owned-chrome';
+import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession,
+  type ChromeLaunchOptions,type ManagedLaunchResult} from '../../src/browser/owned-chrome';
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
@@ -14,6 +16,161 @@ import {inspectApprovedTampermonkeyInstallation} from '../../src/manager/tamperm
 const id='1234567890abcdef';
 const worker={targetId:id,type:'service_worker',
  url:'chrome-extension://'+TAMPERMONKEY_EXTENSION_ID+'/background.js'};
+
+function readWindowsProcessArgs(pid:number):string[]{
+ if(!Number.isSafeInteger(pid)||pid<1)throw Error('INVALID_TEST_PROCESS_ID');
+ const script=[
+  "$ErrorActionPreference='Stop'",
+  "$source=@'",
+  'using System;',
+  'using System.Runtime.InteropServices;',
+  'public static class UahNativeCommandLine {',
+  ' [DllImport("shell32.dll", SetLastError=true)]',
+  ' public static extern IntPtr CommandLineToArgvW([MarshalAs(UnmanagedType.LPWStr)] string commandLine, out int argc);',
+  ' [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr pointer);',
+  '}',
+  "'@",
+  'Add-Type -TypeDefinition $source',
+  `$process=Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = ${pid}'`,
+  "if($null -eq $process -or [string]::IsNullOrEmpty($process.CommandLine)){throw 'PROCESS_NOT_FOUND'}",
+  '$count=0',
+  '$pointers=[UahNativeCommandLine]::CommandLineToArgvW($process.CommandLine,[ref]$count)',
+  'if($pointers -eq [IntPtr]::Zero -or $count -lt 1){throw \'COMMAND_LINE_UNAVAILABLE\'}',
+  'try {',
+  ' $values=[System.Collections.Generic.List[string]]::new()',
+  ' for($i=0;$i -lt $count;$i++){',
+  '  $argumentPointer=[Runtime.InteropServices.Marshal]::ReadIntPtr($pointers,$i*[IntPtr]::Size)',
+  '  [void]$values.Add([Runtime.InteropServices.Marshal]::PtrToStringUni($argumentPointer))',
+  ' }',
+  ' ConvertTo-Json -InputObject $values.ToArray() -Compress',
+  '} finally { [void][UahNativeCommandLine]::LocalFree($pointers) }'
+ ].join('\n');
+ try{
+  const encoded=Buffer.from(script,'utf16le').toString('base64');
+  const output=execFileSync('powershell.exe',[
+   '-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded
+  ],{encoding:'utf8',windowsHide:true,timeout:5000,maxBuffer:8192});
+  const parsed:unknown=JSON.parse(output);
+  if(!Array.isArray(parsed)||parsed.length<1||parsed.some(value=>typeof value!=='string'))
+   throw Error('INVALID_TEST_ARGS');
+  return parsed as string[];
+ }catch{
+  throw Error('CHROME_COMMAND_LINE_QUERY_FAILED');
+ }
+}
+
+function assertChromeArgsEqual(actual:string[],expected:string[]):void{
+ assert.equal(actual.length,expected.length,'Chrome must keep the default argument count');
+ for(let index=0;index<expected.length;index++)
+  assert.equal(actual[index]===expected[index],true,
+   'Chrome default argument mismatch at index '+index);
+}
+
+test('TASK-007: isolated CI extension path is accepted only after the existing consent gates',async()=>{
+ if(process.platform!=='win32')return;
+ const previousActions=process.env.GITHUB_ACTIONS;
+ const previousRunnerTemp=process.env.RUNNER_TEMP;
+ const root=await realpath(await mkdtemp(join(tmpdir(),'uah-extension-option-gate-')));
+ const extension=join(root,'extension');
+ await mkdir(extension);
+ process.env.GITHUB_ACTIONS='true';
+ process.env.RUNNER_TEMP=root;
+ try{
+  const result=await launchApprovedIsolatedChrome(null,{
+   userApproved:true,testHeadless:true,testExtensionDirectory:extension
+  } as ChromeLaunchOptions);
+  assert.deepEqual(result,{ok:false,code:'PREFLIGHT_FAILED'},
+   'a valid gated fixture directory must pass option validation before the deliberately invalid browser config');
+ }finally{
+  if(previousActions===undefined)delete process.env.GITHUB_ACTIONS;
+  else process.env.GITHUB_ACTIONS=previousActions;
+  if(previousRunnerTemp===undefined)delete process.env.RUNNER_TEMP;
+  else process.env.RUNNER_TEMP=previousRunnerTemp;
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-007: extension loading rejects missing consent, non-CI launches and non-single paths before preflight',async()=>{
+ if(process.platform!=='win32')return;
+ const previousActions=process.env.GITHUB_ACTIONS;
+ const previousRunnerTemp=process.env.RUNNER_TEMP;
+ const root=await realpath(await mkdtemp(join(tmpdir(),'uah-extension-option-reject-')));
+ const extension=join(root,'extension');
+ const outside=await realpath(await mkdtemp(join(tmpdir(),'uah-extension-option-outside-')));
+ const outsideExtension=join(outside,'extension');
+ const commaPath=join(root,'extension,second');
+ const listPath=join(root,'extension;second');
+ await Promise.all([mkdir(extension),mkdir(outsideExtension),mkdir(commaPath),mkdir(listPath)]);
+ process.env.RUNNER_TEMP=root;
+ process.env.GITHUB_ACTIONS='true';
+ const run=(options:unknown)=>launchApprovedIsolatedChrome(null,options as ChromeLaunchOptions);
+ try{
+  const rejected=[
+   {name:'explicit user approval is still required',options:{userApproved:false,testHeadless:true,testExtensionDirectory:extension}},
+   {name:'testHeadless is required',options:{userApproved:true,testExtensionDirectory:extension}},
+   {name:'testHeadless must be true',options:{userApproved:true,testHeadless:false,testExtensionDirectory:extension}},
+   {name:'the GitHub Actions gate is required',options:{userApproved:true,testHeadless:true,testExtensionDirectory:extension},actions:'false'},
+   {name:'the extension directory must stay under RUNNER_TEMP',options:{userApproved:true,testHeadless:true,testExtensionDirectory:outsideExtension}},
+   {name:'comma-separated extension paths are rejected',options:{userApproved:true,testHeadless:true,testExtensionDirectory:commaPath}},
+   {name:'semicolon-separated extension paths are rejected',options:{userApproved:true,testHeadless:true,testExtensionDirectory:listPath}},
+   {name:'boxed strings are not accepted as path authority',options:{userApproved:true,testHeadless:true,testExtensionDirectory:new String(extension)}}
+  ];
+  for(const item of rejected){
+   process.env.GITHUB_ACTIONS=item.actions??'true';
+   assert.deepEqual(await run(item.options),{ok:false,code:'NOT_AUTHORIZED'},item.name);
+  }
+ }finally{
+  if(previousActions===undefined)delete process.env.GITHUB_ACTIONS;
+  else process.env.GITHUB_ACTIONS=previousActions;
+  if(previousRunnerTemp===undefined)delete process.env.RUNNER_TEMP;
+  else process.env.RUNNER_TEMP=previousRunnerTemp;
+  await Promise.all([
+   rm(root,{recursive:true,force:true}),
+   rm(outside,{recursive:true,force:true})
+  ]);
+ }
+});
+
+test('TASK-007: extension loading rejects a junction that escapes RUNNER_TEMP',async t=>{
+ if(process.platform!=='win32'){
+  t.skip('Windows reparse-point behavior only');
+  return;
+ }
+ const previousActions=process.env.GITHUB_ACTIONS;
+ const previousRunnerTemp=process.env.RUNNER_TEMP;
+ const root=await realpath(await mkdtemp(join(tmpdir(),'uah-extension-junction-root-')));
+ const outside=await realpath(await mkdtemp(join(tmpdir(),'uah-extension-junction-outside-')));
+ const extension=join(outside,'extension');
+ const link=join(root,'escaped');
+ await mkdir(extension);
+ try{
+  await symlink(outside,link,'junction');
+ }catch{
+  await Promise.all([
+   rm(root,{recursive:true,force:true}),
+   rm(outside,{recursive:true,force:true})
+  ]);
+  t.skip('Disposable Windows runner does not permit a test junction');
+  return;
+ }
+ process.env.RUNNER_TEMP=root;
+ process.env.GITHUB_ACTIONS='true';
+ try{
+  const result=await launchApprovedIsolatedChrome(null,{
+   userApproved:true,testHeadless:true,testExtensionDirectory:join(link,'extension')
+  } as ChromeLaunchOptions);
+  assert.deepEqual(result,{ok:false,code:'NOT_AUTHORIZED'});
+ }finally{
+  if(previousActions===undefined)delete process.env.GITHUB_ACTIONS;
+  else process.env.GITHUB_ACTIONS=previousActions;
+  if(previousRunnerTemp===undefined)delete process.env.RUNNER_TEMP;
+  else process.env.RUNNER_TEMP=previousRunnerTemp;
+  await Promise.all([
+   rm(root,{recursive:true,force:true}),
+   rm(outside,{recursive:true,force:true})
+  ]);
+ }
+});
 
 test('TEST-017 stage: Tampermonkey runtime target is a hint, not proof of GM or installation',()=>{
  const result=inspectTampermonkeyTargetHints([worker]);
@@ -99,6 +256,12 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
  assert.equal(session.ok,true,JSON.stringify(session));
  if(!session.ok)return;
  stop=session.stop;
+ assertChromeArgsEqual(readWindowsProcessArgs(session.pid),[
+  chrome!,'--headless=new','--no-first-run','--no-default-browser-check',
+  '--disable-background-networking','--remote-debugging-address=127.0.0.1',
+  '--remote-debugging-port='+address.port,'--user-data-dir='+config.userDataDir,
+  'about:blank'
+ ]);
  const probe=await inspectApprovedTampermonkeyRuntime(session,true);
  assert.ok(probe.ok?probe.status==='RUNTIME_TARGET_HINT_ONLY':
    probe.code==='RUNTIME_NOT_OBSERVED',JSON.stringify(probe));
@@ -200,6 +363,122 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
    (listenerModule as {verifyWindowsLoopbackListenerPid:typeof originalVerify})
      .verifyWindowsLoopbackListenerPid=originalVerify;
  }
+});
+
+test('TASK-007: installed vendor fixture returns only app-owned manager metadata and closes its inspection target',async t=>{
+ if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'||!process.env.UAH_TM_EXTENSION_DIR){
+  t.skip('Signed disposable vendor CRX Windows Actions fixture only');
+  return;
+ }
+ const runnerTemp=process.env.RUNNER_TEMP;
+ const extension=process.env.UAH_TM_EXTENSION_DIR;
+ assert.ok(runnerTemp&&win32.isAbsolute(runnerTemp),'Windows Actions must provide RUNNER_TEMP');
+ assert.ok(extension&&win32.isAbsolute(extension),'CI must provide the verified unpacked vendor fixture');
+ const manifest=JSON.parse(readFileSync(win32.join(extension,'manifest.json'),'utf8')) as {
+  manifest_version?:unknown;version?:unknown
+ };
+ assert.equal(manifest.manifest_version,3);
+ assert.equal(typeof manifest.version,'string');
+ let chrome:string|undefined;
+ for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],process.env.LOCALAPPDATA]){
+  if(!base)continue;
+  const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+  try{await access(candidate);chrome=candidate;break;}catch{/* signed Chrome is absent at this runner location */}
+ }
+ assert.ok(chrome,'Windows runner must provide signed Chrome');
+ const listener=createServer();
+ await new Promise<void>((resolve,reject)=>{
+  listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);
+ });
+ const address=listener.address();
+ await new Promise<void>(resolve=>listener.close(()=>resolve()));
+ if(!address||typeof address==='string')throw Error('NO_FREE_TEST_PORT');
+ const root=await mkdtemp(win32.join(runnerTemp,'uah-tm-installed-metadata-'));
+ const config={executablePath:chrome!,userDataDir:win32.join(root,'profile'),
+  remoteDebuggingPort:address.port,bindAddress:'127.0.0.1' as const};
+ let session:ManagedLaunchResult|undefined;
+ let safeToRemoveProfile=true;
+ t.after(async()=>{
+  if(session?.ok&&isLiveApprovedChromeSession(session)){
+   const closed=await session.closeGracefully?.().catch(()=>false);
+   if(closed!==true)safeToRemoveProfile=false;
+  }
+  if(!safeToRemoveProfile)throw Error('OWNED_TEST_PROFILE_LEFT_FOR_RUNNER_CLEANUP');
+  await rm(root,{recursive:true,force:true}).catch(()=>undefined);
+ });
+ const prepared=await prepareApprovedIsolatedProfile(config,true);
+ assert.equal(prepared.ok,true,'only a new isolated profile under RUNNER_TEMP may be used');
+ const launched=await launchApprovedIsolatedChrome(config,{
+  userApproved:true,testHeadless:true,testExtensionDirectory:extension
+ });
+ assert.equal(launched.ok,true,'app-owned Chrome must load the disposable fixture '+
+  (launched.ok?'':'('+launched.code+')'));
+ if(!launched.ok)return;
+ session=launched;
+ const canonicalExtension=await realpath(extension);
+ assertChromeArgsEqual(readWindowsProcessArgs(session.pid),[
+  chrome!,'--headless=new','--no-first-run','--no-default-browser-check',
+  '--disable-background-networking','--remote-debugging-address=127.0.0.1',
+  '--remote-debugging-port='+address.port,'--user-data-dir='+config.userDataDir,
+  '--load-extension='+canonicalExtension,'about:blank'
+ ]);
+ const readPageTargets=async():Promise<string[]>=>{
+  const response=await fetch('http://127.0.0.1:'+address.port+'/json/list');
+  assert.equal(response.status===200,true,'owned Chrome target inventory must be readable');
+  const raw:unknown=await response.json();
+  assert.equal(Array.isArray(raw),true,'owned Chrome target inventory must be a list');
+  return (raw as Array<Record<string,unknown>>)
+   .filter(target=>target.type==='page'&&typeof target.id==='string')
+   .map(target=>target.id as string).sort();
+ };
+ const pagesBefore=await readPageTargets();
+ const installation=await inspectApprovedTampermonkeyInstallation(session,true);
+ const pagesAfter=await readPageTargets();
+ assert.equal(pagesAfter.join('|')===pagesBefore.join('|'),true,
+  'metadata inspection must close its temporary chrome://extensions page and CDP target session');
+ assert.equal(installation.ok,true,'installed fixture metadata probe must complete');
+ if(!installation.ok)return;
+ assert.equal(installation.status,'INSTALLED_METADATA_HINT_ONLY');
+ if(installation.status!=='INSTALLED_METADATA_HINT_ONLY')return;
+ assert.deepEqual({manager:installation.manager,extensionId:installation.extensionId,
+  version:installation.version,enabled:installation.enabled},
+ {manager:'Tampermonkey',extensionId:TAMPERMONKEY_EXTENSION_ID,
+  version:manifest.version,enabled:'ENABLED'});
+ assert.equal(['ENABLED','DISABLED','UNKNOWN','NOT_APPLICABLE'].includes(
+  installation.allowUserScripts),true,'permission hint must use the supported state vocabulary');
+ const chromeVersionMajor=Number(session.chromeVersion.split('.')[0]);
+ assert.equal(installation.permissionVerified,chromeVersionMajor<138||
+  installation.allowUserScripts==='ENABLED'||installation.allowUserScripts==='DISABLED');
+ const metadataOnlyFlags={
+  extensionAuthenticityVerified:installation.extensionAuthenticityVerified,
+  storeProvenanceVerified:installation.storeProvenanceVerified,
+  scriptInstallationVerified:installation.scriptInstallationVerified,
+  scriptInjectionVerified:installation.scriptInjectionVerified,
+  gmApiVerified:installation.gmApiVerified,businessVerified:installation.businessVerified
+ };
+ assert.deepEqual(metadataOnlyFlags,{
+  extensionAuthenticityVerified:false,storeProvenanceVerified:false,
+  scriptInstallationVerified:false,scriptInjectionVerified:false,
+  gmApiVerified:false,businessVerified:false
+ });
+ for(const unsupportedAuthorityField of [
+  'automaticInstallAllowed','automaticEnableAllowed','permissionChangeAllowed',
+  'writeAllowed','applyAllowed','automaticPatchAllowed','rollbackAllowed',
+  'automaticRollbackAllowed'
+ ])assert.equal(Object.prototype.hasOwnProperty.call(installation,unsupportedAuthorityField),false,
+  'metadata-only probe must not expose '+unsupportedAuthorityField);
+ console.log('TAMPERMONKEY_INSTALLED_METADATA_HINT_ONLY '+JSON.stringify({
+  fixture:'synthetic/vendor-hosted-unpacked-CRX',manager:installation.manager,
+  extensionId:installation.extensionId,version:installation.version,
+  enabled:installation.enabled,allowUserScripts:installation.allowUserScripts,
+  permissionVerified:installation.permissionVerified,inspectionTargetClosed:true,
+  ...metadataOnlyFlags
+ }));
+ const closed=await session.closeGracefully?.();
+ if(closed!==true)safeToRemoveProfile=false;
+ assert.equal(closed,true,'the app-owned disposable browser session must close');
+ assert.equal(isLiveApprovedChromeSession(session),false,
+  'closing the fixture session must revoke its app-owned session handle');
 });
 
 test('TEST-017 stage: distinct ordinary Chrome targets remain ignorable but cannot forge identities',()=>{
