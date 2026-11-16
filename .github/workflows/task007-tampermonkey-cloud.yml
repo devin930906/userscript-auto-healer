@@ -8,6 +8,7 @@ on:
       - 'tests/manager/tampermonkey-cloud-matrix.test.ts'
       - 'tests/manager/tampermonkey-cloud-log-safety.test.ts'
       - 'tests/manager/tampermonkey-adapter.test.ts'
+      - 'tests/browser/owned-chrome.test.ts'
       - 'src/analyze/selector-analyzer.ts'
       - 'src/repair/patch-planner.ts'
       - 'src/repair/imported-manual-export.ts'
