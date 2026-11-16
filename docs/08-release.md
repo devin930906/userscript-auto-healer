@@ -150,4 +150,19 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
   3. 版本号正式推进至 **`1.0.1`**。
 - **自动化验证**：全量 1075 项测试 100% 绿灯（1065 pass, 0 fail, 10 conditional skip），预开发追踪矩阵 100% 通过。
 
+## 2026-11-16 rebaseline 后的 Stable 发布状态（现行覆盖说明）
 
+> 本节针对 `docs/product-rebaseline.md` 所定义的新产品验收范围。2026-11-12 对 v1.0.0 的 GATE-001..011 签署，以及历史 GitHub Release `v1.1.3`，均保留为历史发布证据；不得直接继承为本次 rebaseline 的验收结论。v1.1.3 已于 2026-11-13 发布，但原始需求校准文件明确规定该版本不是本次需求验收证据。
+
+- **当前代码基线**：PR [#883](https://github.com/devin930906/userscript-auto-healer/pull/883) 已合并，`main@bcacd082a3c538e00dfbf481c7221c8e829818ad`。合并后 Application Skeleton Checks [#43806721310](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721310) 成功（1126 tests：1125 pass、0 fail、1 conditional skip；Windows Electron shell smoke 成功）。
+- **GATE-001 / GATE-002**：当前 rebaseline 的普通用户主流程、真实管理器、真实业务断言、批量处理与逐项结果仍未形成完整产品闭环；历史需求矩阵及旧版本签署不能替代新范围逐项复核。
+- **GATE-003**：合并后 Application Skeleton Checks 通过，但 Windows Candidate EXE/ZIP [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 启动检查失败，未进入打包；因此当前候选发行链的完整机器门槛仍受阻。该故障已在 [Issue #510](https://github.com/devin930906/userscript-auto-healer/issues/510) 重新打开。
+- **GATE-004 / GATE-005**：TASK-007 实验 [#43806236366](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806236366) 验证 vendor-hosted Tampermonkey 5.4.1 与签名 key/runtime ID 对应的隔离运行环境、service worker 及合成业务对照；但 `storeAuthenticityVerified=false`、`gmRoundtrip=false`，且未覆盖真实用户 Chrome/Profile、真实脚本安装授权、完整 GM API、生产业务及支持矩阵，故仍未通过。
+- **GATE-006**：既有桌面安全边界与自动化负例证据保留；本次 rebaseline 的完整安全与权限链尚未重新签署，不以旧版通过记录推定当前全部满足。
+- **GATE-007**：可恢复原子事务、真实脚本自动应用与失败回滚仍未完成；阶段性备份/候选暂存不构成真实原文件事务验收。
+- **GATE-008 / GATE-009**：历史 v1.1.3 的 EXE/ZIP 仍是已发布历史产物；本轮 Candidate Packaging 在回归阶段失败，未生成当前 rebaseline 候选双包，真实安装、升级、卸载、便携直启、只读目录与用户数据持久性仍须按 TEST-027/028 验证。
+- **GATE-010**：本轮工程文档正在同步当前合并、测试与阻断证据；须以 Documentation Integrity 的实际结果确认。
+- **GATE-011**：当前 rebaseline 尚无同一候选 SHA 构建、校验并重新下载验证的 EXE+ZIP 发行对；历史 Release 资产不能代替本次候选产物。
+- **最终集中人工验收**：尚未执行。Windows 实机/VM 安装、升级、卸载、ZIP 解压直启、用户数据、真实 Chrome/Tampermonkey、主流程及 GUI 体验必须继续保留至正式发布前的集中阶段；不得提前标记通过。
+
+**当前判定：Stable 未完成；不得创建新的 Stable Tag/Release。** 只有当前 rebaseline 的全部必要 GATE、同源 EXE/ZIP、机器验证与最终人工验收均有真实证据后，才允许重新评估正式发布。
