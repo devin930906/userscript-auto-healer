@@ -438,3 +438,12 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 ### TASK-005 / TASK-017：已有自定义 Data 外连（2026-11-12）
 
 依用户要求新增正在运行 Chrome 的独立授权连接路径，首阶段支持连接和 Tampermonkey 运行目标只读提示；原有场景诊断、GM 测试与自动修复尚未适配此外部连接。真实 Chrome 原生授权、用户设备和完整业务验收待完成；不得据模拟测试认定 Stable。
+
+## 2026-11-16 当前 TASK 执行状态增量（PR #883 合并后）
+
+- **TASK-005 / Issue #856 与历史 Windows CDP 故障 #510**：Candidate EXE/ZIP run [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 就绪阶段失败，`CDP_TIMEOUT`，尚无已确认根因；#510 已重新打开并记录同 SHA 对照。Portable Chrome Product Validation #43805989203 通过不代表所选安装 Chrome 路径的间歇故障已解决。
+- **TASK-007 / Issue #486**：PR [#883](https://github.com/devin930906/userscript-auto-healer/pull/883) 已合并 main@bcacd082a3c538e00dfbf481c7221c8e829818ad，新增 app-owned Chrome 管理页只读 Tampermonkey ID/名称/版本/启用状态与 Allow User Scripts 元数据检查。云端实验 [#43806236366](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806236366) 只证明 vendor-hosted Tampermonkey 5.4.1 / Chromium 141 隔离环境的签名 key/runtime ID 匹配、service worker 与合成 broken→candidate 对照；`storeAuthenticityVerified=false`、`gmRoundtrip=false`，不证明真实商店来源、用户 Chrome/Profile、完整 GM、生产业务或自动修复/回滚。TASK-007 仍开发中。
+- **TASK-014 / Issue #604**：PR #883 整合可选 AI 模型发现的原生确认边界；当前 Windows Application Checks #43806721310 通过，但完整 AI 双协议、配置与诊断/修复链路仍须按 TEST-015/016 独立验收。TASK-014 不因该 PR 完成。
+- **TASK-017 / Issue #607**：PR #883 将手动 GM 场景与手动注册夹具保留在折叠高级区，并将导入结果下一步导航到受控 Chrome 工作区。完整“浏览器配置→批量导入→一次启动→逐脚本进度/结果”主旅程尚未实现；源码静态 UI 审查不替代真实 Electron 渲染、交互或人工体验。TASK-017 仍开发中。
+- **整合与测试基线**：PR #883 已合并；main SHA `bcacd082a3c538e00dfbf481c7221c8e829818ad` 的 Application Checks #43806721310 成功（1126 tests：1125 pass、0 fail、1 conditional skip；Electron shell smoke 成功）。Candidate Packaging #43805989231 失败且未产出本轮 EXE/ZIP；故不得推进 TASK-019/020/021 的 Stable 完整验收。
+- **依赖执行边界**：TASK-009/#487、TASK-010/#488、TASK-011/#489、TASK-012/#603、TASK-013/#857 仍按真实管理器、业务证据、自动应用门控和事务/回滚依赖推进；不得把合成实验或阶段性代码视为依赖已满足。
