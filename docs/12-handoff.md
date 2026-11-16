@@ -3,6 +3,12 @@
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
 > 2026-11-15 PR #858 原始需求校准续接：现行 REQ-008 默认端口 9896（9223 仅是历史 PoC 参数），用户主流程为 Chrome/Chrome++ 和授权 Profile → 批量导入 → 一次启动 → 逐项真实诊断/安全修复/验收/版本结果；缺登录、授权或业务断言必须逐项受阻并保留原件。主线待完成 TASK-007/009..014/017 对应 #486 #487 #488 #489 #603 #604 #857 #607 的真实代码与 TEST。下方历史日期、版本、端口、Issue 锁定记录仅保留可追溯性，不得覆盖当前准入与真实主干状态。
+>
+> 2026-11-16 PR #886 合并后的当前续接点：产品代码合并点为 main@7c02f828ba781677629634b0947c7e729b1c170b，PR HEAD ce81f10124c9a8d8a976ece414ec6978415ad32f。TASK-007 / #486 仍 Open；Windows Actions #43822893465 的 21 个 Job success、product-candidate/document-idle 为 22/22 pass，但 metadata hint 本身只报告 synthetic unpacked CRX 的 app-owned 元数据。相同矩阵另有四个 product-candidate run-at Job（各 5/5）记录合成 broken/fixed 脚本注入及测试业务结果；候选 GM roundtrip=false、managerInstalled/productCdpVerified=false。四个 native-gm Job 的合成 roundtrip=true，但 gmApiVerified/businessVerified/managerVerifiedForStable=false。Store/扩展真实性、真实用户 Profile、完整产品安装/注入/授权业务和回滚未验证，TEST-017/018、GATE-004/005 未通过。
+>
+> 候选双包 #43822893260 success，源为 PR 测试合并 SHA a41f2e676da766aed184217f1d55424633d9970f；EXE/ZIP SHA-256 分别为 28ae3dd1ddbb61415d802661153758c9d76aec88d6946a80983102159b1ba932 / b895af2754d5ee9f6592f449f2d2f615a9d102f388f52e7f3b93c13f761db1bb，均为短期候选，不是正式 Release。当前 package 1.1.3；历史正式 v1.1.3 发布源 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2 不是本次 rebaseline 验收。
+>
+> #510 仍 Open：#43805989231 的 CDP_TIMEOUT 未定位；#43822893260 曾经四次 FETCH_REFUSED 后恢复，只是一条成功样本。下一优先工作是 #486 的用户授权真实管理器/业务验证；没有可用授权环境前不触碰个人 Chrome/Profile。
 
 > **2026-11-02 最新续接**：按 `docs/19-stable-v7-migration.md`、`AGENTS.md` 新版规则和真实 GitHub 远端状态继续。以下旧版认领/签名/HANDOFF_BLOCKED 均保留为历史资料，不再是产品开发准入条件；真实产品安全和 Stable GATE 未取消。
 
@@ -372,3 +378,11 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **历史发布边界**：GitHub Release `v1.1.3` 已存在，但 `docs/product-rebaseline.md` 明确它不是本次需求验收证据。当前不得沿用旧 GATE 签署或旧双包哈希作为新 Stable。
 - **下一执行顺序**：#510 的受控全量套件对照已在 #43810123635 完成但未复现根因；只有取得新的可比较证据时才继续该故障诊断，不重复相同对照。并行继续 TASK-007/#486 的真实管理器、安装授权、GM 与业务验收；只有 TASK-007/008 可信证据具备后，才按正式依赖推进 TASK-009/#487、TASK-010/#488、TASK-011/#489、TASK-012/#603、TASK-013/#857 与 TASK-017/#607 的真实闭环。TASK-014/#604、TASK-015/#605、TASK-016/#606 按其正式依赖和剩余验收独立推进。不得因为 Issue 没有认领人、没有任务锁或最终人工验收尚未开始而停止独立合法工作。
 - **最终人工验收**：仍须在正式候选 EXE/ZIP 生成且机器检查通过后集中执行；本轮没有执行安装、解压、真实用户设备操作或 GUI 人工体验。Stable 未完成、未发布。
+
+
+## 2026-11-16 本地与远端恢复状态
+
+- 本地完整克隆的 TASK-007 工作树：userscript-auto-healer-task007-worktree；工作分支 feat/task007-installed-probe-positive-20261116，工作树干净。当前本地提交 3d484305822541d18e0d11dbae38128220e509ad 的 tree SHA eed6e9625b859f5986d177fb0b98e8bb4f04dd4c 与 GitHub PR 分支 ce81f10124c9a8d8a976ece414ec6978415ad32f 的 tree 相同。本地提交 SHA 本身未进入远端提交历史；文件内容已由 GitHub 文件 API 同步并经 PR #886 合并。
+- Node v26.12.1 / npm 11.20.0；本地 npm run build、manager adapter 20 pass / 0 fail / 2 intentional skips、pipe focused test 1 pass、git diff --check 通过。
+- Windows Candidate EXE/ZIP run #43822893260 source SHA a41f2e676da766aed184217f1d55424633d9970f 与代码合并点 SHA 7c02f828ba781677629634b0947c7e729b1c170b 不同，候选包仍未满足正式最终发布条件。此前 #43805989231 失败和 #510 根因未确认均继续保留。
+- 正式发布路径仍须按 docs/08-release.md 与 docs/product-rebaseline.md：同一最终源 SHA、完整机器 GATE、用户授权真实环境和集中人工验证；无 Issue 认领/任务锁门槛。
