@@ -476,3 +476,9 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **实验结果**：签名 Chrome 在无 CDP 模式下预热独立 warm Profile，`--dump-dom about:blank` 退出码 0。cold/warm 两臂均为 `OWNED_CDP_BROWSER_VERIFIED`；cold 于约 t1、warm 于 t0 解析 CDP，listener 两臂均由 `t0:0` 到 `t1:1`。cold 的 marker timeline `t0:00,t0:10`，warm 的 marker timeline `t0:10`。原 20 秒 deadline、PID/HTTP/WebSocket 验证均保留，且只有确认会话关闭后才开始下一臂。
 - **结论与状态**：这一组配对没有复现 `#43805989231` 的 t20 `CDP_TIMEOUT`，也未呈现明显冷/暖差异；单次成功不能定位或排除原故障根因。Issue #510 保持 Open，不能据此标记 TEST-006/008/009、GATE 或 Stable 完成。没有执行 Candidate Packaging，没有生成本轮 EXE/ZIP。
 - **后续工作**：不重复相同 cold/warm 对照；等待新的可比较失败证据，再针对具体差异调查。按现有依赖继续处理仍可推进的任务；#486/TASK-007 的真实 Tampermonkey、安装授权、GM 和业务验收仍需要授权的隔离环境。所有必要 GATE、最终人工验证、正式双发行文件与 Stable 仍未完成。
+
+## 2026-11-16 TASK-007 / Issue #486 Chrome Browser MCP 实时复核
+
+- **本次观察**：[详细记录](evidence/2026-11-16-tampermonkey-browser-mcp-followup.md)。连接会话中的 Tampermonkey 运行时为 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`、5.5.1、MV3。单个临时脚本在 `example.net` 实际注入并调用 `GM_getValue`；人工切换选择器前后分别观察到 `missing-target/none` 与 `recovered/done`。
+- **清理与限制**：该脚本已不在已安装列表，重载页后测试 DOM 标记消失；回收站保留脚本记录，没有执行可能影响其他项目的全局清空。浏览器工具未给出活动 Chrome Profile 路径，指定 Data 目录绑定、Chrome 版本和商店来源未独立核实。一次仪表盘快照意外返回其他脚本名称/描述；未打开或更改其他脚本。
+- **判定**：这是管理器手工脚本和合成页面的有限观察，不是产品自动修复、真实用户业务或完整 TEST-017/018。Issue #486 保持 Open；GATE-004/005、最终人工验收及 Stable 均未完成。

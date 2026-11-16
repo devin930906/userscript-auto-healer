@@ -58,6 +58,10 @@ TEST-001..028 对应 REQ-001..028；NFR 安全对应 007/009/015/020/026，兼�
 ## 真实环境验证
 报告必须记录脚本和网页版本/Hash、Chrome 可执行文件真实路径、Profile、端口、扩展版本和安装状态、@grant、页面前置状态、执行步骤、断言与截图/日志（全部脱敏）。管理器兼容测试的必要证据应分层记录：扩展 Worker、用户脚本授权、浏览器内脚本存储与启用、@match、注册的 loader 和站点权限、目标页面脚本真实注入、GM API、业务断言。**只满足前六项不能判定 TEST-018 通过**；2026-10-18 非标准本地动态端口 POC 曾注册但不执行（https://github.com/devin930906/userscript-auto-healer/actions/runs/39091275121），在标准 HTTPS 的 IANA 保留示例网址上，**真实 Violentmonkey .user.js 注入、调用 GM_getValue 的默认值断言已通过**（https://github.com/devin930906/userscript-auto-healer/actions/runs/39092523277）。这一实证仅是准备阶段的可行性验证，不包含修复后回归，不可直接标记产品 TEST-018 通过。目标兼容矩阵应同时覆盖标准/非标准端口的合法 @match、扩展授权/沙箱、真实浏览器差异。CI 不能启动交互式 Chrome 管理器时另由获授权 Windows VM 验证，不得替代为模拟结果。
 
+## 2026-11-16 Chrome Browser MCP 实时管理器补充观察
+
+新增受限会话证据见 [Tampermonkey Browser MCP follow-up](evidence/2026-11-16-tampermonkey-browser-mcp-followup.md)：连接会话运行 Tampermonkey 5.5.1 / MV3；唯一临时脚本实际安装、注入、调用 `GM_getValue`，并在 `example.net` 上观察人工预置的 missing-target → recovered DOM 对照。该测试未运行产品自动诊断/修复，MCP 与指定 Data 目录的进程绑定及商店来源未核实；临时脚本已从已安装列表删除，但保留在回收站以避免全局清空。一次仪表盘快照意外显示其他脚本名称/描述，因此此记录仅为受限观察，不能标记 TEST-017/018 或 GATE-004/005 通过。
+
 ## 开发前 POC-04A：已知选择器失效与人工修正回归
 
 GitHub Windows 2025 的两个**独立**真实 Violentmonkey MV3 v2.49.0 任务（`.github/workflows/windows-manager-extension-poc.yml` 中的 `broken/fixed` matrix）已通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39093275851。
