@@ -24,6 +24,11 @@ on:
         type: boolean
         required: false
         default: false
+      chrome_profile_preinit_compare:
+        description: 'Manual diagnostic only: compare signed owned Chrome startup with a cold profile and one preinitialized without CDP'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +58,7 @@ jobs:
           UAH_TEST_CHROME_CPU_PRESSURE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_cpu_pressure && 'true' || 'false' }}
           UAH_TEST_CHROME_BOOT_LOG: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_boot_log && 'true' || 'false' }}
           UAH_TEST_CHROME_FULL_SUITE_COMPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_full_suite_compare && 'true' || 'false' }}
+          UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_profile_preinit_compare && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -68,6 +74,14 @@ jobs:
             }
           }
           if (!$source) { throw 'Signed installed Chrome unavailable on this runner' }
+          $diagnosticModes = @(
+            $env:UAH_TEST_CHROME_CPU_PRESSURE,
+            $env:UAH_TEST_CHROME_FULL_SUITE_COMPARE,
+            $env:UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE
+          ) | Where-Object { $_ -eq 'true' }
+          if ($diagnosticModes.Count -gt 1) {
+            throw 'Choose exactly one manual Chrome diagnostic mode per runner'
+          }
           $sourceBinary = Join-Path $source 'chrome.exe'
           $signature = Get-AuthenticodeSignature -LiteralPath $sourceBinary
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Google LLC') {
@@ -114,6 +128,19 @@ jobs:
             Write-Output "TASK005_FULLSUITE_ISOLATED_AFTER_EXIT=$afterExit"
             if ($beforeExit -ne 0 -or $suiteExit -ne 0 -or $afterExit -ne 0) {
               throw 'TASK-005 full-suite differential failed; preserve all phase outcomes'
+            }
+          } elseif ($env:UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE -eq 'true' -and
+              $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            # Compare one empty disposable Profile against a second Profile
+            # initialized by the same signed Chrome without any CDP flags.
+            # The focused test retains the production 20-second startup gate
+            # and exact process/listener/WebSocket ownership checks.
+            Write-Output 'TASK005_PROFILE_PREINIT_DIAGNOSTIC_BEGIN'
+            node --test --test-concurrency=1 --test-name-pattern="TASK-005/TEST-006/008/009: cold-versus-preinitialized profile" dist/tests/browser/owned-chrome.test.js
+            $profileCompareExit = $LASTEXITCODE
+            Write-Output "TASK005_PROFILE_PREINIT_DIAGNOSTIC_EXIT=$profileCompareExit"
+            if ($profileCompareExit -ne 0) {
+              throw 'TASK-005 cold-versus-preinitialized profile diagnostic failed'
             }
           } elseif ($env:UAH_TEST_CHROME_CPU_PRESSURE -eq 'true' -and
               $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
