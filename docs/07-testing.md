@@ -1,6 +1,6 @@
 # 测试策略与验证体系
 
-> 状态（2026-11-16，代码合并点 main@7c02f828ba781677629634b0947c7e729b1c170b）：PR [#886](https://github.com/devin930906/userscript-auto-healer/pull/886) 已合并。Windows Tampermonkey 矩阵 [#43822893465](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893465) 共 21 个 Job 全部成功；product-candidate/document-idle Job 为 22/22 tests 通过，只返回隔离应用自有 Chrome 对合成签名 key 已核对 CRX 的 metadata hint，Store/扩展真实性、安装、注入、GM、业务标志均为 false。
+> 状态（2026-11-16，代码合并点 main@7c02f828ba781677629634b0947c7e729b1c170b）：PR [#886](https://github.com/devin930906/userscript-auto-healer/pull/886) 已合并。Windows Tampermonkey 矩阵 [#43822893465](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893465) 共 21 个 Job 全部成功；product-candidate/document-idle Job 为 22/22 tests 通过。该 Job 的 installed-metadata hint 只返回隔离应用自有 Chrome 对合成签名 key 已核对 CRX 的元数据；此 hint 的扩展真实性、Store 来源、脚本安装/注入、GM、业务 flags 均为 false。相同矩阵另有合成 product-candidate/native-gm run-at 证据，详见 TEST-018 与文末续接记录。
 >
 > Windows 候选双包 [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 成功，工作流检出 PR 生成的测试合并 SHA a41f2e676da766aed184217f1d55424633d9970f，和当前代码合并点 SHA 不同。此前 [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 的 CDP_TIMEOUT 失败继续保留；Issue [#510](https://github.com/devin930906/userscript-auto-healer/issues/510) 根因未确认并保持 Open。TEST-017/018 与 Stable GATE 尚未全部通过。
 
