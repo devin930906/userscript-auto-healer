@@ -483,7 +483,7 @@ export async function inspectApprovedTampermonkeyInstallation(
     }
    }
   }
- }catch{result={ok:false,code:'CDP_FAILED',stage:failureStage};}
+ }}catch{result={ok:false,code:'CDP_FAILED',stage:failureStage};}
  finally{
   if(targetId&&socket.readyState===WebSocket.OPEN){
    failureStage='cleanup-close';
