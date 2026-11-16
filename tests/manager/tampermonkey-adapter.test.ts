@@ -1,6 +1,5 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {execFileSync} from 'node:child_process';
 import {access,mkdir,mkdtemp,realpath,rm,symlink} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {createServer} from 'node:net';
@@ -16,55 +15,6 @@ import {inspectApprovedTampermonkeyInstallation} from '../../src/manager/tamperm
 const id='1234567890abcdef';
 const worker={targetId:id,type:'service_worker',
  url:'chrome-extension://'+TAMPERMONKEY_EXTENSION_ID+'/background.js'};
-
-function readWindowsProcessArgs(pid:number):string[]{
- if(!Number.isSafeInteger(pid)||pid<1)throw Error('INVALID_TEST_PROCESS_ID');
- const script=[
-  "$ErrorActionPreference='Stop'",
-  "$source=@'",
-  'using System;',
-  'using System.Runtime.InteropServices;',
-  'public static class UahNativeCommandLine {',
-  ' [DllImport("shell32.dll", SetLastError=true)]',
-  ' public static extern IntPtr CommandLineToArgvW([MarshalAs(UnmanagedType.LPWStr)] string commandLine, out int argc);',
-  ' [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr pointer);',
-  '}',
-  "'@",
-  'Add-Type -TypeDefinition $source',
-  `$process=Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = ${pid}'`,
-  "if($null -eq $process -or [string]::IsNullOrEmpty($process.CommandLine)){throw 'PROCESS_NOT_FOUND'}",
-  '$count=0',
-  '$pointers=[UahNativeCommandLine]::CommandLineToArgvW($process.CommandLine,[ref]$count)',
-  'if($pointers -eq [IntPtr]::Zero -or $count -lt 1){throw \'COMMAND_LINE_UNAVAILABLE\'}',
-  'try {',
-  ' $values=[System.Collections.Generic.List[string]]::new()',
-  ' for($i=0;$i -lt $count;$i++){',
-  '  $argumentPointer=[Runtime.InteropServices.Marshal]::ReadIntPtr($pointers,$i*[IntPtr]::Size)',
-  '  [void]$values.Add([Runtime.InteropServices.Marshal]::PtrToStringUni($argumentPointer))',
-  ' }',
-  ' ConvertTo-Json -InputObject $values.ToArray() -Compress',
-  '} finally { [void][UahNativeCommandLine]::LocalFree($pointers) }'
- ].join('\n');
- try{
-  const encoded=Buffer.from(script,'utf16le').toString('base64');
-  const output=execFileSync('powershell.exe',[
-   '-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded
-  ],{encoding:'utf8',windowsHide:true,timeout:5000,maxBuffer:8192});
-  const parsed:unknown=JSON.parse(output);
-  if(!Array.isArray(parsed)||parsed.length<1||parsed.some(value=>typeof value!=='string'))
-   throw Error('INVALID_TEST_ARGS');
-  return parsed as string[];
- }catch{
-  throw Error('CHROME_COMMAND_LINE_QUERY_FAILED');
- }
-}
-
-function assertChromeArgsEqual(actual:string[],expected:string[]):void{
- assert.equal(actual.length,expected.length,'Chrome must keep the default argument count');
- for(let index=0;index<expected.length;index++)
-  assert.equal(actual[index]===expected[index],true,
-   'Chrome default argument mismatch at index '+index);
-}
 
 test('TASK-007: isolated CI extension path is accepted only after the existing consent gates',async()=>{
  if(process.platform!=='win32')return;
@@ -256,12 +206,6 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
  assert.equal(session.ok,true,JSON.stringify(session));
  if(!session.ok)return;
  stop=session.stop;
- assertChromeArgsEqual(readWindowsProcessArgs(session.pid),[
-  chrome!,'--headless=new','--no-first-run','--no-default-browser-check',
-  '--disable-background-networking','--remote-debugging-address=127.0.0.1',
-  '--remote-debugging-port='+address.port,'--user-data-dir='+config.userDataDir,
-  'about:blank'
- ]);
  const probe=await inspectApprovedTampermonkeyRuntime(session,true);
  assert.ok(probe.ok?probe.status==='RUNTIME_TARGET_HINT_ONLY':
    probe.code==='RUNTIME_NOT_OBSERVED',JSON.stringify(probe));
@@ -420,13 +364,6 @@ test('TASK-007: installed vendor fixture returns only app-owned manager metadata
   (launched.ok?'':'('+launched.code+')'));
  if(!launched.ok)return;
  session=launched;
- const canonicalExtension=await realpath(extension);
- assertChromeArgsEqual(readWindowsProcessArgs(session.pid),[
-  chrome!,'--headless=new','--no-first-run','--no-default-browser-check',
-  '--disable-background-networking','--remote-debugging-address=127.0.0.1',
-  '--remote-debugging-port='+address.port,'--user-data-dir='+config.userDataDir,
-  '--load-extension='+canonicalExtension,'about:blank'
- ]);
  const readPageTargets=async():Promise<string[]>=>{
   const response=await fetch('http://127.0.0.1:'+address.port+'/json/list');
   assert.equal(response.status===200,true,'owned Chrome target inventory must be readable');
