@@ -95,7 +95,7 @@ interface Window {
     startBrowser(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     connectExistingChrome(port:number): Promise<{ok:boolean;code?:string;status?:string;chromeVersion?:string}>;
     disconnectExistingChrome(): Promise<{ok:boolean;code?:string;status?:string}>;
-    inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number}>;
+    inspectTampermonkey(): Promise<{ok:boolean;code?:string;status?:string;matchedRuntimeTargets?:number;version?:string;enabled?:'ENABLED'|'DISABLED'|'UNKNOWN';allowUserScripts?:'ENABLED'|'DISABLED'|'UNKNOWN'|'NOT_APPLICABLE';versionVerified?:boolean;permissionVerified?:boolean;extensionAuthenticityVerified?:false;storeProvenanceVerified?:false}>;
     openTampermonkeyStore(): Promise<{ok:boolean;code?:string;status?:string;
       tampermonkeyVerified:false;gmApiVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
@@ -1233,10 +1233,23 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
   const result=await window.healer.inspectTampermonkey();
   if(requestGeneration!==browserSessionGeneration||
      (!browserConnected&&!existingChromeConnected)||stopInProgress)return;
-  if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
-   setBrowserStatus((existingChromeConnected?'已连接的 Chrome：':'本程序启动的 Chrome：')+
-     '发现 '+result.matchedRuntimeTargets+
-     ' 个疑似 Tampermonkey 运行目标；扩展真实性、脚本安装、GM API 与业务执行均未验证。');
+  if(result.ok&&result.status==='INSTALLED_METADATA_HINT_ONLY'){
+   const enabled=result.enabled==='ENABLED'?'已启用':
+     result.enabled==='DISABLED'?'已停用':'无法确认';
+   const userScripts=result.allowUserScripts==='ENABLED'?'已开启':
+     result.allowUserScripts==='DISABLED'?'未开启':
+     result.allowUserScripts==='NOT_APPLICABLE'?'不适用':'无法确认';
+   const nextStep=result.enabled==='DISABLED'?'请在 chrome://extensions 手动启用扩展。 ':
+     result.allowUserScripts==='DISABLED'?'请在 Tampermonkey 详情页手动开启 Allow User Scripts。 ':'';
+   setBrowserStatus('独立 Chrome 已检测到 Tampermonkey，版本 '+(result.version??'未知')+
+     '；扩展状态：'+enabled+'；Allow User Scripts：'+userScripts+'。'+nextStep+
+     '此检查只证明管理页面显示的安装元数据，不证明扩展来源、脚本安装/注入、GM API 或业务恢复。');
+  }
+  else if(result.ok&&result.status==='NOT_INSTALLED')
+   setBrowserStatus('独立 Chrome 的扩展管理页未找到官方 Tampermonkey ID。可点击「打开官方安装页」，在 Chrome 原生确认后安装，再重新检查；程序没有自动安装或修改权限。');
+  else if(result.ok&&result.status==='RUNTIME_TARGET_HINT_ONLY')
+   setBrowserStatus('已连接的 Chrome：发现 '+result.matchedRuntimeTargets+
+     ' 个疑似 Tampermonkey 运行目标；扩展真实性、版本、脚本安装、GM API 与业务执行均未验证。');
   else if(result.code==='BROWSER_NOT_RUNNING'){
    if(existingChromeConnected){
     existingChromeConnected=false;
@@ -1253,7 +1266,7 @@ inspectButton?.addEventListener('click',()=>void browserAction(async()=>{
    setBrowserStatus(browserConnected
      ? '独立 Chrome 未观察到 Tampermonkey 活动后台目标；无法判断是否已安装，后台可能休眠。请先在 Chrome 扩展管理中核对；若尚未安装，可点击「打开官方安装页」，安装与权限须在 Chrome 另行确认，再重新只读探测。此结果不证明 GM 或脚本业务执行。'
      : '已连接的 Chrome 未观察到 Tampermonkey 活动后台目标；无法判断是否已安装，后台可能休眠。请先在该 Chrome 扩展管理中核对；如需本程序的官方安装页，请另行启动由本程序管理的独立 Chrome 并确认。此结果不证明 GM 或脚本业务执行。');
-  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN'));
+  }else setBrowserStatus('Tampermonkey 只读探测未通过：'+(result.code??'UNKNOWN')+'。安装状态与版本未确认。');
  }catch{
   // A late rejected IPC must not fall into browserAction's generic catch,
   // which would overwrite the newer Chrome stop acknowledgement.

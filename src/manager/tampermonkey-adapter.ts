@@ -112,7 +112,7 @@ export function inspectTampermonkeyTargetHints(payload:unknown):ManagerPresenceR
  * JSON.parse has already validated the full syntax before this scan runs.
  * String contents (including commas, braces and quoted text) are skipped.
  */
-function hasDuplicateJsonObjectKeys(raw:string):boolean{
+export function hasDuplicateJsonObjectKeys(raw:string):boolean{
  const frames:Array<{kind:'object'|'array';keys?:Set<string>;nextKey?:boolean}>=[];
  for(let i=0;i<raw.length;i++){
   const char=raw[i];

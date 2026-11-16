@@ -9,6 +9,7 @@ import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession} from '../../sr
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
+import {inspectApprovedTampermonkeyInstallation} from '../../src/manager/tampermonkey-installation';
 
 const id='1234567890abcdef';
 const worker={targetId:id,type:'service_worker',
@@ -106,6 +107,18 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
    assert.equal(probe.scriptInjectionVerified,false);
    assert.equal(probe.extensionAuthenticityVerified,false);
  }
+ // The app-owned disposable profile has no Tampermonkey installation. The
+ // manager-page inventory must distinguish this verified absence from an
+ // idle service worker, and the temporary chrome://extensions target must be
+ // closed before the inspection can return a result.
+ const installation=await inspectApprovedTampermonkeyInstallation(session,true);
+ assert.deepEqual(installation,{
+  ok:true,status:'NOT_INSTALLED',extensionId:TAMPERMONKEY_EXTENSION_ID,
+  extensionAuthenticityVerified:false,storeProvenanceVerified:false,
+  versionVerified:false,permissionVerified:false,
+  scriptInstallationVerified:false,scriptInjectionVerified:false,
+  gmApiVerified:false,businessVerified:false
+ });
 
  // A user can cancel while the final asynchronous owner/PID check runs.
  // Even a legitimate listener match cannot revive cancelled authorization.
@@ -455,10 +468,14 @@ test('TASK-007/TEST-017/026: renderer manager hint cannot accept a replaced owne
  const end=source.indexOf("ipcMain.handle('browser:open-tampermonkey-store'",start);
  assert.ok(start>=0&&end>start,'manager hint must keep its native IPC boundary');
  const handler=source.slice(start,end);
- const inspect=handler.indexOf('inspectApprovedTampermonkeyRuntime(owned,true)');
- const finalReceipt=handler.indexOf("return {ok:true,status:status.status");
+ const inspect=handler.indexOf('inspectApprovedTampermonkeyInstallation(owned,true)');
+ const finalReceipt=handler.indexOf('return {...status,...unverified};');
  assert.ok(inspect>=0&&finalReceipt>inspect,
-   'only an inspected manager hint may reach the UI');
+   'only inspected read-only manager metadata may reach the UI');
+ assert.ok(handler.includes('chrome://extensions'),
+   'native consent must identify the Chrome extensions management page');
+ assert.ok(handler.includes('不会自动安装、启用或修改权限'),
+   'manager inspection must not imply installation or permission changes');
  // An independently authorized browser can be stopped/replaced while native
  // CDP lookup is pending. A stale success must not repaint the new session.
  const fence=handler.indexOf('readOwnedBrowser()!==owned',inspect);

@@ -98,7 +98,8 @@ import { DESKTOP_WEB_PREFERENCES, SHELL_STATUS, trustedMainFrame } from '../../s
 import { launchApprovedIsolatedChrome, isLiveApprovedChromeSession, type ManagedLaunchResult } from '../../src/browser/owned-chrome';
 import { connectApprovedExistingChrome, isLiveApprovedExistingChromeSession, type ExistingChromeResult } from '../../src/browser/existing-chrome';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
-import { inspectApprovedTampermonkeyRuntime, inspectTampermonkeyTargetHints } from '../../src/manager/tampermonkey-adapter';
+import { inspectTampermonkeyTargetHints } from '../../src/manager/tampermonkey-adapter';
+import {inspectApprovedTampermonkeyInstallation} from '../../src/manager/tampermonkey-installation';
 import { startApprovedTampermonkeyDiagnostic, isCurrentManualDiagnosticSession, type ManualTampermonkeyDiagnosticSession } from '../../src/manager/tampermonkey-diagnostic';
 import {isSupportedGmProbeRunAt} from '../../src/manager/tampermonkey-gm-probe';
 import {createLimitedGmReport,saveLimitedGmReportOnly} from '../../src/manager/gm-report';
@@ -614,9 +615,12 @@ function registerSafeIpc(): void {
     try{
       const decision=await dialog.showMessageBox(win,{
         type:'question',buttons:['允许只读探测','取消'],defaultId:1,cancelId:1,
-        noLink:true,message:'检查 Chrome 中的 Tampermonkey 运行目标？',
-        detail:'只读取已授权浏览器的 CDP 目标信息。'+
-          '\\n不会读取或修改任何已安装脚本，也不证明 GM API 或业务恢复。'
+        noLink:true,message:'检查 Chrome 中的 Tampermonkey 安装状态与运行目标？',
+        detail:owned
+          ?'只读取本程序启动的独立 Chrome 的 chrome://extensions 管理页面，核对固定官方扩展 ID、名称、版本、启用状态及 Allow User Scripts 开关；会临时打开并关闭一个后台管理页。'+
+            '\\n不会自动安装、启用或修改权限，不会读取或修改用户脚本；扩展来源、脚本安装、注入、GM API 与业务恢复仍未验证。'
+          :'只读取已连接 Chrome 的 CDP 活动目标信息，不访问 Profile 或扩展管理页面。'+
+            '\\n不会读取或修改任何已安装脚本，也不证明扩展真实性、GM API 或业务恢复。'
       });
       if(decision.response!==0||(!owned&&!attached)||
          (owned&&!isLiveApprovedChromeSession(owned))||
@@ -624,7 +628,7 @@ function registerSafeIpc(): void {
          win.isDestroyed()||win!==mainWindow)
         return {ok:false,code:'NOT_AUTHORIZED',...unverified};
       let status;
-      if(owned)status=await inspectApprovedTampermonkeyRuntime(owned,true);
+      if(owned)status=await inspectApprovedTampermonkeyInstallation(owned,true);
       else if(attached){
         const result=await attached.sendCommand('Target.getTargets');
         if(!isLiveApprovedExistingChromeSession(attached)||readExistingBrowser()!==attached||
@@ -640,11 +644,7 @@ function registerSafeIpc(): void {
          (attached&&readExistingBrowser()!==attached)||
          win.isDestroyed()||win!==mainWindow)
         return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
-      if(!status.ok)return {...status,...unverified};
-      return {ok:true,status:status.status,manager:status.manager,
-        matchedRuntimeTargets:status.matchedRuntimeTargets,
-        extensionAuthenticityVerified:false,scriptInstallationVerified:false,
-        ...unverified};
+      return {...status,...unverified};
     }catch{
       return {ok:false,code:'PROBE_FAILED',...unverified};
     }finally{probeInProgress=false;}
