@@ -6,9 +6,9 @@
 >
 > 2026-11-16 PR #886 合并后的当前续接点：产品代码合并点为 main@7c02f828ba781677629634b0947c7e729b1c170b，PR HEAD ce81f10124c9a8d8a976ece414ec6978415ad32f。TASK-007 / #486 仍 Open；Windows Actions #43822893465 的 21 个 Job success、product-candidate/document-idle 为 22/22 pass，但 metadata hint 本身只报告 synthetic unpacked CRX 的 app-owned 元数据。相同矩阵另有四个 product-candidate run-at Job（各 5/5）记录合成 broken/fixed 脚本注入及测试业务结果；候选 GM roundtrip=false、managerInstalled/productCdpVerified=false。四个 native-gm Job 的合成 roundtrip=true，但 gmApiVerified/businessVerified/managerVerifiedForStable=false。Store/扩展真实性、真实用户 Profile、完整产品安装/注入/授权业务和回滚未验证，TEST-017/018、GATE-004/005 未通过。
 >
-> 候选双包 #43822893260 success，源为 PR 测试合并 SHA a41f2e676da766aed184217f1d55424633d9970f；EXE/ZIP SHA-256 分别为 28ae3dd1ddbb61415d802661153758c9d76aec88d6946a80983102159b1ba932 / b895af2754d5ee9f6592f449f2d2f615a9d102f388f52e7f3b93c13f761db1bb，均为短期候选，不是正式 Release。当前 package 1.1.3；历史正式 v1.1.3 发布源 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2 不是本次 rebaseline 验收。
+> 先前 PR 临时合并候选 [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 来自 SHA a41f2e676da766aed184217f1d55424633d9970f，现已被后续 main 同源候选取代；历史文件 SHA 仍保留于 docs/07-testing.md。
 >
-> #510 仍 Open：#43805989231 的 CDP_TIMEOUT 未定位；#43822893260 曾经四次 FETCH_REFUSED 后恢复，只是一条成功样本。下一优先工作是 #486 的用户授权真实管理器/业务验证；没有可用授权环境前不触碰个人 Chrome/Profile。
+> #510 仍 Open：原失败 [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 有 79 次 FETCH_REFUSED 至 t20、state=1/endpointMarker=0。main Application #43824662618 与当前 main Candidate #43828261977 在四次拒绝后于 t4 成功读取 CDP；这些成功样本不能证明根因已定位。
 
 > **2026-11-02 最新续接**：按 `docs/19-stable-v7-migration.md`、`AGENTS.md` 新版规则和真实 GitHub 远端状态继续。以下旧版认领/签名/HANDOFF_BLOCKED 均保留为历史资料，不再是产品开发准入条件；真实产品安全和 Stable GATE 未取消。
 
@@ -386,3 +386,6 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - Node v26.12.1 / npm 11.20.0；本地 npm run build、manager adapter 20 pass / 0 fail / 2 intentional skips、pipe focused test 1 pass、git diff --check 通过。
 - Windows Candidate EXE/ZIP run #43822893260 source SHA a41f2e676da766aed184217f1d55424633d9970f 与代码合并点 SHA 7c02f828ba781677629634b0947c7e729b1c170b 不同，候选包仍未满足正式最终发布条件。此前 #43805989231 失败和 #510 根因未确认均继续保留。
 - 正式发布路径仍须按 docs/08-release.md 与 docs/product-rebaseline.md：同一最终源 SHA、完整机器 GATE、用户授权真实环境和集中人工验证；无 Issue 认领/任务锁门槛。
+
+
+> 当前 main 候选：Candidate Packaging [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 以 main@d647003f391f9c350e6efb94a3924f604bd80ead 构建成功。EXE SHA-256 6ac2b0530b0243b3886a9d24d61ff0263ebf69d70423ed1abd0548ec0a63c65b；ZIP SHA-256 7994ad8452cb939beb0270111e5cd0eb4f051767b217a3159a2aeaf6da80f41e；Artifact 14207796979，digest sha256:74a54016d4dbf3583a8f9fd7fb254bc4ea201dbc520c59f24f053b6c4cfe7be2，到期 2026-11-19。候选不是正式 Release；ZIP 重定位首轮用了 8 次尝试，后两轮首试成功。
