@@ -1,8 +1,8 @@
 # 测试策略与验证体系
 
-> 状态（2026-11-16，当前 main@d647003f391f9c350e6efb94a3924f604bd80ead；产品代码合并点 7c02f828ba781677629634b0947c7e729b1c170b）：PR #886 与 docs-only PR #887 均已合并。PR #886 的 Tampermonkey 矩阵 [#43822893465](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893465) 21 个 Job 全部成功；主干 Application Skeleton Checks [#43824662618](https://github.com/devin930906/userscript-auto-healer/actions/runs/43824662618) success（1131 tests / 1129 pass / 0 fail / 2 conditional skip）。
+> 状态（2026-11-16，候选构建记录）：PR #886 的产品代码合并点是 7c02f828ba781677629634b0947c7e729b1c170b。docs-only PR #887 合并 main@d647003f391f9c350e6efb94a3924f604bd80ead，PR #888 后续 docs-only merge 为 main@eeeac2ecaa2e7188a38d6be03d534032eb86bba7；PR #888 主干 Documentation Integrity [#43831022566](https://github.com/devin930906/userscript-auto-healer/actions/runs/43831022566) success。
 >
-> 当前主干 Windows Candidate EXE/ZIP [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 以 main SHA d647003f391f9c350e6efb94a3924f604bd80ead 完成，Candidate Packaging success；旧 PR 临时合并源 #43822893260 仅为历史前序候选。EXE/ZIP 仍为候选工件，不代表 Stable GATE 或最终用户验收。
+> Windows Candidate EXE/ZIP [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 于 workflow_dispatch 时从 main@d647003f391f9c350e6efb94a3924f604bd80ead 构建成功；该 SHA 是构建时 main head，随后 docs-only 提交推进 main。候选 SHA/Artifact 详见下方，不代表 Stable GATE 或最终用户验收。
 
 ## 测试范围
 REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用例中核查。静态样本包括字面/动态 selector、混淆依赖、畸形脚本；真实样本包括 SPA、iframe、管理器 GM API、登录态、CDP 端口冲突、备份失败与修复后功能断言。
@@ -21,7 +21,7 @@ REQ-001..028 一一覆盖；NFR-001..012、RISK-001..013 需在主要负面用�
 | TEST-003 | REQ-003 | 单元/集成 | Windows FS | 目录已授权 | 嵌套、软链接、非 JS | 目录扫描边界：递归扫描 | 仅处理允许路径及匹配后缀 | 无限递归、越界 | 单元 | 阶段自动化已有成果；PR #102 增补目录中不同路径相同字节去重回归与源文件不变证明（以 CI 实际结果为准）；待 Stable 集成复核 |
 | TEST-004 | REQ-004 | 单元/集成 | Node JS Parser | 样本夹具已创建 | @match/@grant/@run-at/@require | 元数据解析：分析并对比原头 | 正确解析且不改原字节 | 字段缺失/改写 | 单元 | 静态单元阶段验证通过；待产品集成复核 |
 | TEST-005 | REQ-005 | 集成 | Windows UI | 脚本元数据 | 登录前提、URL、动作断言 | 目标网站与场景：注册/运行预检 | 缺前置则标 UNKNOWN | 没登录判成功 | 集成 | 阶段自动化通过；真实浏览器场景执行待验收；PR #106 增加桌面本机会话场景登记、已导入 SHA-256 绑定、非法网址/未登录前置/输入拒绝负例及 Electron 表单回归；只表示 STAGED_RUNTIME_UNVERIFIED，真实网站、Tampermonkey 和业务断言仍未运行；PR #107 在现有会话登记后增设仅针对无登录、单 CSS 存在性断言的独立 Chrome 原生二次授权 DOM 多次只读取证及取消，返回限定信号而非真实用户脚本、GM 或业务认证；对应 Windows CI/合并状态按当前 SHA 核验 |
-| TEST-006 | REQ-006 | 端到端 | Windows 真实 Chrome | 获用户许可 | 两个 Chrome.exe | 便携 Chrome 路径：分别启动并确认路径版本 | 完全使用所选程序 | 默默使用默认 Chrome | 真实 E2E | 此前 Candidate Packaging #43805989231 的 Windows 阶段为 CDP_TIMEOUT：FETCH_REFUSED=79（t0..t20）、CHILD_RUNNING_NO_CDP=1、state=1/endpointMarker=0。随后 main 代码 run [#43824662618](https://github.com/devin930906/userscript-auto-healer/actions/runs/43824662618) 与当前 main 候选 run [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 均在 FETCH_REFUSED=t0..t3 后于 t4 解析 CDP。成功样本未定位先前失败根因；#510 保持 Open，未提高超时或弱化 PID/监听所有权。 |
+| TEST-006 | REQ-006 | 端到端 | Windows 真实 Chrome | 获用户许可 | 两个 Chrome.exe | 便携 Chrome 路径：分别启动并确认路径版本 | 完全使用所选程序 | 默默使用默认 Chrome | 真实 E2E | 此前 Candidate Packaging #43805989231 的 Windows 阶段为 CDP_TIMEOUT：FETCH_REFUSED=79（t0..t20）、CHILD_RUNNING_NO_CDP=1、state=1/endpointMarker=0。随后 main 代码 run [#43824662618](https://github.com/devin930906/userscript-auto-healer/actions/runs/43824662618) 与候选构建 run [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 均在 FETCH_REFUSED=t0..t3 后于 t4 解析 CDP。成功样本未定位先前失败根因；#510 保持 Open，未提高超时或弱化 PID/监听所有权。 |
 | TEST-007 | REQ-007 | 端到端 | Chrome 136+ Windows | 准备专用目录 | 默认/在用/新 Profile | Chrome Profile 安全：分别检查并启动 | 默认和在用拒绝，新路径可验证 | 修改原 Profile | 真实 E2E | 已规划 |
 | TEST-008 | REQ-008 | 端到端 | Windows Chrome | 自管浏览器 | 9223 与占用端口 | CDP 启动端口：启动与监听检查 | 启动后可连接，冲突安全失败 | 误接管旧实例 | 真实 E2E | 已规划 |
 | TEST-009 | REQ-009 | 端到端 | Windows CDP | 可同时运行两个实例 | 伪 /json/version 与目标页 | CDP 会话归属：核对实例/目标 | 错误实例拒绝 | 只按端口判成功 | 真实 E2E | 已规划 |
@@ -358,7 +358,7 @@ Windows 源 SHA `54a4be82adcd7aaab96ab3e74d280765d9850455` 的 [Application Skel
 - **剩余边界**：TEST-017/018、真实用户/授权环境测试、GATE-004/005 和最终人工验收未通过；上述候选工件不构成正式 Stable Release。
 
 
-## 2026-11-16 当前 main 同源候选与 #510 对照
+## 2026-11-16 main@d647 候选构建与 #510 对照
 
 - **当前主干**：docs-only PR #887 已合并至 main@d647003f391f9c350e6efb94a3924f604bd80ead；产品代码的 PR #886 合并点为 7c02f828ba781677629634b0947c7e729b1c170b。主干 Documentation Integrity [#43828058355](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828058355) success。
 - **主干应用回归**：PR #886 后 main push run [#43824662618](https://github.com/devin930906/userscript-auto-healer/actions/runs/43824662618) success，1131 tests / 1129 pass / 0 fail / 2 conditional skips；Electron shell smoke success。CDP stage 为 CHROME_SPAWN_RETURNED=t0..t0,FETCH_REFUSED=t0..t3,CDP_VERSION_PARSED=t4..t4。
