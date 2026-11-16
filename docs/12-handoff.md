@@ -360,3 +360,15 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
 
 2026-11-12 外连续接：实现单独授权连接已有自定义 Data 的运行中 Chrome；当前只支持 Tampermonkey 目标只读提示。继续验收 Chrome 原生授权和用户真实 Data；随后分别实现并验证外连场景诊断及 GM 工作流，切勿将外连会话伪装为自启动进程或以断开结束用户 Chrome。
+
+## 2026-11-16 最终 Stable 开发续接记录（PR #883 后）
+
+- **当前远程基线**：仓库 `devin930906/userscript-auto-healer`；默认分支 `main`；当前提交 `bcacd082a3c538e00dfbf481c7221c8e829818ad`。PR [#883](https://github.com/devin930906/userscript-auto-healer/pull/883) 已 squash 合并；不得再从其旧 head `f2675b9e730a76c67aad760625f04c430828fc1e` 继续写入。
+- **PR #883 实际范围**：TASK-007/#486 的 app-owned Chrome `chrome://extensions` 管理页只读 Tampermonkey ID/名称/版本/启用状态与 Allow User Scripts 元数据探测；连接已有 Chrome 仍只提供 runtime-target hints。另含 TASK-014/#604 的可选 AI 模型发现原生确认边界，以及 TASK-017/#607 的高级 GM/手动场景夹具折叠与导入结果到受控 Chrome 工作区的导航。三个 Issue 均保持 Open，PR 不代表各自 TASK 完成。
+- **合并后机器验证**：Application Skeleton Checks [#43806721310](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721310) 成功：1126 tests / 1125 pass / 0 fail / 1 conditional skip；Windows Electron shell smoke 成功。Documentation Integrity [#43806721242](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721242) 成功。
+- **TASK-007 专项阶段证据**：[云端实验 #43806236366](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806236366) 在隔离 Chromium 141.0.7390.37 中运行 vendor-hosted Tampermonkey 5.4.1；签名 CRX3 key 推导的 ID 与运行时 ID 匹配，service worker 被观察，原始合成脚本失败、候选脚本恢复合成目标。此实验明确不证明 Chrome Web Store 来源（`storeAuthenticityVerified=false`）、GM 存储往返（`gmRoundtrip=false`）、真实用户 Chrome/Profile、完整应用管理器探测编排、真实生产业务、自动应用或回滚。TASK-007/#486、TEST-017/018 与 GATE-004/005 仍未通过。
+- **Windows Candidate 阻断**：候选 EXE/ZIP [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 启动阶段失败：`CDP_TIMEOUT`、`FETCH_REFUSED=79`、`CHILD_RUNNING_NO_CDP=1`，打包前终止，本轮没有产生候选 EXE/ZIP。相同 PR SHA 的 Application Checks [#43805989201](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989201) 与 Portable Chrome Product Validation [#43805989203](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989203) 成功；不能用这些成功覆盖失败。历史间歇故障 [Issue #510](https://github.com/devin930906/userscript-auto-healer/issues/510) 已重新打开，需确定根因及可复现回归，不提高超时、不跳过、不弱化 PID/监听归属。
+- **UI/UX 状态**：Impeccable Web 对 HTML/CSS/TypeScript 的静态审查确认手动 GM 场景与手动注册夹具位于折叠高级区，tab 键盘导航及窄屏方向同步有源码实现；普通用户主流程仍未形成“选择 Chrome/Profile → 批量导入 → 一次启动 → 逐脚本进度/结果”的完整旅程。未运行真实 Electron 可视页面或人工 GUI 测试，故不记录视觉/人工验收通过。
+- **历史发布边界**：GitHub Release `v1.1.3` 已存在，但 `docs/product-rebaseline.md` 明确它不是本次需求验收证据。当前不得沿用旧 GATE 签署或旧双包哈希作为新 Stable。
+- **下一执行顺序**：先继续 #510 的有证据 Windows Chrome 启动诊断，并继续 TASK-007/#486 的真实管理器、安装授权、GM 与业务验收；只有 TASK-007/008 可信证据具备后，才按正式依赖推进 TASK-009/#487、TASK-010/#488、TASK-011/#489、TASK-012/#603、TASK-013/#857 与 TASK-017/#607 的真实闭环。TASK-014/#604、TASK-015/#605、TASK-016/#606 按其正式依赖和剩余验收独立推进。不得因为 Issue 没有认领人、没有任务锁或最终人工验收尚未开始而停止独立合法工作。
+- **最终人工验收**：仍须在正式候选 EXE/ZIP 生成且机器检查通过后集中执行；本轮没有执行安装、解压、真实用户设备操作或 GUI 人工体验。Stable 未完成、未发布。

@@ -101,3 +101,11 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
 
 2026-11-12 用户新增范围：已有自定义 Data 外连 → REQ-006..009 / TASK-005、TASK-017 → TEST-006..009、TEST-022、TEST-026；真实 Chrome 授权与现有 Data 实机验收待完成。
+
+## 2026-11-16 PR #883 合并后实际证据追踪
+
+- **REQ-017/018 → TASK-007 → Issue #486 → PR #883 → main**：PR #883 合并 SHA `bcacd082a3c538e00dfbf481c7221c8e829818ad`，新增 app-owned Chrome `chrome://extensions` 管理页只读元数据（固定扩展 ID、名称/版本、启用状态、Allow User Scripts）；现有 Chrome attach 路径仍仅输出 runtime-target hints。Windows Application Checks #43806721310 为 1126 tests（1125 pass、0 fail、1 conditional skip），Electron shell smoke 成功。TASK-007 云端实验 #43806236366 证明隔离 Chromium 141 / vendor-hosted Tampermonkey 5.4.1 的签名 key/runtime ID 匹配及合成场景对照；`storeAuthenticityVerified=false`、`gmRoundtrip=false`，没有真实用户 Profile、完整 GM 与生产业务证据，故 TEST-017/018 与 GATE-004/005 不通过。
+- **REQ-015/016 → TASK-014 → Issue #604 → PR #883 → main**：同一合并 SHA 整合可选模型发现的原生确认边界；这只证明阶段性权限/交互约束已整合，不证明完整 AI 网关、双协议或诊断/修复链路验收。
+- **REQ-001..003/022 → TASK-017 → Issue #607 → PR #883 → main**：同一合并 SHA 将手动 GM 场景与手动场景注册留在折叠高级区，并连接导入结果至受控 Chrome 工作区；完整一次启动批处理及逐脚本结果主旅程仍缺失，源码静态审查不构成真实 UI/人工体验通过。
+- **Windows 发布验证关联**：候选 EXE/ZIP [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 启动阶段失败，未生成候选双包；同 SHA 的 Application Checks #43805989201 与 Portable Chrome Product Validation #43805989203 成功。历史间歇故障 #510 已重新打开，根因未确认。不得用 PR Merged、Issue Open/Closed 或单个成功 Actions 运行推导 GATE-001..011 通过。
+- **当前发行边界**：历史 Release v1.1.3 已发布，但 `docs/product-rebaseline.md` 明确其不是本次需求验收证据；当前没有新 Stable 候选双包、最终人工验收或新 Stable Release。
