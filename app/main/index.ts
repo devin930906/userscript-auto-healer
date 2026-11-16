@@ -119,9 +119,13 @@ import {restoreVerifiedOriginalNativeOnly} from '../../src/version/native-restor
 import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-intent-inspection';
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
-import {readNativeSelectedAiConfig,discoverModelsFromNativeConfig} from '../../src/ai/native-model-discovery';
-import {formatNativeAiReviewDisclosure,NativeAiEvidenceStore,
-  requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
+import {readNativeSelectedAiConfig} from '../../src/ai/native-model-discovery';
+import {formatNativeAiReviewDisclosure,NativeAiEvidenceStore}
+  from '../../src/ai/native-reviewed-suggestion';
+import {discoverNativeAiModelsFromDesktop,
+  requestNativeAiSuggestionFromDesktop,
+  type NativeAiDesktopReviewAuthorizer,
+  type NativeAiDesktopSelection} from '../../src/ai/native-desktop-flow';
 
 let mainWindow: BrowserWindow | null = null;
 // No AI credential, endpoint or provider session is stored between requests.
@@ -288,6 +292,28 @@ async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedP
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
     errors:result.errors, duplicates:result.duplicates};
 }
+
+function createNativeAiDesktopSelection(
+  win:BrowserWindow,
+  title:string,
+  revoked:()=>boolean
+):NativeAiDesktopSelection{
+  return {
+    selectConfigFile:async()=>{
+      if(revoked())return null;
+      const choice=await dialog.showOpenDialog(win,{
+        title,defaultPath:getInitialDialogPath('ai'),
+        properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
+      });
+      if(revoked()||choice.canceled||choice.filePaths.length!==1)return null;
+      return choice.filePaths[0];
+    },
+    readConfigFile:readNativeSelectedAiConfig,
+    rememberSelectedPath:path=>saveRememberedPath('ai',path),
+    isRevoked:revoked
+  };
+}
+
 function registerSafeIpc(): void {
   // No general invoke/channel/payload gateway; no file reading, shell access or script execution.
   ipcMain.handle('app:status', (event) => {
@@ -312,19 +338,9 @@ function registerSafeIpc(): void {
     nativeAiDiscoveryController=controller;
     const revoked=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed();
     try{
-      const choice=await dialog.showOpenDialog(win,{
-        title:'选择本机 AI 服务 JSON 配置（含 API Key，不发送此文件）',
-        defaultPath:getInitialDialogPath('ai'),
-        properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
-      });
-      if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
-      if(choice.canceled||choice.filePaths.length!==1)
-        return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
-      saveRememberedPath('ai',choice.filePaths[0]);
-      const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
-      if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
-      if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
-      return await discoverModelsFromNativeConfig(config,async origin=>{
+      const selection=createNativeAiDesktopSelection(win,
+        '选择本机 AI 服务 JSON 配置（含 API Key，不发送此文件）',revoked);
+      return await discoverNativeAiModelsFromDesktop(selection,async origin=>{
         if(revoked())return false;
         const decision=await dialog.showMessageBox(win,{
           type:'question',title:'确认一次性 AI 模型发现',
@@ -366,18 +382,9 @@ function registerSafeIpc(): void {
       epoch!==scenarioObserveEpoch||readOwnedBrowser()!==owned||
       nativeAiReviewEvidence.resolve(id)!==evidence;
     try{
-      const choice=await dialog.showOpenDialog(win,{
-        title:'选择本机 AI 服务 JSON 配置（仅本次建议使用）',
-        defaultPath:getInitialDialogPath('ai'),
-        properties:['openFile'],filters:[{name:'JSON 配置',extensions:['json']}]
-      });
-      if(revoked()||choice.canceled||choice.filePaths.length!==1)
-        return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
-      saveRememberedPath('ai',choice.filePaths[0]);
-      const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
-      if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
-      if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
-      return await requestNativeReviewedAiSuggestion(config,evidence,async(origin,review,target)=>{
+      const selection=createNativeAiDesktopSelection(win,
+        '选择本机 AI 服务 JSON 配置（仅本次建议使用）',revoked);
+      const authorize:NativeAiDesktopReviewAuthorizer=async(origin,review,target)=>{
         if(revoked())return false;
         const decision=await dialog.showMessageBox(win,{
           type:'warning',title:'人工授权：发送三项脱敏诊断摘要',
@@ -386,7 +393,9 @@ function registerSafeIpc(): void {
           buttons:['同意发送这三项摘要','取消'],defaultId:1,cancelId:1,noLink:true
         });
         return decision.response===0&&!revoked();
-      },controller.signal);
+      };
+      return await requestNativeAiSuggestionFromDesktop(
+        selection,evidence,authorize,controller.signal);
     }catch{return {ok:false,code:'REVIEW_FAILED',automaticPatchAllowed:false};
     }finally{
       if(nativeAiDiscoveryController===controller)nativeAiDiscoveryController=null;

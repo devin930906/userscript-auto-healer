@@ -165,7 +165,20 @@ export async function requestNativeReviewedAiSuggestion(
     if(!gateway.status().manualModelAvailable)return blocked('MODEL_NOT_SELECTED');
     if(signal?.aborted)return blocked('CANCELLED');
     const target=gateway.suggestionRequestTarget();
-    const allowed=await authorize(origin,evidence,target);
+    let onAbort:(()=>void)|undefined;
+    const revoked=signal?new Promise<false>(resolve=>{
+      onAbort=()=>resolve(false);
+      signal.addEventListener('abort',onAbort,{once:true});
+    }):undefined;
+    let allowed:boolean;
+    try{
+      if(signal?.aborted)return blocked('CANCELLED');
+      const approval=Promise.resolve().then(()=>
+        signal?.aborted?false:authorize(origin,evidence,target));
+      allowed=revoked?await Promise.race([approval,revoked]):await approval;
+    }finally{
+      if(signal&&onAbort)signal.removeEventListener('abort',onAbort);
+    }
     if(!allowed||signal?.aborted)return blocked('CANCELLED');
     const consent={userApproved:true as const,approvedOrigin:origin};
     if(!gateway.enable(consent))return blocked('NOT_AUTHORIZED');
