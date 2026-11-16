@@ -109,3 +109,8 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 - **REQ-001..003/022 → TASK-017 → Issue #607 → PR #883 → main**：同一合并 SHA 将手动 GM 场景与手动场景注册留在折叠高级区，并连接导入结果至受控 Chrome 工作区；完整一次启动批处理及逐脚本结果主旅程仍缺失，源码静态审查不构成真实 UI/人工体验通过。
 - **Windows 发布验证关联**：候选 EXE/ZIP [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 启动阶段失败，未生成候选双包；同 SHA 的 Application Checks #43805989201 与 Portable Chrome Product Validation #43805989203 成功。历史间歇故障 #510 已重新打开，根因未确认。不得用 PR Merged、Issue Open/Closed 或单个成功 Actions 运行推导 GATE-001..011 通过。
 - **当前发行边界**：历史 Release v1.1.3 已发布，但 `docs/product-rebaseline.md` 明确其不是本次需求验收证据；当前没有新 Stable 候选双包、最终人工验收或新 Stable Release。
+
+## 2026-11-16 PR #891 后的 TASK-007 边界追踪
+
+- **TASK-007 / #486 / REQ-017/018 / TEST-017/018 / GATE-004/005**：PR [#891](https://github.com/devin930906/userscript-auto-healer/pull/891) 合并 SHA `8484b76f6cadd88d106c2d5bd077cece2328cf72`，只修复测试专用 owned-Chrome extension pipe 在 outgoing error/close 时的失败关闭，并补充 malformed/oversized、pipe failure、timeout 与 cancellation 负例。它不完成 Issue #486 的真实 Tampermonkey 身份、GM、业务或回滚验收；#486 继续 Open，GATE-004/005 未通过。
+- 对应隔离 Windows run [#43843893323](https://github.com/devin930906/userscript-auto-healer/actions/runs/43843893323) 21/21 Job success，但日志仍为 `storeAuthenticityVerified=false`、`gmApiVerified=false`、`businessVerified=false` 与 `managerVerifiedForStable=false`。不得将该 CI 矩阵升级为真实用户或 Stable 证据。

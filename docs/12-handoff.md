@@ -2,9 +2,13 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
+> 2026-11-16 PR #891 合并后的最新续接点：当前代码基线为 `main@8484b76f6cadd88d106c2d5bd077cece2328cf72`；PR [#891](https://github.com/devin930906/userscript-auto-healer/pull/891) 合并了测试专用 owned-Chrome pipe outgoing error/close fail-closed 修复及负向回归。PR head `ebd83800ff0dabbceaac894f50bd793a7b9e94b0` 的 Windows 应用/Portable Chrome/候选双包/隔离 TASK-007 workflows 均成功；候选 artifact 不构成 Stable。#486 仍 Open，store authenticity、真实用户 Profile、正式脚本/GM/业务和回滚证据未完成，TEST-017/018 与 GATE-004/005 仍未通过。下一步继续 #486 的真实授权验收；需要用户授权的隔离 Chrome/Tampermonkey 环境时再执行，不建立 Issue 锁或认领前置条件。
+>
+> 合并后 main push run [#43846393524](https://github.com/devin930906/userscript-auto-healer/actions/runs/43846393524) success：1132 tests / 1130 pass / 0 fail / 2 conditional skips，Electron renderer/preload IPC smoke success；可选诊断 job skipped。
+
 > 2026-11-15 PR #858 原始需求校准续接：现行 REQ-008 默认端口 9896（9223 仅是历史 PoC 参数），用户主流程为 Chrome/Chrome++ 和授权 Profile → 批量导入 → 一次启动 → 逐项真实诊断/安全修复/验收/版本结果；缺登录、授权或业务断言必须逐项受阻并保留原件。主线待完成 TASK-007/009..014/017 对应 #486 #487 #488 #489 #603 #604 #857 #607 的真实代码与 TEST。下方历史日期、版本、端口、Issue 锁定记录仅保留可追溯性，不得覆盖当前准入与真实主干状态。
 >
-> 2026-11-16 PR #886 合并后的当前续接点：产品代码合并点为 main@7c02f828ba781677629634b0947c7e729b1c170b，PR HEAD ce81f10124c9a8d8a976ece414ec6978415ad32f。TASK-007 / #486 仍 Open；Windows Actions #43822893465 的 21 个 Job success、product-candidate/document-idle 为 22/22 pass，但 metadata hint 本身只报告 synthetic unpacked CRX 的 app-owned 元数据。相同矩阵另有四个 product-candidate run-at Job（各 5/5）记录合成 broken/fixed 脚本注入及测试业务结果；候选 GM roundtrip=false、managerInstalled/productCdpVerified=false。四个 native-gm Job 的合成 roundtrip=true，但 gmApiVerified/businessVerified/managerVerifiedForStable=false。Store/扩展真实性、真实用户 Profile、完整产品安装/注入/授权业务和回滚未验证，TEST-017/018、GATE-004/005 未通过。
+> 历史快照（2026-11-16 PR #886 合并时）：产品代码合并点为 main@7c02f828ba781677629634b0947c7e729b1c170b，PR HEAD ce81f10124c9a8d8a976ece414ec6978415ad32f。TASK-007 / #486 仍 Open；Windows Actions #43822893465 的 21 个 Job success、product-candidate/document-idle 为 22/22 pass，但 metadata hint 本身只报告 synthetic unpacked CRX 的 app-owned 元数据。相同矩阵另有四个 product-candidate run-at Job（各 5/5）记录合成 broken/fixed 脚本注入及测试业务结果；候选 GM roundtrip=false、managerInstalled/productCdpVerified=false。四个 native-gm Job 的合成 roundtrip=true，但 gmApiVerified/businessVerified/managerVerifiedForStable=false。Store/扩展真实性、真实用户 Profile、完整产品安装/注入/授权业务和回滚未验证，TEST-017/018、GATE-004/005 未通过。
 >
 > 先前 PR 临时合并候选 [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 来自 SHA a41f2e676da766aed184217f1d55424633d9970f，现已被后续 main 同源候选取代；历史文件 SHA 仍保留于 docs/07-testing.md。
 >
