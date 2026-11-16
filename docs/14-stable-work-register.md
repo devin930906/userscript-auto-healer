@@ -17,7 +17,7 @@
 
 | 任务编号 | 关联需求 | 当前状态 | 实际缺口 | 影响范围 | 前置依赖 | 已有证据 | 下一执行动作 | 完成条件 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TASK-007 | REQ-017/018；TEST-017/018 | 四种声明 `@run-at` 模式的真实 Tampermonkey 合成脚本/GM 阶段测试，以及一对真实管理器中执行的产品生成/审计候选与原版对照，已完成并整合；完整产品级验收仍受阻 | CRX 解包扩展运行 ID 不等于商店官方 ID，缺商店签名身份；部分 `readyState` 记录不支持精确注入时机承诺；现有产品候选对照仅在无真实用户数据的合成站点完成，缺可信支持矩阵、产品自动安全应用、真实修复回归与失败恢复 | 管理器适配；GATE-004/005 | TASK-004..006；独立授权测试环境；真实补丁应用需要 TASK-010/011 | PR #194/#196/#197 均已合并；#39502515449 的四种 `@run-at` 各自 Job success；PR #197 HEAD `a13550b51a0312385e7c1f809de81ce7e7c13e35`，Actions #39503655317 六 Job success，`product-original` 与 `product-candidate` 同一原版 SHA `f564a76620d1aee7b80b12ddea3a92de27cdc6e0eb16e634451ef6d173694103`、候选 SHA `69c1079ef37e55c987bc81fd1696c836e45d50dfb480d5cd3bd831de4f4f0ac4`，原版目标存在时 `missing-target`、审计候选 `recovered/done`，`automaticPatchAllowed=false`；main 合并 `c058e37c148bbc29d1a7e670aab261c396eeea1e` | 确认可信商店 Tampermonkey 身份与注入时序，接通经授权真实业务场景、备份门控及产品实际修复/回滚；不得将合成候选成功升格为自动修复 VERIFIED | TEST-017/018 在正式支持矩阵内的真实产品正反与失败恢复完整通过，GATE-004/005 另行验收 |
+| TASK-007 | REQ-017/018；TEST-017/018 | 四种声明 `@run-at` 模式的真实 Tampermonkey 合成脚本/GM 阶段测试，以及一对真实管理器中执行的产品生成/审计候选与原版对照，已完成并整合；完整产品级验收仍受阻 | CRX 解包扩展运行 ID 不等于商店官方 ID，缺商店签名身份；部分 `readyState` 记录不支持精确注入时机承诺；现有产品候选对照仅在无真实用户数据的合成站点完成，缺可信支持矩阵、产品自动安全应用、真实修复回归与失败恢复 | 管理器适配；GATE-004/005 | TASK-004..006；独立授权测试环境；真实补丁应用需要 TASK-010/011 | PR #194/#196/#197 均已合并；#39502515449 的四种 `@run-at` 各自 Job success；PR #197 HEAD `a13550b51a0312385e7c1f809de81ce7e7c13e35`，Actions #39503655317 六 Job success，`product-original` 与 `product-candidate` 同一原版 SHA `f564a76620d1aee7b80b12ddea3a92de27cdc6e0eb16e634451ef6d173694103`、候选 SHA `69c1079ef37e55c987bc81fd1696c836e45d50dfb480d5cd3bd831de4f4f0ac4`，原版目标存在时 `missing-target`、审计候选 `recovered/done`，`automaticPatchAllowed=false`；main 合并 `c058e37c148bbc29d1a7e670aab261c396eeea1e` | 确认可信商店 Tampermonkey 身份与注入时序，接通经授权真实业务场景、备份门控及产品实际修复/回滚；不得将合成候选成功升格为自动修复 VERIFIED | TEST-017/018 在正式支持矩阵内的真实产品正反与失败恢复完整通过，GATE-004/005 另行验收 PR #886 merged main@7c02f828ba781677629634b0947c7e729b1c170b；Windows run #43822893465 21 Job success、product-candidate/document-idle 22/22 pass，metadata flags 仅 hint 且 authenticity/Store/script/GM/business 均 false；#486 保持 Open，GATE-004/005 未通过。 |
 | TASK-008 | REQ-013；TEST-013 | 阶段代码已整合，集成未完成 | 只读 DOM/JS 信号已存在，但可信 Tampermonkey 故障归因与完整日志链未验证 | 故障诊断与后续修复 | TASK-007 | docs/09-development-plan.md；src/diagnostics/ | 以实际失败脚本场景完成归因、误判和脱敏验证 | TEST-013 产品级正反例与回归证据通过 |
 | TASK-009 | REQ-014/019；TEST-014/019 | 阶段代码已整合，单一真实管理器合成候选验证通过，完整自动修复仍受阻 | PR #197 中现有 AST 补丁引擎已实际生成单一选择器 `CANDIDATE_ONLY`、独立审计 `REVIEWABLE_ONLY` 并在隔离 Tampermonkey 合成页面恢复业务；但不是产品诊断证据绑定、用户脚本自动应用、独立备份/回滚或正式真实网站回归 | 核心修复 | TASK-007/008/010/011 | PR #197；Actions #39503655317（六 Job success，两个产品对照 Job 保持原版/候选 SHA 一致），源 HEAD `a13550b51a0312385e7c1f809de81ce7e7c13e35`；src/repair/patch-planner.ts | 在经批准的真实端到端场景验证候选与诊断证据的一致性，连接备份、独立验收、显式用户授权及安全原子应用／回滚 | 经可信证据与安全备份实际执行修复，拒绝扩权和失败恢复测试通过；目前不得自动应用 |
 | TASK-010 | REQ-018/021；TEST-018/021 | 阶段代码已整合，产品门槛未完成 | 离线审计与阻断逻辑不提供可信管理器/业务/备份证明 | 自动验收 | TASK-007/009/011 | src/acceptance/；docs/09-development-plan.md | 增加独立真实业务前后验收及可信备份绑定 | 可信正反证据可重演且未知状态安全拒绝 |
@@ -406,7 +406,7 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   3. 版本号正式推进至 **`1.0.1`**。
 - **自动化验证**：全量 1075 项测试 100% 绿灯（1065 pass, 0 fail, 10 conditional skip），预开发追踪矩阵 100% 通过。
 
-## 2026-11-16 rebaseline 后的当前工作登记（覆盖旧快照的现时状态）
+## 2026-11-16 PR #883 合并后的工作登记快照（新状态见文末）
 
 > 本节是当前状态增量，不改写 2026-10-21/2026-11-12 历史记录。当前 Stable 目标以 `docs/product-rebaseline.md` 为准；历史 v1.0.0/v1.1.3 发布与旧 GATE 签署不得自动继承为本次 rebaseline 通过。
 
@@ -420,3 +420,16 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **Stable/GATE**：本次 rebaseline 的完整 GATE-001..011 尚未重新签署。GATE-004/005 因真实 Tampermonkey/GM/业务与支持矩阵不足而阻断；GATE-007 因可信自动应用/原子事务/回滚不足而阻断；GATE-008/009/011 因当前候选双包未构建及最终验收缺失而阻断；GATE-003 的候选打包链受 #510 失败影响。其他 GATE 逐项以当前正式 TEST/REQ 和实际证据重新判定，不继承历史签署。
 - **正式 Release**：历史 `v1.1.3` 仍是已发布记录，但不是本次 rebaseline 的验收证据；本轮没有新 Stable Tag/Release，没有当前同源候选 EXE/ZIP，没有最终人工验收。
 - **当前优先剩余工作**：#510 的同源三阶段对照未复现，需等待新的可比较因果证据，不重复同一对照；继续 #486/TASK-007 的真实管理器/安装授权/GM/业务验证；依赖满足后推进 #487/#488/#489/#603/#857/#607 等产品闭环。最终人工验证仍集中安排于正式候选双包机器检查通过之后。
+
+
+## 2026-11-16 PR #886 合并后的当前工作登记
+
+> 当前产品代码合并点 main@7c02f828ba781677629634b0947c7e729b1c170b；PR #886 已合并。以下记录覆盖上方 PR #883 后的历史快照。
+
+- **TASK-007 / #486**：PR #886 合并了 app-owned、test-only 扩展 metadata probe。Windows 矩阵 [#43822893465](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893465) 21/21 Job success；product-candidate/document-idle Job 22/22 pass。metadata hint 只确认合成签名 key 已核对 unpacked CRX 的元数据，所有 authenticity/Store/script/GM/business flags 均 false。另四个 product-candidate run-at Job 各 5/5，synthetic broken/fixed 注入与合成业务命中记录通过，但 GM roundtrip=false 且 managerInstalled/productCdpVerified=false；四个 native-gm Job 的 GM roundtrip=true，formal gmApi/business/stable-manager flags 仍 false。全部是隔离合成证据。#486 保持 Open，TEST-017/018、GATE-004/005 未通过。
+- **#510 / TASK-005**：早前 candidate #43805989231 的 CDP_TIMEOUT 失败仍有效。run [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 在另一 PR 测试合并 SHA 上经历 FETCH_REFUSED=t0..t4 后于 t5 成功读取 CDP 版本并完成候选双包；这不是根因或产品修复证明。#510 保持 Open。
+- **最新自动化结果**：Application Skeleton Checks #43822893371 success（1131 tests / 1129 pass / 0 fail / 2 conditional skips，Electron shell smoke success）；Portable Chrome Product Validation #43822893326 success；Windows Candidate Packaging #43822893260 success。PR #886 的 28 个 check runs 全部 completed 且无失败；required stale-round-fence status 成功，无 review threads。
+- **候选发行文件**：EXE SHA-256 28ae3dd1ddbb61415d802661153758c9d76aec88d6946a80983102159b1ba932；ZIP SHA-256 b895af2754d5ee9f6592f449f2d2f615a9d102f388f52e7f3b93c13f761db1bb；Actions Artifact 14204424590，digest sha256:426191ae3d2ea778938062a9592c5076fdbdcd0251c9aaed1f699f0d5b1f9c22，到期 2026-11-19。候选来源 SHA a41f2e676da766aed184217f1d55424633d9970f，和代码合并点 7c02f828ba781677629634b0947c7e729b1c170b 不同，不能当成该最终提交的正式双包。
+- **正式 Release 与 Stable**：package.json 仍为 1.1.3；最近正式 Release 是 v1.1.3（源 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，发布于 2026-11-13），早于本次 rebaseline。没有本轮正式 tag/Release、同一最终代码提交的正式 EXE/ZIP 或最终用户集中人工验收；Stable 未完成。
+- **本地同步**：完整克隆 worktree userscript-auto-healer-task007-worktree，分支 feat/task007-installed-probe-positive-20261116，工作树 clean；本地提交 3d484305822541d18e0d11dbae38128220e509ad 的 tree eed6e9625b859f5986d177fb0b98e8bb4f04dd4c 等于远端 PR 分支 tree。推送曾因 SEC_E_NO_CREDENTIALS 失败；源文件由 GitHub 文件 API 同步后进入 PR #886。无未同步文件差异。
+- **下一项**：继续 TASK-007 / #486，需有用户授权的隔离 Chrome/Tampermonkey 环境，完成正式支持范围/身份来源、安装/注入、GM 往返、真实业务正反例和失败恢复证据；Issue 认领/锁不是前置条件。随后复核 TASK-005/#510 的可比较因果证据、候选双包与全部 GATE，最后做集中人工验收。
