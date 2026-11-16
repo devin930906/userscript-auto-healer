@@ -487,3 +487,9 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - main 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a` 的手动 Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) success。warmup 使用同一签名 Chrome、第二个 disposable Profile、`--dump-dom about:blank` 且无 CDP 参数；退出码 0。之后 cold / warm 两臂都通过原有 20 秒启动及签名、PID、HTTP、WebSocket 所有权校验，并完成进程/listener 清理。
 - 单次配对结果：cold `CDP_VERSION_PARSED=t1`，warm `CDP_VERSION_PARSED=t0`；listener 两臂均为 `t0:0,t1:1`，cold Local State 从 `t0:00` 到 `t0:10`，warm 预热后为 `t0:10`。没有复现历史 `CDP_TIMEOUT`。
 - **续接判定**：此结果不定位原失败根因，也不足以排除更广泛 runner、profile 或启动时序因素。保留 #510 Open，不重复完全相同的对照；只有出现新的可比较失败证据才继续同类根因诊断。Issue、TASK 与 GATE 验收状态不变；EXE/ZIP、Stable 和最终人工验收仍未完成。
+
+## 2026-11-16 TASK-007 / Issue #486 Chrome Browser MCP 实时复核
+
+- 用户启动 MCP 后，Tampermonkey Service Worker 运行时返回官方扩展 ID、名称、5.5.1 版本和 MV3；唯一临时脚本实际安装、注入、`GM_getValue` 默认值及合成 broken/fixed DOM 对照见 [复核记录](evidence/2026-11-16-tampermonkey-browser-mcp-followup.md)。
+- 本次仅验证手工管理器运行链。MCP 不允许访问 `chrome://version`，没有获得活动进程命令行/Profile 目录；指定 Data 路径绑定、Chrome 版本、Web Store 来源和完整支持矩阵仍未确认。脚本经人工修改，未验证产品自动诊断/修复、真实业务站点、GM 写入、备份或回滚。
+- 测试脚本已从已安装列表移除并确认不再注入，回收站记录保留以避免全局清空。一次仪表盘快照意外返回其他脚本名称/描述，未打开源码或修改；因此本次证据只作受限观察。#486 保持 Open；TASK-007、TEST-017/018、GATE-004/005 与 Stable 状态不变。
