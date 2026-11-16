@@ -749,10 +749,22 @@ export async function launchApprovedIsolatedChrome(
               }
               emitStage('CDP_WS_PROOF_VERIFIED');
               if(canonicalTestExtensionDirectory!==undefined){
+                if(!testExtensionDirectory)
+                  return {ok:false,code:'NOT_AUTHORIZED'};
+                const extensionUseCheck=await awaitPrelaunchCheckOrRevocation(
+                  validateRunnerTempDirectory(canonicalTestExtensionDirectory,
+                    process.env.RUNNER_TEMP,testExtensionDirectory.runnerTemp),
+                  checked.signal);
+                if(extensionUseCheck.aborted)return {ok:false,code:'ABORTED'};
+                if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+                if(!extensionUseCheck.value||
+                   !sameWindowsPath(extensionUseCheck.value.path,
+                     canonicalTestExtensionDirectory))
+                  return {ok:false,code:'NOT_AUTHORIZED'};
                 const remainingMs=Math.max(1,Math.ceil(
                   20000-(performance.now()-began)));
                 const loaded=await loadTestExtensionOverPipe(child,
-                  canonicalTestExtensionDirectory,checked.signal,remainingMs);
+                  extensionUseCheck.value.path,checked.signal,remainingMs);
                 if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
                 if(errored||exited||child.killed)return {ok:false,code:'LAUNCH_FAILED'};
                 if(performance.now()-began>=20000){
