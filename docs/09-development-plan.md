@@ -456,7 +456,7 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **TASK-005 / Issue #510**：候选运行 [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 在 Chrome 启动时经历 FETCH_REFUSED=t0..t4 并于 t5 解析出 CDP 版本，候选打包成功。此成功样本未提供此前 #43805989231 的 CDP_TIMEOUT 根因或确定性修复；#510 保持 Open。早先失败仍须保留，不能以这一成功关闭故障。
 - **Windows 构建与正式 Release**：main Application Skeleton Checks #43824662618 success（1131 tests / 1129 pass / 0 fail / 2 conditional skip，Electron shell smoke success）；Portable Chrome #43822893326 success。main@d647003f391f9c350e6efb94a3924f604bd80ead 的 Candidate Packaging [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) success，EXE SHA-256 6ac2b0530b0243b3886a9d24d61ff0263ebf69d70423ed1abd0548ec0a63c65b，ZIP SHA-256 7994ad8452cb939beb0270111e5cd0eb4f051767b217a3159a2aeaf6da80f41e，Artifact 14207796979 / 到期 2026-11-19；均为候选包，未完成真实用户验收与 Stable GATE。
 - **本地提交与远端同步**：Windows 完整仓库 worktree userscript-auto-healer-task007-worktree 的本地提交 3d484305822541d18e0d11dbae38128220e509ad，tree eed6e9625b859f5986d177fb0b98e8bb4f04dd4c；与远端 PR 分支 ce81f10124c9a8d8a976ece414ec6978415ad32f 的 tree 一致且工作树干净。推送尝试因 SEC_E_NO_CREDENTIALS 未成功；远端文件内容随后通过 GitHub 文件 API 同步，故本地 SHA 不在远端提交历史，也不等于 main 合并 SHA。
-- **本地验证**：Node v26.12.1 / npm 11.20.0；npm run build 通过；manager adapter 20 pass / 0 fail / 2 intentional skips；owned-chrome pipe focused test 1 pass；git diff --check 通过。独立安全审查未发现 Critical/Important 问题；仍未对 malformed/oversized/timeout/abort pipe responses 添加逐项负向单元测试。
+- **本地验证（PR #886 合并时点）**：Node v26.12.1 / npm 11.20.0；npm run build 通过；manager adapter 20 pass / 0 fail / 2 intentional skips；owned-chrome pipe focused test 1 pass；git diff --check 通过。该记录时点尚未对 malformed/oversized/timeout/abort pipe responses 添加逐项负向单元测试；后续 PR #891 已部分补入，见下方 TASK-007 进度记录。
 - **下一执行入口**：TASK-007 / #486 的真实 Tampermonkey 支持矩阵、授权隔离 Profile、扩展身份/Store 来源、脚本安装注入、GM 往返、真实业务正反断言与失败恢复。需要具备用户授权的测试环境后再执行；当前未操作个人 Chrome/Profile。Issue 占用/认领不是前置条件。
 - **Stable 状态**：未通过本轮全部 GATE；没有同一最终候选提交的正式 EXE+ZIP 及最终集中人工验收，没有新 Stable tag/Release。
 
@@ -465,6 +465,13 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - 当前 main SHA d647003f391f9c350e6efb94a3924f604bd80ead 的 Windows Candidate run #43828261977 通过。回归 1131 tests / 1129 pass / 0 fail / 2 conditional skip；EXE/ZIP 载荷检查、安装启动、userData 保留和便携重定位通过。
 - EXE 候选 SHA-256 6ac2b0530b0243b3886a9d24d61ff0263ebf69d70423ed1abd0548ec0a63c65b；ZIP 候选 SHA-256 7994ad8452cb939beb0270111e5cd0eb4f051767b217a3159a2aeaf6da80f41e；Artifact 14207796979，digest sha256:74a54016d4dbf3583a8f9fd7fb254bc4ea201dbc520c59f24f053b6c4cfe7be2，2026-11-19 到期。
 - 候选 ZIP relocation 第一轮需要 8 次尝试后通过，后两轮首试通过；记录此次成功重试，不据此推断与 #510 有共同根因。#510 仍 Open，Stable 未通过。
+
+## 2026-11-16 TASK-007 / Issue #486 辅助负向覆盖（不等于验收完成）
+
+- PR [#891](https://github.com/devin930906/userscript-auto-healer/pull/891) 已 squash 合并至 `main@8484b76f6cadd88d106c2d5bd077cece2328cf72`。本次仅补强测试专用 Chrome debugging pipe 在 outgoing `error`/`close` 时的即时失败关闭，并覆盖 malformed/oversized、incoming/outgoing failure、timeout、abort。
+- Windows Actions PR head `ebd83800ff0dabbceaac894f50bd793a7b9e94b0` 的隔离 TASK-007 matrix #43843893323 为 21/21 Job success；日志限定为 disposable manager/Chromium synthetic fixture，仍未通过 Chrome Web Store provenance、真实 Profile、真实业务或 Stable manager flags。
+- 合并后 main push run [#43846393524](https://github.com/devin930906/userscript-auto-healer/actions/runs/43846393524) 在合并 SHA `8484b76f6cadd88d106c2d5bd077cece2328cf72` 上 success：1132 tests / 1130 pass / 0 fail / 2 conditional skips，Electron renderer/preload IPC smoke success。
+- #486 保持 Open；REQ-017/018、TEST-017/018 与 GATE-004/005 的真实授权支持矩阵、Store/扩展身份、脚本安装注入、GM 往返、业务失败恢复仍未闭环。PR #891 不改变已批准范围或 Issue 依赖。
 
 ## 2026-11-16 TASK-005 / Issue #510 限时 CPU 压力对照（根因仍未确认）
 
