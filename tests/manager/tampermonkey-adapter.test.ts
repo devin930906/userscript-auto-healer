@@ -374,6 +374,11 @@ test('TASK-007: installed vendor fixture returns only app-owned manager metadata
  const extension=process.env.UAH_TM_EXTENSION_DIR;
  assert.ok(runnerTemp&&win32.isAbsolute(runnerTemp),'Windows Actions must provide RUNNER_TEMP');
  assert.ok(extension&&win32.isAbsolute(extension),'CI must provide the verified unpacked vendor fixture');
+ const fixturePreflight=await launchApprovedIsolatedChrome(null,{
+  userApproved:true,testHeadless:true,testExtensionDirectory:extension
+ });
+ assert.deepEqual(fixturePreflight,{ok:false,code:'PREFLIGHT_FAILED'},
+  'fixture path must pass the app-owned RUNNER_TEMP boundary before reading its manifest');
  const manifest=JSON.parse(readFileSync(win32.join(extension,'manifest.json'),'utf8')) as {
   manifest_version?:unknown;version?:unknown
  };
@@ -468,7 +473,7 @@ test('TASK-007: installed vendor fixture returns only app-owned manager metadata
  ])assert.equal(Object.prototype.hasOwnProperty.call(installation,unsupportedAuthorityField),false,
   'metadata-only probe must not expose '+unsupportedAuthorityField);
  console.log('TAMPERMONKEY_INSTALLED_METADATA_HINT_ONLY '+JSON.stringify({
-  fixture:'synthetic/vendor-hosted-unpacked-CRX',manager:installation.manager,
+  fixture:'synthetic/signature-key-verified-unpacked-CRX',manager:installation.manager,
   extensionId:installation.extensionId,version:installation.version,
   enabled:installation.enabled,allowUserScripts:installation.allowUserScripts,
   permissionVerified:installation.permissionVerified,inspectionTargetClosed:true,
