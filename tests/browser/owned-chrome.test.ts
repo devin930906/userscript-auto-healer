@@ -2671,6 +2671,187 @@ test('TASK-007: test extension option uses one bounded pipe request and leaves o
   }
 });
 
+test('TASK-007: extension pipe errors, malformed frames, limits, timeout and abort fail closed',async t=>{
+  if(process.platform!=='win32')return t.skip('Windows path boundary only');
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  type Scenario='outgoing-error'|'outgoing-close'|'incoming-error'|'incoming-close'|
+    'malformed-json'|'oversized'|'timeout'|'abort';
+  const saved={actions:process.env.GITHUB_ACTIONS,runnerTemp:process.env.RUNNER_TEMP,
+    event:process.env.GITHUB_EVENT_NAME,request:process.env.UAH_TEST_CHROME_BOOT_LOG};
+  const root=await realpath(await mkdtemp(join(tmpdir(),'uah-task007-pipe-fail-')));
+  const extension=join(root,'extension');
+  await mkdir(extension);
+  const canonicalExtension=await realpath(extension);
+  const children:Array<ReturnType<typeof makeChild>>=[];
+  const pipeStreams:PassThrough[]=[];
+  const pipeRequests:unknown[]=[];
+  let scenario:Scenario='outgoing-error';
+  let activeController:AbortController|undefined;
+  let notifyPipeAction:(()=>void)|undefined;
+  let outgoingErrors=0;
+  function makeChild(){
+    const child=Object.assign(new EventEmitter(),{
+      pid:41274,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+      stdio:[] as unknown[],
+      kill(){this.killed=true;return true;}
+    });
+    const incoming=new PassThrough(),outgoing=new PassThrough();
+    let pending=Buffer.alloc(0);
+    outgoing.on('error',()=>{outgoingErrors++;});
+    outgoing.on('data',(chunk:Buffer)=>{
+      pending=Buffer.concat([pending,chunk]);
+      const delimiter=pending.indexOf(0);
+      if(delimiter===-1)return;
+      const frame=pending.subarray(0,delimiter).toString('utf8');
+      pending=pending.subarray(delimiter+1);
+      if(!frame)return;
+      const request=JSON.parse(frame) as {id:number};
+      pipeRequests.push(request);
+      switch(scenario){
+        case 'outgoing-error':
+          outgoing.destroy(new Error('SYNTHETIC_OUTGOING_PIPE_ERROR'));
+          break;
+        case 'outgoing-close':
+          outgoing.destroy();
+          break;
+        case 'incoming-error':
+          incoming.destroy(new Error('SYNTHETIC_INCOMING_PIPE_ERROR'));
+          break;
+        case 'incoming-close':
+          incoming.destroy();
+          break;
+        case 'malformed-json':
+          incoming.write('{invalid-json\0');
+          break;
+        case 'oversized':
+          incoming.write(Buffer.alloc(65537,0x78));
+          break;
+        case 'timeout':
+          break;
+        case 'abort':
+          activeController?.abort();
+          break;
+      }
+      notifyPipeAction?.();
+    });
+    child.stdio=[null,null,null,outgoing,incoming];
+    pipeStreams.push(incoming,outgoing);
+    return child;
+  }
+  try{
+    process.env.GITHUB_ACTIONS='true';
+    process.env.RUNNER_TEMP=root;
+    process.env.GITHUB_EVENT_NAME='pull_request';
+    process.env.UAH_TEST_CHROME_BOOT_LOG='true';
+    t.mock.method(launcher,'preflightChrome',async(requested:unknown)=>
+      ({ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+        config:requested,runtimeIdentityVerified:false as const}));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>(
+      {ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+        version:'155.0.1.1',publisher:'Google LLC' as const,runtimeVerified:false as const}));
+    t.mock.method(cp,'spawn',(_file:string,args?:ReadonlyArray<string>,
+      _options?:import('node:child_process').SpawnOptions)=>{
+      const child=makeChild();
+      children.push(child);
+      assert.ok(args?.includes('--remote-debugging-pipe'),
+        'only the explicit test-extension launch may open the debugging pipe');
+      return child as unknown as import('node:child_process').ChildProcess;
+    });
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>(
+      {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+        pid:41274,executableVerified:false as const}));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>true);
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12174/devtools/browser/abcdefgh-1234'
+    })));
+
+    let profileNumber=0;
+    const runFailure=async(mode:Scenario)=>{
+      scenario=mode;
+      const profilePath=join(root,'profile-'+profileNumber++);
+      await mkdir(profilePath);
+      const cfg=config('C:\\synthetic\\chrome.exe',await realpath(profilePath),12174);
+      const controller=new AbortController();
+      activeController=controller;
+      let pipeActionResolve!:()=>void;
+      const pipeAction=new Promise<void>(resolve=>{pipeActionResolve=resolve;});
+      notifyPipeAction=pipeActionResolve;
+      const firstRequest=pipeRequests.length;
+      const started=performance.now();
+      const pending=launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,testHeadless:true,testExtensionDirectory:canonicalExtension,
+        signal:controller.signal
+      });
+      let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>;
+      if(mode==='outgoing-error'||mode==='outgoing-close'){
+        const actionStarted=await Promise.race([
+          pipeAction.then(()=>true),
+          delay(2000).then(()=>false)
+        ]);
+        assert.equal(actionStarted,true,
+          mode+' must reach the outgoing pipe action within the startup fixture bound');
+        const early=await Promise.race([
+          pending.then(value=>({settled:true as const,value})),
+          delay(200).then(()=>({settled:false as const}))
+        ]);
+        if(!early.settled){
+          // Keep the test process tidy while preserving the expected RED result.
+          controller.abort();
+          await pending;
+        }
+        assert.equal(early.settled,true,
+          mode+' must settle immediately instead of waiting for the pipe timeout');
+        result=early.settled?early.value:await pending;
+        assert.deepEqual(result,{ok:false,code:'LAUNCH_FAILED'},mode);
+      }else{
+        result=await pending;
+        assert.deepEqual(result,mode==='abort'
+          ?{ok:false,code:'ABORTED'}:{ok:false,code:'LAUNCH_FAILED'},mode);
+      }
+      assert.deepEqual(pipeRequests[firstRequest],{
+        id:1,method:'Extensions.loadUnpacked',params:{path:canonicalExtension}
+      },mode+' must use exactly the expected bounded test request');
+      assert.equal(children.at(-1)?.killed,true,
+        mode+' must retire only its owned synthetic Chrome child');
+      if(mode==='timeout')assert.ok(performance.now()-started<6500,
+        'an absent response must fail within the bounded pipe timeout');
+      if(mode==='abort')assert.equal(controller.signal.aborted,true);
+      activeController=undefined;
+      notifyPipeAction=undefined;
+    };
+
+    await runFailure('outgoing-error');
+    await runFailure('outgoing-close');
+    await runFailure('incoming-error');
+    await runFailure('incoming-close');
+    await runFailure('malformed-json');
+    await runFailure('oversized');
+    await runFailure('timeout');
+    await runFailure('abort');
+    assert.equal(outgoingErrors,1,
+      'the synthetic outgoing error was observed without crashing the test process');
+  }finally{
+    activeController?.abort();
+    notifyPipeAction=undefined;
+    for(const stream of pipeStreams)stream.destroy();
+    t.mock.reset();
+    for(const [key,value] of [
+      ['GITHUB_ACTIONS',saved.actions],['RUNNER_TEMP',saved.runnerTemp],
+      ['GITHUB_EVENT_NAME',saved.event],['UAH_TEST_CHROME_BOOT_LOG',saved.request]
+    ] as const){
+      if(value===undefined)delete process.env[key];
+      else process.env[key]=value;
+    }
+    await rm(root,{force:true,recursive:true});
+  }
+});
+
 
 /** TASK-018 / TEST-009/026: a CDP Browser.getVersion receipt carrying an
  * explicit protocol error is never a successful identity proof, even when

@@ -363,6 +363,8 @@ async function loadTestExtensionOverPipe(
       incoming.removeListener('data',onData);
       incoming.removeListener('error',onFailure);
       incoming.removeListener('close',onFailure);
+      outgoing.removeListener('error',onFailure);
+      outgoing.removeListener('close',onFailure);
       signal?.removeEventListener('abort',onFailure);
     };
     const finish=(ok:boolean)=>{
@@ -409,6 +411,8 @@ async function loadTestExtensionOverPipe(
     incoming.on('data',onData);
     incoming.once('error',onFailure);
     incoming.once('close',onFailure);
+    outgoing.once('error',onFailure);
+    outgoing.once('close',onFailure);
     signal?.addEventListener('abort',onFailure,{once:true});
     timer=setTimeout(onFailure,Math.max(1,Math.min(timeoutMs,5000)));
     if(signal?.aborted){onFailure();return;}
