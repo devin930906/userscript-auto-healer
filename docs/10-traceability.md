@@ -4,7 +4,7 @@
 
 > 现行未验收映射补充（不替换下方历史矩阵）：REQ-006..009 → TASK-005 / #856 / TEST-006..009（默认 CDP 9896、Chrome++ 与 Profile 归属）；REQ-017/018/023 → TASK-007/010/012 / #486 #488 #603 / TEST-017/018/023（真实 Tampermonkey 与脚本安装/版本；新增自管 Chrome 扩展管理页元数据只读检查（不证明 Store 来源或 GM/业务））；REQ-014/019..022 → TASK-009..013 / #487 #488 #489 #857 / TEST-014/018..022（真实诊断、自动候选、受控提交与回滚、批次验收）；REQ-015/016 → TASK-014 / #604 / TEST-015/016（可选 AI 双协议）；REQ-001..003/022 → TASK-002/013/017 / #857 #607 / TEST-001..003/022（一次启动、逐项结果）。历史实现状态不能自动令这些增量或 GATE-001..011 通过。
 
-> 状态：准备阶段的设计映射，代码及测试未运行。
+> 历史状态说明：下方 REQ/NFR/TASK/TEST/GATE 主矩阵源于准备阶段；实际实现与验证证据见本文件后续日期增量、当前 Issue/PR 和 `docs/14-stable-work-register.md`，不得将原设计映射文字当作当前运行结果。
 
 ## 原始要求映射
 I-001=用户故障成本；I-002=Chrome/CDP/Profile；I-003=文件导入与批量；I-004=AST/动态诊断/自愈；I-005=验收/备份回滚/监控；I-006=共享兼容层；I-007=AI；I-008=补充安全和管理器行为约束；I-009=开发前原始 Windows EXE+RAR 历史约束；I-010=用户 2026-10-18 明确将便携格式变更为 ZIP（覆盖 I-009 的 RAR 部分，保留 EXE）；I-011=用户 2026-10-18 确认 Tampermonkey 首选，纠正 Violentmonkey 验收替代风险。源原文 docs/00-intake.md，正式需求 docs/02-requirements.md。
@@ -114,3 +114,9 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 
 - **TASK-007 / #486 / REQ-017/018 / TEST-017/018 / GATE-004/005**：PR [#891](https://github.com/devin930906/userscript-auto-healer/pull/891) 合并 SHA `8484b76f6cadd88d106c2d5bd077cece2328cf72`，只修复测试专用 owned-Chrome extension pipe 在 outgoing error/close 时的失败关闭，并补充 malformed/oversized、pipe failure、timeout 与 cancellation 负例。它不完成 Issue #486 的真实 Tampermonkey 身份、GM、业务或回滚验收；#486 继续 Open，GATE-004/005 未通过。
 - 对应隔离 Windows run [#43843893323](https://github.com/devin930906/userscript-auto-healer/actions/runs/43843893323) 21/21 Job success，但日志仍为 `storeAuthenticityVerified=false`、`gmApiVerified=false`、`businessVerified=false` 与 `managerVerifiedForStable=false`。不得将该 CI 矩阵升级为真实用户或 Stable 证据。
+
+## 2026-11-16 TASK-014 / Issue #604 AI 授权目标修正
+
+- **REQ-015/016 → TASK-014 → Issue #604 → PR #893 → `main@5edebd67ef02248bae00457c14e81f1f331fd8aa`**：原生同意框现在根据选定的 Chat Completions 或 Responses 协议以及自定义 base-path 显示与实际 transport 相同的 `POST` 目标 URL；空 `?`/`#` 分隔符在同意和网络请求前被拒绝。PR [#893](https://github.com/devin930906/userscript-auto-healer/pull/893) 已合并。
+- PR Application Checks [#43858568343](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568343) 与合并后 main Application Checks [#43860109349](https://github.com/devin930906/userscript-auto-healer/actions/runs/43860109349) 成功；后者包含 Windows Electron shell smoke。Windows 候选打包检查 [#43858568495](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568495) 也成功，但它是 PR-head 候选，不是 Stable Release。
+- 本次只修正授权披露与协议目标一致性。批量分析、实际诊断与修复候选流程仍未接入 AI；依赖 TASK-009/TASK-013 未完成，Issue #604 保持 Open，TEST-015/016 与 Stable GATE 不得据此标为通过。
