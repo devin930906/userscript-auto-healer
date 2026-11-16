@@ -9,7 +9,7 @@ import { performance } from 'node:perf_hooks';
 import { launchApprovedIsolatedChrome, readBoundedCdpJson, isLiveApprovedChromeSession, MAX_CDP_TARGET_LIST_BYTES, DEFAULT_CDP_JSON_LIMIT_BYTES } from '../../src/browser/owned-chrome';
 import { openApprovedTarget, type TargetNavigationStage } from '../../src/browser/cdp-target';
 import {observeApprovedDom} from '../../src/observe/dom-observer';
-import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
+import { prepareApprovedIsolatedProfile, preflightChrome } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import {PassThrough} from 'node:stream';
@@ -40,6 +40,34 @@ test('TASK-005/TEST-006/008/009: manual same-runner full-suite differential reta
   assert.match(workflow,/npm test/);
   assert.match(workflow,/if \(\$beforeExit -ne 0 -or \$suiteExit -ne 0 -or \$afterExit -ne 0\)/);
   // A diagnostic result can never change the native user's launch contract.
+  assert.doesNotMatch(workflow,/UAH_.*TIMEOUT_OVERRIDE|SKIP_CHROME_OWNERSHIP/);
+});
+
+test('TASK-005/TEST-006/008/009: cold vs preinitialized profile diagnostic is manual-only and bounded',()=>{
+  const workflow=readFileSync(join(process.cwd(),
+    '.github/workflows/task005-portable-product-check.yml'),'utf8');
+  const source=readFileSync(join(process.cwd(),
+    'tests/browser/owned-chrome.test.ts'),'utf8');
+  assert.match(workflow,/chrome_profile_preinit_compare:\s*\n\s*description:/);
+  assert.match(workflow,/UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE:/);
+  assert.match(workflow,/TASK-005\/TEST-006\/008\/009: cold-versus-preinitialized profile/);
+  assert.match(source,/TASK005_PROFILE_PREINIT_COLD_BEGIN/);
+  assert.match(source,/TASK005_PROFILE_PREINIT_WARMUP_BEGIN/);
+  assert.match(source,/TASK005_PROFILE_PREINIT_WARM_BEGIN/);
+  assert.match(workflow,/diagnosticModes\.Count -gt 1/);
+  assert.match(workflow,/--test-name-pattern="TASK-005\/TEST-006\/008\/009: cold-versus-preinitialized profile"/);
+  assert.match(source,/--dump-dom/);
+  assert.match(source,/RUNNER_TEMP/);
+  assert.match(source,/launchApprovedIsolatedChrome\(cfg/);
+  assert.match(source,/Get-CimInstance -ClassName Win32_Process/);
+  assert.match(source,/GetProcessById/);
+  assert.match(source,/CreationDate -ceq \$root\.CreationDate/);
+  assert.match(source,/process\.Kill\(\$true\)/);
+  assert.match(source,/closeGracefully/);
+  assert.match(source,/waitForOwnedChromeShutdown/);
+  assert.match(source,/assert\.notEqual\(process\.env\.UAH_TEST_CHROME_CPU_PRESSURE,'true'/);
+  assert.doesNotMatch(source,/assert\.ifError\(warmup(?:Exit|Close)\.error\)/);
+  assert.match(workflow,/GITHUB_EVENT_NAME -eq 'workflow_dispatch'/);
   assert.doesNotMatch(workflow,/UAH_.*TIMEOUT_OVERRIDE|SKIP_CHROME_OWNERSHIP/);
 });
 
@@ -134,6 +162,71 @@ async function redactedChromeBootstrapMarkers(profile:string):Promise<string>{
     exists('Local State'),exists('DevToolsActivePort')
   ]);
   return 'state='+state+' endpointMarker='+endpoint;
+}
+
+/** Read or retire ONLY process trees whose command lines carry this test's
+ * unique disposable Profile. PowerShell receives the path as UTF-16LE Base64,
+ * and stdout is reduced to a count/fixed token; no PID, command line or path
+ * is retained in TAP output. A null result is unknown and must fail closed.
+ */
+async function probeDisposableChromeProcesses(profile:string,
+  terminate=false):Promise<number|'KILL_REQUESTED'|null>{
+  if(process.platform!=='win32')return null;
+  const encodedProfile=Buffer.from(profile,'utf16le').toString('base64');
+  const script="$ErrorActionPreference='Stop';"+
+    "$PSNativeCommandUseErrorActionPreference=$false;"+
+    "$profile=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('"+
+      encodedProfile+"'));"+
+    "$processes=@(Get-CimInstance -ClassName Win32_Process);"+
+    "$roots=@($processes | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($profile,[StringComparison]::OrdinalIgnoreCase) -ge 0 });"+
+    "$ownedIds=[Collections.Generic.HashSet[int]]::new();"+
+    "foreach($root in $roots){[void]$ownedIds.Add([int]$root.ProcessId)};"+
+    "$added=$true;while($added){$added=$false;foreach($candidate in $processes){if($ownedIds.Contains([int]$candidate.ParentProcessId) -and $ownedIds.Add([int]$candidate.ProcessId)){$added=$true}}};"+
+    (terminate
+      ? "foreach($root in $roots){try{$processId=[int]$root.ProcessId;$process=[System.Diagnostics.Process]::GetProcessById($processId);$current=Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId='+$processId);if($current -and $current.ProcessId -eq $processId -and $current.CreationDate -ceq $root.CreationDate -and $current.CommandLine -ceq $root.CommandLine -and $process.ProcessName -ieq [IO.Path]::GetFileNameWithoutExtension([string]$root.Name)){$process.Kill($true)}}catch{}};[Console]::Out.Write('KILL_REQUESTED')"
+      : "[Console]::Out.Write([string]$ownedIds.Count)");
+  const encodedScript=Buffer.from(script,'utf16le').toString('base64');
+  try{
+    const {stdout}=await execFileAsync('pwsh.exe',
+      ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encodedScript],
+      {windowsHide:true,timeout:8000,maxBuffer:4096});
+    const output=stdout.trim();
+    if(terminate)return output==='KILL_REQUESTED'?'KILL_REQUESTED':null;
+    if(!/^\d+$/.test(output))return null;
+    const count=Number(output);
+    return Number.isSafeInteger(count)&&count>=0&&count<=10000?count:null;
+  }catch{return null;}
+}
+
+async function waitForDisposableChromeExit(profile:string,
+  timeoutMs:number):Promise<boolean>{
+  const deadline=performance.now()+timeoutMs;
+  while(true){
+    const remaining=await probeDisposableChromeProcesses(profile);
+    if(remaining===0)return true;
+    if(performance.now()>=deadline)return false;
+    await delay(250);
+  }
+}
+
+async function retireDisposableChromeTree(profile:string):Promise<boolean>{
+  const request=await probeDisposableChromeProcesses(profile,true);
+  if(request!=='KILL_REQUESTED')return false;
+  return waitForDisposableChromeExit(profile,8000);
+}
+
+async function waitForOwnedChromeShutdown(profile:string,port:number,
+  timeoutMs:number):Promise<boolean>{
+  const deadline=performance.now()+timeoutMs;
+  while(true){
+    const [remaining,listener]=await Promise.all([
+      probeDisposableChromeProcesses(profile),
+      readTestOnlyLocalListenerPresence(port)
+    ]);
+    if(remaining===0&&listener==='0')return true;
+    if(performance.now()>=deadline)return false;
+    await delay(250);
+  }
 }
 
 /** TASK-005 / TEST-006/008/009/026: diagnostic-only marker transitions.
@@ -1029,6 +1122,299 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     assert.deepEqual(await openApprovedTarget(result,site,true),
       {ok:false,code:'UNVERIFIED_BROWSER'});
   }
+});
+
+
+/** Manual-only TASK-005 diagnostic: compare the unchanged owned-Chrome launch
+ * contract on a new empty Profile and a second disposable Profile initialized
+ * by the same signed Chrome without any remote-debugging option. Both measured
+ * launches use launchApprovedIsolatedChrome's original 20-second deadline,
+ * signed-binary check, listener PID proof and browser WebSocket proof. No user
+ * Profile, Chrome process, CDP endpoint or application setting is accessed.
+ */
+test('TASK-005/TEST-006/008/009: cold-versus-preinitialized profile',async t=>{
+  if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'||
+     process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
+     process.env.UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE!=='true'){
+    t.skip('Manual signed-Chrome Windows Actions diagnostic only');return;
+  }
+  assert.notEqual(process.env.UAH_TEST_CHROME_CPU_PRESSURE,'true',
+    'profile comparison cannot run with synthetic CPU pressure');
+  assert.notEqual(process.env.UAH_TEST_CHROME_FULL_SUITE_COMPARE,'true',
+    'profile comparison cannot run with full-suite workload');
+  const runnerTemp=process.env.RUNNER_TEMP;
+  assert.ok(runnerTemp,'The manual diagnostic requires canonical RUNNER_TEMP');
+  let tempStat;
+  try{tempStat=await lstat(runnerTemp);}
+  catch{assert.fail('RUNNER_TEMP is unavailable for the manual diagnostic');}
+  assert.ok(tempStat.isDirectory()&&!tempStat.isSymbolicLink(),
+    'RUNNER_TEMP must be a real directory');
+  let canonicalTemp:string;
+  try{canonicalTemp=await realpath(runnerTemp);}
+  catch{assert.fail('RUNNER_TEMP could not be canonicalized');}
+  assert.ok(win32.normalize(runnerTemp).toLowerCase()===
+    win32.normalize(canonicalTemp).toLowerCase(),
+    'RUNNER_TEMP must resolve to its canonical local path');
+
+  let chrome:string|undefined;
+  for(const base of [process.env.PROGRAMFILES,process.env['PROGRAMFILES(X86)'],
+    process.env.LOCALAPPDATA]){
+    if(!base)continue;
+    const candidate=win32.join(base,'Google','Chrome','Application','chrome.exe');
+    try{await access(candidate);chrome=candidate;break;}catch{/* try next signed install location */}
+  }
+  if(!chrome){t.skip('No official Chrome binary on runner');return;}
+
+  let root:string;
+  try{root=await mkdtemp(join(canonicalTemp,'uah-profile-preinit-'));}
+  catch{assert.fail('Unable to create diagnostic data under RUNNER_TEMP');}
+  const coldProfile=join(root,'cold-profile');
+  const warmProfile=join(root,'preinitialized-profile');
+  let warmupChild:ReturnType<typeof spawn>|undefined;
+  let warmupClosed:Promise<{code:number|null;signal:NodeJS.Signals|null;error?:Error}>|undefined;
+  let coldPort:number|undefined;
+  let warmPort:number|undefined;
+  let canRunNextArm=true;
+  const liveSessions:Array<{stop:()=>void;closeGracefully?:()=>Promise<boolean>}> = [];
+  t.after(async()=>{
+    let cleanupConfirmed=true;
+    for(const session of liveSessions){
+      try{
+        if(session.closeGracefully)await session.closeGracefully();
+        else session.stop();
+      }catch{session.stop();}
+    }
+    if(warmupChild&&warmupChild.exitCode===null){
+      await retireDisposableChromeTree(warmProfile);
+      if(warmupChild.exitCode===null&&!warmupChild.killed)warmupChild.kill();
+    }
+    if(warmupClosed){
+      let timer:ReturnType<typeof setTimeout>|undefined;
+      const childClosed=await Promise.race([
+        warmupClosed,
+        new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),5000);})
+      ]).finally(()=>{if(timer)clearTimeout(timer);});
+      if(childClosed===null)cleanupConfirmed=false;
+    }
+    for(const [profile,port] of [[coldProfile,coldPort],[warmProfile,warmPort]] as const){
+      let stopped=port===undefined
+        ?await waitForDisposableChromeExit(profile,1000)
+        :await waitForOwnedChromeShutdown(profile,port,1000);
+      if(!stopped){
+        await retireDisposableChromeTree(profile);
+        stopped=port===undefined
+          ?await waitForDisposableChromeExit(profile,8000)
+          :await waitForOwnedChromeShutdown(profile,port,8000);
+      }
+      if(!stopped)cleanupConfirmed=false;
+    }
+    try{
+      await rm(root,{recursive:true,force:true});
+      try{await lstat(root);cleanupConfirmed=false;}
+      catch(error){
+        if(!error||typeof error!=='object'||
+           Object.getOwnPropertyDescriptor(error,'code')?.value!=='ENOENT')
+          cleanupConfirmed=false;
+      }
+    }catch{cleanupConfirmed=false;}
+    if(!cleanupConfirmed)
+      throw Error('Test-owned Chrome process/profile cleanup was not confirmed');
+  });
+  let canonicalRoot:string;
+  try{canonicalRoot=await realpath(root);}
+  catch{assert.fail('The test-owned diagnostic root could not be canonicalized');}
+  assert.ok(win32.normalize(root).toLowerCase()===
+    win32.normalize(canonicalRoot).toLowerCase(),
+    'The diagnostic root must not resolve through a link');
+  const relativeRoot=win32.relative(canonicalTemp,canonicalRoot);
+  assert.ok(relativeRoot&&!/^\.\.(?:\\|$)/.test(relativeRoot)&&
+    !win32.isAbsolute(relativeRoot),
+    'The test-owned root must remain inside RUNNER_TEMP');
+
+  coldPort=await unusedLoopbackPort();
+  warmPort=await unusedLoopbackPort();
+  const coldConfig=config(chrome,coldProfile,coldPort!);
+  const warmConfig=config(chrome,warmProfile,warmPort!);
+  const coldPrepared=await prepareApprovedIsolatedProfile(coldConfig,true);
+  assert.equal(coldPrepared.ok,true,
+    coldPrepared.ok?'':coldPrepared.code);
+  const warmPrepared=await prepareApprovedIsolatedProfile(warmConfig,true);
+  assert.equal(warmPrepared.ok,true,
+    warmPrepared.ok?'':warmPrepared.code);
+
+  t.diagnostic('TASK005_PROFILE_PREINIT_WARMUP_BEGIN');
+  const warmupArgs=[
+    '--headless=new','--no-first-run','--no-default-browser-check',
+    '--disable-background-networking','--disable-background-mode',
+    '--user-data-dir='+warmProfile,'--dump-dom','about:blank'
+  ];
+  assert.ok(!warmupArgs.some(arg=>arg.startsWith('--remote-debugging-')),
+    'The one-time Profile initializer must not enable a CDP endpoint');
+  warmupChild=spawn(chrome,warmupArgs,{windowsHide:true,stdio:'ignore'});
+  warmupClosed=new Promise(resolve=>{
+    warmupChild!.once('error',error=>resolve({code:null,signal:null,error}));
+    warmupChild!.once('close',(code,signal)=>resolve({code,signal}));
+  });
+  const waitForWarmupClose=async(milliseconds:number)=>{
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    return await Promise.race([
+      warmupClosed!,
+      new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),milliseconds);})
+    ]).finally(()=>{if(timer)clearTimeout(timer);});
+  };
+  let warmupExit=await waitForWarmupClose(30_000);
+  if(warmupExit===null){
+    await retireDisposableChromeTree(warmProfile);
+    if(warmupChild.exitCode===null&&!warmupChild.killed)warmupChild.kill();
+    const terminated=await waitForWarmupClose(5000);
+    assert.ok(terminated,'Timed-out test-owned Chrome did not close after termination');
+    assert.ok(!terminated.error,'Test-owned Chrome close emitted an error');
+    const profileProcessTreeClosed=await waitForDisposableChromeExit(warmProfile,8000);
+    assert.ok(profileProcessTreeClosed,
+      'Timed-out test-owned Chrome process tree did not close');
+    assert.fail('No-CDP profile initialization exceeded its 30-second bound');
+  }
+  assert.ok(!warmupExit.error,'No-CDP profile initialization failed to spawn cleanly');
+  assert.equal(warmupExit.code,0,'No-CDP Profile initialization must exit cleanly');
+  t.diagnostic('TASK005_PROFILE_PREINIT_WARMUP_EXIT=0');
+  let warmupProcessTreeClosed=await waitForDisposableChromeExit(warmProfile,8000);
+  if(!warmupProcessTreeClosed){
+    await retireDisposableChromeTree(warmProfile);
+    warmupProcessTreeClosed=await waitForDisposableChromeExit(warmProfile,8000);
+  }
+  assert.ok(warmupProcessTreeClosed,
+    'No-CDP profile initializer left a test-owned Chrome process behind');
+  const warmPreflight=await preflightChrome(warmConfig);
+  assert.ok(warmPreflight.ok,
+    warmPreflight.ok?'':'Preinitialized Profile is still in use or unsafe');
+  assert.equal(await redactedChromeBootstrapMarkers(warmProfile),
+    'state=1 endpointMarker=0',
+    'The warm Profile must be initialized without a remote-debugging marker');
+
+  const allowedStages=new Set([
+    'CHROME_SPAWN_RETURNED','FETCH_FAILED','FETCH_REFUSED','FETCH_TIMEOUT',
+    'FETCH_RESET','HTTP_REJECTED','BODY_REJECTED','CDP_VERSION_REJECTED',
+    'CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP','CDP_PID_PROOF_STARTED',
+    'CDP_PID_PROOF_VERIFIED','CDP_PID_PROOF_REJECTED','CDP_WS_PROOF_STARTED',
+    'CDP_WS_PROOF_VERIFIED','CDP_WS_PROOF_REJECTED','CDP_POST_VERSION_DEADLINE'
+  ]);
+  const launchArm=async(label:'COLD'|'WARM',profile:string,port:number)=>{
+    const cfg=config(chrome!,profile,port);
+    const stages:string[]=[];
+    const stageWindows=createBoundedCdpStageWindows();
+    const bootstrapTimeline=createBoundedChromeBootstrapTimeline();
+    const listenerTimeline=createBoundedListenerPresenceTimeline();
+    const started=performance.now();
+    let sampling=false;
+    let latestListenerSampleMs=-Infinity;
+    const poll=async()=>{
+      if(sampling)return;
+      sampling=true;
+      try{
+        const elapsed=performance.now()-started;
+        bootstrapTimeline.observe(elapsed,
+          await redactedChromeBootstrapMarkers(profile));
+        if(elapsed-latestListenerSampleMs>=2500){
+          latestListenerSampleMs=elapsed;
+          listenerTimeline.observe(elapsed,
+            await readTestOnlyLocalListenerPresence(port));
+        }
+      }finally{sampling=false;}
+    };
+    await poll();
+    const interval=setInterval(()=>{void poll();},750);
+    let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>;
+    try{
+      result=await launchApprovedIsolatedChrome(cfg,{
+        userApproved:true,testHeadless:true,
+        onStartupStage:stage=>{
+          stages.push(stage);
+          stageWindows.observe(performance.now()-started,stage);
+        }
+      });
+    }finally{
+      clearInterval(interval);
+      bootstrapTimeline.observe(performance.now()-started,
+        await redactedChromeBootstrapMarkers(profile));
+      listenerTimeline.observe(performance.now()-started,
+        await readTestOnlyLocalListenerPresence(port));
+    }
+    const counts:Record<string,number>={};
+    for(const stage of stages){
+      if(allowedStages.has(stage))counts[stage]=(counts[stage]??0)+1;
+      else counts.OTHER=(counts.OTHER??0)+1;
+    }
+    const outcome=result.ok?'OWNED_CDP_BROWSER_VERIFIED':result.code;
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_RESULT='+outcome);
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_STARTUP_STAGE_COUNTS='+
+      JSON.stringify(counts));
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_STARTUP_STAGE_WINDOWS='+
+      stageWindows.summary());
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_BOOTSTRAP_MARKERS='+
+      await redactedChromeBootstrapMarkers(profile));
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_BOOTSTRAP_TIMELINE='+
+      bootstrapTimeline.summary());
+    t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_LISTENER_TIMELINE='+
+      listenerTimeline.summary());
+    let ownershipVerifiedBeforeClose=false;
+    let gracefulCloseAcknowledged=false;
+    if(result.ok){
+      liveSessions.push(result);
+      ownershipVerifiedBeforeClose=
+        result.status==='OWNED_CDP_BROWSER_VERIFIED'&&
+        result.websocketHandshakeVerified===true&&
+        isLiveApprovedChromeSession(result);
+      try{gracefulCloseAcknowledged=
+        await result.closeGracefully?.()===true;}catch{/* fixed failure below */}
+    }
+    let shutdownConfirmed=await waitForOwnedChromeShutdown(profile,port,8000);
+    if(!shutdownConfirmed){
+      await retireDisposableChromeTree(profile);
+      shutdownConfirmed=await waitForOwnedChromeShutdown(profile,port,8000);
+    }
+    if(!shutdownConfirmed){
+      canRunNextArm=false;
+      throw Error('Test-owned Chrome shutdown could not be confirmed');
+    }
+    const sessionIndex=result.ok?liveSessions.indexOf(result):-1;
+    if(sessionIndex>=0)liveSessions.splice(sessionIndex,1);
+    assert.ok(stages.every(stage=>allowedStages.has(stage)),
+      'Startup observations must remain fixed-label only');
+    assert.ok(stages.length<=100,'Startup stage records must remain bounded');
+    if(result.ok){
+      assert.ok(ownershipVerifiedBeforeClose,
+        'Each measured session must prove exact browser ownership before close');
+      assert.ok(gracefulCloseAcknowledged,
+        'Verified Browser.close must acknowledge before the next arm');
+    }
+    return result.ok?'VERIFIED':result.code;
+  };
+  const safelyLaunchArm=async(label:'COLD'|'WARM',profile:string,port:number)=>{
+    try{return await launchArm(label,profile,port);}
+    catch{
+      let shutdownConfirmed=await waitForOwnedChromeShutdown(profile,port,1000);
+      if(!shutdownConfirmed){
+        await retireDisposableChromeTree(profile);
+        shutdownConfirmed=await waitForOwnedChromeShutdown(profile,port,8000);
+      }
+      if(!shutdownConfirmed)canRunNextArm=false;
+      t.diagnostic('TASK005_PROFILE_PREINIT_'+label+'_HARNESS_ERROR=YES');
+      return 'HARNESS_ERROR';
+    }
+  };
+
+  t.diagnostic('TASK005_PROFILE_PREINIT_COLD_BEGIN');
+  const coldOutcome=await safelyLaunchArm('COLD',coldProfile,coldPort!);
+  let warmOutcome='SKIPPED_UNCONFIRMED_CLEANUP';
+  if(canRunNextArm){
+    t.diagnostic('TASK005_PROFILE_PREINIT_WARM_BEGIN');
+    warmOutcome=await safelyLaunchArm('WARM',warmProfile,warmPort!);
+  }else{
+    t.diagnostic('TASK005_PROFILE_PREINIT_WARM_SKIPPED=PROCESS_CLEANUP_UNCONFIRMED');
+  }
+  assert.equal(coldOutcome,'VERIFIED','Cold empty-profile owned Chrome must verify');
+  assert.equal(warmOutcome,'VERIFIED',
+    'Preinitialized-profile owned Chrome must verify after the cold arm completes');
 });
 
 
