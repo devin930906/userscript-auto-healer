@@ -480,3 +480,10 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - 手动 Windows run [#43834078871](https://github.com/devin930906/userscript-auto-healer/actions/runs/43834078871) 使用 `fix/task007-installation-probe-loop-closure-20261116` 精确源码 SHA `f2675b9e730a76c67aad760625f04c430828fc1e`，与失败候选 run [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 相同。诊断输入开启 `chrome_startup_diagnostic=true`、`chrome_cpu_pressure=true`；两个测试专属 CPU 子进程最多运行 8 秒，不触碰用户 Chrome/Profile，原有 20 秒 CDP deadline、失败关闭和所有权检查未更改。
 - 与失败及先前成功运行使用相同 `windows-2025-vs2026` runner image `20261103.298.1`。完整 owned-Chrome 测试文件 60 项为 59 pass / 0 fail / 1 skip，随后 3 个独立启动样本全部通过；CDP 分别于 t4、t1、t1、t1 解析，固定端口标记均为 `state=1 endpointMarker=0`，压力期间记录到的监听器时间线仅为 `t0:0`。同一 run 的常规 Windows 回归为 1126 tests / 1125 pass / 0 fail / 1 conditional skip，Electron shell smoke 成功。
 - 限时合成 CPU 压力未复现 `CDP_TIMEOUT`；它不证明或排除更广泛的 runner/resource 时序因素，也没有给出确定根因或修复。该 run 未执行 Candidate Packaging、没有生成 EXE/ZIP；#510 保持 Open，TEST-006/008/009 与 Stable GATE 不因该结果判为通过。
+
+## 2026-11-16 TASK-005 / Issue #510 cold 与预初始化 Profile 对照
+
+- PR [#897](https://github.com/devin930906/userscript-auto-healer/pull/897) 增加一个仅 `workflow_dispatch` 可选的诊断模式；CPU 压力、全套件负载和 Profile 对照互斥。它只改测试与工作流，不改产品启动实现。
+- main 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a` 的手动 Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) success。warmup 使用同一签名 Chrome、第二个 disposable Profile、`--dump-dom about:blank` 且无 CDP 参数；退出码 0。之后 cold / warm 两臂都通过原有 20 秒启动及签名、PID、HTTP、WebSocket 所有权校验，并完成进程/listener 清理。
+- 单次配对结果：cold `CDP_VERSION_PARSED=t1`，warm `CDP_VERSION_PARSED=t0`；listener 两臂均为 `t0:0,t1:1`，cold Local State 从 `t0:00` 到 `t0:10`，warm 预热后为 `t0:10`。没有复现历史 `CDP_TIMEOUT`。
+- **续接判定**：此结果不定位原失败根因，也不足以排除更广泛 runner、profile 或启动时序因素。保留 #510 Open，不重复完全相同的对照；只有出现新的可比较失败证据才继续同类根因诊断。Issue、TASK 与 GATE 验收状态不变；EXE/ZIP、Stable 和最终人工验收仍未完成。
