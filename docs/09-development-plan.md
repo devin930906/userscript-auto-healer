@@ -4,6 +4,8 @@
 
 > 当前需求验收补充（不重编号）：REQ-008 的 CDP 默认 9896、实际 Chrome++/闲置 Profile 与监听归属 → TASK-005 / #856 / TEST-006..009；真实 Tampermonkey 及获授权的扩展/脚本安装 → TASK-007/012 / #486 #603 / TEST-017/018/023；同一受控浏览器的真实业务断言、保守自动修复、备份与可恢复回滚 → TASK-009..013 / #487 #488 #489 #603 #857 / TEST-014/018..023；可选 AI 双接口接入 → TASK-014 / #604 / TEST-015/016；普通用户一次启动的批处理与逐项结果 → TASK-013/017 / #857 #607 / TEST-002/022。现有“已完成并整合”只描述历史子范围，不证明上述产品级增量验收已经完成。
 
+> 最新续接（2026-11-16）：TASK-014 的原生桌面 mock flow 与 review 授权取消竞态测试已随 PR [#895](https://github.com/devin930906/userscript-auto-healer/pull/895) 合并到 `main@d8d0bf7223d128f3839400689b2d1f935e52fe2e`。该增量复用实际 IPC 调用的 main-process 协调器，定向 AI/桌面边界测试 99/99 通过，PR 与合并后 Application Checks 成功。它未接入真实批处理、故障诊断或候选生成；TASK-009/TASK-013 依赖和 TEST-015/016 全范围仍未满足，Issue #604 保持 Open。
+
 > 历史状态快照（2026-10-26）：（4）有条件准入并完成交接，（7）已有 Electron+TypeScript 产品源码、受控 Chrome、AST、手动候选导出、只读持久批处理及 Windows 开发候选 EXE＋ZIP。当日 `main@c3c28451636400a4228688d7354c8f42ba0ccbca` 的应用回归 #40272189600 成功；隔离 Tampermonkey 矩阵 #40270144017 对应历史 SHA `35033f74` 成功。此历史快照不是当前主干状态；当前 Stable 缺口以本文件后续 TASK 记录、`docs/12-handoff.md` 与 `docs/14-stable-work-register.md` 为准。
 
 ## 开发阶段
