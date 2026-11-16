@@ -270,8 +270,11 @@ test('TASK-014/TEST-015/016/026: AI model discovery uses native picker and disti
   const renderer=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
   assert.match(main,/ipcMain\.handle\('ai:discover-native',async\(event,\.\.\.args:unknown\[\]\)=>/);
-  assert.match(main,/readNativeSelectedAiConfig\(choice\.filePaths\[0\]\)/);
-  assert.match(main,/discoverModelsFromNativeConfig\(config,async origin=>/);
+  assert.match(main,/function createNativeAiDesktopSelection\(/);
+  assert.match(main,/selectConfigFile:async\(\)=>/);
+  assert.match(main,/readConfigFile:readNativeSelectedAiConfig/);
+  assert.match(main,/rememberSelectedPath:path=>saveRememberedPath\('ai',path\)/);
+  assert.match(main,/discoverNativeAiModelsFromDesktop\(selection,async origin=>/);
   assert.match(main,/dialog\.showMessageBox\(win,/);
   assert.match(main,/nativeAiDiscoveryController\?\.abort\(\)/);
   assert.match(preload,/discoverNativeAiModels: \(\): Promise<unknown> => ipcRenderer\.invoke\('ai:discover-native'\)/);
@@ -288,8 +291,8 @@ test('TASK-014/TEST-015/016/026: native AI review only accepts a staged scenario
   const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
   assert.ok(main.includes("ipcMain.handle('ai:review-native',async(event,id:unknown,...args:unknown[])"));
   assert.ok(main.includes('nativeAiReviewEvidence.resolve(id)'));
-  assert.ok(main.includes('readNativeSelectedAiConfig(choice.filePaths[0])'));
-  assert.ok(main.includes('requestNativeReviewedAiSuggestion(config,evidence,async(origin,review,target)=>'));
+  assert.match(main,/createNativeAiDesktopSelection\(win,/);
+  assert.match(main,/requestNativeAiSuggestionFromDesktop\(\s*selection,evidence,authorize,controller\.signal\)/);
   assert.ok(main.includes('formatNativeAiReviewDisclosure(origin,review,target)'));
   assert.ok(main.includes("nativeAiReviewEvidence.record(selected.scenario.id,selected.scenario.scriptSha256,"));
   assert.ok(main.includes('nativeAiReviewEvidence.clear()'));
