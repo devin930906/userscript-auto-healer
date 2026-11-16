@@ -6,7 +6,7 @@
 
 - 在用户重启 Chrome Browser MCP 后，`list_pages` 可用；Tampermonkey 扩展 Service Worker 可执行 `chrome.runtime.getManifest()`，返回 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`、名称「篡改猴」、版本 `5.5.1`、Manifest V3。Tampermonkey 选项页也显示 v5.5.1。
 - `list_extensions` 返回 `No unpacked extensions found`；此接口的结果不用于推断已安装商店扩展缺失。Service Worker 运行信息证明该扩展在连接会话中运行，但不证明 Chrome Web Store 来源。
-- 用户指定的 Codex Chrome Data 路径按任务授权用于本次操作；Chrome Browser MCP 拒绝导航到 `chrome://version`，而本次接口没有暴露活动 Chrome 命令行或 User Data Directory。因此，MCP 会话与指定磁盘目录的进程级绑定及 Chrome 版本均未独立核实。扩展商店来源未验证。
+- 用户指定 Codex Chrome Data 路径为目标，但本次执行只能确认 Chrome Browser MCP 连接会话。Administrator 下的只读进程查询看到 102 个 `chrome.exe`，其中 0 个 `--user-data-dir` 参数精确匹配指定目录；MCP 工具也没有提供会话对应进程 ID。Chrome Browser MCP 拒绝导航到 `chrome://version`。因此不能认定此次脚本测试发生在指定 Data 目录，也未确认 Chrome 版本。扩展商店来源未验证。
 
 ## 临时脚本与页面断言
 
