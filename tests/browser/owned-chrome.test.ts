@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { access, lstat, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
@@ -12,6 +12,7 @@ import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
+import {PassThrough} from 'node:stream';
 import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
@@ -2526,6 +2527,147 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
       if(value===undefined)delete process.env[key];
       else process.env[key]=value;
     }
+  }
+});
+
+
+/** TASK-007: exercise the CI-only extension argv without querying OS process
+ * metadata. The launch and CDP pieces are mocked; only the disposable
+ * directory boundary runs on Windows.
+ */
+test('TASK-007: test extension option uses one bounded pipe request and leaves ordinary Chrome argv unchanged',async t=>{
+  if(process.platform!=='win32')return t.skip('Windows path boundary only');
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const saved={actions:process.env.GITHUB_ACTIONS,runnerTemp:process.env.RUNNER_TEMP,
+    event:process.env.GITHUB_EVENT_NAME,request:process.env.UAH_TEST_CHROME_BOOT_LOG};
+  const root=await realpath(await mkdtemp(join(tmpdir(),'uah-task007-argv-')));
+  const extension=join(root,'extension');
+  const profile=join(root,'profile');
+  await Promise.all([mkdir(extension),mkdir(profile)]);
+  const canonicalExtension=await realpath(extension);
+  const canonicalProfile=await realpath(profile);
+  const cfg=config('C:\\synthetic\\chrome.exe',canonicalProfile,12174);
+  let observedArgs:string[]=[];
+  let observedSpawnOptions:import('node:child_process').SpawnOptions|undefined;
+  let pipeRequest:unknown;
+  const pipeStreams:PassThrough[]=[];
+  const children:Array<ReturnType<typeof makeChild>>=[];
+  function makeChild(withPipe:boolean){
+    const child=Object.assign(new EventEmitter(),{
+      pid:41274,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+      stdio:[] as unknown[],
+      kill(){this.killed=true;return true;}
+    });
+    if(withPipe){
+      const incoming=new PassThrough(),outgoing=new PassThrough();
+      let pending='';
+      outgoing.on('data',(chunk:Buffer)=>{
+        pending+=chunk.toString('utf8');
+        let delimiter=pending.indexOf('\0');
+        while(delimiter!==-1){
+          const frame=pending.slice(0,delimiter);
+          pending=pending.slice(delimiter+1);
+          delimiter=pending.indexOf('\0');
+          if(!frame)continue;
+          pipeRequest=JSON.parse(frame);
+          const request=pipeRequest as {id:number};
+          incoming.write(JSON.stringify({id:request.id,
+            result:{id:'abcdefghijklmnopabcdefghijklmnop'}})+'\0');
+        }
+      });
+      child.stdio=[null,null,null,outgoing,incoming];
+      pipeStreams.push(incoming,outgoing);
+    }
+    return child;
+  }
+  const sessions:Array<Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>> = [];
+  try{
+    process.env.GITHUB_ACTIONS='true';
+    process.env.RUNNER_TEMP=root;
+    process.env.GITHUB_EVENT_NAME='pull_request';
+    process.env.UAH_TEST_CHROME_BOOT_LOG='true';
+    t.mock.method(launcher,'preflightChrome',async()=>(
+      {ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+        config:cfg,runtimeIdentityVerified:false as const}));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>(
+      {ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+        version:'155.0.1.1',publisher:'Google LLC' as const,runtimeVerified:false as const}));
+    t.mock.method(cp,'spawn',(_file:string,args?:ReadonlyArray<string>,
+      options?:import('node:child_process').SpawnOptions)=>{
+      observedArgs=Array.from(args??[]);
+      observedSpawnOptions=options;
+      const child=makeChild(observedArgs.includes('--remote-debugging-pipe'));
+      children.push(child);
+      return child as unknown as import('node:child_process').ChildProcess;
+    });
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async()=>({
+      ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+      pid:41274,executableVerified:false as const
+    }));
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>true);
+    t.mock.method(cdp,'requestVerifiedCdpBrowserClose',async()=>true);
+    t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify({
+      Browser:'Chrome/155.0.1.1',
+      webSocketDebuggerUrl:'ws://127.0.0.1:12174/devtools/browser/abcdefgh-1234'
+    })));
+
+    const withExtension=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,testHeadless:true,testExtensionDirectory:canonicalExtension
+    });
+    sessions.push(withExtension);
+    assert.equal(withExtension.ok,true,JSON.stringify(withExtension));
+    assert.deepEqual(observedArgs,[
+      '--headless=new','--remote-debugging-pipe','--enable-unsafe-extension-debugging',
+      '--no-first-run','--no-default-browser-check',
+      '--disable-background-networking','--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=12174','--user-data-dir='+canonicalProfile,
+      'about:blank'
+    ]);
+    assert.deepEqual(pipeRequest,{id:1,method:'Extensions.loadUnpacked',
+      params:{path:canonicalExtension}},
+      'only the validated extension path is sent over the private Chrome pipe');
+    assert.equal(observedSpawnOptions?.shell,false,
+      'the fixture argument must retain shell:false process creation');
+    assert.deepEqual(observedSpawnOptions?.stdio,
+      ['ignore','ignore','ignore','pipe','pipe'],
+      'the isolated fixture path alone opens the two owned Chrome pipe handles');
+    if(withExtension.ok)
+      assert.equal(await withExtension.closeGracefully?.(),true);
+
+    const ordinary=await launchApprovedIsolatedChrome(cfg,{userApproved:true});
+    sessions.push(ordinary);
+    assert.equal(ordinary.ok,true,JSON.stringify(ordinary));
+    assert.deepEqual(observedArgs,[
+      '--no-first-run','--no-default-browser-check','--disable-background-networking',
+      '--remote-debugging-address=127.0.0.1','--remote-debugging-port=12174',
+      '--user-data-dir='+canonicalProfile,'about:blank'
+    ],'ordinary app-owned launches must retain their existing argv');
+    assert.equal(observedSpawnOptions?.stdio,'ignore',
+      'ordinary Chrome must not open remote debugging pipes for extension control');
+    assert.ok(!observedArgs.includes('--remote-debugging-pipe')&&
+      !observedArgs.includes('--enable-unsafe-extension-debugging'),
+      'ordinary Chrome must not enable unsafe extension debugging');
+    assert.equal(children.length,2);
+  }finally{
+    for(const session of sessions){
+      if(session.ok&&isLiveApprovedChromeSession(session))
+        await session.closeGracefully?.().catch(()=>false);
+    }
+    for(const stream of pipeStreams)stream.destroy();
+    t.mock.reset();
+    for(const [key,value] of [
+      ['GITHUB_ACTIONS',saved.actions],['RUNNER_TEMP',saved.runnerTemp],
+      ['GITHUB_EVENT_NAME',saved.event],['UAH_TEST_CHROME_BOOT_LOG',saved.request]
+    ] as const){
+      if(value===undefined)delete process.env[key];
+      else process.env[key]=value;
+    }
+    await rm(root,{force:true,recursive:true});
   }
 });
 

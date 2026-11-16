@@ -3,10 +3,12 @@
  * injection, GM API support or script repair; those are separate product gates.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import {lstat,realpath} from 'node:fs/promises';
+import type {Readable,Writable} from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
-import {isAbsolute,join,relative,resolve,sep} from 'node:path';
+import {isAbsolute,join,relative,resolve,sep,win32} from 'node:path';
 import { preflightChrome, inspectWindowsChromeBinary } from './chrome-launcher';
 import { inspectCdpVersion, verifyWindowsLoopbackListenerPid, findWindowsLoopbackListenerPid, verifyCdpBrowserWebSocket, requestVerifiedCdpBrowserClose, type ListenerOwnerResult } from './cdp-session';
 import { readChromeProcessInfo, chromeProcessMatches } from './existing-chrome';
@@ -227,12 +229,80 @@ export interface ChromeLaunchOptions {
   readonly userApproved:boolean;
   /** Disposable GitHub Actions test profile only. */
   readonly testHeadless?:boolean;
+  /** One unpacked fixture directory for TASK-007 Windows Actions tests only. */
+  readonly testExtensionDirectory?:string;
   readonly signal?:AbortSignal;
   /** Called only if a verified, still-owned Chrome process exits unexpectedly. */
   readonly onUnexpectedExit?:()=>void;
   /** Trusted native diagnostics only; emits fixed stage labels, never URL,
    * profile, PID, response body or transport error text. Non-authoritative. */
   readonly onStartupStage?:(stage:ChromeStartupStage)=>void;
+}
+
+interface ValidatedRunnerTempDirectory {
+  readonly path:string;
+  readonly runnerTemp:string;
+}
+function isCanonicalWindowsPath(path:string):boolean{
+ try{
+  return path.length>0&&path.length<=32767&&
+   !path.includes('\0')&&!path.includes('/')&&
+   !path.includes(',')&&!path.includes(';')&&
+   /^[a-zA-Z]:\\$/.test(win32.parse(path).root)&&
+   win32.isAbsolute(path)&&win32.resolve(path)===path;
+ }catch{return false;}
+}
+function isStrictWindowsDescendant(parent:string,target:string):boolean{
+ try{
+  const child=win32.relative(parent,target);
+  return child!==''&&child!=='..'&&!child.startsWith('..'+win32.sep)&&
+   !win32.isAbsolute(child);
+ }catch{return false;}
+}
+function sameWindowsPath(left:string,right:string):boolean{
+ try{return win32.relative(left,right)===''&&win32.relative(right,left)==='';}
+ catch{return false;}
+}
+/** Reject every link/reparse component from the volume root to this directory. */
+async function hasNoWindowsReparseComponents(path:string):Promise<boolean>{
+ try{
+  const root=win32.parse(path).root;
+  if(!/^[a-zA-Z]:\\$/.test(root))return false;
+  const rootInfo=await lstat(root);
+  if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink())return false;
+  let current=root;
+  const parts=win32.relative(root,path).split(win32.sep);
+  if(parts.length===0||parts.some(part=>part===''||part==='.'||part==='..'))return false;
+  for(const part of parts){
+   current=win32.join(current,part);
+   const info=await lstat(current);
+   if(!info.isDirectory()||info.isSymbolicLink())return false;
+  }
+  return true;
+ }catch{return false;}
+}
+/** Resolve only real, strict descendants of the Actions temp directory. */
+async function validateRunnerTempDirectory(
+ path:string,runnerTemp:string|undefined,expectedRunnerTemp?:string
+):Promise<ValidatedRunnerTempDirectory|null>{
+ try{
+  if(process.platform!=='win32'||!runnerTemp||
+     !isCanonicalWindowsPath(runnerTemp)||!isCanonicalWindowsPath(path)||
+     !isStrictWindowsDescendant(runnerTemp,path))return null;
+  const [canonicalRoot,canonicalPath]=await Promise.all([
+   realpath(runnerTemp),realpath(path)
+  ]);
+  if(!isCanonicalWindowsPath(canonicalRoot)||!isCanonicalWindowsPath(canonicalPath)||
+     !isStrictWindowsDescendant(canonicalRoot,canonicalPath)||
+     !sameWindowsPath(path,canonicalPath)||
+     (expectedRunnerTemp!==undefined&&!sameWindowsPath(canonicalRoot,expectedRunnerTemp)))
+   return null;
+  if(!await hasNoWindowsReparseComponents(canonicalRoot)||
+     !await hasNoWindowsReparseComponents(canonicalPath))return null;
+  const info=await lstat(canonicalPath);
+  if(!info.isDirectory()||info.isSymbolicLink())return null;
+  return {path:canonicalPath,runnerTemp:canonicalRoot};
+ }catch{return null;}
 }
 /** Only references actually issued by this process can open CDP targets.
  * A serialized/forged success-shaped result is not an authorized session.
@@ -272,6 +342,84 @@ export function isLiveApprovedChromeSession(
 function stopOwnChild(child:ChildProcess):void {
   if(child.pid && child.exitCode===null && !child.killed)child.kill();
 }
+const MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES=65536;
+/** Load one validated CI fixture over Chrome's local debugging pipe.
+ * Current branded Chrome ignores --load-extension; Extensions.loadUnpacked is
+ * restricted to the explicit pipe transport plus the test-only unsafe-debug
+ * switch. The pipe is never opened for ordinary application launches.
+ */
+async function loadTestExtensionOverPipe(
+  child:ChildProcess,path:string,signal:AbortSignal|undefined,timeoutMs:number
+):Promise<boolean>{
+  const outgoing=child.stdio?.[3] as Writable|null|undefined;
+  const incoming=child.stdio?.[4] as Readable|null|undefined;
+  if(!outgoing||!incoming||signal?.aborted)return false;
+  return await new Promise<boolean>(resolve=>{
+    let settled=false;
+    let timer:NodeJS.Timeout|undefined;
+    let pending=Buffer.alloc(0),receivedBytes=0;
+    const cleanup=()=>{
+      if(timer)clearTimeout(timer);
+      incoming.removeListener('data',onData);
+      incoming.removeListener('error',onFailure);
+      incoming.removeListener('close',onFailure);
+      signal?.removeEventListener('abort',onFailure);
+    };
+    const finish=(ok:boolean)=>{
+      if(settled)return;
+      settled=true;
+      cleanup();
+      // Drain any later pipe notifications so the retained owned child cannot
+      // block on a full local debugging pipe. No later pipe command is issued.
+      const ignorePipeError=()=>{};
+      incoming.on('error',ignorePipeError);
+      outgoing.on('error',ignorePipeError);
+      incoming.resume();
+      resolve(ok);
+    };
+    const onFailure=()=>finish(false);
+    const onData=(chunk:Buffer|string)=>{
+      const bytes=Buffer.isBuffer(chunk)?chunk:
+        typeof chunk==='string'?Buffer.from(chunk,'utf8'):null;
+      if(!bytes)return finish(false);
+      receivedBytes+=bytes.byteLength;
+      if(receivedBytes>MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES)return finish(false);
+      pending=Buffer.concat([pending,bytes]);
+      if(pending.byteLength>MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES)return finish(false);
+      let delimiter=pending.indexOf(0);
+      while(delimiter!==-1){
+        const frame=pending.subarray(0,delimiter).toString('utf8');
+        pending=pending.subarray(delimiter+1);
+        delimiter=pending.indexOf(0);
+        if(!frame)continue;
+        let response:unknown;
+        try{response=JSON.parse(frame) as unknown;}catch{return finish(false);}
+        if(!response||typeof response!=='object'||Array.isArray(response)||
+           nodeTypes.isProxy(response))return finish(false);
+        const record=response as Record<string,unknown>;
+        if(record.id!==1)continue;
+        if(Object.prototype.hasOwnProperty.call(record,'error'))return finish(false);
+        const result=record.result;
+        if(!result||typeof result!=='object'||Array.isArray(result)||
+           nodeTypes.isProxy(result))return finish(false);
+        const extensionId=(result as Record<string,unknown>).id;
+        return finish(typeof extensionId==='string'&&/^[a-p]{32}$/.test(extensionId));
+      }
+    };
+    incoming.on('data',onData);
+    incoming.once('error',onFailure);
+    incoming.once('close',onFailure);
+    signal?.addEventListener('abort',onFailure,{once:true});
+    timer=setTimeout(onFailure,Math.max(1,Math.min(timeoutMs,5000)));
+    if(signal?.aborted){onFailure();return;}
+    try{
+      outgoing.write(JSON.stringify({id:1,method:'Extensions.loadUnpacked',
+        params:{path}})+'\0','utf8',(error?:Error|null)=>{
+        if(error)onFailure();
+      });
+    }catch{onFailure();}
+  });
+}
 /** TASK-005 / TEST-006/007/009/026: snapshot native consent without running
  * caller-defined getters, inherited authorization or Proxy reflection traps.
  * No browser preflight, executable inspection or filesystem side effect may
@@ -283,7 +431,7 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
   const prototype=Object.getPrototypeOf(raw);
   if(prototype!==Object.prototype&&prototype!==null)return null;
   const desc=Object.getOwnPropertyDescriptors(raw);
-  const allowed=new Set(['userApproved','signal','testHeadless',
+  const allowed=new Set(['userApproved','signal','testHeadless','testExtensionDirectory',
     'onStartupStage','onUnexpectedExit']);
   for(const key of Reflect.ownKeys(desc)){
    if(typeof key!=='string'||!allowed.has(key)||
@@ -303,6 +451,11 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
   }
   const headless:unknown=desc.testHeadless?.value;
   if(headless!==undefined&&typeof headless!=='boolean')return null;
+  const testExtensionDirectory:unknown=desc.testExtensionDirectory?.value;
+  if(testExtensionDirectory!==undefined&&
+     (typeof testExtensionDirectory!=='string'||headless!==true||
+      process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'||
+      !isCanonicalWindowsPath(testExtensionDirectory)))return null;
   const startup:unknown=desc.onStartupStage?.value;
   const unexpected:unknown=desc.onUnexpectedExit?.value;
   if((startup!==undefined&&
@@ -312,6 +465,7 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
     return null;
   return {userApproved:true,signal:signal as AbortSignal|undefined,
     testHeadless:headless as boolean|undefined,
+    testExtensionDirectory:testExtensionDirectory as string|undefined,
     onStartupStage:startup as ChromeLaunchOptions['onStartupStage'],
     onUnexpectedExit:unexpected as ChromeLaunchOptions['onUnexpectedExit']};
  }catch{return null;}
@@ -369,11 +523,37 @@ export async function launchApprovedIsolatedChrome(
   const checked=checkedChromeLaunchOptions(options);
   if(!checked)return {ok:false,code:'NOT_AUTHORIZED'};
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+  let testExtensionDirectory:ValidatedRunnerTempDirectory|undefined;
+  if(checked.testExtensionDirectory!==undefined){
+    const extensionCheck=await awaitPrelaunchCheckOrRevocation(
+      validateRunnerTempDirectory(
+        checked.testExtensionDirectory,process.env.RUNNER_TEMP),checked.signal);
+    if(extensionCheck.aborted)return {ok:false,code:'ABORTED'};
+    if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+    if(!extensionCheck.value)return {ok:false,code:'NOT_AUTHORIZED'};
+    testExtensionDirectory=extensionCheck.value;
+  }
   const firstCheck=await awaitPrelaunchCheckOrRevocation(preflightChrome(input),checked.signal);
   if(firstCheck.aborted)return {ok:false,code:'ABORTED'};
   const preflight=firstCheck.value;
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!preflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
+  let testProfileDirectory:ValidatedRunnerTempDirectory|undefined;
+  if(testExtensionDirectory){
+    const profileCheck=await awaitPrelaunchCheckOrRevocation(
+      validateRunnerTempDirectory(
+        preflight.config.userDataDir,process.env.RUNNER_TEMP,
+        testExtensionDirectory.runnerTemp),checked.signal);
+    if(profileCheck.aborted)return {ok:false,code:'ABORTED'};
+    if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+    if(!profileCheck.value||
+       !sameWindowsPath(profileCheck.value.runnerTemp,testExtensionDirectory.runnerTemp)||
+       sameWindowsPath(profileCheck.value.path,testExtensionDirectory.path)||
+       isStrictWindowsDescendant(profileCheck.value.path,testExtensionDirectory.path)||
+       isStrictWindowsDescendant(testExtensionDirectory.path,profileCheck.value.path))
+      return {ok:false,code:'NOT_AUTHORIZED'};
+    testProfileDirectory=profileCheck.value;
+  }
   const binaryCheck=await awaitPrelaunchCheckOrRevocation(
     inspectWindowsChromeBinary(preflight.config),checked.signal);
   if(binaryCheck.aborted)return {ok:false,code:'ABORTED'};
@@ -394,6 +574,26 @@ export async function launchApprovedIsolatedChrome(
   if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
   if(!finalPreflight.ok)return {ok:false,code:'PREFLIGHT_FAILED'};
   const cfg=finalPreflight.config;
+  let canonicalTestExtensionDirectory:string|undefined;
+  if(testExtensionDirectory&&testProfileDirectory){
+    const extensionRecheck=await awaitPrelaunchCheckOrRevocation(
+      validateRunnerTempDirectory(
+        checked.testExtensionDirectory!,process.env.RUNNER_TEMP,
+        testExtensionDirectory.runnerTemp),checked.signal);
+    if(extensionRecheck.aborted)return {ok:false,code:'ABORTED'};
+    if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+    const profileRecheck=await awaitPrelaunchCheckOrRevocation(
+      validateRunnerTempDirectory(
+        cfg.userDataDir,process.env.RUNNER_TEMP,
+        testProfileDirectory.runnerTemp),checked.signal);
+    if(profileRecheck.aborted)return {ok:false,code:'ABORTED'};
+    if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+    if(!extensionRecheck.value||!profileRecheck.value||
+       !sameWindowsPath(extensionRecheck.value.path,testExtensionDirectory.path)||
+       !sameWindowsPath(profileRecheck.value.path,testProfileDirectory.path))
+      return {ok:false,code:'NOT_AUTHORIZED'};
+    canonicalTestExtensionDirectory=extensionRecheck.value.path;
+  }
   // Opt-in diagnostic is restricted to a manual Windows Actions run and a
   // Profile strictly INSIDE the runner's temporary directory. Never use it
   // for normal product sessions, PR/push CI or a user/default Chrome Profile.
@@ -412,14 +612,19 @@ export async function launchApprovedIsolatedChrome(
     '--no-first-run','--no-default-browser-check','--disable-background-networking',
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port='+cfg.remoteDebuggingPort,
-    '--user-data-dir='+cfg.userDataDir,'about:blank'
+    '--user-data-dir='+cfg.userDataDir,
+    'about:blank'
   ];
+  if(canonicalTestExtensionDirectory!==undefined)
+    argv.unshift('--remote-debugging-pipe','--enable-unsafe-extension-debugging');
   if(checked.testHeadless===true)argv.unshift('--headless=new');
   if(diagnostic)argv.unshift('--enable-logging','--v=0');
   let child:ChildProcess;
   try{
     child=spawn(cfg.executablePath,argv,{
-      shell:false,windowsHide:true,stdio:'ignore',
+      shell:false,windowsHide:true,
+      stdio:canonicalTestExtensionDirectory===undefined?'ignore':
+        ['ignore','ignore','ignore','pipe','pipe'],
       ...(diagnostic?{env:{...process.env,
         CHROME_LOG_FILE:join(cfg.userDataDir,'chrome_debug.log')}}:{})
     });
@@ -543,6 +748,31 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               }
               emitStage('CDP_WS_PROOF_VERIFIED');
+              if(canonicalTestExtensionDirectory!==undefined){
+                if(!testExtensionDirectory)
+                  return {ok:false,code:'NOT_AUTHORIZED'};
+                const extensionUseCheck=await awaitPrelaunchCheckOrRevocation(
+                  validateRunnerTempDirectory(canonicalTestExtensionDirectory,
+                    process.env.RUNNER_TEMP,testExtensionDirectory.runnerTemp),
+                  checked.signal);
+                if(extensionUseCheck.aborted)return {ok:false,code:'ABORTED'};
+                if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+                if(!extensionUseCheck.value||
+                   !sameWindowsPath(extensionUseCheck.value.path,
+                     canonicalTestExtensionDirectory))
+                  return {ok:false,code:'NOT_AUTHORIZED'};
+                const remainingMs=Math.max(1,Math.ceil(
+                  20000-(performance.now()-began)));
+                const loaded=await loadTestExtensionOverPipe(child,
+                  extensionUseCheck.value.path,checked.signal,remainingMs);
+                if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+                if(errored||exited||child.killed)return {ok:false,code:'LAUNCH_FAILED'};
+                if(performance.now()-began>=20000){
+                  emitStage('CDP_POST_VERSION_DEADLINE');
+                  return {ok:false,code:'CDP_TIMEOUT'};
+                }
+                if(!loaded)return {ok:false,code:'LAUNCH_FAILED'};
+              }
               let pollTimer:ReturnType<typeof setInterval>|undefined;
               const handle:OwnedSessionHandle={
                 child,effectivePid,isTrampoline,stopped:false

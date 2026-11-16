@@ -7,6 +7,8 @@ on:
       - 'poc/safe-tampermonkey-page-label.cjs'
       - 'tests/manager/tampermonkey-cloud-matrix.test.ts'
       - 'tests/manager/tampermonkey-cloud-log-safety.test.ts'
+      - 'tests/manager/tampermonkey-adapter.test.ts'
+      - 'tests/browser/owned-chrome.test.ts'
       - 'src/analyze/selector-analyzer.ts'
       - 'src/repair/patch-planner.ts'
       - 'src/repair/imported-manual-export.ts'
@@ -14,6 +16,8 @@ on:
       - 'poc/crx3-package-integrity.cjs'
       - 'poc/crx3-package-integrity.test.cjs'
       - 'src/manager/tampermonkey-gm-probe.ts'
+      - 'src/manager/tampermonkey-installation.ts'
+      - 'src/browser/owned-chrome.ts'
       - '.github/workflows/task007-tampermonkey-cloud.yml'
   workflow_dispatch:
     inputs:
@@ -196,6 +200,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Locked application dependency installation failed' }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Native product AST planner build failed' }
+      - name: Exercise app-owned installed Tampermonkey metadata hint
+        if: matrix.variant == 'product-candidate' && matrix.run_at == 'document-idle'
+        shell: pwsh
+        run: |
+          node --test ./dist/tests/manager/tampermonkey-adapter.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'App-owned installed metadata hint regression failed' }
       - name: Execute real extension manager + GM API + synthetic business assertions
         shell: pwsh
         env:
