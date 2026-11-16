@@ -12,6 +12,7 @@ import {observeApprovedDom} from '../../src/observe/dom-observer';
 import { prepareApprovedIsolatedProfile } from '../../src/browser/chrome-launcher';
 import { createServer } from 'node:http';
 import { execFile, spawn } from 'node:child_process';
+import {PassThrough} from 'node:stream';
 import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
@@ -2534,7 +2535,7 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
  * metadata. The launch and CDP pieces are mocked; only the disposable
  * directory boundary runs on Windows.
  */
-test('TASK-007: test extension option adds exactly one argument and leaves ordinary Chrome argv unchanged',async t=>{
+test('TASK-007: test extension option uses one bounded pipe request and leaves ordinary Chrome argv unchanged',async t=>{
   if(process.platform!=='win32')return t.skip('Windows path boundary only');
   const {EventEmitter}=require('node:events') as typeof import('node:events');
   const cp=require('node:child_process') as typeof import('node:child_process');
@@ -2553,12 +2554,36 @@ test('TASK-007: test extension option adds exactly one argument and leaves ordin
   const cfg=config('C:\\synthetic\\chrome.exe',canonicalProfile,12174);
   let observedArgs:string[]=[];
   let observedSpawnOptions:import('node:child_process').SpawnOptions|undefined;
+  let pipeRequest:unknown;
+  const pipeStreams:PassThrough[]=[];
   const children:Array<ReturnType<typeof makeChild>>=[];
-  function makeChild(){
-    return Object.assign(new EventEmitter(),{
+  function makeChild(withPipe:boolean){
+    const child=Object.assign(new EventEmitter(),{
       pid:41274,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+      stdio:[] as unknown[],
       kill(){this.killed=true;return true;}
     });
+    if(withPipe){
+      const incoming=new PassThrough(),outgoing=new PassThrough();
+      let pending='';
+      outgoing.on('data',(chunk:Buffer)=>{
+        pending+=chunk.toString('utf8');
+        let delimiter=pending.indexOf('\0');
+        while(delimiter!==-1){
+          const frame=pending.slice(0,delimiter);
+          pending=pending.slice(delimiter+1);
+          delimiter=pending.indexOf('\0');
+          if(!frame)continue;
+          pipeRequest=JSON.parse(frame);
+          const request=pipeRequest as {id:number};
+          incoming.write(JSON.stringify({id:request.id,
+            result:{id:'abcdefghijklmnopabcdefghijklmnop'}})+'\0');
+        }
+      });
+      child.stdio=[null,null,null,outgoing,incoming];
+      pipeStreams.push(incoming,outgoing);
+    }
+    return child;
   }
   const sessions:Array<Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>> = [];
   try{
@@ -2576,7 +2601,7 @@ test('TASK-007: test extension option adds exactly one argument and leaves ordin
       options?:import('node:child_process').SpawnOptions)=>{
       observedArgs=Array.from(args??[]);
       observedSpawnOptions=options;
-      const child=makeChild();
+      const child=makeChild(observedArgs.includes('--remote-debugging-pipe'));
       children.push(child);
       return child as unknown as import('node:child_process').ChildProcess;
     });
@@ -2597,13 +2622,20 @@ test('TASK-007: test extension option adds exactly one argument and leaves ordin
     sessions.push(withExtension);
     assert.equal(withExtension.ok,true,JSON.stringify(withExtension));
     assert.deepEqual(observedArgs,[
-      '--headless=new','--no-first-run','--no-default-browser-check',
+      '--headless=new','--remote-debugging-pipe','--enable-unsafe-extension-debugging',
+      '--no-first-run','--no-default-browser-check',
       '--disable-background-networking','--remote-debugging-address=127.0.0.1',
       '--remote-debugging-port=12174','--user-data-dir='+canonicalProfile,
-      '--load-extension='+canonicalExtension,'about:blank'
+      'about:blank'
     ]);
+    assert.deepEqual(pipeRequest,{id:1,method:'Extensions.loadUnpacked',
+      params:{path:canonicalExtension}},
+      'only the validated extension path is sent over the private Chrome pipe');
     assert.equal(observedSpawnOptions?.shell,false,
       'the fixture argument must retain shell:false process creation');
+    assert.deepEqual(observedSpawnOptions?.stdio,
+      ['ignore','ignore','ignore','pipe','pipe'],
+      'the isolated fixture path alone opens the two owned Chrome pipe handles');
     if(withExtension.ok)
       assert.equal(await withExtension.closeGracefully?.(),true);
 
@@ -2615,14 +2647,18 @@ test('TASK-007: test extension option adds exactly one argument and leaves ordin
       '--remote-debugging-address=127.0.0.1','--remote-debugging-port=12174',
       '--user-data-dir='+canonicalProfile,'about:blank'
     ],'ordinary app-owned launches must retain their existing argv');
-    assert.ok(!observedArgs.some(arg=>arg.startsWith('--load-extension=')),
-      'ordinary Chrome must never receive a fixture extension path');
+    assert.equal(observedSpawnOptions?.stdio,'ignore',
+      'ordinary Chrome must not open remote debugging pipes for extension control');
+    assert.ok(!observedArgs.includes('--remote-debugging-pipe')&&
+      !observedArgs.includes('--enable-unsafe-extension-debugging'),
+      'ordinary Chrome must not enable unsafe extension debugging');
     assert.equal(children.length,2);
   }finally{
     for(const session of sessions){
       if(session.ok&&isLiveApprovedChromeSession(session))
         await session.closeGracefully?.().catch(()=>false);
     }
+    for(const stream of pipeStreams)stream.destroy();
     t.mock.reset();
     for(const [key,value] of [
       ['GITHUB_ACTIONS',saved.actions],['RUNNER_TEMP',saved.runnerTemp],
