@@ -4,6 +4,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import {lstat,realpath} from 'node:fs/promises';
+import type {Readable,Writable} from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
 import {types as nodeTypes} from 'node:util';
@@ -341,6 +342,84 @@ export function isLiveApprovedChromeSession(
 function stopOwnChild(child:ChildProcess):void {
   if(child.pid && child.exitCode===null && !child.killed)child.kill();
 }
+const MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES=65536;
+/** Load one validated CI fixture over Chrome's local debugging pipe.
+ * Current branded Chrome ignores --load-extension; Extensions.loadUnpacked is
+ * restricted to the explicit pipe transport plus the test-only unsafe-debug
+ * switch. The pipe is never opened for ordinary application launches.
+ */
+async function loadTestExtensionOverPipe(
+  child:ChildProcess,path:string,signal:AbortSignal|undefined,timeoutMs:number
+):Promise<boolean>{
+  const outgoing=child.stdio?.[3] as Writable|null|undefined;
+  const incoming=child.stdio?.[4] as Readable|null|undefined;
+  if(!outgoing||!incoming||signal?.aborted)return false;
+  return await new Promise<boolean>(resolve=>{
+    let settled=false;
+    let timer:NodeJS.Timeout|undefined;
+    let pending=Buffer.alloc(0),receivedBytes=0;
+    const cleanup=()=>{
+      if(timer)clearTimeout(timer);
+      incoming.removeListener('data',onData);
+      incoming.removeListener('error',onFailure);
+      incoming.removeListener('close',onFailure);
+      signal?.removeEventListener('abort',onFailure);
+    };
+    const finish=(ok:boolean)=>{
+      if(settled)return;
+      settled=true;
+      cleanup();
+      // Drain any later pipe notifications so the retained owned child cannot
+      // block on a full local debugging pipe. No later pipe command is issued.
+      const ignorePipeError=()=>{};
+      incoming.on('error',ignorePipeError);
+      outgoing.on('error',ignorePipeError);
+      incoming.resume();
+      resolve(ok);
+    };
+    const onFailure=()=>finish(false);
+    const onData=(chunk:Buffer|string)=>{
+      const bytes=Buffer.isBuffer(chunk)?chunk:
+        typeof chunk==='string'?Buffer.from(chunk,'utf8'):null;
+      if(!bytes)return finish(false);
+      receivedBytes+=bytes.byteLength;
+      if(receivedBytes>MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES)return finish(false);
+      pending=Buffer.concat([pending,bytes]);
+      if(pending.byteLength>MAX_TEST_EXTENSION_PIPE_RESPONSE_BYTES)return finish(false);
+      let delimiter=pending.indexOf(0);
+      while(delimiter!==-1){
+        const frame=pending.subarray(0,delimiter).toString('utf8');
+        pending=pending.subarray(delimiter+1);
+        delimiter=pending.indexOf(0);
+        if(!frame)continue;
+        let response:unknown;
+        try{response=JSON.parse(frame) as unknown;}catch{return finish(false);}
+        if(!response||typeof response!=='object'||Array.isArray(response)||
+           nodeTypes.isProxy(response))return finish(false);
+        const record=response as Record<string,unknown>;
+        if(record.id!==1)continue;
+        if(Object.prototype.hasOwnProperty.call(record,'error'))return finish(false);
+        const result=record.result;
+        if(!result||typeof result!=='object'||Array.isArray(result)||
+           nodeTypes.isProxy(result))return finish(false);
+        const extensionId=(result as Record<string,unknown>).id;
+        return finish(typeof extensionId==='string'&&/^[a-p]{32}$/.test(extensionId));
+      }
+    };
+    incoming.on('data',onData);
+    incoming.once('error',onFailure);
+    incoming.once('close',onFailure);
+    signal?.addEventListener('abort',onFailure,{once:true});
+    timer=setTimeout(onFailure,Math.max(1,Math.min(timeoutMs,5000)));
+    if(signal?.aborted){onFailure();return;}
+    try{
+      outgoing.write(JSON.stringify({id:1,method:'Extensions.loadUnpacked',
+        params:{path}})+'\0','utf8',(error?:Error|null)=>{
+        if(error)onFailure();
+      });
+    }catch{onFailure();}
+  });
+}
 /** TASK-005 / TEST-006/007/009/026: snapshot native consent without running
  * caller-defined getters, inherited authorization or Proxy reflection traps.
  * No browser preflight, executable inspection or filesystem side effect may
@@ -534,16 +613,18 @@ export async function launchApprovedIsolatedChrome(
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port='+cfg.remoteDebuggingPort,
     '--user-data-dir='+cfg.userDataDir,
-    ...(canonicalTestExtensionDirectory===undefined?[]:
-      ['--load-extension='+canonicalTestExtensionDirectory]),
     'about:blank'
   ];
+  if(canonicalTestExtensionDirectory!==undefined)
+    argv.unshift('--remote-debugging-pipe','--enable-unsafe-extension-debugging');
   if(checked.testHeadless===true)argv.unshift('--headless=new');
   if(diagnostic)argv.unshift('--enable-logging','--v=0');
   let child:ChildProcess;
   try{
     child=spawn(cfg.executablePath,argv,{
-      shell:false,windowsHide:true,stdio:'ignore',
+      shell:false,windowsHide:true,
+      stdio:canonicalTestExtensionDirectory===undefined?'ignore':
+        ['ignore','ignore','ignore','pipe','pipe'],
       ...(diagnostic?{env:{...process.env,
         CHROME_LOG_FILE:join(cfg.userDataDir,'chrome_debug.log')}}:{})
     });
@@ -667,6 +748,19 @@ export async function launchApprovedIsolatedChrome(
                 return {ok:false,code:'WEBSOCKET_VERIFICATION_FAILED'};
               }
               emitStage('CDP_WS_PROOF_VERIFIED');
+              if(canonicalTestExtensionDirectory!==undefined){
+                const remainingMs=Math.max(1,Math.ceil(
+                  20000-(performance.now()-began)));
+                const loaded=await loadTestExtensionOverPipe(child,
+                  canonicalTestExtensionDirectory,checked.signal,remainingMs);
+                if(checked.signal?.aborted)return {ok:false,code:'ABORTED'};
+                if(errored||exited||child.killed)return {ok:false,code:'LAUNCH_FAILED'};
+                if(performance.now()-began>=20000){
+                  emitStage('CDP_POST_VERSION_DEADLINE');
+                  return {ok:false,code:'CDP_TIMEOUT'};
+                }
+                if(!loaded)return {ok:false,code:'LAUNCH_FAILED'};
+              }
               let pollTimer:ReturnType<typeof setInterval>|undefined;
               const handle:OwnedSessionHandle={
                 child,effectivePid,isTrampoline,stopped:false
