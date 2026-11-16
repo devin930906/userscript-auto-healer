@@ -289,7 +289,8 @@ test('TASK-014/TEST-015/016/026: native AI review only accepts a staged scenario
   assert.ok(main.includes("ipcMain.handle('ai:review-native',async(event,id:unknown,...args:unknown[])"));
   assert.ok(main.includes('nativeAiReviewEvidence.resolve(id)'));
   assert.ok(main.includes('readNativeSelectedAiConfig(choice.filePaths[0])'));
-  assert.ok(main.includes('requestNativeReviewedAiSuggestion(config,evidence,async(origin,review)=>'));
+  assert.ok(main.includes('requestNativeReviewedAiSuggestion(config,evidence,async(origin,review,target)=>'));
+  assert.ok(main.includes('formatNativeAiReviewDisclosure(origin,review,target)'));
   assert.ok(main.includes("nativeAiReviewEvidence.record(selected.scenario.id,selected.scenario.scriptSha256,"));
   assert.ok(main.includes('nativeAiReviewEvidence.clear()'));
   assert.ok(preload.includes("requestNativeAiReview: (id: string): Promise<unknown> => ipcRenderer.invoke('ai:review-native',id)"));

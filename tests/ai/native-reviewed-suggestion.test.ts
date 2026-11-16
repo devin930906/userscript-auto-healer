@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {NativeAiEvidenceStore,requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
+import {formatNativeAiReviewDisclosure,NativeAiEvidenceStore,
+  requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
 
 const A='a'.repeat(64);
 const config=()=>JSON.stringify({baseUrl:'https://models.example.com/v1',
@@ -76,6 +77,79 @@ test('TASK-014/TEST-015/016: approved suggestion sends hashes only; response nev
   assert.equal(calls[0].body.includes('#secret-selector'),false);
   assert.equal(calls[0].body.includes(A),false);
   assert.equal(calls[0].body.includes('private_scope_934'),false);
+});
+
+test('TASK-014/TEST-015/016: native consent target exactly matches the selected protocol request URL',async()=>{
+  const cases=[
+    {protocol:'chat-completions',path:'/chat/completions',reply:response()},
+    {protocol:'responses',path:'/responses',reply:Response.json({status:'completed',output:[{
+      type:'message',role:'assistant',status:'completed',content:[{
+        type:'output_text',text:'Untrusted review idea only.'
+      }]
+    }]})}
+  ];
+  for(const fixture of cases){
+    const store=new NativeAiEvidenceStore();
+    assert.equal(store.record('native_scope',A,'#private-selector','UNKNOWN'),true);
+    const evidence=store.resolve('native_scope');
+    const input=JSON.parse(config()) as Record<string,unknown>;
+    input.baseUrl='https://models.example.com/custom/v1';
+    input.protocol=fixture.protocol;
+    let consentTarget:unknown;
+    let requestUrl:string|undefined;
+    const authorize=async(...args:unknown[]):Promise<boolean>=>{
+      consentTarget=args[2];
+      return true;
+    };
+    const transport:typeof fetch=async(url)=>{
+      requestUrl=String(url);
+      return fixture.reply;
+    };
+
+    const result=await requestNativeReviewedAiSuggestion(
+      JSON.stringify(input),evidence,authorize,undefined,transport);
+    const expectedUrl='https://models.example.com/custom/v1'+fixture.path;
+    assert.equal(result.ok,true,fixture.protocol);
+    assert.deepEqual(consentTarget,{method:'POST',url:expectedUrl},
+      fixture.protocol+' must disclose the exact method and URL before sending');
+    assert.equal(requestUrl,expectedUrl,
+      fixture.protocol+' must send to the endpoint disclosed for approval');
+  }
+});
+
+test('TASK-014/TEST-015/016: native disclosure displays the exact URL and only the three reviewed fields',()=>{
+  const selectorHash='b'.repeat(64);
+  const detail=formatNativeAiReviewDisclosure('https://models.example.com',
+    {diagnosticCode:'UNKNOWN',scenarioHash:A,selectorHash},
+    {method:'POST',url:'https://models.example.com/custom/v1/responses'});
+  assert.ok(detail.includes('服务来源：https://models.example.com'));
+  assert.ok(detail.includes('实际请求目标：POST https://models.example.com/custom/v1/responses'));
+  assert.ok(detail.includes('diagnosticCode=UNKNOWN'));
+  assert.ok(detail.includes('scenarioHash='+A));
+  assert.ok(detail.includes('selectorHash='+selectorHash));
+  assert.ok(detail.includes('Bearer API Key'));
+  assert.equal(detail.includes('native-private-review-key'),false);
+});
+
+test('TASK-014/TEST-015/016/026: empty query and fragment delimiters fail before consent or provider traffic',async()=>{
+  const store=new NativeAiEvidenceStore();
+  assert.equal(store.record('native_scope',A,'#private-selector','UNKNOWN'),true);
+  const evidence=store.resolve('native_scope');
+  let approvals=0,requests=0;
+  const authorize=async()=>{approvals++;return true;};
+  const transport:typeof fetch=async()=>{requests++;return response();};
+  for(const baseUrl of [
+    'https://models.example.com/custom/v1?',
+    'https://models.example.com/custom/v1#'
+  ]){
+    const input=JSON.parse(config()) as Record<string,unknown>;
+    input.baseUrl=baseUrl;
+    const result=await requestNativeReviewedAiSuggestion(
+      JSON.stringify(input),evidence,authorize,undefined,transport);
+    assert.deepEqual(result,{ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false},baseUrl);
+  }
+  assert.equal(approvals,0,'malformed endpoint syntax must not reach native consent');
+  assert.equal(requests,0,'malformed endpoint syntax must not contact the provider');
 });
 
 test('TASK-014/TEST-015/016: malformed, missing, or no-manual-model scope never reaches provider',async()=>{

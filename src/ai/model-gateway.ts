@@ -21,6 +21,8 @@ export type AiSuggestion = Readonly<{ok:true;status:'UNTRUSTED_AI_TEXT_ONLY';
   candidateText:string;model:string;tampermonkeyVerified:false;
   businessVerified:false;automaticPatchAllowed:false;automaticRollbackAllowed:false}>;
 export type GatewayStatus = Readonly<{enabled:boolean;remainingRequests:number;manualModelAvailable:boolean}>;
+/** Exact, credential-free request destination for the native consent dialog. */
+export type SuggestionRequestTarget = Readonly<{method:'POST';url:string}>;
 type Options = Readonly<{baseUrl:string;apiKey:string;manualModel:string|null;
   maxRequests:number;timeoutMs:number;maxOutputTokens:number;
   protocol:'chat-completions'|'responses'}>;
@@ -56,6 +58,7 @@ function validateConfig(input:unknown):{options:Options;url:URL}{
   if(!c||typeof c.baseUrl!=='string'||c.baseUrl.length>512||
      c.baseUrl.trim()!==c.baseUrl||/[\x00-\x1f\x7f]/.test(c.baseUrl)||
      c.baseUrl.includes('%')||
+     c.baseUrl.includes('?')||c.baseUrl.includes('#')||
      /(?:^|\/)\.{1,2}(?:\/|$)/.test(c.baseUrl))
     throw Error('INVALID_AI_CONFIGURATION');
   let url:URL;
@@ -186,6 +189,17 @@ export class OptionalAiGateway {
       remainingRequests:this.options.maxRequests-this.requests,
       manualModelAvailable:this.options.manualModel!==null});
   }
+  private pathUrl(path:'/models'|'/chat/completions'|'/responses'):string{
+    return this.root+path;
+  }
+  private suggestionPath():'/chat/completions'|'/responses'{
+    return this.options.protocol==='responses'?'/responses':'/chat/completions';
+  }
+  /** Disclose the same URL that suggest() will send to; never includes credentials. */
+  suggestionRequestTarget():SuggestionRequestTarget{
+    return Object.freeze({method:'POST' as const,
+      url:this.pathUrl(this.suggestionPath())});
+  }
   /** A native consent dialog must supply this scope; untrusted JS cannot. */
   enable(input:unknown):boolean{
     const c=record(input,['userApproved','approvedOrigin']);
@@ -237,7 +251,7 @@ export class OptionalAiGateway {
       else all.addEventListener('abort',onAbort,{once:true});
     });
     try{
-      const transporting=this.transport(this.root+path,{
+      const transporting=this.transport(this.pathUrl(path),{
         ...init,redirect:'error',credentials:'omit',cache:'no-store',signal:all,
         headers:{'Authorization':'Bearer '+this.options.apiKey,
           'Accept':'application/json',...(init.body?{'Content-Type':'application/json'}:{})}
@@ -322,8 +336,7 @@ export class OptionalAiGateway {
         max_tokens:this.options.maxOutputTokens,
         messages:[{role:'system',content:instructions},
           {role:'user',content:JSON.stringify(data)}]});
-    const fetched=await this.request(this.options.protocol==='responses'
-      ?'/responses':'/chat/completions',{method:'POST',body},signal);
+    const fetched=await this.request(this.suggestionPath(),{method:'POST',body},signal);
     if('ok' in fetched&&fetched.ok===false)return fetched;
     if(!('value' in fetched))return failure('INVALID_RESPONSE');
     const response=fetched.value as Record<string,unknown>;
