@@ -7,10 +7,12 @@
  */
 import {createHmac,randomBytes} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
-import {OptionalAiGateway,type AiSuggestion,type GatewayCode} from './model-gateway';
+import {OptionalAiGateway,type AiSuggestion,type GatewayCode,
+  type SuggestionRequestTarget} from './model-gateway';
 
 type Evidence=Readonly<{diagnosticCode:'SELECTOR_ASSERTION'|'UNKNOWN';
   scenarioHash:string;selectorHash:string}>;
+export type NativeAiReviewEvidence=Evidence;
 type Failure=Readonly<{ok:false;code:GatewayCode|'CANCELLED'|
   'NO_REVIEW_EVIDENCE'|'INVALID_CONFIGURATION';automaticPatchAllowed:false}>;
 export type NativeReviewedSuggestionResult=AiSuggestion|Failure;
@@ -20,6 +22,21 @@ const MAX_AGE_MS=300000;
 const MAX_SESSION_RECORDS=100;
 const blocked=(code:Failure['code']):Failure=>
   Object.freeze({ok:false,code,automaticPatchAllowed:false as const});
+
+/** Format the exact native disclosure without ever receiving the API key. */
+export function formatNativeAiReviewDisclosure(origin:string,review:NativeAiReviewEvidence,
+  target:SuggestionRequestTarget):string{
+  return [
+    '服务来源：'+origin,
+    '实际请求目标：'+target.method+' '+target.url,
+    '只发送以下固定字段（不发送脚本源码、DOM、URL、文件路径或选择器原文）：',
+    'diagnosticCode='+review.diagnosticCode,
+    'scenarioHash='+review.scenarioHash,
+    'selectorHash='+review.selectorHash,
+    '会发送本地配置的 Bearer API Key；仅发起上述一次请求，有用量成本。',
+    '返回的文字仅供人工参考，绝不安装、更新或修复脚本。'
+  ].join('\n');
+}
 
 /** A native AI disclosure must never inspect a caller-controlled cancellation
  * getter or attach a hostile listener. Reject forged signals before touching
@@ -104,7 +121,7 @@ export class NativeAiEvidenceStore{
 export async function requestNativeReviewedAiSuggestion(
   configText:unknown,
   evidenceInput:unknown,
-  authorize:(origin:string,review:Evidence)=>Promise<boolean>,
+  authorize:(origin:string,review:Evidence,target:SuggestionRequestTarget)=>Promise<boolean>,
   signal?:AbortSignal,
   transport:typeof fetch=fetch
 ):Promise<NativeReviewedSuggestionResult>{
@@ -147,7 +164,8 @@ export async function requestNativeReviewedAiSuggestion(
   try{
     if(!gateway.status().manualModelAvailable)return blocked('MODEL_NOT_SELECTED');
     if(signal?.aborted)return blocked('CANCELLED');
-    const allowed=await authorize(origin,evidence);
+    const target=gateway.suggestionRequestTarget();
+    const allowed=await authorize(origin,evidence,target);
     if(!allowed||signal?.aborted)return blocked('CANCELLED');
     const consent={userApproved:true as const,approvedOrigin:origin};
     if(!gateway.enable(consent))return blocked('NOT_AUTHORIZED');

@@ -120,7 +120,8 @@ import {inspectNativeRestoreIntentReadOnly} from '../../src/version/restore-inte
 import {inspectNativeRestoreIntentInventoryReadOnly} from '../../src/version/restore-intent-inventory';
 import {createVerifiedBackupOnly} from '../../src/version/verified-backup';
 import {readNativeSelectedAiConfig,discoverModelsFromNativeConfig} from '../../src/ai/native-model-discovery';
-import {NativeAiEvidenceStore,requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
+import {formatNativeAiReviewDisclosure,NativeAiEvidenceStore,
+  requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
 
 let mainWindow: BrowserWindow | null = null;
 // No AI credential, endpoint or provider session is stored between requests.
@@ -376,17 +377,12 @@ function registerSafeIpc(): void {
       const config=await readNativeSelectedAiConfig(choice.filePaths[0]);
       if(revoked())return {ok:false,code:'CANCELLED',automaticPatchAllowed:false};
       if(config===null)return {ok:false,code:'INVALID_CONFIGURATION',automaticPatchAllowed:false};
-      return await requestNativeReviewedAiSuggestion(config,evidence,async(origin,review)=>{
+      return await requestNativeReviewedAiSuggestion(config,evidence,async(origin,review,target)=>{
         if(revoked())return false;
         const decision=await dialog.showMessageBox(win,{
           type:'warning',title:'人工授权：发送三项脱敏诊断摘要',
           message:'是否允许向此 AI 服务请求一次未经验证的文字建议？',
-          detail:'服务来源：'+origin+'\n只发送以下固定字段（不发送脚本源码、DOM、URL、文件路径或选择器原文）：'+
-            '\ndiagnosticCode='+review.diagnosticCode+
-            '\nscenarioHash='+review.scenarioHash+
-            '\nselectorHash='+review.selectorHash+
-            '\n会发送本地配置的 Bearer API Key；仅本次 POST /chat/completions，有用量成本。'+
-            '\n返回的文字仅供人工参考，绝不安装、更新或修复脚本。',
+          detail:formatNativeAiReviewDisclosure(origin,review,target),
           buttons:['同意发送这三项摘要','取消'],defaultId:1,cancelId:1,noLink:true
         });
         return decision.response===0&&!revoked();
