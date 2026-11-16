@@ -1,6 +1,8 @@
 # 发布策略与最终 Stable 门槛
 
-> 状态（2026-10-26 当前主干）：已有 Windows 开发候选 EXE＋真实 ZIP，历史 main 双包运行 #40272068615 的源 SHA 为 `4acd806936e64da4ebe11d56aa433160efcc2b23` 且成功；最新 main `c3c28451636400a4228688d7354c8f42ba0ccbca` 的应用检查 #40272189600 成功，但本记录未证明同一最新 SHA 已完成正式双包验收。安装文件完整性、只读解压运行、合成升级及卸载保留为阶段证据；真实用户环境、产品自动修复/回滚及 GATE-001..011 未完成。正式交付仍仅 EXE＋ZIP，历史 RAR 只作归档。
+> 状态（2026-11-16，产品代码合并点 main@7c02f828ba781677629634b0947c7e729b1c170b）：package.json 版本仍为 1.1.3；最近正式 Release [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3) 基于旧发布提交 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，不能作为本轮 rebaseline Stable 验收证明。
+>
+> PR #886 后的 Windows Candidate EXE/ZIP [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 成功，但构建来源是 PR 测试合并 SHA a41f2e676da766aed184217f1d55424633d9970f，不是当前代码合并点 SHA；两包为候选文件，未做最终用户环境集中验收。当前没有本轮正式 Stable tag/Release，GATE-004/005 与最终发布门槛仍未通过。
 
 ## 支持平台
 目标 Windows x64（起始支持建议，不表示用户确认最低 Windows/Chrome 版本）；应用运行依赖外部所选 Chrome 和授权的真实油猴管理器，Chrome 多便携版兼容范围由 POC-01/02 建立矩阵，不能保证任意 Chrome。
@@ -166,3 +168,12 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - **最终集中人工验收**：尚未执行。Windows 实机/VM 安装、升级、卸载、ZIP 解压直启、用户数据、真实 Chrome/Tampermonkey、主流程及 GUI 体验必须继续保留至正式发布前的集中阶段；不得提前标记通过。
 
 **当前判定：Stable 未完成；不得创建新的 Stable Tag/Release。** 只有当前 rebaseline 的全部必要 GATE、同源 EXE/ZIP、机器验证与最终人工验收均有真实证据后，才允许重新评估正式发布。
+
+## 2026-11-16 PR #886 后的双包候选与 Release 状态
+
+- 最新正式 Release 仍是 [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3)，该版本发布于 2026-11-13，来源提交 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2。它早于当前 rebaseline，不继承为本轮 Stable 验收。
+- Windows Candidate EXE and ZIP [#43822893260](https://github.com/devin930906/userscript-auto-healer/actions/runs/43822893260) 在 Windows 2025 runner 成功，源为 PR 测试合并 SHA a41f2e676da766aed184217f1d55424633d9970f。它与当前代码合并点 main@7c02f828ba781677629634b0947c7e729b1c170b 是不同提交；本次候选文件不能替代以最终正式候选 SHA 重新构建。
+- EXE 候选 Userscript-Auto-Healer-v1.1.3-a41f2e676da7-CANDIDATE-Setup.exe：SHA-256 28ae3dd1ddbb61415d802661153758c9d76aec88d6946a80983102159b1ba932。Windows runner 完成 158 文件安装载荷 SHA-256 一致性、安装启动、卸载和 userData 保留检查。
+- ZIP 候选 Userscript-Auto-Healer-v1.1.3-a41f2e676da7-CANDIDATE-Portable.zip：SHA-256 b895af2754d5ee9f6592f449f2d2f615a9d102f388f52e7f3b93c13f761db1bb。完整 158 文件清单及 SHA-256 回环、三轮便携重定位及 Electron 重启通过。
+- 两类候选随 Actions Artifact 14204424590 暂存，工件 digest sha256:426191ae3d2ea778938062a9592c5076fdbdcd0251c9aaed1f699f0d5b1f9c22，到期 2026-11-19；短期 Actions 工件不是正式发行下载地址。
+- Stable 仍未通过：TEST-017/018 与 GATE-004/005 缺真实获授权 Tampermonkey/Profile、安装注入、GM 和业务断言；最终用户 EXE/ZIP 集中人工验收未执行。未创建本轮正式 tag/Release。历史正式文件可从 v1.1.3 Release 页面查阅；本轮候选文件没有正式下载地址。
