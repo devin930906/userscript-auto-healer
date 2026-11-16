@@ -406,7 +406,16 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   3. 版本号正式推进至 **`1.0.1`**。
 - **自动化验证**：全量 1075 项测试 100% 绿灯（1065 pass, 0 fail, 10 conditional skip），预开发追踪矩阵 100% 通过。
 
+## 2026-11-16 rebaseline 后的当前工作登记（覆盖旧快照的现时状态）
 
+> 本节是当前状态增量，不改写 2026-10-21/2026-11-12 历史记录。当前 Stable 目标以 `docs/product-rebaseline.md` 为准；历史 v1.0.0/v1.1.3 发布与旧 GATE 签署不得自动继承为本次 rebaseline 通过。
 
-
-
+- **当前基线**：`main@bcacd082a3c538e00dfbf481c7221c8e829818ad`。PR [#883](https://github.com/devin930906/userscript-auto-healer/pull/883) squash 合并，涉及 TASK-007/#486、TASK-014/#604、TASK-017/#607 的阶段性实现；三个 Issue 保持 Open。
+- **TASK-007 / #486**：已整合 app-owned Chrome 管理器页面只读元数据探测（扩展 ID、名称、版本、启用状态、Allow User Scripts），并保留连接已有 Chrome 的只读 target-hint 边界。云端实验 [#43806236366](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806236366) 在隔离 Chromium 141.0.7390.37 + vendor-hosted Tampermonkey 5.4.1 中通过签名 key/runtime ID 对照与合成业务对照；`storeAuthenticityVerified=false`、`gmRoundtrip=false`。真实用户 Chrome/Profile、官方商店来源、应用自身 manager-probe 完整编排、安装/启用/授权、真实脚本注入、完整 GM 与生产业务仍未完成；TASK-007 继续开发中。
+- **TASK-014 / #604**：PR #883 整合可选 AI 模型发现的原生确认边界；合并后 Application Checks 通过。更广泛的 AI 双协议、配置、实际诊断/修复链路与完整 TEST-015/016 验收仍待按原 TASK 条件完成。
+- **TASK-017 / #607**：PR #883 将手动 GM 场景和手动场景注册留在折叠高级区，并把导入结果下一步导航到受控 Chrome 工作区。静态 UI 审查未发现键盘 tab 导航和窄屏方向同步缺失；完整一次启动批处理、逐脚本进度/结果、真实业务旅程与 GUI 人工体验仍未完成。
+- **Windows CDP 启动阻断 / #510**：Candidate Packaging [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 失败，`CDP_TIMEOUT`、`FETCH_REFUSED=79`、`CHILD_RUNNING_NO_CDP=1`，打包前失败。相同 SHA 的 Application Checks [#43805989201](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989201) 与 Portable Chrome Product Validation [#43805989203](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989203) 成功，但不抵销失败。#510 已重新打开，根因未确认。
+- **当前机器证据**：合并后 Windows Application Skeleton Checks [#43806721310](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721310) 成功（1126 tests / 1125 pass / 0 fail / 1 conditional skip，Electron shell smoke 成功）；Documentation Integrity [#43806721242](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721242) 成功。候选双包运行 #43805989231 失败，未产生本轮 EXE/ZIP。
+- **Stable/GATE**：本次 rebaseline 的完整 GATE-001..011 尚未重新签署。GATE-004/005 因真实 Tampermonkey/GM/业务与支持矩阵不足而阻断；GATE-007 因可信自动应用/原子事务/回滚不足而阻断；GATE-008/009/011 因当前候选双包未构建及最终验收缺失而阻断；GATE-003 的候选打包链受 #510 失败影响。其他 GATE 逐项以当前正式 TEST/REQ 和实际证据重新判定，不继承历史签署。
+- **正式 Release**：历史 `v1.1.3` 仍是已发布记录，但不是本次 rebaseline 的验收证据；本轮没有新 Stable Tag/Release，没有当前同源候选 EXE/ZIP，没有最终人工验收。
+- **当前优先剩余工作**：继续 #510 有证据的 Windows Chrome 启动诊断；继续 #486/TASK-007 的真实管理器/安装授权/GM/业务验证；依赖满足后推进 #487/#488/#489/#603/#857/#607 等产品闭环。最终人工验证仍集中安排于正式候选双包机器检查通过之后。
