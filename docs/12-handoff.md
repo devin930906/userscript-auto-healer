@@ -2,9 +2,11 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
-> 2026-11-16 PR #891 合并后的最新续接点：当前代码基线为 `main@8484b76f6cadd88d106c2d5bd077cece2328cf72`；PR [#891](https://github.com/devin930906/userscript-auto-healer/pull/891) 合并了测试专用 owned-Chrome pipe outgoing error/close fail-closed 修复及负向回归。PR head `ebd83800ff0dabbceaac894f50bd793a7b9e94b0` 的 Windows 应用/Portable Chrome/候选双包/隔离 TASK-007 workflows 均成功；候选 artifact 不构成 Stable。#486 仍 Open，store authenticity、真实用户 Profile、正式脚本/GM/业务和回滚证据未完成，TEST-017/018 与 GATE-004/005 仍未通过。下一步继续 #486 的真实授权验收；需要用户授权的隔离 Chrome/Tampermonkey 环境时再执行，不建立 Issue 锁或认领前置条件。
+> 2026-11-16 PR #893 产品代码合并后的续接点：产品代码合并 SHA 为 `5edebd67ef02248bae00457c14e81f1f331fd8aa`，tree 为 `804b83353d2c16d39b04d4eef598d79410b1d5c6`；本轮文档更新开始前，本地产品代码树与该 tree 一致。当前仓库 HEAD 应始终以 GitHub `main` 实际状态重新核对。PR [#893](https://github.com/devin930906/userscript-auto-healer/pull/893) 修复 TASK-014/#604 原生 AI 同意框与实际协议目标不一致：Chat Completions/Responses、自定义 base-path 的确切 POST URL 会显示在确认框，空 query/fragment 分隔符会在同意及网络流量前拒绝。
 >
-> 合并后 main push run [#43846393524](https://github.com/devin930906/userscript-auto-healer/actions/runs/43846393524) success：1132 tests / 1130 pass / 0 fail / 2 conditional skips，Electron renderer/preload IPC smoke success；可选诊断 job skipped。
+> PR-head Application Checks [#43858568343](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568343)、Candidate Packaging [#43858568495](https://github.com/devin930906/userscript-auto-healer/actions/runs/43858568495) 与合并后 main Application Checks [#43860109349](https://github.com/devin930906/userscript-auto-healer/actions/runs/43860109349) 均成功；main run 的 Electron shell smoke 成功，可选启动/AST 诊断 job skipped。候选 EXE/ZIP 与校验仅为候选交付，不是正式 Stable。
+>
+> TASK-014/#604 仍未完成：AI 尚未进入实际批处理分析、故障诊断及候选生成链；TASK-009/TASK-013 依赖和完整 TEST-015/016 未通过，#604 继续 Open。下一步按依赖推进真实产品集成和负向测试；保留 #486 与 #510 的独立开放阻断，Stable 发布仍未达到验收门槛。
 
 > 2026-11-15 PR #858 原始需求校准续接：现行 REQ-008 默认端口 9896（9223 仅是历史 PoC 参数），用户主流程为 Chrome/Chrome++ 和授权 Profile → 批量导入 → 一次启动 → 逐项真实诊断/安全修复/验收/版本结果；缺登录、授权或业务断言必须逐项受阻并保留原件。主线待完成 TASK-007/009..014/017 对应 #486 #487 #488 #489 #603 #604 #857 #607 的真实代码与 TEST。下方历史日期、版本、端口、Issue 锁定记录仅保留可追溯性，不得覆盖当前准入与真实主干状态。
 >
