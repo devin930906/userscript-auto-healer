@@ -1,8 +1,8 @@
 # 发布策略与最终 Stable 门槛
 
-> 状态（2026-11-16，当前 main@d647003f391f9c350e6efb94a3924f604bd80ead；产品代码合并点 7c02f828ba781677629634b0947c7e729b1c170b）：package.json 版本仍为 1.1.3，最近正式 Release [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3) 基于旧提交 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，不能作为本轮 rebaseline 验收证明。当前 main 同源候选双包 run #43828261977 success，但 TEST/GATE 和最终用户集中人工验收仍未完成。
+> 状态（2026-11-16，候选构建记录）：PR #886 产品代码合并点 7c02f828ba781677629634b0947c7e729b1c170b；main@eeeac2ecaa2e7188a38d6be03d534032eb86bba7 是 PR #888 后的 docs-only 更新。候选 run #43828261977 在该 docs-only 更新前由 main@d647003f391f9c350e6efb94a3924f604bd80ead 构建。package.json 版本仍为 1.1.3；最近正式 Release v1.1.3 基于旧提交 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，不是本轮 rebaseline 验收。
 >
-> 当前主干候选 Windows EXE/ZIP [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 已以 main@d647003f391f9c350e6efb94a3924f604bd80ead 构建成功；文件和 Artifact 校验如下方最新状态记录。此前 PR 临时合并 SHA a41f2e676da766aed184217f1d55424633d9970f 的包保留为历史候选。当前没有本轮正式 Stable tag/Release；GATE-004/005 与最终用户集中人工验收仍未完成。
+> Windows Candidate EXE/ZIP [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 以构建时 main@d647003f391f9c350e6efb94a3924f604bd80ead 成功完成；后续 docs-only PR #888 将 main 推进到 eeeac2ecaa2e7188a38d6be03d534032eb86bba7，不含产品代码变化。候选工件不代表 Stable GATE 或最终用户验收。
 
 ## 支持平台
 目标 Windows x64（起始支持建议，不表示用户确认最低 Windows/Chrome 版本）；应用运行依赖外部所选 Chrome 和授权的真实油猴管理器，Chrome 多便携版兼容范围由 POC-01/02 建立矩阵，不能保证任意 Chrome。
@@ -178,7 +178,7 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - 两类候选随 Actions Artifact 14204424590 暂存，工件 digest sha256:426191ae3d2ea778938062a9592c5076fdbdcd0251c9aaed1f699f0d5b1f9c22，到期 2026-11-19；短期 Actions 工件不是正式发行下载地址。
 - Stable 仍未通过：TEST-017/018 与 GATE-004/005 缺真实获授权 Tampermonkey/Profile、安装注入、GM 和业务断言；最终用户 EXE/ZIP 集中人工验收未执行。未创建本轮正式 tag/Release。历史正式文件可从 v1.1.3 Release 页面查阅；本轮候选文件没有正式下载地址。
 
-## 2026-11-16 当前 main 同源候选双包
+## 2026-11-16 main@d647 候选构建双包结果
 
 - Windows Candidate EXE and ZIP [#43828261977](https://github.com/devin930906/userscript-auto-healer/actions/runs/43828261977) 由 workflow_dispatch 在 main 上执行，准确源码 SHA 为 d647003f391f9c350e6efb94a3924f604bd80ead。Windows 2025 runner 的全量测试为 1131 / 1129 pass / 0 fail / 2 conditional skip。
 - EXE Userscript-Auto-Healer-v1.1.3-d647003f391f-CANDIDATE-Setup.exe：SHA-256 6ac2b0530b0243b3886a9d24d61ff0263ebf69d70423ed1abd0548ec0a63c65b。候选安装、Electron 启动、158 文件载荷 SHA-256 对照、卸载及 userData 保留通过。
