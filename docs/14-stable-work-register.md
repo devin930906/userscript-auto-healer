@@ -506,3 +506,12 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **修改**：在只读 chrome://extensions 探测中等待 Chromium 管理器初始化，限定四秒总预算并按剩余时间收紧每次 CDP 查询；未就绪超时返回 INSPECTION_UNAVAILABLE，不会错误报告未安装。
 - **验证**：build 成功；新增等待就绪与超时失败关闭覆盖；完整套件 1,146 项，1,134 通过、0 失败、12 条件跳过。证据见 [readiness 记录](evidence/2026-11-17-tampermonkey-manager-inventory-readiness.md)。
 - **边界**：尚无修复后真实浏览器验收；Chromium 内部属性变化时仍安全失败关闭。#486、TEST-017/018、GATE-004/005 与 Stable 均未完成。
+
+
+## 2026-11-17 当前 Stable 与 Tampermonkey 观测更新
+
+- **主干**：`main@674548901ebf1e58b6ef9b66fc681a393a8c99a1`；PR #901 产品改动已整合至 `4129a966a2917801fe71f49d7d357f54404b8a77`，PR #902 docs-only；当前无 Open PR。PR #902 Documentation Integrity run #44031797621 成功。
+- **Tampermonkey 观察**：用户最新截图显示 Chrome 中 Tampermonkey v5.5.1 已安装，且 Tampermonkey 仪表盘可打开。UAH 状态框曾报告未找到官方卡片；以截图修正“浏览器没有安装”的说法，作为探测不一致线索继续排查。截图不证明 UAH 所管理的 Profile/Data 路径绑定、Web Store 来源或产品安装/注入、GM、业务修复和回滚，TEST-017/018、GATE-004/005 仍未通过。
+- **Candidate 双包**：Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 的 PR HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1` 检查通过；artifact 14304753363，digest `sha256:2e8e90be2b0999dbbee9e224feeeacc3e226e06cf902de42c0a4babc4f30026f`，到期 2026-11-20T06:25:48Z。非正式 Release。
+- **活跃 Issues**：#486/#487/#488/#489/#510/#603..#610/#857 共 14 项。#856/#480/#440/#215 已关闭；对应 TASK/GATE 仍按当前需求追踪，不以旧 Issue 关闭作为验收。
+- **最终判定**：Stable 未完成。缺产品级真实管理器/业务和失败回滚、最终同源双包及集中人工验收；不创建正式 Tag/Release。
