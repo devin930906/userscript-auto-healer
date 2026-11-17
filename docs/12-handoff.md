@@ -436,3 +436,15 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - PR #901 Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 成功，HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1`；候选包与当前 main 的产品代码树一致但来自 PR HEAD。该产物为临时 Candidate，不是 Stable Release；artifact 14304753363 于 2026-11-20T06:25:48Z 过期。
 - 当前 Open Issues 14 个：#486/#487/#488/#489/#510/#603..#610/#857。#856/#480/#440/#215 已关闭历史；#857 是 TASK-013 当前 Issue，#610 是最终 TASK-021/GATE 跟踪。
 - 最新正式 Release 仍是 v1.1.3。TASK-007、TEST-017/018、GATE-004/005 以及所有最终 Stable GATE 与人工验收仍未完成。继续保持不操作用户桌面；如需补充实机步骤，由用户自己操作并提供结果。
+
+
+## 2026-11-17 TASK-007 / #486 用户 Chrome Tampermonkey 截图复核
+
+- 用户最新截图显示 Chrome 已打开 Tampermonkey v5.5.1 的“已安装脚本”仪表盘；列表含三个启用中的 `UAH Isolated GM Diagnostic` 脚本，以及启用中的 `ChatGPT Prompt Flow` v1.0.51。这确认截图所示浏览器已安装并运行 Tampermonkey，不能再把 UAH 状态框先前的“未找到官方 Tampermonkey ID”解释为用户没安装，也不需要用户重装。
+- 截图未证明该仪表盘所在 Chrome 进程/Profile 与 UAH 所管理的 Data/Profile 完全绑定；也未证明商店来源、这些诊断脚本的 GM 调用、正式产品注入、业务修复或失败回滚。#486 继续 Open；TEST-017/018 和 GATE-004/005 未通过。用户已要求不使用 Computer Use，并由用户自行操作桌面；本轮没有控制其电脑或浏览器。
+
+## 2026-11-17 TASK-005 / #510 限时协议探测运行结果
+
+- PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) 的 default-off 隔离 Windows 诊断 workflow run [#44058008706](https://github.com/devin930906/userscript-auto-healer/actions/runs/44058008706) 成功；在一次性 runner Chrome/Profile 中只启用 `chrome_post_timeout_protocol_probe=true`。
+- 本次 Chrome 在原 20 秒超时前成功启动，所以没有进入超时后 GET `/json/version` / PID 复核 / WebSocket 的诊断分支。该结果没有复现 #510，也未提供根因证据；不是产品修复。PR #904 保持 Draft，Issue #510 保持 Open。
+- Stable 仍未完成；不得据此关闭 #510、宣称 TASK-005 根因已解决或宣称 Stable GATE 已通过。

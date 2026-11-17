@@ -515,3 +515,10 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **Candidate 双包**：Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 的 PR HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1` 检查通过；artifact 14304753363，digest `sha256:2e8e90be2b0999dbbee9e224feeeacc3e226e06cf902de42c0a4babc4f30026f`，到期 2026-11-20T06:25:48Z。非正式 Release。
 - **活跃 Issues**：#486/#487/#488/#489/#510/#603..#610/#857 共 14 项。#856/#480/#440/#215 已关闭；对应 TASK/GATE 仍按当前需求追踪，不以旧 Issue 关闭作为验收。
 - **最终判定**：Stable 未完成。缺产品级真实管理器/业务和失败回滚、最终同源双包及集中人工验收；不创建正式 Tag/Release。
+
+
+## 2026-11-17 用户截图与 TASK-005 隔离诊断更新
+
+- **#486 / Tampermonkey**：用户提供的 Chrome 截图显示 Tampermonkey v5.5.1“已安装脚本”页，含三个启用的 UAH 隔离 GM 诊断脚本和启用的 ChatGPT Prompt Flow v1.0.51。截图确认 Tampermonkey 已安装；先前 UAH “未找到官方 ID”不能作为未安装证据，也不应要求重装。截图未提供 UAH 受控进程/Profile 绑定、商店来源、脚本 GM/业务动作或失败回滚证明。#486 继续 Open，TEST-017/018、GATE-004/005 未通过。用户要求不使用 Computer Use，由用户操作其桌面。
+- **#510 / 诊断**：PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) 的 Windows 隔离手动 run [#44058008706](https://github.com/devin930906/userscript-auto-healer/actions/runs/44058008706) 成功；唯一开启输入是 `chrome_post_timeout_protocol_probe=true`。原 20 秒启动超时未复现，故超时后 HTTP/PID/WebSocket 分支未触发；无根因结论或产品修复。PR #904 保持 Draft，#510 保持 Open。
+- **Stable**：上述截图与成功样本均不代表完整真实业务验收、失败恢复、Stable GATE 或正式发布；最终同源 EXE/ZIP 和集中人工验收仍未完成。
