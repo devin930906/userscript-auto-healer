@@ -420,7 +420,7 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 
 ## 2026-11-17 TASK-007 / #486 Tampermonkey manager inventory readiness correction
 
-- **GitHub 同步**：[PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) 已创建，等待检查与集成；Issue #486 仍保持 Open。
+- **GitHub 同步**：[PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) 已于 2026-11-17 squash 合并至 `main@4129a966a2917801fe71f49d7d357f54404b8a77`；PR 的文档、边界、Windows smoke 与 Windows 候选打包检查均成功，两个条件诊断 job 按条件跳过。候选包不是正式 Release；Issue #486 仍保持 Open。
 
 - 用户截图显示 Tampermonkey options 页为 v5.5.1；UAH 状态框同时显示未找到官方卡片。截图无法独立绑定到 UAH 启动的 Profile，因此只作为差异线索。
 - 代码路径检查发现探针只等待 Page.loadEventFired，而 Chromium 扩展管理器之后还会异步读取并初始化扩展列表。未完成初始化时的零卡片不能证明未安装。
