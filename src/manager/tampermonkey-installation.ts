@@ -6,6 +6,7 @@
  * reads user scripts, or claims Chrome Web Store provenance.
  */
 import {types as nodeTypes} from 'node:util';
+import {performance} from 'node:perf_hooks';
 import type {ManagedLaunchResult} from '../browser/owned-chrome';
 import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {verifyWindowsLoopbackListenerPid} from '../browser/cdp-session';
@@ -47,6 +48,8 @@ const EXTENSIONS_LIST_URL='chrome://extensions/';
 const EXTENSIONS_DETAILS_URL='chrome://extensions/?id='+TAMPERMONKEY_EXTENSION_ID;
 const MAX_CDP_MESSAGE_BYTES=512*1024;
 const CDP_COMMAND_TIMEOUT_MS=5000;
+// chrome://extensions renders cards only after its asynchronous inventory load.
+const MANAGER_INVENTORY_READY_TIMEOUT_MS=4000;
 const VERSION_PATTERN=/^\d+\.\d+\.\d+(?:\.\d+)?$/;
 
 /** Fixed, read-only expression for Chrome's own extensions management page.
@@ -59,7 +62,9 @@ export const TAMPERMONKEY_MANAGER_CARD_EXPRESSION =
  ' const expectedId="'+TAMPERMONKEY_EXTENSION_ID+'";'+
  ' const manager=document.querySelector("extensions-manager");'+
  ' if(!manager||location.protocol!=="chrome:"||location.hostname!=="extensions"||location.pathname!=="/")'+
- '  return {managerPage:false,matchingCount:0};'+
+ '  return {managerPage:false,inventoryReady:false,matchingCount:0};'+
+ ' const inventoryReady=manager.didInitPage_===true;'+
+ ' if(!inventoryReady)return {managerPage:true,inventoryReady:false,matchingCount:0};'+
  ' const matches=[];const visited=new Set();'+
  ' const scan=root=>{'+
  '  if(!root||visited.has(root))return;visited.add(root);'+
@@ -85,10 +90,10 @@ export const TAMPERMONKEY_MANAGER_CARD_EXPRESSION =
  '  }'+
  ' };'+
  ' scan(document);'+
- ' if(matches.length!==1)return {managerPage:true,matchingCount:matches.length};'+
- ' return {managerPage:true,matchingCount:1,id:matches[0].id,name:matches[0].name,'+
+ ' if(matches.length!==1)return {managerPage:true,inventoryReady:true,matchingCount:matches.length};'+
+ ' return {managerPage:true,inventoryReady:true,matchingCount:1,id:matches[0].id,name:matches[0].name,'+
  '  version:matches[0].version,enabled:matches[0].enabled};'+
- '}catch{return {managerPage:false,matchingCount:0};}'+
+ '}catch{return {managerPage:false,inventoryReady:false,matchingCount:0};}'+
  '})()';
 
 /** Fixed, read-only expression for the Chrome 138+ Allow User Scripts toggle.
@@ -153,6 +158,42 @@ function runtimeValue(payload:unknown):Record<string,unknown>|null{
  const value=ownValue(remote,'value');
  return isPlainRecord(value)?value:null;
 }
+function isManagerInventoryPending(payload:unknown):boolean{
+ const value=runtimeValue(payload);
+ return value!==null&&
+  ownValue(value,'managerPage')===true&&
+  ownValue(value,'inventoryReady')===false&&
+  ownValue(value,'matchingCount')===0&&
+  hasOnlyKeys(value,['managerPage','inventoryReady','matchingCount']);
+}
+/** @internal Bounded retry seam for deterministic inventory-readiness tests. */
+export async function readTampermonkeyManagerCardAfterInventoryReady(
+ evaluate:(timeoutMs:number)=>Promise<unknown>,
+ options:{readonly timeoutMs?:number;readonly now?:()=>number;
+  readonly wait?:(ms:number)=>Promise<void>}={}
+):Promise<ManagerInstallationResult>{
+ const timeoutMs=options.timeoutMs??MANAGER_INVENTORY_READY_TIMEOUT_MS;
+ if(!Number.isFinite(timeoutMs)||timeoutMs<=0)
+  return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
+ const now=options.now??(()=>performance.now());
+ const wait=options.wait??waitBriefly;
+ const deadline=now()+timeoutMs;
+ for(;;){
+  const remaining=deadline-now();
+  if(remaining<=0)
+   return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
+  let receipt:unknown;
+  try{receipt=await evaluate(Math.min(CDP_COMMAND_TIMEOUT_MS,remaining));}
+  catch{return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};}
+  const inventoryPending=isManagerInventoryPending(receipt);
+  const card=parseTampermonkeyExtensionCardReceipt(receipt);
+  if(card.ok||!inventoryPending)return card;
+  const remainingAfterRead=deadline-now();
+  if(remainingAfterRead<=0)
+   return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
+  await wait(Math.min(250,remainingAfterRead));
+ }
+}
 function invalidReceipt():ManagerInstallationResult{
  return {ok:false,code:'INVALID_CDP_RESPONSE'};
 }
@@ -162,19 +203,21 @@ export function parseTampermonkeyExtensionCardReceipt(
  payload:unknown
 ):ManagerInstallationResult{
  const value=runtimeValue(payload);
- if(!value||ownValue(value,'managerPage')!==true)return invalidReceipt();
+ if(!value||ownValue(value,'managerPage')!==true||
+    ownValue(value,'inventoryReady')!==true)return invalidReceipt();
  const count=ownValue(value,'matchingCount');
  if(!Number.isInteger(count)||typeof count!=='number'||count<0||count>1)
   return invalidReceipt();
  if(count===0){
-  if(!hasOnlyKeys(value,['managerPage','matchingCount']))return invalidReceipt();
+  if(!hasOnlyKeys(value,['managerPage','inventoryReady','matchingCount']))return invalidReceipt();
   return {ok:true,status:'NOT_INSTALLED',extensionId:TAMPERMONKEY_EXTENSION_ID,
    extensionAuthenticityVerified:false,storeProvenanceVerified:false,
    versionVerified:false,permissionVerified:false,
    scriptInstallationVerified:false,scriptInjectionVerified:false,
    gmApiVerified:false,businessVerified:false};
  }
- if(!hasOnlyKeys(value,['managerPage','matchingCount','id','name','version','enabled']))
+ if(!hasOnlyKeys(value,['managerPage','inventoryReady','matchingCount',
+   'id','name','version','enabled']))
   return invalidReceipt();
  const id=ownValue(value,'id');
  const name=ownValue(value,'name');
@@ -436,17 +479,13 @@ export async function inspectApprovedTampermonkeyInstallation(
           !listLoadSucceeded||!isExtensionsPageUrl(frameUrl(listFrame)||'',false))
         result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'list-frame'};
        else{
-       let card:ManagerInstallationResult={ok:false,code:'INSPECTION_UNAVAILABLE'};
-       for(let attempt=0;attempt<4;attempt++){
-        failureStage='manager-card';
-        const receipt=await sendCdpCommand(socket,commandId++,'Runtime.evaluate',{
+       failureStage='manager-card';
+       const card=await readTampermonkeyManagerCardAfterInventoryReady(timeoutMs=>
+        sendCdpCommand(socket,commandId++,'Runtime.evaluate',{
          expression:TAMPERMONKEY_MANAGER_CARD_EXPRESSION,
          returnByValue:true,awaitPromise:false,userGesture:false,silent:true
-        },sessionId);
-        card=parseTampermonkeyExtensionCardReceipt(receipt);
-        if(card.ok||card.code!=='INVALID_CDP_RESPONSE')break;
-        await waitBriefly(250);
-       }
+        },sessionId,timeoutMs)
+       );
        if(!card.ok)result={ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
        else if(card.status==='NOT_INSTALLED')result=card;
        else if(signal?.aborted)result={ok:false,code:'CANCELLED'};
@@ -516,3 +555,4 @@ export async function inspectApprovedTampermonkeyInstallation(
  if(!finalOwnership.ok)return {ok:false,code:'UNOWNED_LISTENER'};
  return result;
 }
+

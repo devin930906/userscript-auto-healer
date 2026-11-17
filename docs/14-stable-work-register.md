@@ -497,3 +497,10 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **Verification**: typecheck, Windows relocation/file-lock/no-overwrite, and checksum refusal cases passed; 1,143 registered tests = 1,140 pass / 0 fail / 3 conditional skips. Candidate ZIP 159-file SHA-256 round-trip, cold and three post-use relocation/restart cycles, Unicode/space path, read-only ACL extraction, clean installer/159-file payload parity, Electron launch, uninstall and userData retention passed. Older-installer upgrade used a synthetic Inno installer and is not historical-version migration evidence.
 - **Outputs**: candidate EXE SHA-256 `b225db2d93caad7b62639bbcf1ae5f144c7d6d26b7410f2788f8736508f31741`; candidate Portable ZIP SHA-256 `c285f59e93c9f067eddf74878a2a62e0c7063a1391bb5be7ea18354c20e0da12`. Temporary [Actions artifact 14247526962](https://github.com/devin930906/userscript-auto-healer/actions/runs/43910270170/artifacts/14247526962), digest `sha256:4aaa73ffd9ad06ab8f4d8b20ee430933b0b921d17150fb32e14457f3125cb879`, expires 2026-11-19 16:49 UTC. It is not a formal Release.
 - **Stable status**: Candidate packaging succeeded, but the final Stable GATEs and required human acceptance remain incomplete. #486/TASK-007 is still Open; TEST-017/018 and GATE-004/005 are not passed. Do not treat these candidate hashes as release hashes.
+
+## 2026-11-17 TASK-007 / #486 — manager inventory readiness false-negative guard
+
+- **用户线索**：用户截图展示 Tampermonkey options v5.5.1，而 UAH status 说官方卡片未找到；截图不能证明两处属于同一个 Chrome Profile。
+- **修改**：在只读 chrome://extensions 探测中等待 Chromium 管理器初始化，限定四秒总预算并按剩余时间收紧每次 CDP 查询；未就绪超时返回 INSPECTION_UNAVAILABLE，不会错误报告未安装。
+- **验证**：build 成功；新增等待就绪与超时失败关闭覆盖；完整套件 1,146 项，1,134 通过、0 失败、12 条件跳过。证据见 [readiness 记录](evidence/2026-11-17-tampermonkey-manager-inventory-readiness.md)。
+- **边界**：尚无修复后真实浏览器验收；Chromium 内部属性变化时仍安全失败关闭。#486、TEST-017/018、GATE-004/005 与 Stable 均未完成。

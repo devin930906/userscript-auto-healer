@@ -2,13 +2,14 @@ import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {
  parseTampermonkeyExtensionCardReceipt,
- parseTampermonkeyUserScriptsReceipt
+ parseTampermonkeyUserScriptsReceipt,
+ readTampermonkeyManagerCardAfterInventoryReady
 } from '../../src/manager/tampermonkey-installation';
 import {TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
 import {TAMPERMONKEY_MANAGER_CARD_EXPRESSION,TAMPERMONKEY_USER_SCRIPTS_EXPRESSION} from '../../src/manager/tampermonkey-installation';
 
 function card(value:Record<string,unknown>){
- return {result:{type:'object',value:{managerPage:true,matchingCount:1,
+ return {result:{type:'object',value:{managerPage:true,inventoryReady:true,matchingCount:1,
    id:TAMPERMONKEY_EXTENSION_ID,name:'Tampermonkey',version:'5.4.1',
    enabled:true,...value}}};
 }
@@ -28,7 +29,7 @@ test('TASK-007: exact Tampermonkey card yields metadata-only installation eviden
 
 test('TASK-007: an authoritative empty manager inventory reports not installed',()=>{
  const result=parseTampermonkeyExtensionCardReceipt({
-  result:{type:'object',value:{managerPage:true,matchingCount:0}}
+  result:{type:'object',value:{managerPage:true,inventoryReady:true,matchingCount:0}}
  });
  assert.deepEqual(result,{
   ok:true,status:'NOT_INSTALLED',extensionId:TAMPERMONKEY_EXTENSION_ID,
@@ -37,6 +38,52 @@ test('TASK-007: an authoritative empty manager inventory reports not installed',
   scriptInstallationVerified:false,scriptInjectionVerified:false,
   gmApiVerified:false,businessVerified:false
  });
+});
+
+test('TASK-007: an empty manager page without completed inventory is not proof of absence',()=>{
+ for(const value of [
+  {managerPage:true,matchingCount:0},
+  {managerPage:true,inventoryReady:false,matchingCount:0}
+ ]){
+  const result=parseTampermonkeyExtensionCardReceipt({result:{type:'object',value}});
+  assert.deepEqual(result,{ok:false,code:'INVALID_CDP_RESPONSE'});
+ }
+});
+
+test('TASK-007: manager-card probe retries pending inventory and accepts the ready card',async()=>{
+ let now=0;
+ const timeouts:number[]=[];
+ const receipts:unknown[]=[
+  {result:{type:'object',value:{managerPage:true,inventoryReady:false,matchingCount:0}}},
+  card({})
+ ];
+ const result=await readTampermonkeyManagerCardAfterInventoryReady(async timeoutMs=>{
+  timeouts.push(timeoutMs);
+  return receipts.shift();
+ },{
+  timeoutMs:1000,
+  now:()=>now,
+  wait:async ms=>{now+=ms;}
+ });
+ assert.equal(result.ok,true);
+ assert.equal(timeouts.length,2);
+ assert.deepEqual(timeouts,[1000,750]);
+});
+
+test('TASK-007: manager-card probe passes remaining deadline to CDP and fails closed at timeout',async()=>{
+ let now=0;
+ const timeouts:number[]=[];
+ const result=await readTampermonkeyManagerCardAfterInventoryReady(async timeoutMs=>{
+  timeouts.push(timeoutMs);
+  now+=timeoutMs;
+  return {result:{type:'object',value:{managerPage:true,inventoryReady:false,matchingCount:0}}};
+ },{
+  timeoutMs:1000,
+  now:()=>now,
+  wait:async ms=>{now+=ms;}
+ });
+ assert.deepEqual(result,{ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'});
+ assert.deepEqual(timeouts,[1000]);
 });
 
 test('TASK-007: manager inventory ambiguity and mismatched identity fail closed',()=>{
@@ -85,6 +132,8 @@ test('TASK-007: user-script permission rejects malformed or ambiguous receipts',
 test('TASK-007: manager probes are fixed, read-only and never target extension origins',()=>{
  assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/extensions-item/);
  assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,new RegExp(TAMPERMONKEY_EXTENSION_ID));
+ assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/didInitPage_/);
+ assert.match(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/inventoryReady/);
  assert.doesNotMatch(TAMPERMONKEY_MANAGER_CARD_EXPRESSION,/chrome-extension:\/\//);
  assert.match(TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,/allow user scripts\|允许用户脚本/);
  assert.doesNotMatch(TAMPERMONKEY_USER_SCRIPTS_EXPRESSION,/\.click\s*\(/);
@@ -101,3 +150,4 @@ test('TASK-007/026: receipt parsers never execute accessors or Proxy traps',()=>
  assert.equal(getterCalls,0);
  assert.equal(proxyCalls,0);
 });
+
