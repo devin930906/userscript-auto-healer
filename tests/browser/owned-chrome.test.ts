@@ -16,7 +16,69 @@ import {PassThrough} from 'node:stream';
 import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
+import { readChromeStartupLogSummary } from './chrome-startup-log-summary';
 const execFileAsync=promisify(execFile);
+
+test('TASK-005 Chrome boot-log summary reports only bounded allow-listed startup signals',()=>{
+  const {summarizeChromeStartupLog}=require('./chrome-startup-log-summary') as {
+    summarizeChromeStartupLog?:(content:string,expectedPort:number)=>unknown
+  };
+  assert.equal(typeof summarizeChromeStartupLog,'function',
+    'the diagnostic parser must exist before it can be integrated with the runner');
+  if(typeof summarizeChromeStartupLog!=='function')return;
+  const log=[
+    '[1:INFO:remote_debugging_server.cc] DevTools listening on ws://127.0.0.1:23451/devtools/browser/SECRET-ID',
+    '[2:INFO:remote_debugging_server.cc] DevTools listening on ws://127.0.0.1:29999/devtools/browser/OTHER-ID',
+    '[3:ERROR:profile_manager.cc] failed to open C:\\Private\\Chrome Data\\Profile path; token=PRIVATE-TOKEN',
+    '[4:FATAL:startup.cc] fatal startup marker SECRET-FATAL'
+  ].join('\n');
+  const summary=summarizeChromeStartupLog(log,23451);
+  assert.deepEqual(summary,{
+    status:'parsed',
+    devtoolsAnnouncementCount:2,
+    configuredLoopbackEndpointAnnounced:true,
+    errorLineCount:1,
+    fatalLineCount:1
+  });
+  assert.doesNotMatch(JSON.stringify(summary),
+    /127\.0\.0\.1|23451|29999|SECRET-ID|OTHER-ID|Private|PRIVATE-TOKEN|SECRET-FATAL/);
+  assert.deepEqual(summarizeChromeStartupLog(
+    'DevTools listening on ws://127.0.0.1:29999/devtools/browser/WRONG-PORT',23451),{
+      status:'parsed',devtoolsAnnouncementCount:1,
+      configuredLoopbackEndpointAnnounced:false,errorLineCount:0,fatalLineCount:0
+    });
+  assert.deepEqual(summarizeChromeStartupLog('x'.repeat(1_048_577),23451),
+    {status:'too-large'});
+});
+
+test('TASK-005 Chrome boot-log reader handles only a bounded disposable profile file',async()=>{
+  const {readChromeStartupLogSummary}=require('./chrome-startup-log-summary') as {
+    readChromeStartupLogSummary?:(profile:string,expectedPort:number)=>unknown
+  };
+  assert.equal(typeof readChromeStartupLogSummary,'function',
+    'the manual runner must have a bounded, path-redacted log reader');
+  if(typeof readChromeStartupLogSummary!=='function')return;
+  const root=await mkdtemp(join(tmpdir(),'uah-chrome-log-summary-'));
+  try{
+    const profile=join(root,'profile');
+    await mkdir(profile);
+    await writeFile(join(profile,'chrome_debug.log'),
+      'DevTools listening on ws://127.0.0.1:23451/devtools/browser/SECRET-ID\n[ERROR:startup.cc] PRIVATE-PATH',
+      'utf8');
+    assert.deepEqual(readChromeStartupLogSummary(profile,23451),{
+      status:'parsed',devtoolsAnnouncementCount:1,
+      configuredLoopbackEndpointAnnounced:true,errorLineCount:1,fatalLineCount:0
+    });
+    assert.deepEqual(readChromeStartupLogSummary(join(root,'missing-profile'),23451),
+      {status:'unavailable'});
+    const largeProfile=join(root,'large-profile');
+    await mkdir(largeProfile);
+    await writeFile(join(largeProfile,'chrome_debug.log'),'x'.repeat(1_048_577),'utf8');
+    assert.deepEqual(readChromeStartupLogSummary(largeProfile,23451),{status:'too-large'});
+  }finally{
+    await rm(root,{recursive:true,force:true});
+  }
+});
 
 /** The dedicated Chrome test has repeatedly passed while the same Chrome
  * case intermittently fails late in the 800+-case application suite.
@@ -882,6 +944,15 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     (process.env.UAH_TEST_CHROME_BOOT_LOG==='true'||
      process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE==='true')&&
     process.env.RUNNER_TEMP;
+  const manualChromeBootLog=process.env.GITHUB_ACTIONS==='true'&&
+    process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+    process.env.UAH_TEST_CHROME_BOOT_LOG==='true';
+  const chromeBootLogSummaries:Array<Readonly<{
+    attempt:number;
+    outcome:'verified'|'not-verified';
+    summary:ReturnType<typeof readChromeStartupLogSummary>;
+  }>>=[];
+  let chromeBootLogAttempt=0;
   const root=await mkdtemp(join(runnerTempRoot||tmpdir(),'uah-owned-chrome-test-'));
   let profile=join(root,'profile');
   let stop:()=>void=()=>{};
@@ -938,7 +1009,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     };
     await poll();
     const interval=setInterval(()=>{void poll();},750);
-    try{return await launchApprovedIsolatedChrome(configForTest,launchOptions);}
+    const attempt=++chromeBootLogAttempt;
+    let result:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>;
+    try{result=await launchApprovedIsolatedChrome(configForTest,launchOptions);}
     finally{
       pressure.stop();
       clearInterval(interval);
@@ -946,6 +1019,11 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       timeline.observe(performance.now()-started,
         await redactedChromeBootstrapMarkers(profile));
     }
+    if(manualChromeBootLog)chromeBootLogSummaries.push(Object.freeze({
+      attempt,outcome:result.ok?'verified':'not-verified',
+      summary:readChromeStartupLogSummary(profile,port)
+    }));
+    return result;
   };
   let result=await launchWithBoundedMarkers();
   if(!result.ok){
@@ -978,6 +1056,8 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     t.diagnostic('CDP_LISTENER_PRESENCE_TIMELINE='+listenerTimeline.summary());
     // 1 means *some* IPv4 loopback listener was seen, NOT verified ownership.
   }
+  for(const summary of chromeBootLogSummaries)
+    t.diagnostic('CDP_CHROME_BOOT_LOG_SUMMARY='+JSON.stringify(summary));
   assert.equal(result.ok,true,JSON.stringify(result));
   assert.ok(startupStages.includes('CHROME_SPAWN_RETURNED'),
     'Chrome spawn-return boundary must be emitted before CDP transport probing');
