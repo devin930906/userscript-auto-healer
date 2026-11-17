@@ -206,6 +206,9 @@ test('TASK-005/TEST-009/026: target inventory refuses accessor or Proxy spoofing
 
 import { createServer } from 'node:net';
 import { verifyWindowsLoopbackListenerPid, parseWindowsLoopbackListeners } from '../../src/browser/cdp-session';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync=promisify(execFile);
 test('TEST-009/026: netstat lookup is absolute and cannot search the working directory',()=>{
   assert.equal(resolveWindowsNetstatExecutable('C:\\Windows'),
     'C:\\Windows\\System32\\netstat.exe');
@@ -242,6 +245,118 @@ test('TEST-009: OS loopback listener must belong to the expected process PID',as
   assert.deepEqual(await verifyWindowsLoopbackListenerPid(0,process.pid),
     {ok:false,code:'INVALID_ARGUMENTS'});
   assert.equal(server.listening,true);
+});
+
+test('TEST-009/026: forged listener cancellation signals are rejected without invoking traps',async()=>{
+  let traps=0;
+  const poisoned=new Proxy(new AbortController().signal,{
+    get(){traps++;throw Error('PRIVATE_SIGNAL_GET');},
+    getPrototypeOf(){traps++;throw Error('PRIVATE_SIGNAL_PROTO');}
+  });
+  assert.deepEqual(await verifyWindowsLoopbackListenerPid(12065,process.pid,
+    poisoned as AbortSignal),{ok:false,code:'INVALID_ARGUMENTS'});
+  assert.equal(traps,0);
+});
+
+test('TEST-009: aborting the bounded listener probe terminates its netstat child',async()=>{
+  if(process.platform!=='win32')return;
+  const modulePath=require.resolve('../../src/browser/cdp-session');
+  const script=`
+    const cp=require('node:child_process');
+    const promisify=require('node:util').promisify;
+    const realExecFile=cp.execFile;
+    const controller=new AbortController();
+    const signal=controller.signal;
+    let passedSignal=false, fallbackKilled=false, child;
+    const wrappedExecFile=(file,args,options,callback)=>{
+      passedSignal=options.signal===signal;
+      if(file!==require(${JSON.stringify(modulePath)}).resolveWindowsNetstatExecutable(process.env.SystemRoot)||
+         JSON.stringify(args)!==JSON.stringify(['-ano','-p','TCP'])){
+        throw Error('UNEXPECTED_NETSTAT_COMMAND');
+      }
+      child=realExecFile(process.execPath,['-e','setTimeout(()=>{},30000)'],options,callback);
+      if(!passedSignal)setTimeout(()=>{fallbackKilled=true;child.kill();},250);
+      return child;
+    };
+    wrappedExecFile[promisify.custom]=(file,args,options)=>{
+      let resolve,reject;
+      const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});
+      child=wrappedExecFile(file,args,options,(error,stdout,stderr)=>{
+        if(error){error.stdout=stdout;error.stderr=stderr;reject(error);}
+        else resolve({stdout,stderr});
+      });
+      promise.child=child;
+      return promise;
+    };
+    cp.execFile=wrappedExecFile;
+    const cdp=require(${JSON.stringify(modulePath)});
+    setTimeout(()=>controller.abort(),50);
+    cdp.verifyWindowsLoopbackListenerPid(12065,process.pid,signal).then(result=>{
+      setTimeout(()=>console.log(JSON.stringify({passedSignal,fallbackKilled,
+        childExited:child?.exitCode!==null||child?.signalCode!==null,result})),20);
+    },error=>{console.error(String(error));process.exitCode=1;});
+  `;
+  const {stdout}=await execFileAsync(process.execPath,['-e',script],{
+    encoding:'utf8',timeout:3000,maxBuffer:1024*1024,windowsHide:true
+  });
+  const result=JSON.parse(stdout.trim()) as {
+    passedSignal:boolean;fallbackKilled:boolean;childExited:boolean;
+    result:{ok:boolean;code?:string}
+  };
+  assert.equal(result.passedSignal,true,
+    'the AbortSignal must reach execFile rather than only racing the caller');
+  assert.equal(result.fallbackKilled,false,
+    'the child must exit because of the propagated AbortSignal');
+  assert.equal(result.childExited,true,'the netstat child must be gone when the probe returns');
+  assert.deepEqual(result.result,{ok:false,code:'LISTENER_UNAVAILABLE'});
+});
+
+test('TEST-009: a listener result arriving after cancellation cannot be accepted',async()=>{
+  if(process.platform!=='win32')return;
+  const modulePath=require.resolve('../../src/browser/cdp-session');
+  const script=`
+    const cp=require('node:child_process');
+    const promisify=require('node:util').promisify;
+    const controller=new AbortController();
+    const signal=controller.signal;
+    const child={exitCode:0,signalCode:null,once(){return this;}};
+    let signalPassed=false;
+    const fakeExecFile=(file,args,options,callback)=>{
+      signalPassed=options.signal===signal;
+      if(file!==require(${JSON.stringify(modulePath)}).resolveWindowsNetstatExecutable(process.env.SystemRoot)||
+         JSON.stringify(args)!==JSON.stringify(['-ano','-p','TCP'])){
+        throw Error('UNEXPECTED_NETSTAT_COMMAND');
+      }
+      controller.abort();
+      callback(null,' TCP 127.0.0.1:12065 0.0.0.0:0 LISTENING 2345','');
+      return child;
+    };
+    fakeExecFile[promisify.custom]=(file,args,options)=>{
+      let resolve,reject;
+      const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});
+      const returnedChild=fakeExecFile(file,args,options,(error,stdout,stderr)=>{
+        if(error){error.stdout=stdout;error.stderr=stderr;reject(error);}
+        else resolve({stdout,stderr});
+      });
+      promise.child=returnedChild;
+      return promise;
+    };
+    cp.execFile=fakeExecFile;
+    const cdp=require(${JSON.stringify(modulePath)});
+    cdp.verifyWindowsLoopbackListenerPid(12065,2345,signal).then(result=>
+      console.log(JSON.stringify({signalPassed,result})),error=>{
+        console.error(String(error));process.exitCode=1;
+      });
+  `;
+  const {stdout}=await execFileAsync(process.execPath,['-e',script],{
+    encoding:'utf8',timeout:3000,maxBuffer:1024*1024,windowsHide:true
+  });
+  const result=JSON.parse(stdout.trim()) as {
+    signalPassed:boolean;result:{ok:boolean;code?:string}
+  };
+  assert.equal(result.signalPassed,true);
+  assert.deepEqual(result.result,{ok:false,code:'LISTENER_UNAVAILABLE'},
+    'a late native owner receipt must not survive cancellation');
 });
 
 test('TEST-009/026: a forged non-LISTENING loopback row is never accepted as ownership',()=>{

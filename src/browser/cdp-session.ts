@@ -178,7 +178,7 @@ export function inspectCdpTargetList(
 /** Windows-only loopback listener PID query. This does not contact the CDP endpoint,
  * start a browser, nor by itself authenticate the executable or its Profile.
  */
-import { execFile as execFileCallback } from 'node:child_process';
+import { execFile as execFileCallback,type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import {lstat} from 'node:fs/promises';
 import {win32} from 'node:path';
@@ -224,10 +224,27 @@ export function resolveWindowsNetstatExecutable(systemRoot:unknown):string|null{
       /[. ]$/.test(component)))return null;
   return win32.join(systemRoot,'System32','netstat.exe');
 }
-export async function findWindowsLoopbackListenerPid(port:number):Promise<LoopbackListenerResult>{
+function validListenerAbortSignal(signal:unknown):boolean{
+  if(signal===undefined)return true;
+  try{
+    if(!signal||typeof signal!=='object'||nodeTypes.isProxy(signal)||
+       Object.getPrototypeOf(signal)!==AbortSignal.prototype||
+       ['aborted','addEventListener','removeEventListener'].some(key=>
+         Object.prototype.hasOwnProperty.call(signal,key)))return false;
+    const getter=Object.getOwnPropertyDescriptor(
+      AbortSignal.prototype,'aborted')?.get;
+    return typeof getter==='function'&&typeof getter.call(signal)==='boolean';
+  }catch{return false;}
+}
+export async function findWindowsLoopbackListenerPid(
+  port:number,signal?:AbortSignal
+):Promise<LoopbackListenerResult>{
+  if(!validListenerAbortSignal(signal))
+    return {ok:false,code:'INVALID_ARGUMENTS'};
   if(process.platform!=='win32')return {ok:false,code:'UNSUPPORTED_PLATFORM'};
   if(!Number.isInteger(port)||port<1024||port>65535)
     return {ok:false,code:'INVALID_ARGUMENTS'};
+  if(signal?.aborted)return {ok:false,code:'LISTENER_UNAVAILABLE'};
   // No PATH or current-directory executable search: an imported or adjacent
   // untrusted "netstat.exe" must never run during Chrome ownership checks.
   // A reparse-point ancestor or missing native binary fails closed.
@@ -237,8 +254,25 @@ export async function findWindowsLoopbackListenerPid(port:number):Promise<Loopba
     if(!binary||await hasUnsafePathLink(binary)||
        !(await lstat(binary)).isFile())
       return {ok:false,code:'LISTENER_UNAVAILABLE'};
-    const result=await execFileAsync(binary,['-ano','-p','TCP'],
-      {windowsHide:true,timeout:12000,maxBuffer:8*1024*1024});
+    if(signal?.aborted)return {ok:false,code:'LISTENER_UNAVAILABLE'};
+    const command=execFileAsync(binary,['-ano','-p','TCP'],
+      {windowsHide:true,timeout:12000,maxBuffer:8*1024*1024,signal});
+    const child=(command as typeof command & {readonly child?:ChildProcess}).child;
+    const childClosed=child?new Promise<void>(resolve=>{
+      if(child.exitCode!==null||child.signalCode!==null){resolve();return;}
+      child.once('close',()=>resolve());
+    }):Promise.resolve();
+    let result:Awaited<typeof command>;
+    try{
+      result=await command;
+    }catch{
+      // execFile's AbortError can arrive before the OS reports that its child
+      // has exited. Keep the original caller bounded by its abort race, while
+      // allowing this background operation to finish its process cleanup.
+      if(signal?.aborted)await childClosed;
+      return {ok:false,code:'LISTENER_UNAVAILABLE'};
+    }
+    if(signal?.aborted)return {ok:false,code:'LISTENER_UNAVAILABLE'};
     output=result.stdout;
   }catch{
     return {ok:false,code:'LISTENER_UNAVAILABLE'};
@@ -250,11 +284,11 @@ export async function findWindowsLoopbackListenerPid(port:number):Promise<Loopba
   return {ok:true,status:'UNIQUE_LOOPBACK_LISTENER',pid:pids[0]};
 }
 export async function verifyWindowsLoopbackListenerPid(
-  port:number, expectedPid:number
+  port:number, expectedPid:number,signal?:AbortSignal
 ):Promise<ListenerOwnerResult> {
   if(!Number.isSafeInteger(expectedPid)||expectedPid<1)
     return {ok:false,code:'INVALID_ARGUMENTS'};
-  const found=await findWindowsLoopbackListenerPid(port);
+  const found=await findWindowsLoopbackListenerPid(port,signal);
   if(!found.ok)return found;
   const pid=found.pid;
   if(pid!==expectedPid)return {ok:false,code:'LISTENER_PID_MISMATCH'};

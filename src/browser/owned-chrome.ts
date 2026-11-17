@@ -283,8 +283,10 @@ async function probeCdpProtocolAfterOwnedTimeout(
     const ownerSignal=boundedSignal();
     if(!ownerSignal){emit('CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE');return;}
     const owner=await awaitPrelaunchCheckOrRevocation(
-      verifyWindowsLoopbackListenerPid(port,pid),ownerSignal);
-    if(owner.aborted){emit('CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE');return;}
+      verifyWindowsLoopbackListenerPid(port,pid,ownerSignal),ownerSignal);
+    if(owner.aborted||ownerSignal.aborted){
+      emit('CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE');return;
+    }
     if(!owner.value.ok||owner.value.pid!==pid){
       emit('CDP_TIMEOUT_OWNER_PROBE_REJECTED');
       return;
@@ -949,10 +951,12 @@ export async function launchApprovedIsolatedChrome(
           // A revoked consent or owned child exit also ends this read-only
           // wait; absence of a completed probe remains inconclusive.
           let stageEmitted=false;
+          const listenerSignal=AbortSignal.any([
+            activeSignal,AbortSignal.timeout(1000)]);
           const diagnostic=await awaitPrelaunchCheckOrRevocation(
-            verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid),
-            AbortSignal.any([activeSignal,AbortSignal.timeout(1000)]));
-          if(!diagnostic.aborted){
+            verifyWindowsLoopbackListenerPid(
+              cfg.remoteDebuggingPort,pid,listenerSignal),listenerSignal);
+          if(!diagnostic.aborted&&!listenerSignal.aborted){
             stage=classifyCdpTimeoutListener(diagnostic.value);
             if(diagnostic.value.ok&&diagnostic.value.pid===pid&&
                process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&

@@ -1933,6 +1933,7 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
   const saved={actions:process.env.GITHUB_ACTIONS,event:process.env.GITHUB_EVENT_NAME,
     probe:process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE};
   let elapsedMs=0,fetchCalls=0,ownerChecks=0,websocketProofs=0;
+  const ownerSignals:AbortSignal[]=[];
   const timeoutBudgets:number[]=[];
   const stages:string[]=[];
   try{
@@ -1970,10 +1971,13 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
       return new Response(JSON.stringify({Browser:'Chrome/155.0.1.1',
         webSocketDebuggerUrl:'ws://127.0.0.1:12065/devtools/browser/abcdefgh-1234'}));
     });
-    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async(port:number,expectedPid:number)=>{
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async(port:number,expectedPid:number,signal?:AbortSignal)=>{
       ownerChecks++;
       assert.equal(port,12065);
       assert.equal(expectedPid,child.pid);
+      assert.ok(signal instanceof AbortSignal,
+        'both post-timeout PID probes must pass their bounded cancellation signal');
+      ownerSignals.push(signal);
       if(ownerChecks===2)elapsedMs=21001;
       return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
         pid:child.pid,executableVerified:false as const};
@@ -1990,6 +1994,7 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
       'late HTTP and WebSocket success must never change the original timeout result');
     assert.equal(fetchCalls,2,'one normal request and at most one post-timeout HTTP request');
     assert.equal(ownerChecks,2,'recheck this child listener after the HTTP response');
+    assert.equal(ownerSignals.length,2,'the startup and post-HTTP owner checks both receive cancellation');
     assert.equal(websocketProofs,1,'only the verified HTTP response and rechecked listener permit one WS probe');
     assert.deepEqual(timeoutBudgets.slice(-3),[2000,1500,1000],
       'the remaining post-timeout budget must decrease across HTTP, PID and WebSocket probes');
