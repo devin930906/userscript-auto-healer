@@ -420,6 +420,8 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 
 ## 2026-11-17 TASK-007 / #486 Tampermonkey manager inventory readiness correction
 
+- **GitHub 同步**：[PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) 已创建，等待检查与集成；Issue #486 仍保持 Open。
+
 - 用户截图显示 Tampermonkey options 页为 v5.5.1；UAH 状态框同时显示未找到官方卡片。截图无法独立绑定到 UAH 启动的 Profile，因此只作为差异线索。
 - 代码路径检查发现探针只等待 Page.loadEventFired，而 Chromium 扩展管理器之后还会异步读取并初始化扩展列表。未完成初始化时的零卡片不能证明未安装。
 - 已加入管理器就绪标记、最多 4 秒的单调时钟等待，并让每次 CDP 调用受剩余预算限制。未就绪超时按 INSPECTION_UNAVAILABLE 失败关闭；探针继续只读管理页元数据。

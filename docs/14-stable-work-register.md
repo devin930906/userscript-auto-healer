@@ -500,6 +500,8 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 
 ## 2026-11-17 TASK-007 / #486 — manager inventory readiness false-negative guard
 
+- **GitHub**：[PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) 等待检查与集成；不关闭 #486。
+
 - **用户线索**：用户截图展示 Tampermonkey options v5.5.1，而 UAH status 说官方卡片未找到；截图不能证明两处属于同一个 Chrome Profile。
 - **修改**：在只读 chrome://extensions 探测中等待 Chromium 管理器初始化，限定四秒总预算并按剩余时间收紧每次 CDP 查询；未就绪超时返回 INSPECTION_UNAVAILABLE，不会错误报告未安装。
 - **验证**：build 成功；新增等待就绪与超时失败关闭覆盖；完整套件 1,146 项，1,134 通过、0 失败、12 条件跳过。证据见 [readiness 记录](evidence/2026-11-17-tampermonkey-manager-inventory-readiness.md)。

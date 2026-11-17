@@ -1,6 +1,6 @@
 # TASK-007 / REQ-017/018: Tampermonkey manager inventory readiness
 
-**Status:** local correction implemented and full tests passed; live post-fix browser verification remains outstanding. Issue #486 stays open.
+**Status:** implemented and full tests passed; [PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) is open, with live post-fix browser verification outstanding. Issue #486 stays open.
 
 ## User observation
 
