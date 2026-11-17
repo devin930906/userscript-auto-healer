@@ -529,3 +529,9 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **诊断改动**：PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) HEAD `8a7dff5d0e77ee0c7ccce593e3e90a925efbafa3` 增加 test-only Chrome 日志摘要器；仅读取 runner 一次性 Profile 中的 regular log file、大小上限 1 MiB；允许输出字段仅为 DevTools 公告数量、配置 loopback 端点公告布尔、ERROR/FATAL 行数和有限状态。raw log 和未审核文本不会进入 Actions 日志。
 - **隔离 Windows 结果**：手动 run [#44065671777](https://github.com/devin930906/userscript-auto-healer/actions/runs/44065671777) 仅开启 `chrome_boot_log=true`。签名 Chrome 启动及 owned-CDP 测试通过，阶段为 spawn t0、一次初始 refused、t1 解析 CDP version；摘要为 DevTools 公告 0、配置端点公告 false、ERROR 1、FATAL 0。Profile 已清理。
 - **判定**：测试成功本身证明不能把日志缺少 `DevTools listening` 当成端点未启动；该信号仍不足以解释原失败。#510 保持 Open、无产品根因修复、相关 GATE 未完成；PR #904 保持 Draft。Windows 候选包及 TASK-007 21-job 合成矩阵均通过，但本记录不代表 Stable。
+
+## 2026-11-17 本地回归环境诊断（#904）
+
+- 默认系统 `TEMP/TMP` 下的完整套件：1,154 项，1,100 通过、42 失败、12 条件跳过；临时诊断将 40 个 TASK-011 恢复失败追到系统临时目录祖先枚举的 `EPERM/scandir`，安全守卫按设计拒绝，未修改保护规则。
+- 使用工作区内的一次性 `TEMP/TMP` 目录复跑：1,154 项，1,141 通过、1 失败、12 条件跳过；剩余失败为 TEST-003 测试文件创建 symlink 时系统返回 `EPERM`。build 通过。
+- 此记录是本机权限边界，不代表本地全套件完全通过，也不构成产品代码修复或 Stable GATE 证据。

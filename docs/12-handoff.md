@@ -456,3 +456,10 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **Windows run**：手动 run [#44065671777](https://github.com/devin930906/userscript-auto-healer/actions/runs/44065671777) 只开启 `chrome_boot_log=true`，Windows `portable-chrome` Job 成功。隔离签名 Chrome 在 t1 通过 CDP version，测试验证了原有 owned listener 与 browser WebSocket 约束。
 - **脱敏日志结果**：`devtoolsAnnouncementCount=0`、`configuredLoopbackEndpointAnnounced=false`、`errorLineCount=1`、`fatalLineCount=0`。raw log 未上传，runner 一次性 Profile 清理。由于该次测试本身成功，日志中没有 `DevTools listening` 不能解释成端点未启动；当前 Chrome 日志摘要不是充分的故障判别信号。
 - **结论**：本次没有复现原 20 秒 `CDP_TIMEOUT`，没有建立根因或产品修复。Issue #510 保持 Open，PR #904 保持 Draft，所有 Stable GATE 状态不变。
+
+## 2026-11-17 本地 TASK-011 Windows 临时目录回归诊断
+
+- **源码身份**：本机完整回归使用的 workflow、TASK-005 代码及测试文件 blob SHA 已逐项对齐 PR #904 的原 HEAD `e7e8648d5e0fec84c8db845a06e09dc85c758bb3`；文档本身未参与测试执行。
+- **默认 TEMP/TMP**：`npm test` 的 build 通过；1,154 项中 1,100 通过、42 失败、12 条件跳过。临时诊断副本将 #fail 定位到 Windows 系统临时目录祖先扫描：`fs.readdir` 返回 `EPERM`（`scandir`），恢复路径守卫按设计失败关闭并返回 `UNSAFE_PATH`。没有放宽路径检查。
+- **隔离 TEMP/TMP 重跑**：把 `TEMP` / `TMP` 指向工作区内新建的一次性临时目录后，完整 `npm test` 为 1,154 项、1,141 通过、1 失败、12 条件跳过；TASK-011 恢复用例全部通过。唯一剩余失败是 `TEST-003: symlink file cannot bypass path scanner`，本机创建测试符号链接本身返回 `EPERM`。
+- **结论**：临时目录改址只用于本机验证，没有改产品代码或测试通过条件；完整本地套件仍有一项受 Windows 符号链接权限限制。该环境诊断不改变 #510 的 Chrome 超时根因状态，也不清除 Stable 门槛。
