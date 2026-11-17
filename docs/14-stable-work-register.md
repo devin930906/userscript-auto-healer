@@ -482,3 +482,18 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **本次观察**：[详细记录](evidence/2026-11-16-tampermonkey-browser-mcp-followup.md)。连接会话中的 Tampermonkey 运行时为 ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`、5.5.1、MV3。单个临时脚本在 `example.net` 实际注入并调用 `GM_getValue`；人工切换选择器前后分别观察到 `missing-target/none` 与 `recovered/done`。
 - **清理与限制**：该脚本已不在已安装列表，重载页后测试 DOM 标记消失；回收站保留脚本记录，没有执行可能影响其他项目的全局清空。浏览器工具未给出活动 Chrome Profile 路径，指定 Data 目录绑定、Chrome 版本和商店来源未独立核实。一次仪表盘快照意外返回其他脚本名称/描述；未打开或更改其他脚本。
 - **判定**：这是管理器手工脚本和合成页面的有限观察，不是产品自动修复、真实用户业务或完整 TEST-017/018。Issue #486 保持 Open；GATE-004/005、最终人工验收及 Stable 均未完成。
+
+## 2026-11-17 TASK-007 / Issue #486 用户指定脚本 MCP 实时业务样本
+
+- **测试对象**：用户指定本地 `ChatGPT-Prompt-Flow.user.js` v1.0.51，本机原文件哈希在测试前后相同；临时唯一名副本仅更改 `@name`，用户原件没有修改。公开记录不包含本机路径或哈希值。
+- **环境/恢复**：用户授权使用 Chrome Browser MCP 当前 Profile；Tampermonkey 5.5.1 / MV3。原安装 v1.0.53 曾暂时停用，QA 副本单独启用；完成后 QA 名称在启用列表 0 条，v1.0.53 恢复为启用。MCP Profile 与用户指定的 Codex Chrome Data 路径未作进程级绑定；Web Store 来源未核验。
+- **实际动作**：在空输入的独立临时 ChatGPT 会话中观察到 Prompt Flow 面板；通过 `File`/`DataTransfer` 事件导入 1 条 TXT（MCP 原生文件上传接口不允许读取该工作区路径），面板报告 1 条并开放运行。确认 composer 为空后运行一次，页面回复节点精确包含 `UAH QA PASS 1.0.51`，队列面板显示 `全部完成`、`running=false`。
+- **收尾与限制**：本地临时脚本/TXT 删除，测试页关闭；Tampermonkey 可能保留已删除 QA 副本在回收站，未使用全局“删除全部”。没有测试原生文件选择器、GM 往返、manager/app authenticity、UAH 自动诊断/修复、失败恢复、备份或回滚；该用户脚本样本不等于 TEST-017/018 或 GATE-004/005。原始未发送草稿页未清空或发送。
+- **结论**：增加一项真实外部脚本业务动作观察；#486 保持 Open，TASK-007、TEST-017/018、GATE-004/005 与 Stable 验收状态不变。详细证据：[本次 MCP 验收记录](evidence/2026-11-17-chatgpt-prompt-flow-1.0.51-mcp-acceptance.md)。
+
+## 2026-11-17 TASK-019/020 — exact-main Windows candidate packaging
+
+- **Source**: `main@ad34e61fba377349b0303c4feabb139b9c88a0e2`, version `1.1.3`; Windows Candidate EXE/ZIP run [#43910270170](https://github.com/devin930906/userscript-auto-healer/actions/runs/43910270170) completed successfully.
+- **Verification**: typecheck, Windows relocation/file-lock/no-overwrite, and checksum refusal cases passed; 1,143 registered tests = 1,140 pass / 0 fail / 3 conditional skips. Candidate ZIP 159-file SHA-256 round-trip, cold and three post-use relocation/restart cycles, Unicode/space path, read-only ACL extraction, clean installer/159-file payload parity, Electron launch, uninstall and userData retention passed. Older-installer upgrade used a synthetic Inno installer and is not historical-version migration evidence.
+- **Outputs**: candidate EXE SHA-256 `b225db2d93caad7b62639bbcf1ae5f144c7d6d26b7410f2788f8736508f31741`; candidate Portable ZIP SHA-256 `c285f59e93c9f067eddf74878a2a62e0c7063a1391bb5be7ea18354c20e0da12`. Temporary [Actions artifact 14247526962](https://github.com/devin930906/userscript-auto-healer/actions/runs/43910270170/artifacts/14247526962), digest `sha256:4aaa73ffd9ad06ab8f4d8b20ee430933b0b921d17150fb32e14457f3125cb879`, expires 2026-11-19 16:49 UTC. It is not a formal Release.
+- **Stable status**: Candidate packaging succeeded, but the final Stable GATEs and required human acceptance remain incomplete. #486/TASK-007 is still Open; TEST-017/018 and GATE-004/005 are not passed. Do not treat these candidate hashes as release hashes.
