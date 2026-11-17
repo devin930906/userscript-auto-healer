@@ -152,22 +152,22 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
   3. 版本号正式推进至 **`1.0.1`**。
 - **自动化验证**：全量 1075 项测试 100% 绿灯（1065 pass, 0 fail, 10 conditional skip），预开发追踪矩阵 100% 通过。
 
-## 2026-11-16 PR #883 合并后的 Stable 发布状态快照（已由文末 main 候选状态更新）
+## 2026-11-17 PR #901/#902 合并后的 Stable 发布状态快照
 
-> 本节针对 `docs/product-rebaseline.md` 所定义的新产品验收范围。2026-11-12 对 v1.0.0 的 GATE-001..011 签署，以及历史 GitHub Release `v1.1.3`，均保留为历史发布证据；不得直接继承为本次 rebaseline 的验收结论。v1.1.3 已于 2026-11-13 发布，但原始需求校准文件明确规定该版本不是本次需求验收证据。
+> 本节针对 `docs/product-rebaseline.md` 所定义的新产品验收范围。历史 v1.1.3 Release 和旧版 GATE 签署保留为历史记录，不自动覆盖本轮验收。
 
-- **当前代码基线**：PR [#883](https://github.com/devin930906/userscript-auto-healer/pull/883) 已合并，`main@bcacd082a3c538e00dfbf481c7221c8e829818ad`。合并后 Application Skeleton Checks [#43806721310](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806721310) 成功（1126 tests：1125 pass、0 fail、1 conditional skip；Windows Electron shell smoke 成功）。
-- **GATE-001 / GATE-002**：当前 rebaseline 的普通用户主流程、真实管理器、真实业务断言、批量处理与逐项结果仍未形成完整产品闭环；历史需求矩阵及旧版本签署不能替代新范围逐项复核。
-- **GATE-003**：合并后 Application Skeleton Checks 通过，但 Windows Candidate EXE/ZIP [#43805989231](https://github.com/devin930906/userscript-auto-healer/actions/runs/43805989231) 在 TEST-006/008/009 的 owned-Chrome CDP 启动检查失败，未进入打包；因此当前候选发行链的完整机器门槛仍受阻。该故障已在 [Issue #510](https://github.com/devin930906/userscript-auto-healer/issues/510) 重新打开。
-- **GATE-004 / GATE-005**：TASK-007 实验 [#43806236366](https://github.com/devin930906/userscript-auto-healer/actions/runs/43806236366) 验证 vendor-hosted Tampermonkey 5.4.1 与签名 key/runtime ID 对应的隔离运行环境、service worker 及合成业务对照；但 `storeAuthenticityVerified=false`、`gmRoundtrip=false`，且未覆盖真实用户 Chrome/Profile、真实脚本安装授权、完整 GM API、生产业务及支持矩阵，故仍未通过。
-- **GATE-006**：既有桌面安全边界与自动化负例证据保留；本次 rebaseline 的完整安全与权限链尚未重新签署，不以旧版通过记录推定当前全部满足。
-- **GATE-007**：可恢复原子事务、真实脚本自动应用与失败回滚仍未完成；阶段性备份/候选暂存不构成真实原文件事务验收。
-- **GATE-008 / GATE-009**：历史 v1.1.3 的 EXE/ZIP 仍是已发布历史产物；本轮 Candidate Packaging 在回归阶段失败，未生成当前 rebaseline 候选双包，真实安装、升级、卸载、便携直启、只读目录与用户数据持久性仍须按 TEST-027/028 验证。
-- **GATE-010**：本轮工程文档正在同步当前合并、测试与阻断证据；须以 Documentation Integrity 的实际结果确认。
-- **GATE-011**：当前 rebaseline 尚无同一候选 SHA 构建、校验并重新下载验证的 EXE+ZIP 发行对；历史 Release 资产不能代替本次候选产物。
-- **最终集中人工验收**：尚未执行。Windows 实机/VM 安装、升级、卸载、ZIP 解压直启、用户数据、真实 Chrome/Tampermonkey、主流程及 GUI 体验必须继续保留至正式发布前的集中阶段；不得提前标记通过。
+- **当前代码基线**：PR [#901](https://github.com/devin930906/userscript-auto-healer/pull/901) 的产品改动已合并到 `main@4129a966a2917801fe71f49d7d357f54404b8a77`；PR [#902](https://github.com/devin930906/userscript-auto-healer/pull/902) 为 docs-only，当前 `main@674548901ebf1e58b6ef9b66fc681a393a8c99a1`。当前没有 Open PR。最近正式 Release 仍为 [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3)，不是本轮 Stable 验收证据。
+- **GATE-001 / GATE-002**：普通用户完整主流程、产品级真实管理器与业务断言、真实批处理及逐项结果尚未形成完整闭环。
+- **GATE-003**：Windows Candidate EXE/ZIP [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 在 PR #901 HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1` 成功；Windows CI 为 1,146 项、1,143 通过、0 失败、3 条件跳过。Candidate Packaging 完成 159 文件 ZIP 清单、安装载荷哈希、Electron 启动/卸载/userData 保留和便携重定位检查。产品代码树与当前 main 相同，但构建源不是当前文档提交 SHA；此候选包不是 Stable 发行物。Issue #510 的间歇性 Chrome 启动根因仍未确认。
+- **GATE-004 / GATE-005**：用户于 2026-11-17 提供的 Chrome 截图显示 Tampermonkey 官方扩展 ID 对应的 Tampermonkey 页面及 v5.5.1，确认其所示浏览器已安装并能打开 Tampermonkey 仪表盘。该事实与 UAH 状态框“未找到官方卡片”不一致；截图没有进程级证明 UAH 正在检查同一个 Data/Profile，需按探测结果与浏览器状态冲突继续核查，不能再推断用户未安装 Tampermonkey，也不应要求重装。它仍未证明 UAH Profile 绑定、商店来源、产品安装/注入、GM 往返、业务修复或失败回滚；TASK-007、TEST-017/018 和 GATE-004/005 未通过。
+- **GATE-006**：已有安全边界与负例记录保留；本轮完整权限链仍未重新签署，不继承旧版通过结论。
+- **GATE-007**：真实脚本原子事务、自动应用和失败回滚未完成；候选暂存及离线恢复检查不等同真实可恢复事务。
+- **GATE-008 / GATE-009**：PR #901 Candidate EXE/ZIP 的自动化安装和便携检查通过，但尚未从最终发布提交生成正式双包，也未完成最终用户对真实升级/卸载、便携直启和数据保留的集中验收。
+- **GATE-010**：PR #902 合并 SHA 的 Documentation Integrity [#44031797621](https://github.com/devin930906/userscript-auto-healer/actions/runs/44031797621) 成功；本轮新文档变更仍须通过自己的文档工作流。
+- **GATE-011**：没有从最终 Stable 提交构建并重新下载校验的正式 EXE+ZIP 发行对，也没有本轮正式 Stable Release。
+- **最终集中人工验收**：尚未执行。真实 Chrome/Tampermonkey、完整主流程，以及最终 EXE/ZIP 的安装、升级、卸载和便携使用仍需在发布前完成。
 
-**当前判定：Stable 未完成；不得创建新的 Stable Tag/Release。** 只有当前 rebaseline 的全部必要 GATE、同源 EXE/ZIP、机器验证与最终人工验收均有真实证据后，才允许重新评估正式发布。
+**当前判定：Stable 未完成；不得创建新的 Stable Tag/Release。**
 
 ## 2026-11-16 PR #886 合并时的 PR 临时合并源候选（后续已有 main 候选）
 

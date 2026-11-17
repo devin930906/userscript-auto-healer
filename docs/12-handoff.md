@@ -427,3 +427,12 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 已加入管理器就绪标记、最多 4 秒的单调时钟等待，并让每次 CDP 调用受剩余预算限制。未就绪超时按 INSPECTION_UNAVAILABLE 失败关闭；探针继续只读管理页元数据。
 - 本地验证：build 成功；manager 专项 10/10；完整套件 1,146 项（1,134 通过、0 失败、12 条件跳过）。详细证据见 [Tampermonkey manager readiness 记录](evidence/2026-11-17-tampermonkey-manager-inventory-readiness.md)。
 - 尚未做修复后的浏览器复测；不证明同一 Profile、商店来源、脚本注入、GM、业务恢复或回滚。#486 保持 Open；TEST-017/018、GATE-004/005 和 Stable 状态不变。
+
+
+## 2026-11-17 当前续接快照（PR #901/#902 与用户截图后）
+
+- 当前 `main@674548901ebf1e58b6ef9b66fc681a393a8c99a1`；PR #901 产品改动合并 SHA `4129a966a2917801fe71f49d7d357f54404b8a77`，PR #902 docs-only 合并。PR #902 的 Documentation Integrity run [#44031797621](https://github.com/devin930906/userscript-auto-healer/actions/runs/44031797621) 成功；当前无 Open PR。
+- 用户最新 Chrome 截图确认 Tampermonkey 5.5.1 已安装并可打开其仪表盘。这与 UAH 状态框的“未找到官方卡片”冲突；不得再把状态框结果解释成用户未安装，也不要要求重装。截图未提供 Data/Profile 的进程级绑定，且没有在截图中显示 UAH 对该精确 Profile 的复测结果。
+- PR #901 Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 成功，HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1`；候选包与当前 main 的产品代码树一致但来自 PR HEAD。该产物为临时 Candidate，不是 Stable Release；artifact 14304753363 于 2026-11-20T06:25:48Z 过期。
+- 当前 Open Issues 14 个：#486/#487/#488/#489/#510/#603..#610/#857。#856/#480/#440/#215 已关闭历史；#857 是 TASK-013 当前 Issue，#610 是最终 TASK-021/GATE 跟踪。
+- 最新正式 Release 仍是 v1.1.3。TASK-007、TEST-017/018、GATE-004/005 以及所有最终 Stable GATE 与人工验收仍未完成。继续保持不操作用户桌面；如需补充实机步骤，由用户自己操作并提供结果。
