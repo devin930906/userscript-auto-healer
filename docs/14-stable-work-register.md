@@ -522,3 +522,10 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **#486 / Tampermonkey**：用户提供的 Chrome 截图显示 Tampermonkey v5.5.1“已安装脚本”页，含三个启用的 UAH 隔离 GM 诊断脚本和启用的 ChatGPT Prompt Flow v1.0.51。截图确认 Tampermonkey 已安装；先前 UAH “未找到官方 ID”不能作为未安装证据，也不应要求重装。截图未提供 UAH 受控进程/Profile 绑定、商店来源、脚本 GM/业务动作或失败回滚证明。#486 继续 Open，TEST-017/018、GATE-004/005 未通过。用户要求不使用 Computer Use，由用户操作其桌面。
 - **#510 / 诊断**：PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) 的 Windows 隔离手动 run [#44058008706](https://github.com/devin930906/userscript-auto-healer/actions/runs/44058008706) 成功；唯一开启输入是 `chrome_post_timeout_protocol_probe=true`。原 20 秒启动超时未复现，故超时后 HTTP/PID/WebSocket 分支未触发；无根因结论或产品修复。PR #904 保持 Draft，#510 保持 Open。
 - **Stable**：上述截图与成功样本均不代表完整真实业务验收、失败恢复、Stable GATE 或正式发布；最终同源 EXE/ZIP 和集中人工验收仍未完成。
+
+
+## 2026-11-17 TASK-005 / #510 bounded Chrome boot-log diagnostic update
+
+- **诊断改动**：PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) HEAD `8a7dff5d0e77ee0c7ccce593e3e90a925efbafa3` 增加 test-only Chrome 日志摘要器；仅读取 runner 一次性 Profile 中的 regular log file、大小上限 1 MiB；允许输出字段仅为 DevTools 公告数量、配置 loopback 端点公告布尔、ERROR/FATAL 行数和有限状态。raw log 和未审核文本不会进入 Actions 日志。
+- **隔离 Windows 结果**：手动 run [#44065671777](https://github.com/devin930906/userscript-auto-healer/actions/runs/44065671777) 仅开启 `chrome_boot_log=true`。签名 Chrome 启动及 owned-CDP 测试通过，阶段为 spawn t0、一次初始 refused、t1 解析 CDP version；摘要为 DevTools 公告 0、配置端点公告 false、ERROR 1、FATAL 0。Profile 已清理。
+- **判定**：测试成功本身证明不能把日志缺少 `DevTools listening` 当成端点未启动；该信号仍不足以解释原失败。#510 保持 Open、无产品根因修复、相关 GATE 未完成；PR #904 保持 Draft。Windows 候选包及 TASK-007 21-job 合成矩阵均通过，但本记录不代表 Stable。

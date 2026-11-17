@@ -448,3 +448,11 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) 的 default-off 隔离 Windows 诊断 workflow run [#44058008706](https://github.com/devin930906/userscript-auto-healer/actions/runs/44058008706) 成功；在一次性 runner Chrome/Profile 中只启用 `chrome_post_timeout_protocol_probe=true`。
 - 本次 Chrome 在原 20 秒超时前成功启动，所以没有进入超时后 GET `/json/version` / PID 复核 / WebSocket 的诊断分支。该结果没有复现 #510，也未提供根因证据；不是产品修复。PR #904 保持 Draft，Issue #510 保持 Open。
 - Stable 仍未完成；不得据此关闭 #510、宣称 TASK-005 根因已解决或宣称 Stable GATE 已通过。
+
+
+## 2026-11-17 TASK-005 / #510 bounded Chrome boot-log diagnostic
+
+- **Code and sync**：PR [#904](https://github.com/devin930906/userscript-auto-healer/pull/904) 当前诊断代码 HEAD `8a7dff5d0e77ee0c7ccce593e3e90a925efbafa3`。新增测试专用 Chrome 启动日志摘要器，只从一次性 Profile 的常规文件读取最多 1 MiB，并输出固定摘要字段；不输出原始日志、地址、端口、Profile 路径、浏览器 ID 或错误文本。
+- **Windows run**：手动 run [#44065671777](https://github.com/devin930906/userscript-auto-healer/actions/runs/44065671777) 只开启 `chrome_boot_log=true`，Windows `portable-chrome` Job 成功。隔离签名 Chrome 在 t1 通过 CDP version，测试验证了原有 owned listener 与 browser WebSocket 约束。
+- **脱敏日志结果**：`devtoolsAnnouncementCount=0`、`configuredLoopbackEndpointAnnounced=false`、`errorLineCount=1`、`fatalLineCount=0`。raw log 未上传，runner 一次性 Profile 清理。由于该次测试本身成功，日志中没有 `DevTools listening` 不能解释成端点未启动；当前 Chrome 日志摘要不是充分的故障判别信号。
+- **结论**：本次没有复现原 20 秒 `CDP_TIMEOUT`，没有建立根因或产品修复。Issue #510 保持 Open，PR #904 保持 Draft，所有 Stable GATE 状态不变。
