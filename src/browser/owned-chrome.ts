@@ -19,6 +19,7 @@ import { readChromeProcessInfo, chromeProcessMatches } from './existing-chrome';
  */
 export const DEFAULT_CDP_JSON_LIMIT_BYTES=16384;
 export const MAX_CDP_TARGET_LIST_BYTES=1048576; // 1 MiB for target list (supports up to 1000 targets)
+const POST_TIMEOUT_PROTOCOL_PROBE_BUDGET_MS=2000;
 
 export async function readBoundedCdpJson(
   response:Response,signal?:AbortSignal,maxBytes?:number
@@ -139,7 +140,12 @@ export type ChromeStartupStage='CHROME_SPAWN_RETURNED'|'FETCH_FAILED'|'FETCH_REF
   'CDP_TIMEOUT_PROBE_INCONCLUSIVE'|'CDP_PID_PROOF_STARTED'|
   'CDP_PID_PROOF_VERIFIED'|'CDP_PID_PROOF_REJECTED'|
   'CDP_WS_PROOF_STARTED'|'CDP_WS_PROOF_VERIFIED'|
-  'CDP_WS_PROOF_REJECTED'|'CDP_POST_VERSION_DEADLINE';
+  'CDP_WS_PROOF_REJECTED'|'CDP_POST_VERSION_DEADLINE'|
+  'CDP_TIMEOUT_HTTP_PROBE_VERIFIED'|'CDP_TIMEOUT_HTTP_PROBE_REJECTED'|
+  'CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE'|'CDP_TIMEOUT_OWNER_PROBE_REJECTED'|
+  'CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE'|'CDP_TIMEOUT_WS_PROBE_VERIFIED'|
+  'CDP_TIMEOUT_WS_PROBE_REJECTED'|'CDP_TIMEOUT_WS_PROBE_INCONCLUSIVE'|
+  'CDP_TIMEOUT_PROTOCOL_PROBE_INCONCLUSIVE';
 
 /** Only fixed, redacted transport labels. Never serialize an underlying
  * fetch/undici error, socket address, Chrome profile, process or user script.
@@ -222,6 +228,79 @@ export function classifyCdpTimeoutListener(result:ListenerOwnerResult):ChromeSta
     case 'LISTENER_PID_MISMATCH':return 'CDP_TIMEOUT_LISTENER_PID_MISMATCH';
     case 'LISTENER_AMBIGUOUS':return 'CDP_TIMEOUT_LISTENER_AMBIGUOUS';
     default:return 'CDP_TIMEOUT_PROBE_INCONCLUSIVE';
+  }
+}
+/** Manual Windows CI evidence only. A late endpoint observation is diagnostic:
+ * it never changes the original timeout result or grants an owned session. The
+ * caller invokes this only after the timed-out child listener PID matched.
+ */
+async function probeCdpProtocolAfterOwnedTimeout(
+  port:number,pid:number,browserVersion:string,signal:AbortSignal,
+  emit:(stage:ChromeStartupStage)=>void
+):Promise<void>{
+  const deadline=performance.now()+POST_TIMEOUT_PROTOCOL_PROBE_BUDGET_MS;
+  const boundedSignal=():AbortSignal|null=>{
+    const remaining=Math.ceil(deadline-performance.now());
+    if(remaining<=0)return null;
+    return AbortSignal.any([signal,AbortSignal.timeout(remaining)]);
+  };
+  const inconclusive=():void=>emit('CDP_TIMEOUT_PROTOCOL_PROBE_INCONCLUSIVE');
+  try{
+    const httpSignal=boundedSignal();
+    if(!httpSignal){emit('CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE');return;}
+    let response:Response;
+    try{
+      const fetched=await awaitPrelaunchCheckOrRevocation(fetch(
+        'http://127.0.0.1:'+port+'/json/version',{
+          method:'GET',redirect:'error',signal:httpSignal
+        }),httpSignal);
+      if(fetched.aborted){
+        emit('CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE');
+        return;
+      }
+      response=fetched.value;
+    }catch{
+      emit(httpSignal.aborted?'CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE':
+        'CDP_TIMEOUT_HTTP_PROBE_REJECTED');
+      return;
+    }
+    const payload=await readBoundedCdpJson(response,httpSignal);
+    if(signal.aborted){inconclusive();return;}
+    if(payload===null||response.status!==200){
+      emit(httpSignal.aborted?'CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE':
+        'CDP_TIMEOUT_HTTP_PROBE_REJECTED');
+      return;
+    }
+    const inspected=inspectCdpVersion(payload,port);
+    if(!inspected.ok||
+       (inspected.browser!=='Chrome/'+browserVersion&&
+        inspected.browser!=='HeadlessChrome/'+browserVersion)){
+      emit('CDP_TIMEOUT_HTTP_PROBE_REJECTED');
+      return;
+    }
+    emit('CDP_TIMEOUT_HTTP_PROBE_VERIFIED');
+
+    const ownerSignal=boundedSignal();
+    if(!ownerSignal){emit('CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE');return;}
+    const owner=await awaitPrelaunchCheckOrRevocation(
+      verifyWindowsLoopbackListenerPid(port,pid),ownerSignal);
+    if(owner.aborted){emit('CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE');return;}
+    if(!owner.value.ok||owner.value.pid!==pid){
+      emit('CDP_TIMEOUT_OWNER_PROBE_REJECTED');
+      return;
+    }
+
+    const websocketSignal=boundedSignal();
+    if(!websocketSignal){emit('CDP_TIMEOUT_WS_PROBE_INCONCLUSIVE');return;}
+    const handshake=await awaitPrelaunchCheckOrRevocation(
+      verifyCdpBrowserWebSocket(inspected.websocketUrl,port,browserVersion,
+        websocketSignal),websocketSignal);
+    if(handshake.aborted){emit('CDP_TIMEOUT_WS_PROBE_INCONCLUSIVE');return;}
+    emit(handshake.value?'CDP_TIMEOUT_WS_PROBE_VERIFIED':
+      'CDP_TIMEOUT_WS_PROBE_REJECTED');
+  }catch{
+    // This is only a redacted observation. Never serialize transport or OS data.
+    inconclusive();
   }
 }
 export interface ChromeLaunchOptions {
@@ -869,13 +948,23 @@ export async function launchApprovedIsolatedChrome(
           // the owned child alive indefinitely or extend CDP verification.
           // A revoked consent or owned child exit also ends this read-only
           // wait; absence of a completed probe remains inconclusive.
+          let stageEmitted=false;
           const diagnostic=await awaitPrelaunchCheckOrRevocation(
             verifyWindowsLoopbackListenerPid(cfg.remoteDebuggingPort,pid),
             AbortSignal.any([activeSignal,AbortSignal.timeout(1000)]));
-          if(!diagnostic.aborted)
+          if(!diagnostic.aborted){
             stage=classifyCdpTimeoutListener(diagnostic.value);
+            if(diagnostic.value.ok&&diagnostic.value.pid===pid&&
+               process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
+               process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE==='true'){
+              emitStage(stage);
+              stageEmitted=true;
+              await probeCdpProtocolAfterOwnedTimeout(
+                cfg.remoteDebuggingPort,pid,binary.version,activeSignal,emitStage);
+            }
+          }
+          if(!stageEmitted)emitStage(stage);
         }catch{/* Never publish OS error text or change the failure result. */}
-        emitStage(stage);
       }
     }
     return {ok:false,code:'CDP_TIMEOUT'};

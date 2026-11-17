@@ -376,7 +376,11 @@ function createBoundedCdpStageWindows() {
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','PROBE_ERROR',
     'CDP_TIMEOUT_LISTENER_PID_MATCH','CDP_TIMEOUT_LISTENER_UNAVAILABLE',
     'CDP_TIMEOUT_LISTENER_PID_MISMATCH','CDP_TIMEOUT_LISTENER_AMBIGUOUS',
-    'CDP_TIMEOUT_PROBE_INCONCLUSIVE'
+    'CDP_TIMEOUT_PROBE_INCONCLUSIVE','CDP_TIMEOUT_HTTP_PROBE_VERIFIED',
+    'CDP_TIMEOUT_HTTP_PROBE_REJECTED','CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE',
+    'CDP_TIMEOUT_OWNER_PROBE_REJECTED','CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE',
+    'CDP_TIMEOUT_WS_PROBE_VERIFIED','CDP_TIMEOUT_WS_PROBE_REJECTED',
+    'CDP_TIMEOUT_WS_PROBE_INCONCLUSIVE','CDP_TIMEOUT_PROTOCOL_PROBE_INCONCLUSIVE'
   ]);
   const windows=new Map<string,{first:number;last:number}>();
   return {
@@ -386,7 +390,7 @@ function createBoundedCdpStageWindows() {
       const second=Math.min(31,Math.floor(elapsedMs/1000));
       const previous=windows.get(stage);
       if(previous){previous.last=Math.max(previous.last,second);return;}
-      if(windows.size<16)windows.set(stage,{first:second,last:second});
+      if(windows.size<24)windows.set(stage,{first:second,last:second});
     },
     summary():string {
       return windows.size?
@@ -418,6 +422,40 @@ test('TASK-005/TEST-006/008/009: startup stage windows expose only bounded fixed
   for(let i=0;i<1000;i++)many.observe(i*10,i%2?'FETCH_REFUSED':'FETCH_RESET');
   assert.equal(many.summary(),'FETCH_RESET=t0..t9,FETCH_REFUSED=t0..t9');
   assert.ok(many.summary().length<200);
+});
+
+test('TASK-005: bounded startup stage windows retain redacted post-timeout protocol evidence',()=>{
+  const windows=createBoundedCdpStageWindows();
+  windows.observe(20000,'CDP_TIMEOUT_LISTENER_PID_MATCH');
+  windows.observe(21000,'CDP_TIMEOUT_HTTP_PROBE_VERIFIED');
+  windows.observe(21001,'CDP_TIMEOUT_WS_PROBE_VERIFIED');
+  assert.equal(windows.summary(),
+    'CDP_TIMEOUT_LISTENER_PID_MATCH=t20..t20,'+
+    'CDP_TIMEOUT_HTTP_PROBE_VERIFIED=t21..t21,'+
+    'CDP_TIMEOUT_WS_PROBE_VERIFIED=t21..t21');
+  assert.ok(!windows.summary().includes('127.0.0.1'));
+  assert.ok(!windows.summary().includes('41265'));
+});
+
+test('TASK-005: post-timeout protocol diagnostic is manual-only and runs one isolated Chrome test',()=>{
+  const workflow=readFileSync(join(process.cwd(),
+    '.github/workflows/task005-portable-product-check.yml'),'utf8');
+  const source=readFileSync(join(process.cwd(),'src/browser/owned-chrome.ts'),'utf8');
+  const browserTest=readFileSync(join(process.cwd(),'tests/browser/owned-chrome.test.ts'),'utf8');
+  assert.match(workflow,/chrome_post_timeout_protocol_probe:\s*\n\s*description:/);
+  assert.match(workflow,/UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE:/);
+  assert.match(workflow,/TASK005_POST_TIMEOUT_PROTOCOL_PROBE_BEGIN/);
+  assert.match(workflow,/--test-name-pattern="TEST-006\/008\/009: isolated signed Chrome presents owned CDP HTTP only"/);
+  assert.match(workflow,/Choose exactly one manual Chrome diagnostic mode per runner/);
+  assert.match(workflow,/post-timeout protocol probe.*boot log/i);
+  assert.match(source,/POST_TIMEOUT_PROTOCOL_PROBE_BUDGET_MS=2000/);
+  assert.match(source,/GITHUB_EVENT_NAME==='workflow_dispatch'/);
+  assert.match(source,/UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE==='true'/);
+  assert.match(source,/CDP_TIMEOUT_HTTP_PROBE_VERIFIED/);
+  assert.match(source,/CDP_TIMEOUT_WS_PROBE_VERIFIED/);
+  assert.match(browserTest,/UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE==='true'/);
+  assert.match(browserTest,/process\.env\.RUNNER_TEMP/);
+  assert.doesNotMatch(workflow,/UAH_.*TIMEOUT_OVERRIDE|SKIP_CHROME_OWNERSHIP/);
 });
 
 /** A bounded CI-only recovery for Chrome that has not even touched its
@@ -836,12 +874,15 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     try{await access(candidate);chrome=candidate;break;}catch{ /* other location */ }
   }
   if(!chrome){t.skip('No official Chrome binary on runner');return;}
-  // The manual CI logging mode confines this test-owned Profile to RUNNER_TEMP.
-  // Other Windows CI runs retain their existing temporary test path.
-  const ciLogRoot=process.env.GITHUB_ACTIONS==='true'&&
+  // Manual diagnostics that need a stable artifact boundary keep this
+  // test-owned Profile under RUNNER_TEMP; ordinary Windows CI retains its
+  // existing temporary test path.
+  const runnerTempRoot=process.env.GITHUB_ACTIONS==='true'&&
     process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
-    process.env.UAH_TEST_CHROME_BOOT_LOG==='true'&&process.env.RUNNER_TEMP;
-  const root=await mkdtemp(join(ciLogRoot||tmpdir(),'uah-owned-chrome-test-'));
+    (process.env.UAH_TEST_CHROME_BOOT_LOG==='true'||
+     process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE==='true')&&
+    process.env.RUNNER_TEMP;
+  const root=await mkdtemp(join(runnerTempRoot||tmpdir(),'uah-owned-chrome-test-'));
   let profile=join(root,'profile');
   let stop:()=>void=()=>{};
   let unexpectedExits=0;
@@ -955,7 +996,14 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     'CDP_VERSION_REJECTED','CDP_VERSION_PARSED','CHILD_RUNNING_NO_CDP',
     'CDP_PID_PROOF_STARTED','CDP_PID_PROOF_VERIFIED','CDP_PID_PROOF_REJECTED',
     'CDP_WS_PROOF_STARTED','CDP_WS_PROOF_VERIFIED','CDP_WS_PROOF_REJECTED',
-    'CDP_POST_VERSION_DEADLINE']);
+    'CDP_POST_VERSION_DEADLINE','CDP_TIMEOUT_LISTENER_PID_MATCH',
+    'CDP_TIMEOUT_LISTENER_UNAVAILABLE','CDP_TIMEOUT_LISTENER_PID_MISMATCH',
+    'CDP_TIMEOUT_LISTENER_AMBIGUOUS','CDP_TIMEOUT_PROBE_INCONCLUSIVE',
+    'CDP_TIMEOUT_HTTP_PROBE_VERIFIED','CDP_TIMEOUT_HTTP_PROBE_REJECTED',
+    'CDP_TIMEOUT_HTTP_PROBE_INCONCLUSIVE','CDP_TIMEOUT_OWNER_PROBE_REJECTED',
+    'CDP_TIMEOUT_OWNER_PROBE_INCONCLUSIVE','CDP_TIMEOUT_WS_PROBE_VERIFIED',
+    'CDP_TIMEOUT_WS_PROBE_REJECTED','CDP_TIMEOUT_WS_PROBE_INCONCLUSIVE',
+    'CDP_TIMEOUT_PROTOCOL_PROBE_INCONCLUSIVE']);
   assert.ok(startupStages.every(stage=>allowed.has(stage)),
     'diagnostic stages must only use fixed redacted labels');
   assert.ok(startupStages.length<=100,'startup diagnostics must be bounded');
@@ -1865,6 +1913,86 @@ test('TASK-005/TEST-006/008/009/026: timed-out Chrome diagnostics cannot wait fo
   }finally{
     if(prevActions===undefined)delete process.env.GITHUB_ACTIONS;
     else process.env.GITHUB_ACTIONS=prevActions;
+    t.mock.reset();
+  }
+});
+
+test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requires the owned listener',async t=>{
+  const {EventEmitter}=require('node:events') as typeof import('node:events');
+  const cp=require('node:child_process') as typeof import('node:child_process');
+  const launcher=require('../../src/browser/chrome-launcher') as
+    typeof import('../../src/browser/chrome-launcher');
+  const cdp=require('../../src/browser/cdp-session') as
+    typeof import('../../src/browser/cdp-session');
+  const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned',12065);
+  const child=Object.assign(new EventEmitter(),{
+    pid:41265,exitCode:null as number|null,killed:false,
+    signalCode:null as string|null,
+    kill(){this.killed=true;return true;}
+  });
+  const saved={actions:process.env.GITHUB_ACTIONS,event:process.env.GITHUB_EVENT_NAME,
+    probe:process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE};
+  let elapsedMs=0,fetchCalls=0,ownerChecks=0,websocketProofs=0;
+  const stages:string[]=[];
+  try{
+    process.env.GITHUB_ACTIONS='true';
+    process.env.GITHUB_EVENT_NAME='workflow_dispatch';
+    process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE='true';
+    t.mock.method(performance,'now',()=>elapsedMs);
+    t.mock.method(launcher,'preflightChrome',async()=>( {
+      ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
+      config:cfg,runtimeIdentityVerified:false as const
+    }));
+    t.mock.method(launcher,'inspectWindowsChromeBinary',async()=>( {
+      ok:true as const,status:'SIGNED_GOOGLE_CHROME_BINARY' as const,
+      version:'155.0.1.1',publisher:'Google LLC' as const,
+      runtimeVerified:false as const
+    }));
+    t.mock.method(cp,'spawn',()=>child as unknown as import('node:child_process').ChildProcess);
+    t.mock.method(globalThis,'fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
+      fetchCalls++;
+      if(fetchCalls===1){
+        elapsedMs=20001;
+        throw Object.assign(new Error('PRIVATE_CDP_ENDPOINT'),{code:'ECONNREFUSED'});
+      }
+      assert.equal(String(input),'http://127.0.0.1:12065/json/version');
+      assert.equal(init?.method??'GET','GET');
+      assert.equal(init?.redirect,'error','post-timeout probe must refuse redirects');
+      assert.ok(init?.signal instanceof AbortSignal,
+        'post-timeout HTTP probe must have a bounded cancellation signal');
+      return new Response(JSON.stringify({Browser:'Chrome/155.0.1.1',
+        webSocketDebuggerUrl:'ws://127.0.0.1:12065/devtools/browser/abcdefgh-1234'}));
+    });
+    t.mock.method(cdp,'verifyWindowsLoopbackListenerPid',async(port:number,expectedPid:number)=>{
+      ownerChecks++;
+      assert.equal(port,12065);
+      assert.equal(expectedPid,child.pid);
+      return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
+        pid:child.pid,executableVerified:false as const};
+    });
+    t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
+      websocketProofs++;
+      return true;
+    });
+    const result=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,testHeadless:true,onStartupStage:stage=>stages.push(stage)
+    });
+    assert.deepEqual(result,{ok:false,code:'CDP_TIMEOUT'},
+      'late HTTP and WebSocket success must never change the original timeout result');
+    assert.equal(fetchCalls,2,'one normal request and at most one post-timeout HTTP request');
+    assert.equal(ownerChecks,2,'recheck this child listener after the HTTP response');
+    assert.equal(websocketProofs,1,'only the verified HTTP response and rechecked listener permit one WS probe');
+    assert.ok(stages.includes('CDP_TIMEOUT_HTTP_PROBE_VERIFIED'));
+    assert.ok(stages.includes('CDP_TIMEOUT_WS_PROBE_VERIFIED'));
+    assert.ok(!stages.join(',').includes('PRIVATE_CDP_ENDPOINT'));
+    assert.equal(child.killed,true,'retire the still-owned diagnostic child on timeout');
+  }finally{
+    if(saved.actions===undefined)delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS=saved.actions;
+    if(saved.event===undefined)delete process.env.GITHUB_EVENT_NAME;
+    else process.env.GITHUB_EVENT_NAME=saved.event;
+    if(saved.probe===undefined)delete process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE;
+    else process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE=saved.probe;
     t.mock.reset();
   }
 });

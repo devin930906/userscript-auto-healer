@@ -29,6 +29,11 @@ on:
         type: boolean
         required: false
         default: false
+      chrome_post_timeout_protocol_probe:
+        description: 'Manual Windows CI only: after the original 20s timeout, inspect HTTP/WebSocket once only when the disposable Chrome listener PID matches; timeout remains failure'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -59,6 +64,7 @@ jobs:
           UAH_TEST_CHROME_BOOT_LOG: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_boot_log && 'true' || 'false' }}
           UAH_TEST_CHROME_FULL_SUITE_COMPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_full_suite_compare && 'true' || 'false' }}
           UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_profile_preinit_compare && 'true' || 'false' }}
+          UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.chrome_post_timeout_protocol_probe && 'true' || 'false' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -77,10 +83,15 @@ jobs:
           $diagnosticModes = @(
             $env:UAH_TEST_CHROME_CPU_PRESSURE,
             $env:UAH_TEST_CHROME_FULL_SUITE_COMPARE,
-            $env:UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE
+            $env:UAH_TEST_CHROME_PROFILE_PREINIT_COMPARE,
+            $env:UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE
           ) | Where-Object { $_ -eq 'true' }
           if ($diagnosticModes.Count -gt 1) {
             throw 'Choose exactly one manual Chrome diagnostic mode per runner'
+          }
+          if ($env:UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE -eq 'true' -and
+              $env:UAH_TEST_CHROME_BOOT_LOG -eq 'true') {
+            throw 'The post-timeout protocol probe must run without a Chrome boot log to isolate one variable'
           }
           $sourceBinary = Join-Path $source 'chrome.exe'
           $signature = Get-AuthenticodeSignature -LiteralPath $sourceBinary
@@ -105,7 +116,19 @@ jobs:
           # Explicit manual CPU diagnostics compare baseline and controlled load
           # on the SAME ephemeral Windows runner and source SHA; no global CI
           # concurrency change, timeout increase or raw Chrome log publication.
-          if ($env:UAH_TEST_CHROME_FULL_SUITE_COMPARE -eq 'true' -and
+          if ($env:UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE -eq 'true' -and
+              $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            # One isolated signed-Chrome test only. The normal 20-second
+            # acceptance result remains authoritative; late protocol evidence
+            # is redacted diagnosis and cannot turn a timeout into success.
+            Write-Output 'TASK005_POST_TIMEOUT_PROTOCOL_PROBE_BEGIN'
+            node --test --test-concurrency=1 --test-name-pattern="TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only" dist/tests/browser/owned-chrome.test.js
+            $protocolProbeExit = $LASTEXITCODE
+            Write-Output "TASK005_POST_TIMEOUT_PROTOCOL_PROBE_EXIT=$protocolProbeExit"
+            if ($protocolProbeExit -ne 0) {
+              throw 'TASK-005 post-timeout protocol diagnostic failed; preserve the original timeout result'
+            }
+          } elseif ($env:UAH_TEST_CHROME_FULL_SUITE_COMPARE -eq 'true' -and
               $env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             # This diagnostic answers a different question from the existing
             # two-worker stress experiment. Disable synthetic CPU pressure so
