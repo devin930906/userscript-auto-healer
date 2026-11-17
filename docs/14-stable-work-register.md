@@ -535,3 +535,9 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - 默认系统 `TEMP/TMP` 下的完整套件：1,154 项，1,100 通过、42 失败、12 条件跳过；临时诊断将 40 个 TASK-011 恢复失败追到系统临时目录祖先枚举的 `EPERM/scandir`，安全守卫按设计拒绝，未修改保护规则。
 - 使用工作区内的一次性 `TEMP/TMP` 目录复跑：1,154 项，1,141 通过、1 失败、12 条件跳过；剩余失败为 TEST-003 测试文件创建 symlink 时系统返回 `EPERM`。build 通过。
 - 此记录是本机权限边界，不代表本地全套件完全通过，也不构成产品代码修复或 Stable GATE 证据。
+
+## 2026-11-17 TASK-005 / #510 — netstat listener observation classification
+
+- **改动**：仅当 `netstat.exe` 成功完成、但解析器未找到精确 IPv4 loopback `LISTENING` 行时返回 `NO_MATCHING_LOOPBACK_RECORD`，超时阶段输出 `CDP_TIMEOUT_LISTENER_NOT_OBSERVED`。进程检查、查询失败或取消仍返回 `LISTENER_UNAVAILABLE`；模糊/不匹配 PID 仍维持原来的拒绝状态。
+- **TDD 与验证**：先新增空输出回归和阶段映射断言，旧实现分别返回 `LISTENER_UNAVAILABLE` 与 `CDP_TIMEOUT_PROBE_INCONCLUSIVE`（RED）。修复后 `npm run build` 成功，`cdp-session.test.js` 与 `owned-chrome.test.js` 全文件合计 92 项、87 通过、0 失败、5 项条件跳过。当前本机 `npm test`：1,155 项、1,142 通过、1 失败、12 条件跳过；唯一失败为 TEST-003 的 symlink 创建权限 `EPERM`，未更改生产路径守卫或测试通过条件。
+- **状态边界**：新阶段只表示一次成功查询中没有解析到该精确记录，不证明系统不存在 IPv6、非 loopback 或格式不同的监听端点，也不是历史 #510 根因结论。原 20 秒 deadline、owner/PID 校验、post-timeout 限时及 HTTP/WebSocket 准入条件未放宽。#510、TEST-006/008/009 与 Stable GATE 仍未完成；PR #904 保持 Draft。

@@ -136,6 +136,7 @@ export type ChromeStartupStage='CHROME_SPAWN_RETURNED'|'FETCH_FAILED'|'FETCH_REF
   'FETCH_RESET'|'CHILD_RUNNING_NO_CDP'|'HTTP_REJECTED'|'BODY_REJECTED'|
   'CDP_VERSION_REJECTED'|'CDP_VERSION_PARSED'|'PROBE_ERROR'|
   'CDP_TIMEOUT_LISTENER_PID_MATCH'|'CDP_TIMEOUT_LISTENER_UNAVAILABLE'|
+  'CDP_TIMEOUT_LISTENER_NOT_OBSERVED'|
   'CDP_TIMEOUT_LISTENER_PID_MISMATCH'|'CDP_TIMEOUT_LISTENER_AMBIGUOUS'|
   'CDP_TIMEOUT_PROBE_INCONCLUSIVE'|'CDP_PID_PROOF_STARTED'|
   'CDP_PID_PROOF_VERIFIED'|'CDP_PID_PROOF_REJECTED'|
@@ -220,11 +221,14 @@ export function classifyCdpStartupTransportFailure(error:unknown):
  * These fixed labels contain no PID, port, profile, URL or OS-error text.
  * LISTENER_UNAVAILABLE may also mean the OS probe failed; it does not by
  * itself prove that no listening socket exists.
+ * LISTENER_NOT_OBSERVED means a successful netstat query had no exact parsed
+ * IPv4 loopback record; it is not proof that no other listener exists.
  */
 export function classifyCdpTimeoutListener(result:ListenerOwnerResult):ChromeStartupStage {
   if(result.ok)return 'CDP_TIMEOUT_LISTENER_PID_MATCH';
   switch(result.code){
     case 'LISTENER_UNAVAILABLE':return 'CDP_TIMEOUT_LISTENER_UNAVAILABLE';
+    case 'NO_MATCHING_LOOPBACK_RECORD':return 'CDP_TIMEOUT_LISTENER_NOT_OBSERVED';
     case 'LISTENER_PID_MISMATCH':return 'CDP_TIMEOUT_LISTENER_PID_MISMATCH';
     case 'LISTENER_AMBIGUOUS':return 'CDP_TIMEOUT_LISTENER_AMBIGUOUS';
     default:return 'CDP_TIMEOUT_PROBE_INCONCLUSIVE';

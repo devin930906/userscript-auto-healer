@@ -188,11 +188,12 @@ export type ListenerOwnerResult =
   | {readonly ok:true; readonly status:'LISTENER_PID_MATCH_ONLY'; readonly pid:number;
      readonly executableVerified:false}
   | {readonly ok:false; readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
-      'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'|'LISTENER_PID_MISMATCH'};
+      'LISTENER_UNAVAILABLE'|'NO_MATCHING_LOOPBACK_RECORD'|
+      'LISTENER_AMBIGUOUS'|'LISTENER_PID_MISMATCH'};
 export type LoopbackListenerResult =
   | {readonly ok:true;readonly status:'UNIQUE_LOOPBACK_LISTENER';readonly pid:number}
   | {readonly ok:false;readonly code:'UNSUPPORTED_PLATFORM'|'INVALID_ARGUMENTS'|
-     'LISTENER_UNAVAILABLE'|'LISTENER_AMBIGUOUS'};
+     'LISTENER_UNAVAILABLE'|'NO_MATCHING_LOOPBACK_RECORD'|'LISTENER_AMBIGUOUS'};
 /** Parse numeric Windows TCP LISTENING sockets on the exact IPv4 loopback port.
  * Only 127.0.0.1:port -> 0.0.0.0:0 qualifies, never wildcard or remote peers.
  * An invalid PID remains ambiguous, never trusted.
@@ -278,7 +279,10 @@ export async function findWindowsLoopbackListenerPid(
     return {ok:false,code:'LISTENER_UNAVAILABLE'};
   }
   const pids=parseWindowsLoopbackListeners(output,port);
-  if(pids.length===0)return {ok:false,code:'LISTENER_UNAVAILABLE'};
+  // A successful query with no exact parsed record is distinct from failure
+  // to run/read netstat. This is an observation only; it does not prove that
+  // no IPv6, non-loopback or differently formatted listener exists.
+  if(pids.length===0)return {ok:false,code:'NO_MATCHING_LOOPBACK_RECORD'};
   if(pids.length!==1||!Number.isSafeInteger(pids[0])||pids[0]<1)
     return {ok:false,code:'LISTENER_AMBIGUOUS'};
   return {ok:true,status:'UNIQUE_LOOPBACK_LISTENER',pid:pids[0]};

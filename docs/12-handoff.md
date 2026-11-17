@@ -463,3 +463,9 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **默认 TEMP/TMP**：`npm test` 的 build 通过；1,154 项中 1,100 通过、42 失败、12 条件跳过。初始运行中 40 个 TASK-011 恢复用例失败；代表用例的 Windows 路径祖先扫描中，`fs.readdir` 返回 `EPERM`（`scandir`），因此守卫按设计失败关闭并返回 `UNSAFE_PATH`。将 TEMP/TMP 改到工作区重跑后，40 个恢复用例全部通过；没有放宽路径检查。
 - **隔离 TEMP/TMP 重跑**：把 `TEMP` / `TMP` 指向工作区内新建的一次性临时目录后，完整 `npm test` 为 1,154 项、1,141 通过、1 失败、12 条件跳过；TASK-011 恢复用例全部通过。唯一剩余失败是 `TEST-003: symlink file cannot bypass path scanner`，本机创建测试符号链接本身返回 `EPERM`。
 - **结论**：临时目录改址只用于本机验证，没有改产品代码或测试通过条件；完整本地套件仍有一项受 Windows 符号链接权限限制。该环境诊断不改变 #510 的 Chrome 超时根因状态，也不清除 Stable 门槛。
+
+## 2026-11-17 TASK-005 / #510 netstat listener observation classification
+
+- **实现范围**：成功完成的 `netstat` 查询若没有解析到精确的 IPv4 loopback `LISTENING` 行，返回 `NO_MATCHING_LOOPBACK_RECORD` 并记录固定阶段 `CDP_TIMEOUT_LISTENER_NOT_OBSERVED`；查询、执行或取消失败仍为 `LISTENER_UNAVAILABLE`。这只记录解析器观察，不证明其他地址族或不同格式的监听端点不存在。
+- **验证**：TDD 新用例先红：空 `stdout` 被旧代码归为 `LISTENER_UNAVAILABLE`，阶段分类为 `CDP_TIMEOUT_PROBE_INCONCLUSIVE`；修复后 `npm run build` 通过，两个完整浏览器测试文件 92 项中 87 通过、0 失败、5 项 Windows Actions 条件跳过。完整 `npm test` 为 1,155 项、1,142 通过、1 失败、12 条件跳过；唯一失败仍是本机创建符号链接返回 `EPERM` 的 TEST-003。未修改安全守卫。
+- **结论与边界**：该诊断只帮助未来重现超时时区分“查询成功但未解析到精确行”和“查询不可用”，没有重现或解释历史 #510 根因，不改变 Chrome 超时、PID/ownership 检查或请求门槛。Issue #510 保持 Open，PR #904 维持 Draft，Stable GATE 未清除。

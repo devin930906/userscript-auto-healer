@@ -258,6 +258,49 @@ test('TEST-009/026: forged listener cancellation signals are rejected without in
   assert.equal(traps,0);
 });
 
+test('TEST-009: a successful netstat query with no exact loopback row is distinct',async()=>{
+  if(process.platform!=='win32')return;
+  const modulePath=require.resolve('../../src/browser/cdp-session');
+  const script=`
+    const cp=require('node:child_process');
+    const promisify=require('node:util').promisify;
+    const path=require('node:path').win32;
+    const realExecFile=cp.execFile;
+    const expectedNetstat=path.join(process.env.SystemRoot,'System32','netstat.exe');
+    let child;
+    const fakeExecFile=(file,args,options,callback)=>{
+      if(file!==expectedNetstat||
+         JSON.stringify(args)!==JSON.stringify(['-ano','-p','TCP'])){
+        throw Error('UNEXPECTED_NETSTAT_COMMAND');
+      }
+      child=realExecFile(process.execPath,['-e','process.stdout.write(\"\")'],
+        options,callback);
+      return child;
+    };
+    fakeExecFile[promisify.custom]=(file,args,options)=>{
+      let resolve,reject;
+      const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});
+      child=fakeExecFile(file,args,options,(error,stdout,stderr)=>{
+        if(error){error.stdout=stdout;error.stderr=stderr;reject(error);}
+        else resolve({stdout,stderr});
+      });
+      promise.child=child;
+      return promise;
+    };
+    cp.execFile=fakeExecFile;
+    const cdp=require(${JSON.stringify(modulePath)});
+    cdp.verifyWindowsLoopbackListenerPid(12065,process.pid).then(result=>
+      console.log(JSON.stringify(result)),error=>{
+        console.error(String(error));process.exitCode=1;
+      });
+  `;
+  const {stdout}=await execFileAsync(process.execPath,['-e',script],{
+    encoding:'utf8',timeout:3000,maxBuffer:1024*1024,windowsHide:true
+  });
+  assert.deepEqual(JSON.parse(stdout.trim()),
+    {ok:false,code:'NO_MATCHING_LOOPBACK_RECORD'});
+});
+
 test('TEST-009: aborting the bounded listener probe terminates its netstat child',async()=>{
   if(process.platform!=='win32')return;
   const modulePath=require.resolve('../../src/browser/cdp-session');
