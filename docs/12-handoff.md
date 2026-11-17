@@ -417,3 +417,13 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **Machine results**: TypeScript typecheck, Windows portable relocation/file-lock/no-overwrite checks, and checksum-manifest refusal cases passed. Registered regressions: **1,143 tests; 1,140 passed, 0 failed, 3 conditional skips**. The ZIP round-trip checked 159 files; cold relocation and three post-use relocation/restart cycles passed, including Unicode/space paths and an actual read-only ACL extraction. The candidate installed cleanly with 159-file payload SHA-256 parity, Electron launch, uninstall, and userData retention. Upgrade used a synthetic older Inno Setup installer, not a real historical release.
 - **Candidate hashes**: EXE `b225db2d93caad7b62639bbcf1ae5f144c7d6d26b7410f2788f8736508f31741`; Portable ZIP `c285f59e93c9f067eddf74878a2a62e0c7063a1391bb5be7ea18354c20e0da12`. Temporary Actions artifact [14247526962](https://github.com/devin930906/userscript-auto-healer/actions/runs/43910270170/artifacts/14247526962), digest `sha256:4aaa73ffd9ad06ab8f4d8b20ee430933b0b921d17150fb32e14457f3125cb879`, expires 2026-11-19 16:49 UTC.
 - **Acceptance boundary**: These checks verify this candidate build only. They do not complete the remaining real Tampermonkey/business acceptance, final user verification, Stable GATEs, or a formal Release. #486 remains Open; TEST-017/018 and GATE-004/005 remain incomplete.
+
+## 2026-11-17 TASK-007 / #486 Tampermonkey manager inventory readiness correction
+
+- **GitHub 同步**：[PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) 已创建，等待检查与集成；Issue #486 仍保持 Open。
+
+- 用户截图显示 Tampermonkey options 页为 v5.5.1；UAH 状态框同时显示未找到官方卡片。截图无法独立绑定到 UAH 启动的 Profile，因此只作为差异线索。
+- 代码路径检查发现探针只等待 Page.loadEventFired，而 Chromium 扩展管理器之后还会异步读取并初始化扩展列表。未完成初始化时的零卡片不能证明未安装。
+- 已加入管理器就绪标记、最多 4 秒的单调时钟等待，并让每次 CDP 调用受剩余预算限制。未就绪超时按 INSPECTION_UNAVAILABLE 失败关闭；探针继续只读管理页元数据。
+- 本地验证：build 成功；manager 专项 10/10；完整套件 1,146 项（1,134 通过、0 失败、12 条件跳过）。详细证据见 [Tampermonkey manager readiness 记录](evidence/2026-11-17-tampermonkey-manager-inventory-readiness.md)。
+- 尚未做修复后的浏览器复测；不证明同一 Profile、商店来源、脚本注入、GM、业务恢复或回滚。#486 保持 Open；TEST-017/018、GATE-004/005 和 Stable 状态不变。
