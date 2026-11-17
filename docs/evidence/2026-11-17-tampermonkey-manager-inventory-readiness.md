@@ -1,6 +1,6 @@
 # TASK-007 / REQ-017/018: Tampermonkey manager inventory readiness
 
-**Status:** implemented and full tests passed; [PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) is open, with live post-fix browser verification outstanding. Issue #486 stays open.
+**Status:** merged in [PR #901](https://github.com/devin930906/userscript-auto-healer/pull/901) as main commit 4129a966a2917801fe71f49d7d357f54404b8a77; live post-fix browser verification remains outstanding. Issue #486 stays open.
 
 ## User observation
 
@@ -29,6 +29,7 @@ Chromium source references:
 - Focused manager suite: 10 passed, 0 failed.
 - Full npm test: 1,146 tests, 1,134 passed, 0 failed, 12 conditional skips.
 - npm run build and git diff --check passed.
+- PR #901 checks passed: Windows boundary and shell smoke, documentation, issue coordination, and Windows candidate packaging [run #44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756). Two conditional diagnostic jobs were skipped. Candidate files are not a formal Stable Release.
 
 ## Limits
 
