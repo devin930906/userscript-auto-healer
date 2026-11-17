@@ -1933,12 +1933,18 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
   const saved={actions:process.env.GITHUB_ACTIONS,event:process.env.GITHUB_EVENT_NAME,
     probe:process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE};
   let elapsedMs=0,fetchCalls=0,ownerChecks=0,websocketProofs=0;
+  const timeoutBudgets:number[]=[];
   const stages:string[]=[];
   try{
     process.env.GITHUB_ACTIONS='true';
     process.env.GITHUB_EVENT_NAME='workflow_dispatch';
     process.env.UAH_TEST_CHROME_POST_TIMEOUT_PROTOCOL_PROBE='true';
     t.mock.method(performance,'now',()=>elapsedMs);
+    const realTimeout=AbortSignal.timeout;
+    t.mock.method(AbortSignal,'timeout',(ms:number)=>{
+      timeoutBudgets.push(ms);
+      return realTimeout(ms);
+    });
     t.mock.method(launcher,'preflightChrome',async()=>( {
       ok:true as const,status:'PATH_AND_PORT_CHECKED_ONLY' as const,
       config:cfg,runtimeIdentityVerified:false as const
@@ -1960,6 +1966,7 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
       assert.equal(init?.redirect,'error','post-timeout probe must refuse redirects');
       assert.ok(init?.signal instanceof AbortSignal,
         'post-timeout HTTP probe must have a bounded cancellation signal');
+      elapsedMs=20501;
       return new Response(JSON.stringify({Browser:'Chrome/155.0.1.1',
         webSocketDebuggerUrl:'ws://127.0.0.1:12065/devtools/browser/abcdefgh-1234'}));
     });
@@ -1967,11 +1974,13 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
       ownerChecks++;
       assert.equal(port,12065);
       assert.equal(expectedPid,child.pid);
+      if(ownerChecks===2)elapsedMs=21001;
       return {ok:true as const,status:'LISTENER_PID_MATCH_ONLY' as const,
         pid:child.pid,executableVerified:false as const};
     });
     t.mock.method(cdp,'verifyCdpBrowserWebSocket',async()=>{
       websocketProofs++;
+      elapsedMs=21201;
       return true;
     });
     const result=await launchApprovedIsolatedChrome(cfg,{
@@ -1982,6 +1991,8 @@ test('TASK-005: opted-in post-timeout protocol probe is diagnostic only and requ
     assert.equal(fetchCalls,2,'one normal request and at most one post-timeout HTTP request');
     assert.equal(ownerChecks,2,'recheck this child listener after the HTTP response');
     assert.equal(websocketProofs,1,'only the verified HTTP response and rechecked listener permit one WS probe');
+    assert.deepEqual(timeoutBudgets.slice(-3),[2000,1500,1000],
+      'the remaining post-timeout budget must decrease across HTTP, PID and WebSocket probes');
     assert.ok(stages.includes('CDP_TIMEOUT_HTTP_PROBE_VERIFIED'));
     assert.ok(stages.includes('CDP_TIMEOUT_WS_PROBE_VERIFIED'));
     assert.ok(!stages.join(',').includes('PRIVATE_CDP_ENDPOINT'));
