@@ -460,6 +460,6 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 ## 2026-11-17 本地 TASK-011 Windows 临时目录回归诊断
 
 - **源码身份**：本机完整回归使用的 workflow、TASK-005 代码及测试文件 blob SHA 已逐项对齐 PR #904 的原 HEAD `e7e8648d5e0fec84c8db845a06e09dc85c758bb3`；文档本身未参与测试执行。
-- **默认 TEMP/TMP**：`npm test` 的 build 通过；1,154 项中 1,100 通过、42 失败、12 条件跳过。临时诊断副本将 #fail 定位到 Windows 系统临时目录祖先扫描：`fs.readdir` 返回 `EPERM`（`scandir`），恢复路径守卫按设计失败关闭并返回 `UNSAFE_PATH`。没有放宽路径检查。
+- **默认 TEMP/TMP**：`npm test` 的 build 通过；1,154 项中 1,100 通过、42 失败、12 条件跳过。初始运行中 40 个 TASK-011 恢复用例失败；代表用例的 Windows 路径祖先扫描中，`fs.readdir` 返回 `EPERM`（`scandir`），因此守卫按设计失败关闭并返回 `UNSAFE_PATH`。将 TEMP/TMP 改到工作区重跑后，40 个恢复用例全部通过；没有放宽路径检查。
 - **隔离 TEMP/TMP 重跑**：把 `TEMP` / `TMP` 指向工作区内新建的一次性临时目录后，完整 `npm test` 为 1,154 项、1,141 通过、1 失败、12 条件跳过；TASK-011 恢复用例全部通过。唯一剩余失败是 `TEST-003: symlink file cannot bypass path scanner`，本机创建测试符号链接本身返回 `EPERM`。
 - **结论**：临时目录改址只用于本机验证，没有改产品代码或测试通过条件；完整本地套件仍有一项受 Windows 符号链接权限限制。该环境诊断不改变 #510 的 Chrome 超时根因状态，也不清除 Stable 门槛。
