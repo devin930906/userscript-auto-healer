@@ -26,6 +26,35 @@ test('TEST-024: a clean owned-browser DOM observation creates only unverified el
   assert.equal(JSON.stringify(result).includes('https://'),false);
 });
 
+test('TASK-015/REQ-024/TEST-024: record supported selector-only assertion counts without persisting page details',()=>{
+  for(const checkedAssertions of [1,3,8]){
+    const history=new LimitedHealthRegistry(()=>1200);
+    const result=recordLimitedScenarioInspection(history,{
+      ...valid(),checkedAssertions
+    });
+    assert.equal(result.status,'ELEMENT_FOUND_ONLY');
+    assert.equal(result.history.length,1);
+    assert.equal(result.history[0].kind,'LIMITED_DOM_OBSERVATION');
+    assert.equal(result.history[0].evidenceHash?.length,64);
+    assert.equal(result.tampermonkeyVerified,false);
+    assert.equal(result.businessVerified,false);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.automaticRollbackAllowed,false);
+    const serialized=JSON.stringify(result);
+    assert.equal(serialized.includes('https://'),false);
+    assert.equal(serialized.includes('querySelector'),false);
+  }
+
+  for(const checkedAssertions of [0,9]){
+    const history=new LimitedHealthRegistry(()=>1200);
+    assert.throws(()=>recordLimitedScenarioInspection(history,{
+      ...valid(),checkedAssertions
+    }),/INVALID_LIMITED_INSPECTION/);
+    assert.equal(history.snapshot(A).status,'UNTESTED');
+    assert.equal(history.snapshot(A).history.length,0);
+  }
+});
+
 test('TEST-024: missing selector and JavaScript exception cannot be displayed as healthy',()=>{
   const history=new LimitedHealthRegistry(()=>1200);
   const missing=recordLimitedScenarioInspection(history,{
@@ -62,7 +91,7 @@ test('TEST-024: invalid or accessor-backed partial receipts fail closed with no 
   const bad=[
     accessor,{...valid(),extra:'https://sensitive.example'},
     {...valid(),checkedAssertions:0},
-    {...valid(),checkedAssertions:3},
+    {...valid(),checkedAssertions:9},
     {...valid(),triageStatus:'RECOVERED_VERIFIED'},
     {...valid(),pageExceptionCount:1},
     {...valid(),pageRuntimeStatus:'PAGE_EXCEPTION_SIGNAL_ONLY'},
