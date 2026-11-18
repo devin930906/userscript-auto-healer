@@ -22,6 +22,8 @@ const allowedTriage = new Set<FaultTriageStatus>([
   'SINGLE_CAUSE_SIGNAL_ONLY', 'MULTIPLE_CAUSE_SIGNALS', 'NO_FAULT_SIGNAL',
   'INSUFFICIENT_EVIDENCE', 'INVALID_EVIDENCE'
 ]);
+// Keep the health receipt within the existing read-only DOM diagnostic cap.
+const MAX_READ_ONLY_SCENARIO_ASSERTIONS = 8;
 
 /** Main-process only. Reject inconsistent receipts; never persist DOM or URLs. */
 export function recordLimitedScenarioInspection(
@@ -46,7 +48,7 @@ export function recordLimitedScenarioInspection(
         !/^[0-9a-f]{64}$/.test(values.scriptHash) ||
         !Number.isSafeInteger(values.checkedAssertions) ||
         (values.checkedAssertions as number) < 1 ||
-        (values.checkedAssertions as number) > 2 ||
+        (values.checkedAssertions as number) > MAX_READ_ONLY_SCENARIO_ASSERTIONS ||
         !allowedTriage.has(values.triageStatus as FaultTriageStatus) ||
         (values.pageRuntimeStatus !== 'PAGE_EXCEPTION_SIGNAL_ONLY' &&
          values.pageRuntimeStatus !== 'NO_EXCEPTION_IN_WINDOW_ONLY') ||
