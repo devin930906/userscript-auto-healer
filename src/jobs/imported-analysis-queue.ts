@@ -11,7 +11,7 @@ import {MAX_SCRIPT_BYTES,MAX_TOTAL_IMPORTED_BYTES,MAX_SELECTED_FILES,
 import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
-import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
+import {previewImportedBatchOffMain,type IsolatedBatchPreviewResult} from '../analyze/isolated-batch-preview';
 import {ReadOnlyBatchCoordinator} from './batch-coordinator';
 
 const GLOBAL_ANALYSIS_DEADLINE_MS=120000;
@@ -107,6 +107,27 @@ export function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundSc
  }catch{return null;}
 }
 
+/** A worker lifecycle receipt is required before dispatching another worker.
+ * A legacy array-only result has no retirement evidence and therefore fails
+ * closed; the opt-in structured API supplies the required boolean. */
+function readWorkerResult(value:unknown):IsolatedBatchPreviewResult|null{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||Array.isArray(value))
+   return null;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(fields);
+  if(names.length!==2||
+     !Object.prototype.hasOwnProperty.call(fields,'previews')||
+     !Object.prototype.hasOwnProperty.call(fields,'safeToContinue')||
+     !Object.prototype.hasOwnProperty.call(fields.previews,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.safeToContinue,'value')||
+     !Array.isArray(fields.previews.value)||
+     typeof fields.safeToContinue.value!=='boolean')return null;
+  return {previews:fields.previews.value as ImportAnalysisPreview[],
+   safeToContinue:fields.safeToContinue.value};
+ }catch{return null;}
+}
+
 /** Only explicitly native-imported byte identities can enter this worker.
  * The 16-file isolated AST worker is the actual trusted read-only task;
  * one scheduler job owns one segment. No raw bytes or paths reach progress.
@@ -161,6 +182,9 @@ export async function runImportedReadOnlyAnalysisQueue(
  // A transient isolated Worker failure is retryable once, but neither
  // retries nor a malformed reply may double-count completed script slots.
  const attempts:number[]=Array(segmentCount).fill(0);
+ // A Worker that did not retire within its original deadline may still be
+ // alive. Stop this whole batch before retrying it or starting later segments.
+ let safeToLaunchWorkers=true;
  const parent=new AbortController();
  const cancel=()=>parent.abort();
  signal?.addEventListener('abort',cancel,{once:true});
@@ -178,22 +202,31 @@ export async function runImportedReadOnlyAnalysisQueue(
    count:segmentCount,concurrency:1,maxAttempts:2,
    timeoutMs:SEGMENT_TIMEOUT_MS,jobHashes:groups.map(group=>group.hash)
   },async (ordinal,workerSignal)=>{
+   if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
    const group=groups[ordinal];
    const attempt=++attempts[ordinal];
    let previews:ImportAnalysisPreview[]=[];
    try{
-    previews=await previewImportedBatchOffMain(group.list,workerSignal);
+    const value=await previewImportedBatchOffMain(group.list,workerSignal,
+     undefined,true);
+    const evidence=readWorkerResult(value);
+    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE';}
+    previews=evidence.previews;
+    if(!evidence.safeToContinue)safeToLaunchWorkers=false;
    }catch{
-    // An isolated, trusted read-only Worker can crash before producing a
-    // result. Only one independent replacement attempt is permitted.
+    // A thrown call has no retirement receipt. Do not risk overlapping a
+    // replacement Worker with one that may still be running.
+    safeToLaunchWorkers=false;
    }
    // Cancellation and timeouts never start a replacement Worker.
    if(workerSignal.aborted)return 'PERMANENT_FAILURE';
+  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
    const failed=previews.length!==group.list.length||
     previews.some(x=>x.status==='ISOLATED_ANALYSIS_FAILED');
    const exhausted=previews.some(x=>
     x.status==='SKIPPED_CANCELLED'||x.status==='SKIPPED_BATCH_BUDGET');
-   if(failed&&!exhausted&&attempt<2)return 'RETRYABLE_FAILURE';
+  if(failed&&!exhausted&&safeToLaunchWorkers&&attempt<2)
+   return 'RETRYABLE_FAILURE';
    // Reject the entire malformed/failed segment, not just its supplied
    // prefix. A later segment can still produce independent AST evidence.
    if(!failed){

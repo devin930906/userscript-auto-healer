@@ -88,6 +88,24 @@ test('TEST-004/011/022: isolated preview analyzes a complete script above the sy
  assert.equal(report.businessVerified,false);
 });
 
+test('TASK-013/TEST-022/026: opt-in worker safety result retains the array API and retirement state',async()=>{
+ const source=imported(header+'document.querySelector("#retirement");');
+ const previewWithEvidence=previewImportedBatchOffMain as unknown as
+  (scripts:readonly typeof source[],signal?:AbortSignal,
+   onProgress?:((processed:number,total:number)=>void),
+   includeSafetyEvidence?:true)=>Promise<unknown>;
+ const result=await previewWithEvidence([source],undefined,undefined,true) as
+  {previews:Array<{status:string;automaticPatchAllowed:boolean;
+   tampermonkeyVerified:boolean;businessVerified:boolean}>;safeToContinue:boolean};
+ assert.equal(Array.isArray(result.previews),true);
+ assert.equal(result.previews[0].status,'STATIC_ANALYSIS_ONLY');
+ assert.equal(result.safeToContinue,true,
+  'the previous worker must be confirmed retired before a caller retries it');
+ assert.equal(result.previews[0].automaticPatchAllowed,false);
+ assert.equal(result.previews[0].tampermonkeyVerified,false);
+ assert.equal(result.previews[0].businessVerified,false);
+});
+
 test('TEST-011: batch AST work is bounded without dropping imported scripts',()=>{
  const scripts=Array.from({length:24},()=>imported(header+'document.querySelector("#item");'));
  const previews=previewIsolatedImportedBatch(scripts);

@@ -412,19 +412,40 @@ function isNativeWorkerAbortSignal(value:unknown):value is AbortSignal{
  * and validated worker. This is an unprivileged read-only preview, not the
  * durable repair queue or a Tampermonkey/GM business verification.
  */
-export async function previewImportedBatchOffMain(
+/** Opt-in lifecycle evidence for scheduler callers. Ordinary consumers keep
+ * the legacy array result; callers that can launch another Worker request
+ * this receipt and must require safeToContinue before doing so. */
+export interface IsolatedBatchPreviewResult{
+ readonly previews:ImportAnalysisPreview[];
+ /** False means a prior Worker may still be alive; callers must stop all
+  * retries and later Worker dispatches for this batch. */
+ readonly safeToContinue:boolean;
+}
+export function previewImportedBatchOffMain(
+ scripts:readonly Script[],signal:AbortSignal|undefined,
+ onProgress:((processed:number,total:number)=>void)|undefined,
+ includeSafetyEvidence:true
+):Promise<IsolatedBatchPreviewResult>;
+export function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void
-):Promise<ImportAnalysisPreview[]>{
+):Promise<ImportAnalysisPreview[]>;
+export async function previewImportedBatchOffMain(
+ scripts:readonly Script[],signal?:AbortSignal,
+ onProgress?:(processed:number,total:number)=>void,
+ includeSafetyEvidence?:true
+):Promise<ImportAnalysisPreview[]|IsolatedBatchPreviewResult>{
+ const result=(previews:ImportAnalysisPreview[],safeToContinue:boolean)=>
+  includeSafetyEvidence?Object.freeze({previews,safeToContinue}):previews;
  // This exported boundary accepts only trusted native cancellation handles.
  // [] is the fail-closed refusal for an invalid direct native-batch request,
  // matching the existing over-capacity direct-caller rejection below.
- if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return [];
+ if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return result([],true);
  // Validate and snapshot direct native records before reading .length, .slice,
  // any element/bytes properties or letting an advisory callback run.
  // Eligible bytes have an independent bounded copy before asynchronous work.
  const nativeScripts=snapshotNativeAstBatch(scripts);
- if(nativeScripts===null)return [];
+ if(nativeScripts===null)return result([],true);
  const results:ImportAnalysisPreview[]=[];
  let safeToContinue=true;
  // Use monotonic elapsed time: wall-clock synchronization must not shorten
@@ -465,5 +486,5 @@ export async function previewImportedBatchOffMain(
   try{onProgress?.(results.length,nativeScripts.length);}
   catch{/* progress is advisory; it cannot affect isolated parsing */}
  }
- return results;
+ return result(results,safeToContinue);
 }

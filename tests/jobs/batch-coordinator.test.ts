@@ -1157,7 +1157,9 @@ test('TASK-013/TEST-022: native read-only queue recovers an isolated transient A
   async(...args:Parameters<typeof native>)=>{
    attempts++;
    if(attempts===1)
-    return args[0].map(()=>unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+    return {previews:args[0].map(()=>unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof native>>;
    return native(...args);
   });
  try{
@@ -1183,7 +1185,8 @@ test('TASK-013/TEST-022/026: exhausted malformed AST segment stays failed withou
  const injected=mock.method(isolated,'previewImportedBatchOffMain',
   async(...args:Parameters<typeof native>)=>{
    attempts++;
-   if(attempts<=2)return [];
+   if(attempts<=2)return {previews:[],safeToContinue:true} as unknown as
+    Awaited<ReturnType<typeof native>>;
    return native(...args);
   });
  try{
