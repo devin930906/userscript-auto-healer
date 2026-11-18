@@ -1,4 +1,4 @@
-# TASK-020 / ISSUE-215 / TEST-028: independently corroborate an opaque CIM
+﻿# TASK-020 / ISSUE-215 / TEST-028: independently corroborate an opaque CIM
 # process identity without treating an unreadable process as exited. Only a
 # SECOND trusted Windows process observation with the same PID and creation
 # time may supply a missing executable path. Never terminate a process.
@@ -83,29 +83,35 @@ function Wait-CandidatePortableProcessExit(
     Assert-CandidatePortableNoReparsePath $runner $exact
     # CIM includes processes with this image name from other directories.
     # Exact path comparison is required; do not use name-only process counts.
-    # A failed query OR a redacted/unavailable process path is not proof that
-    # the exact candidate has exited. Refuse relocation without a trustworthy
-    # disambiguation, even if the opaque process is unrelated.
+    # 查询失败直接中止。路径暂时不可读时，只能在既有预算内重新获取
+    # 完整进程快照。任何仍有未知身份的快照都不能放行移动。
     $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='UserscriptAutoHealer.exe'" -ErrorAction Stop)
-    $matches=@()
+    $liveCount=0
+    $hasUnknownIdentity=$false
     foreach($process in $processes) {
       $image=Resolve-CandidatePortableProcessExecutablePath $process
       if([string]::IsNullOrWhiteSpace($image)) {
+        $hasUnknownIdentity=$true
+      } elseif([string]::Equals($image,$exact,[StringComparison]::OrdinalIgnoreCase)) {
+        $liveCount++
+      }
+    }
+    if($hasUnknownIdentity) {
+      if($check -eq $maxChecks) {
         throw [InvalidOperationException]::new(
           'Candidate process executable path unavailable; relocation refused')
       }
-      if([string]::Equals($image,$exact,
-         [StringComparison]::OrdinalIgnoreCase)) {
-        $matches+=,$process
+      Write-Warning -WarningAction Continue ("TASK-020 candidate process identity unavailable: check={0}/{1}" -f
+        $check,$maxChecks)
+    } else {
+      if($liveCount -eq 0) { return $check }
+      # A caller's WarningPreference=Stop must not replace our bounded,
+      # authoritative live-process refusal with a diagnostic warning exception.
+      Write-Warning -WarningAction Continue ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
+        $liveCount,$check,$maxChecks)
+      if($check -eq $maxChecks) {
+        throw [InvalidOperationException]::new('Candidate-owned executable did not exit before relocation')
       }
-    }
-    if($matches.Count -eq 0) { return $check }
-    # A caller's WarningPreference=Stop must not replace our bounded,
-    # authoritative live-process refusal with a diagnostic warning exception.
-    Write-Warning -WarningAction Continue ("TASK-020 candidate-owned executable remains live: count={0} check={1}/{2}" -f
-      $matches.Count,$check,$maxChecks)
-    if($check -eq $maxChecks) {
-      throw [InvalidOperationException]::new('Candidate-owned executable did not exit before relocation')
     }
     Start-Sleep -Milliseconds $delayMilliseconds
   }

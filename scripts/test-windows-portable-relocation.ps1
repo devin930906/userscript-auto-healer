@@ -580,26 +580,47 @@ try {
   # The exact candidate identity is then unknowable; never return a false
   # "quiescent" receipt. Shadow CIM only in this local test scope.
   $opaqueRejected=& {
+    $queryState=@{ Count=0 }
     function Get-CimInstance {
       param([string]$ClassName,[string]$Filter,[string]$ErrorAction)
       if($ClassName -cne 'Win32_Process' -or
          $Filter -cne "Name='UserscriptAutoHealer.exe'") {
         throw 'Unexpected candidate process query'
       }
+      $queryState.Count++
       [pscustomobject]@{Name='UserscriptAutoHealer.exe';ExecutablePath=$null}
     }
     try {
-      Wait-CandidatePortableProcessExit $ownedExe 1 0 | Out-Null
+      Wait-CandidatePortableProcessExit $ownedExe 3 0 | Out-Null
       return $false
     } catch [System.InvalidOperationException] {
       if($_.Exception.Message -notlike '*executable path unavailable*') { throw }
-      return $true
+      return ($queryState.Count -eq 3)
     }
   }
   if(-not $opaqueRejected) {
-    throw 'Hidden CIM executable path incorrectly cleared the relocation gate'
+    throw 'Hidden CIM executable path must exhaust the check budget and refuse relocation'
   }
   Write-Output 'PASS: redacted candidate-name process path refuses relocation'
+
+  # 第一次采样无法识别同名进程时，只有后续完整、无未知身份的
+  # 进程快照才能放行。第二次仍有已确认的运行实例，第三次才为空。
+  $resolvedChecks=& {
+    $queryState=@{ Count=0 }
+    function Get-CimInstance {
+      $queryState.Count++
+      if($queryState.Count -eq 1) {
+        [pscustomobject]@{Name='UserscriptAutoHealer.exe';ExecutablePath=$null}
+      } elseif($queryState.Count -eq 2) {
+        [pscustomobject]@{Name='UserscriptAutoHealer.exe';ExecutablePath=$ownedExe}
+      }
+    }
+    Wait-CandidatePortableProcessExit $ownedExe 3 0
+  }
+  if($resolvedChecks -ne 3) {
+    throw 'Transient opaque identity did not require a fresh quiescent snapshot'
+  }
+  Write-Output 'PASS: transient opaque identity waits for a fresh quiescent snapshot'
 
   # A failing or redacted CIM owner query must produce explicit diagnostic
   # uncertainty without throwing and hiding a previous relocation error.
