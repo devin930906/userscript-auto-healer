@@ -13,7 +13,9 @@ import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
-import {previewImportedBatchOffMain,type IsolatedBatchPreviewResult} from '../analyze/isolated-batch-preview';
+import {acquireNativeAstWorkerLease,previewImportedBatchOffMain,
+ releaseNativeAstWorkerLease,type IsolatedBatchPreviewResult,
+ type NativeAstWorkerLease} from '../analyze/isolated-batch-preview';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {snapshotNativeScripts} from './imported-analysis-queue';
 import {ReadOnlyBatchCoordinator,type ReadOnlyBatchSnapshot} from './batch-coordinator';
@@ -97,6 +99,14 @@ export async function runCheckpointedNativeImportAnalysis(
     journalRoot.length>4096||!isAbsolute(journalRoot)||
     journalRoot!==resolve(journalRoot)||journalRoot.includes('\0'))
   return fail(count,'UNSAFE_PATH');
+ // Reserve the shared process lifecycle before any journal directory or file
+ // operation. A busy or permanently unsafe gate is an unstarted request, so
+ // it must not turn an existing scheduling hint into FAILED or create one.
+ const acquisition=acquireNativeAstWorkerLease();
+ if(acquisition.status!=='ACQUIRED')return fail(count,'BUSY');
+ const lease:NativeAstWorkerLease=acquisition.lease;
+ let safeToLaunchWorkers=true;
+ try{
  // No untrusted hash or path enters the directory name; the digest uses only
  // the native importer's verified bytes, ordered and domain-separated.
  // v1/v2 did not bind the decoder and v3 grouped only by file count,
@@ -181,7 +191,6 @@ export async function runCheckpointedNativeImportAnalysis(
  const lifetime=new AbortController();
  // Keep this process-local stop state after an unconfirmed Worker retirement;
  // journal rows remain ordinary scheduling states, never lifecycle authority.
- let safeToLaunchWorkers=true;
  const attemptCounts:number[]=Array(groups.length).fill(0);
  const recoverIndividually=async(group:typeof groups[number])=>{
   const rows:(ImportAnalysisPreview|undefined)[]=
@@ -190,7 +199,7 @@ export async function runCheckpointedNativeImportAnalysis(
    if(lifetime.signal.aborted)break;
    try{
     const value=await previewImportedBatchOffMain([group.scripts[index]],
-     lifetime.signal,undefined,true);
+     lifetime.signal,undefined,true,lease);
     const evidence=readWorkerResult(value);
     if(!evidence||!evidence.safeToContinue){
      safeToLaunchWorkers=false;
@@ -217,7 +226,7 @@ export async function runCheckpointedNativeImportAnalysis(
   let previews:ImportAnalysisPreview[];
   try{
    const value=await previewImportedBatchOffMain(groups[ordinal].scripts,abort,
-    undefined,true);
+    undefined,true,lease);
    const evidence=readWorkerResult(value);
    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE' as const;}
    previews=evidence.previews;
@@ -318,7 +327,7 @@ export async function runCheckpointedNativeImportAnalysis(
      if(signal?.aborted||lifetime.signal.aborted)break;
      try{
       const value=await previewImportedBatchOffMain(group.scripts,lifetime.signal,
-       undefined,true);
+       undefined,true,lease);
       const evidence=readWorkerResult(value);
       if(!evidence){safeToLaunchWorkers=false;break;}
       const fresh=evidence.previews;
@@ -384,5 +393,8 @@ export async function runCheckpointedNativeImportAnalysis(
   clearTimeout(timeout);
   signal?.removeEventListener('abort',cancel);
   lifetime.signal.removeEventListener('abort',onAbort);
+ }
+ }finally{
+  releaseNativeAstWorkerLease(lease,safeToLaunchWorkers);
  }
 }

@@ -22,16 +22,6 @@ const ENCODINGS=new Set<ImportedScript['textEncoding']>([
 ]);
 const unavailable=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
  'ISOLATED_ANALYSIS_FAILED')=>unavailableImportPreview(status,'NOT_CHECKED');
-const UNSAFE_BATCH_SET_KEY='__uah_task013_unretired_ast_batches_v1__';
-const unsafeBatchIdentities=(()=>{
- const state=process as unknown as Record<string,unknown>;
- const current=state[UNSAFE_BATCH_SET_KEY];
- if(current instanceof Set)return current as Set<string>;
- const created=new Set<string>();
- Object.defineProperty(state,UNSAFE_BATCH_SET_KEY,{value:created,
-  enumerable:false,configurable:false,writable:false});
- return created;
-})();
 
 type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
 // Invoke native TypedArray internal-slot getters, not caller-owned accessors.
@@ -187,18 +177,6 @@ export async function runImportedReadOnlyAnalysisQueue(
   groups.push({offset,list,hash:hash.digest('hex')});
   offset=end;
  }
- const batchIdentityHash=createHash('sha256')
-  .update('uah-native-readonly-batch-lifetime-v1\0');
- for(const script of boundScripts){
-  batchIdentityHash.update(script.sha256);batchIdentityHash.update('\0');
-  batchIdentityHash.update(script.textEncoding);batchIdentityHash.update('\0');
- }
- const batchIdentity=batchIdentityHash.digest('hex');
- // An earlier call in this same Node process could not confirm Worker
- // retirement for these exact ordered bytes. Process exit clears this fence;
- // worker_threads cannot outlive the process that owned them.
- if(unsafeBatchIdentities.has(batchIdentity))
-  return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  const segmentCount=groups.length;
  const results:(ImportAnalysisPreview|null)[]=Array(count).fill(null);
  // A transient isolated Worker failure is retryable once, but neither
@@ -210,7 +188,6 @@ export async function runImportedReadOnlyAnalysisQueue(
  let safeToLaunchWorkers=true;
  const stopWorkers=()=>{
   safeToLaunchWorkers=false;
-  unsafeBatchIdentities.add(batchIdentity);
  };
  const parent=new AbortController();
  const cancel=()=>parent.abort();

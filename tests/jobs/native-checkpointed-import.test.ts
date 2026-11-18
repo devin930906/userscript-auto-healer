@@ -1,5 +1,6 @@
 import {test,mock} from 'node:test';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -8,7 +9,8 @@ import {importApprovedPaths} from '../../src/import/import-service';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
-import {unavailableImportPreview} from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
+import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 
 test('TASK-013/TEST-022/026: checkpointed native import must reject an array Proxy without reading properties',async()=>{
  let traps=0;
@@ -34,6 +36,13 @@ test('TASK-013/TEST-022/026: checkpointed native import must reject an array Pro
 });
 
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
+function isolateNativePoisoningTest(pattern:string,childKey:string):boolean{
+ if(process.env.UAH_TASK013_NATIVE_CHILD===childKey)return false;
+ execFileSync(process.execPath,['--test','--test-name-pattern',pattern,__filename],{
+  encoding:'utf8',env:{...process.env,UAH_TASK013_NATIVE_CHILD:childKey}
+ });
+ return true;
+}
 test('TASK-013/TEST-022/026: forged native cancellation never executes getters or creates a journal',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-signal-boundary-'));
  try{
@@ -572,6 +581,7 @@ test('TASK-013/TEST-022/026: cancelling resumed per-script recovery keeps only c
 });
 
 test('TASK-013/TEST-022/026: unretired native fallback worker stops remaining files and leaves FAILED journal intact',async()=>{
+ if(isolateNativePoisoningTest('unretired native fallback worker stops remaining files','native-fallback'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-native-fallback-unretired-'));
  try{
   const paths:string[]=[];
@@ -614,6 +624,7 @@ test('TASK-013/TEST-022/026: unretired native fallback worker stops remaining fi
 });
 
 test('TASK-013/TEST-022/026: unretired initial worker blocks retries and later journal segments',async()=>{
+ if(isolateNativePoisoningTest('unretired initial worker blocks retries and later journal segments','initial-worker'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-native-unretired-worker-'));
  try{
   const paths:string[]=[];
@@ -693,6 +704,7 @@ test('TASK-013/TEST-022/026: new retry policy preserves old v1 checkpoint eviden
 });
 
 test('TASK-013/TEST-022/026: thrown AST call without retirement proof stops retries',async()=>{
+ if(isolateNativePoisoningTest('thrown AST call without retirement proof stops retries','thrown-worker'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-native-ast-reject-'));
  try{
   const sourcePath=join(home,'review.user.js');
@@ -722,6 +734,7 @@ test('TASK-013/TEST-022/026: thrown AST call without retirement proof stops retr
 });
 
 test('TASK-013/TEST-022: permanent preview budget failure is not retried as a transient crash',async()=>{
+ if(isolateNativePoisoningTest('permanent preview budget failure is not retried as a transient crash','budget-worker'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-native-ast-permanent-'));
  try{
   const sourcePath=join(home,'review.user.js');
@@ -851,6 +864,7 @@ test('TASK-013/TEST-022: cancellation during resumed AST display analysis cannot
 });
 
 test('TASK-013/TEST-022/026: resumed AST worker fault without retirement proof stops later segments',async()=>{
+ if(isolateNativePoisoningTest('resumed AST worker fault without retirement proof stops later segments','resumed-worker'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-resumed-worker-failure-'));
  try{
   const files:string[]=[];
@@ -1009,6 +1023,7 @@ test('TASK-013/TEST-022: resumed read-only AST display retries one transient Wor
 });
 
 test('TASK-013/TEST-022: resumed AST display never retries a permanent worker budget result',async()=>{
+ if(isolateNativePoisoningTest('resumed AST display never retries a permanent worker budget result','resumed-budget'))return;
  const home=await mkdtemp(join(tmpdir(),'uah-resumed-budget-'));
  try{
   const file=join(home,'budget.user.js');
@@ -1040,6 +1055,138 @@ test('TASK-013/TEST-022: resumed AST display never retries a permanent worker bu
   }finally{patch.mock.restore();}
   assert.deepEqual(await readFile(journal),before);
   assert.equal(await readFile(file,'utf8'),script);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: ordinary and checkpointed queue paths share one active Worker gate',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-shared-worker-lifecycle-'));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ let starts=0;
+ let notifyRetirement!:()=>void;
+ const retirementStarted=new Promise<void>(resolve=>{notifyRetirement=resolve;});
+ let releaseRetirement!:()=>void;
+ try{
+  const paths:string[]=[];
+  for(let i=0;i<3;i++){
+   const path=join(home,'shared-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#shared-'+i+'");');
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  workers.Worker=class extends EventEmitter{
+   constructor(_filename:string,options:{workerData:typeof scripts}){
+    super();starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate():Promise<number>{
+    if(starts===2)return new Promise(resolve=>{
+     notifyRetirement();releaseRetirement=()=>resolve(0);
+    });
+    return Promise.resolve(0);
+   }
+  } as unknown as typeof native;
+
+  const journalRoot=join(userData,'readonly-journals');
+  const seeded=await runCheckpointedNativeImportAnalysis(journalRoot,scripts);
+  assert.equal(seeded.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journalDirectory=join(journalRoot,(await readdir(journalRoot))[0]);
+  const journalPath=join(journalDirectory,BATCH_JOURNAL_FILENAME);
+  const journalBeforeBusy=await readFile(journalPath);
+
+  const ordinary=runImportedReadOnlyAnalysisQueue([scripts[0]]);
+  await retirementStarted;
+  const nativeDuring=await runCheckpointedNativeImportAnalysis(
+   journalRoot,scripts);
+  assert.deepEqual(nativeDuring,{status:'BLOCKED',reason:'BUSY',
+   previews:scripts.map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'))});
+  assert.equal(starts,2,
+   'the native checkpoint path must be rejected while the ordinary path owns an active Worker');
+  assert.deepEqual(await readFile(journalPath),journalBeforeBusy,
+   'a Worker gate refusal must leave existing checkpoint bytes untouched');
+
+  releaseRetirement();
+  assert.deepEqual((await ordinary).map(row=>row.status),['STATIC_ANALYSIS_ONLY']);
+  const nativeAfter=await runCheckpointedNativeImportAnalysis(
+   journalRoot,scripts);
+  assert.equal(nativeAfter.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(nativeAfter.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+   assert.deepEqual(nativeAfter.previews.map(row=>row.status),
+    Array(3).fill('STATIC_ANALYSIS_ONLY'));
+  assert.equal(starts,3,
+   'a new native Worker may start after the ordinary Worker retires safely');
+  assert.deepEqual(await readFile(journalPath),journalBeforeBusy,
+   'the retry may use fresh display evidence without rewriting a settled journal');
+ }finally{
+  releaseRetirement?.();
+  workers.Worker=native;
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: permanently blocked Worker gate returns before creating a native journal',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-blocked-gate-'));
+ try{
+  const selected=join(home,'blocked.user.js');
+  await writeFile(selected,header+'document.querySelector("#blocked");');
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const journalRoot=join(userData,'readonly-journals');
+  const isolatedPath=require.resolve('../../src/analyze/isolated-batch-preview');
+  const previewPath=require.resolve('../../src/analyze/import-preview');
+  const importPath=require.resolve('../../src/import/import-service');
+  const nativePath=require.resolve('../../src/jobs/native-checkpointed-import');
+  const childCode=`
+   const assert=require('node:assert/strict');
+   const {EventEmitter}=require('node:events');
+   const {previewImportedBatchOffMain}=require(${JSON.stringify(isolatedPath)});
+   const {previewImportedScriptAnalysis}=require(${JSON.stringify(previewPath)});
+   const {importApprovedPaths}=require(${JSON.stringify(importPath)});
+   const {runCheckpointedNativeImportAnalysis}=require(${JSON.stringify(nativePath)});
+   const workers=require('node:worker_threads');
+   const nativeWorker=workers.Worker;
+   const selected=${JSON.stringify(selected)};
+   const journalRoot=${JSON.stringify(journalRoot)};
+   let starts=0;
+   (async()=>{
+    try{
+     workers.Worker=class extends EventEmitter{
+      constructor(_filename,options){
+       super();starts++;
+       setImmediate(()=>{
+        this.emit('online');
+        this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
+       });
+      }
+      terminate(){return Promise.reject(Error('PRIVATE_RETIREMENT_FAILURE'));}
+     };
+     const scripts=(await importApprovedPaths([selected])).scripts;
+     const failed=await previewImportedBatchOffMain(scripts);
+     assert.equal(failed[0].status,'ISOLATED_ANALYSIS_FAILED');
+     const refused=await runCheckpointedNativeImportAnalysis(journalRoot,scripts);
+     assert.equal(refused.status,'BLOCKED');
+     assert.equal(refused.reason,'BUSY');
+     assert.equal(starts,1,'a permanently blocked gate must not dispatch another Worker');
+     const fs=require('node:fs');
+     assert.equal(fs.existsSync(journalRoot),false,
+      'a permanent lifecycle refusal must not create or persist a FAILED journal');
+     process.stdout.write(JSON.stringify({status:refused.status,reason:refused.reason,starts}));
+    }finally{workers.Worker=nativeWorker;}
+   })().catch(error=>{console.error(error);process.exitCode=1;});
+  `;
+  const childResult=JSON.parse(execFileSync(process.execPath,['-e',childCode],
+   {encoding:'utf8'})) as {status:string;reason:string;starts:number};
+  assert.deepEqual(childResult,{status:'BLOCKED',reason:'BUSY',starts:1});
+  assert.deepEqual(await readdir(userData),[],
+   'an unretired worker must leave the native userData directory without journal artifacts');
  }finally{await rm(home,{recursive:true,force:true});}
 });
 

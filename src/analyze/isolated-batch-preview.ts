@@ -417,37 +417,155 @@ function isNativeWorkerAbortSignal(value:unknown):value is AbortSignal{
  * this receipt and must require safeToContinue before doing so. */
 export interface IsolatedBatchPreviewResult{
  readonly previews:ImportAnalysisPreview[];
- /** False means a prior Worker may still be alive; callers must stop all
-  * retries and later Worker dispatches for this batch. */
+ /** False means this call cannot authorize another dispatch. A caller refused
+  * while another lifecycle owner is active has not itself dispatched work. */
  readonly safeToContinue:boolean;
+}
+/** Capability issued only to the trusted native checkpoint scheduler. The
+ * runtime identity is held in process-local shared state; caller-created
+ * objects never grant access to the native lease path. */
+export type NativeAstWorkerLease=object;
+interface SharedAstWorkerGate{
+ readonly version:1;
+ active:boolean;
+ blocked:boolean;
+ lease:NativeAstWorkerLease|null;
+}
+const SHARED_AST_WORKER_GATE_KEY='__uah_isolated_ast_worker_gate_v1__';
+/** The process object is shared by independently loaded copies of this
+ * module. A malformed or inaccessible gate is a refusal, never permission. */
+function getSharedAstWorkerGate():SharedAstWorkerGate|null{
+ try{
+  const state=process as unknown as Record<string,unknown>;
+  const descriptor=Object.getOwnPropertyDescriptor(state,SHARED_AST_WORKER_GATE_KEY);
+  if(!descriptor){
+   const created=Object.seal({version:1 as const,active:false,blocked:false,
+    lease:null as NativeAstWorkerLease|null});
+   Object.defineProperty(state,SHARED_AST_WORKER_GATE_KEY,{value:created,
+    enumerable:false,configurable:false,writable:false});
+   return created;
+  }
+  if(!Object.prototype.hasOwnProperty.call(descriptor,'value'))return null;
+  const value:unknown=descriptor.value;
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value))return null;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(fields);
+  if(names.length!==4||
+     !Object.prototype.hasOwnProperty.call(fields,'version')||
+     !Object.prototype.hasOwnProperty.call(fields,'active')||
+     !Object.prototype.hasOwnProperty.call(fields,'blocked')||
+     !Object.prototype.hasOwnProperty.call(fields,'lease')||
+     !Object.prototype.hasOwnProperty.call(fields.version,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.active,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.blocked,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.lease,'value')||
+     fields.version.value!==1||typeof fields.active.value!=='boolean'||
+     typeof fields.blocked.value!=='boolean'||
+     (fields.lease.value!==null&&
+      (typeof fields.lease.value!=='object'||nodeTypes.isProxy(fields.lease.value))))
+   return null;
+  return value as SharedAstWorkerGate;
+ }catch{return null;}
+}
+type GateAcquireResult=
+ |{readonly status:'ACQUIRED';readonly gate:SharedAstWorkerGate}
+ |{readonly status:'BUSY'|'BLOCKED'};
+function acquireSharedAstWorkerGate(lease?:NativeAstWorkerLease):GateAcquireResult{
+ const gate=getSharedAstWorkerGate();
+ if(!gate)return {status:'BLOCKED'};
+ if(gate.blocked)return {status:'BLOCKED'};
+ if(lease===undefined){
+  if(gate.active||gate.lease!==null)return {status:'BUSY'};
+ }else if(gate.lease!==lease||gate.active){
+  return {status:'BUSY'};
+ }
+ gate.active=true;
+ return {status:'ACQUIRED',gate};
+}
+function noDispatchCanContinue(lease?:NativeAstWorkerLease):boolean{
+ const gate=getSharedAstWorkerGate();
+ return Boolean(gate&&!gate.active&&!gate.blocked&&
+  (lease===undefined?gate.lease===null:gate.lease===lease));
+}
+function releaseSharedAstWorkerGate(gate:SharedAstWorkerGate,safeToContinue:boolean):void{
+ try{
+  if(!safeToContinue)gate.blocked=true;
+  gate.active=false;
+ }catch{/* A damaged gate remains fail-closed for future calls. */}
+}
+/** Reserve the process-wide Worker lifecycle before native checkpoint I/O.
+ * The synchronous acquisition has no wait or timeout extension. Renderer
+ * input cannot provide the returned object capability. */
+export function acquireNativeAstWorkerLease():
+ {readonly status:'ACQUIRED';readonly lease:NativeAstWorkerLease}|{readonly status:'BUSY'|'BLOCKED'}{
+ const gate=getSharedAstWorkerGate();
+ if(!gate)return {status:'BLOCKED'};
+ if(gate.blocked)return {status:'BLOCKED'};
+ if(gate.active||gate.lease!==null)return {status:'BUSY'};
+ const lease=Object.freeze(Object.create(null)) as NativeAstWorkerLease;
+ gate.lease=lease;
+ return Object.freeze({status:'ACQUIRED' as const,lease});
+}
+/** Release only the exact capability acquired by the trusted native caller.
+ * Unsafe evidence or an unexpected active Worker permanently poisons the
+ * process gate; a clean release merely permits the next caller. */
+export function releaseNativeAstWorkerLease(
+ lease:NativeAstWorkerLease,safeToContinue:boolean
+):void{
+ const gate=getSharedAstWorkerGate();
+ if(!gate||gate.lease!==lease)return;
+ try{
+  if(!safeToContinue||gate.active)gate.blocked=true;
+  gate.lease=null;
+ }catch{/* A damaged capability holder leaves the process gate fail-closed. */}
 }
 export function previewImportedBatchOffMain(
  scripts:readonly Script[],signal:AbortSignal|undefined,
  onProgress:((processed:number,total:number)=>void)|undefined,
- includeSafetyEvidence:true
+ includeSafetyEvidence:true,lease?:NativeAstWorkerLease
 ):Promise<IsolatedBatchPreviewResult>;
 export function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
- onProgress?:(processed:number,total:number)=>void
+ onProgress?:(processed:number,total:number)=>void,
+ includeSafetyEvidence?:undefined,lease?:NativeAstWorkerLease
 ):Promise<ImportAnalysisPreview[]>;
 export async function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void,
- includeSafetyEvidence?:true
+ includeSafetyEvidence?:true,lease?:NativeAstWorkerLease
 ):Promise<ImportAnalysisPreview[]|IsolatedBatchPreviewResult>{
  const result=(previews:ImportAnalysisPreview[],safeToContinue:boolean)=>
   includeSafetyEvidence?Object.freeze({previews,safeToContinue}):previews;
  // This exported boundary accepts only trusted native cancellation handles.
  // [] is the fail-closed refusal for an invalid direct native-batch request,
  // matching the existing over-capacity direct-caller rejection below.
- if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return result([],true);
+ if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))
+  return result([],noDispatchCanContinue(lease));
  // Validate and snapshot direct native records before reading .length, .slice,
  // any element/bytes properties or letting an advisory callback run.
  // Eligible bytes have an independent bounded copy before asynchronous work.
  const nativeScripts=snapshotNativeAstBatch(scripts);
- if(nativeScripts===null)return result([],true);
+ if(nativeScripts===null)return result([],noDispatchCanContinue(lease));
+ if(nativeScripts.length===0)return result([],noDispatchCanContinue(lease));
+ const acquisition=acquireSharedAstWorkerGate(lease);
+ if(acquisition.status!=='ACQUIRED'){
+  const refused:ImportAnalysisPreview[]=[];
+  for(const script of nativeScripts){
+   const bytes=script?.bytes;
+   const size=bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH
+    ?NATIVE_BYTE_LENGTH.call(bytes) as number:Infinity;
+   refused.push(size>MAX_ISOLATED_ANALYSIS_BYTES
+    ?unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED')
+    :unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+  }
+  // A concurrent or permanently blocked caller has no dispatch authority.
+  return result(refused,false);
+ }
+ const gate=acquisition.gate;
  const results:ImportAnalysisPreview[]=[];
  let safeToContinue=true;
+ let completed=false;
+ try{
  // Use monotonic elapsed time: wall-clock synchronization must not shorten
  // or silently extend the 120-second native AST batch budget.
  const stopAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
@@ -486,5 +604,10 @@ export async function previewImportedBatchOffMain(
   try{onProgress?.(results.length,nativeScripts.length);}
   catch{/* progress is advisory; it cannot affect isolated parsing */}
  }
- return result(results,safeToContinue);
+  const completedResult=result(results,safeToContinue);
+  completed=true;
+  return completedResult;
+ }finally{
+  releaseSharedAstWorkerGate(gate,completed&&safeToContinue);
+ }
 }
