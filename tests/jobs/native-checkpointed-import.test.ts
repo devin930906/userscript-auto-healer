@@ -1,6 +1,8 @@
 import {test,mock} from 'node:test';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {EventEmitter} from 'node:events';
+import {setTimeout as delay} from 'node:timers/promises';
 import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -1128,6 +1130,58 @@ test('TASK-013/TEST-022/026: ordinary and checkpointed queue paths share one act
  }finally{
   releaseRetirement?.();
   workers.Worker=native;
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: native cancellation holds the lease until Worker retirement',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-cancel-retirement-'));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const realWorker=workers.Worker;
+ const controller=new AbortController();
+ let workerStarted!:()=>void;
+ const started=new Promise<void>(resolve=>{workerStarted=resolve;});
+ let retire!:()=>void;
+ const retirement=new Promise<number>(resolve=>{retire=()=>resolve(0);});
+ let pending:ReturnType<typeof runCheckpointedNativeImportAnalysis>|undefined;
+ let terminationRequested=false;
+ try{
+  const file=join(home,'selected.user.js');
+  const source=header+'document.querySelector("#source-retained");';
+  await writeFile(file,source);
+  const {scripts}=await importApprovedPaths([file]);
+  assert.equal(scripts.length,1);
+  workers.Worker=class extends EventEmitter{
+   constructor(){super();workerStarted();}
+   terminate(){terminationRequested=true;return retirement;}
+  } as unknown as typeof realWorker;
+  const journalRoot=join(home,'journals');
+  pending=runCheckpointedNativeImportAnalysis(journalRoot,scripts,controller.signal);
+  const startDeadline=new AbortController();
+  try{
+   await Promise.race([started,delay(5000,undefined,{signal:startDeadline.signal})
+    .then(()=>assert.fail('the native Worker did not start'))]);
+  }finally{startDeadline.abort();}
+  controller.abort();
+  assert.equal(terminationRequested,true);
+  const early=await Promise.race([pending,delay(250,'STILL_WAITING' as const)]);
+  assert.equal(early,'STILL_WAITING','cancellation must await the outstanding termination');
+  const busy=await runCheckpointedNativeImportAnalysis(join(home,'competing'),scripts);
+  assert.equal(busy.status,'BLOCKED');
+  if(busy.status==='BLOCKED')assert.equal(busy.reason,'BUSY');
+  assert.deepEqual((await readdir(home)).sort(),['journals','selected.user.js']);
+  retire();
+  const cancelled=await pending;
+  assert.equal(cancelled.status,'BLOCKED');
+  if(cancelled.status==='BLOCKED')assert.equal(cancelled.reason,'CANCELLED');
+  assert.deepEqual(cancelled.previews.map(row=>row.status),['SKIPPED_CANCELLED']);
+  assert.equal(await readFile(file,'utf8'),source);
+ }finally{
+  controller.abort();
+  retire();
+  await pending?.catch(()=>{});
+  workers.Worker=realWorker;
   await rm(home,{recursive:true,force:true});
  }
 });
