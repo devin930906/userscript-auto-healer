@@ -201,6 +201,7 @@ export async function runImportedReadOnlyAnalysisQueue(
  },GLOBAL_ANALYSIS_DEADLINE_MS);
  if(signal?.aborted)cancel();
  let processed=0;
+ const inFlightWorkers=new Set<Promise<unknown>>();
  try{
   const coordinator=new ReadOnlyBatchCoordinator({
    count:segmentCount,concurrency:1,maxAttempts:2,
@@ -210,9 +211,11 @@ export async function runImportedReadOnlyAnalysisQueue(
    const group=groups[ordinal];
    const attempt=++attempts[ordinal];
    let previews:ImportAnalysisPreview[]=[];
+   const task=previewImportedBatchOffMain(group.list,workerSignal,
+    undefined,true);
+   inFlightWorkers.add(task);
    try{
-    const value=await previewImportedBatchOffMain(group.list,workerSignal,
-     undefined,true);
+    const value=await task;
     const evidence=readWorkerResult(value);
     if(!evidence){stopWorkers();return 'PERMANENT_FAILURE';}
     previews=evidence.previews;
@@ -221,6 +224,8 @@ export async function runImportedReadOnlyAnalysisQueue(
     // A thrown call has no retirement receipt. Do not risk overlapping a
     // replacement Worker with one that may still be running.
     stopWorkers();
+   }finally{
+    inFlightWorkers.delete(task);
    }
    // Cancellation and timeouts never start a replacement Worker.
    if(workerSignal.aborted)return 'PERMANENT_FAILURE';
@@ -255,9 +260,11 @@ export async function runImportedReadOnlyAnalysisQueue(
    if(!needsRecovery[ordinal]||group.list.length<2)continue;
    for(let index=0;index<group.list.length;index++){
     if(parent.signal.aborted)break;
+    const task=previewImportedBatchOffMain([group.list[index]],
+     parent.signal,undefined,true);
+    inFlightWorkers.add(task);
     try{
-     const value=await previewImportedBatchOffMain([group.list[index]],
-      parent.signal,undefined,true);
+     const value=await task;
      const evidence=readWorkerResult(value);
      if(!evidence||!evidence.safeToContinue){
       stopWorkers();
@@ -278,12 +285,17 @@ export async function runImportedReadOnlyAnalysisQueue(
      // A thrown call carries no retirement proof; stop the fallback chain.
      stopWorkers();
      break;
+    }finally{
+     inFlightWorkers.delete(task);
     }
    }
   }
  }finally{
   clearTimeout(deadline);
   signal?.removeEventListener('abort',cancel);
+  if(inFlightWorkers.size>0){
+   await Promise.allSettled(Array.from(inFlightWorkers));
+  }
  }
  return results.map(value=>value??unavailable(
   signal?.aborted?'SKIPPED_CANCELLED':

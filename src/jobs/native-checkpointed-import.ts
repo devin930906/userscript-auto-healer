@@ -192,14 +192,17 @@ export async function runCheckpointedNativeImportAnalysis(
  // Keep this process-local stop state after an unconfirmed Worker retirement;
  // journal rows remain ordinary scheduling states, never lifecycle authority.
  const attemptCounts:number[]=Array(groups.length).fill(0);
+ const inFlightWorkers=new Set<Promise<unknown>>();
  const recoverIndividually=async(group:typeof groups[number])=>{
   const rows:(ImportAnalysisPreview|undefined)[]=
    Array(group.scripts.length).fill(undefined);
   for(let index=0;index<group.scripts.length;index++){
    if(lifetime.signal.aborted)break;
+   const task=previewImportedBatchOffMain([group.scripts[index]],
+    lifetime.signal,undefined,true,lease);
+   inFlightWorkers.add(task);
    try{
-    const value=await previewImportedBatchOffMain([group.scripts[index]],
-     lifetime.signal,undefined,true,lease);
+    const value=await task;
     const evidence=readWorkerResult(value);
     if(!evidence||!evidence.safeToContinue){
      safeToLaunchWorkers=false;
@@ -216,6 +219,8 @@ export async function runCheckpointedNativeImportAnalysis(
     // A thrown call has no retirement receipt; stop the per-file retry chain.
     safeToLaunchWorkers=false;
     break;
+   }finally{
+    inFlightWorkers.delete(task);
    }
   }
   return rows;
@@ -224,9 +229,11 @@ export async function runCheckpointedNativeImportAnalysis(
   if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE' as const;
   const attempt=++attemptCounts[ordinal];
   let previews:ImportAnalysisPreview[];
+  const task=previewImportedBatchOffMain(groups[ordinal].scripts,abort,
+   undefined,true,lease);
+  inFlightWorkers.add(task);
   try{
-   const value=await previewImportedBatchOffMain(groups[ordinal].scripts,abort,
-    undefined,true,lease);
+   const value=await task;
    const evidence=readWorkerResult(value);
    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE' as const;}
    previews=evidence.previews;
@@ -236,6 +243,8 @@ export async function runCheckpointedNativeImportAnalysis(
    // Worker that remains live. Fail closed for this and later segments.
    safeToLaunchWorkers=false;
    return 'PERMANENT_FAILURE' as const;
+  }finally{
+   inFlightWorkers.delete(task);
   }
   if(abort.aborted||signal?.aborted||lifetime.signal.aborted||
      previews.some(row=>row.status==='SKIPPED_CANCELLED'||
@@ -393,6 +402,9 @@ export async function runCheckpointedNativeImportAnalysis(
   clearTimeout(timeout);
   signal?.removeEventListener('abort',cancel);
   lifetime.signal.removeEventListener('abort',onAbort);
+  if(inFlightWorkers.size>0){
+   await Promise.allSettled(Array.from(inFlightWorkers));
+  }
  }
  }finally{
   releaseNativeAstWorkerLease(lease,safeToLaunchWorkers);
