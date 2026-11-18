@@ -10,6 +10,49 @@ import {tmpdir} from 'node:os';
 import {importApprovedPaths} from '../../src/import/import-service';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import {unavailableImportPreview} from '../../src/analyze/import-preview';
+import {EventEmitter} from 'node:events';
+
+test('TASK-013/TEST-022/026: cancelled queue waits for Worker retirement',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-cancel-retirement-'));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const realWorker=workers.Worker;
+ const controller=new AbortController();
+ let markStarted!:()=>void;
+ const started=new Promise<void>(resolve=>{markStarted=resolve;});
+ let finishRetirement!:()=>void;
+ const retirement=new Promise<number>(resolve=>{finishRetirement=()=>resolve(0);});
+ let queue:ReturnType<typeof runImportedReadOnlyAnalysisQueue>|undefined;
+ let settled=false;
+ let retirementRequested=false;
+ try{
+  const file=join(root,'cancellation.user.js');
+  await writeFile(file,'// ==UserScript==\n// @name cancellation\n'+
+   '// @match https://example.org/*\n// ==/UserScript==\n'+
+   'document.querySelector("#target");');
+  const {scripts}=await importApprovedPaths([file]);
+  assert.equal(scripts.length,1);
+  workers.Worker=class extends EventEmitter{
+   constructor(){super();markStarted();}
+   terminate(){retirementRequested=true;return retirement;}
+  } as unknown as typeof realWorker;
+  queue=runImportedReadOnlyAnalysisQueue(scripts,controller.signal)
+   .finally(()=>{settled=true;});
+  await started;
+  controller.abort();
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(retirementRequested,true);
+  assert.equal(settled,false,'the scheduler must not return while termination is pending');
+  finishRetirement();
+  assert.deepEqual((await queue).map(row=>row.status),['SKIPPED_CANCELLED']);
+ }finally{
+  controller.abort();
+  finishRetirement();
+  await queue?.catch(()=>{});
+  workers.Worker=realWorker;
+  await rm(root,{recursive:true,force:true});
+ }
+});
 
 /** TASK-013 / Issue #857 / TEST-022: each imported file must receive its
  * independent read-only AST opportunity. A 16-file count segment cannot
