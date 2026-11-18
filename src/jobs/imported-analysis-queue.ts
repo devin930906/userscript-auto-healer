@@ -22,6 +22,16 @@ const ENCODINGS=new Set<ImportedScript['textEncoding']>([
 ]);
 const unavailable=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
  'ISOLATED_ANALYSIS_FAILED')=>unavailableImportPreview(status,'NOT_CHECKED');
+const UNSAFE_BATCH_SET_KEY='__uah_task013_unretired_ast_batches_v1__';
+const unsafeBatchIdentities=(()=>{
+ const state=process as unknown as Record<string,unknown>;
+ const current=state[UNSAFE_BATCH_SET_KEY];
+ if(current instanceof Set)return current as Set<string>;
+ const created=new Set<string>();
+ Object.defineProperty(state,UNSAFE_BATCH_SET_KEY,{value:created,
+  enumerable:false,configurable:false,writable:false});
+ return created;
+})();
 
 type BoundScript=Readonly<Pick<ImportedScript,'bytes'|'sha256'|'textEncoding'>>;
 // Invoke native TypedArray internal-slot getters, not caller-owned accessors.
@@ -177,14 +187,31 @@ export async function runImportedReadOnlyAnalysisQueue(
   groups.push({offset,list,hash:hash.digest('hex')});
   offset=end;
  }
+ const batchIdentityHash=createHash('sha256')
+  .update('uah-native-readonly-batch-lifetime-v1\0');
+ for(const script of boundScripts){
+  batchIdentityHash.update(script.sha256);batchIdentityHash.update('\0');
+  batchIdentityHash.update(script.textEncoding);batchIdentityHash.update('\0');
+ }
+ const batchIdentity=batchIdentityHash.digest('hex');
+ // An earlier call in this same Node process could not confirm Worker
+ // retirement for these exact ordered bytes. Process exit clears this fence;
+ // worker_threads cannot outlive the process that owned them.
+ if(unsafeBatchIdentities.has(batchIdentity))
+  return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
  const segmentCount=groups.length;
  const results:(ImportAnalysisPreview|null)[]=Array(count).fill(null);
  // A transient isolated Worker failure is retryable once, but neither
  // retries nor a malformed reply may double-count completed script slots.
  const attempts:number[]=Array(segmentCount).fill(0);
+ const needsRecovery:boolean[]=Array(segmentCount).fill(false);
  // A Worker that did not retire within its original deadline may still be
  // alive. Stop this whole batch before retrying it or starting later segments.
  let safeToLaunchWorkers=true;
+ const stopWorkers=()=>{
+  safeToLaunchWorkers=false;
+  unsafeBatchIdentities.add(batchIdentity);
+ };
  const parent=new AbortController();
  const cancel=()=>parent.abort();
  signal?.addEventListener('abort',cancel,{once:true});
@@ -210,23 +237,23 @@ export async function runImportedReadOnlyAnalysisQueue(
     const value=await previewImportedBatchOffMain(group.list,workerSignal,
      undefined,true);
     const evidence=readWorkerResult(value);
-    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE';}
+    if(!evidence){stopWorkers();return 'PERMANENT_FAILURE';}
     previews=evidence.previews;
-    if(!evidence.safeToContinue)safeToLaunchWorkers=false;
+    if(!evidence.safeToContinue)stopWorkers();
    }catch{
     // A thrown call has no retirement receipt. Do not risk overlapping a
     // replacement Worker with one that may still be running.
-    safeToLaunchWorkers=false;
+    stopWorkers();
    }
    // Cancellation and timeouts never start a replacement Worker.
    if(workerSignal.aborted)return 'PERMANENT_FAILURE';
-  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
+   if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
    const failed=previews.length!==group.list.length||
     previews.some(x=>x.status==='ISOLATED_ANALYSIS_FAILED');
    const exhausted=previews.some(x=>
     x.status==='SKIPPED_CANCELLED'||x.status==='SKIPPED_BATCH_BUDGET');
-  if(failed&&!exhausted&&safeToLaunchWorkers&&attempt<2)
-   return 'RETRYABLE_FAILURE';
+   if(failed&&!exhausted&&attempt<2)return 'RETRYABLE_FAILURE';
+   if(failed&&!exhausted&&attempt>=2)needsRecovery[ordinal]=true;
    // Reject the entire malformed/failed segment, not just its supplied
    // prefix. A later segment can still produce independent AST evidence.
    if(!failed){
@@ -241,6 +268,42 @@ export async function runImportedReadOnlyAnalysisQueue(
   parent.signal.addEventListener('abort',onAbort,{once:true});
   try{await coordinator.run();}
   finally{parent.signal.removeEventListener('abort',onAbort);}
+  // A failed multi-file segment may hide independently analyzable scripts.
+  // Re-import each already-snapshotted byte record through a fresh one-file
+  // Worker, within the same global signal/deadline and original Worker limit.
+  // The checkpointed scheduler is not involved and no source is written.
+  for(let ordinal=0;ordinal<groups.length&&safeToLaunchWorkers&&
+      !parent.signal.aborted;ordinal++){
+   const group=groups[ordinal];
+   if(!needsRecovery[ordinal]||group.list.length<2)continue;
+   for(let index=0;index<group.list.length;index++){
+    if(parent.signal.aborted)break;
+    try{
+     const value=await previewImportedBatchOffMain([group.list[index]],
+      parent.signal,undefined,true);
+     const evidence=readWorkerResult(value);
+     if(!evidence||!evidence.safeToContinue){
+      stopWorkers();
+      break;
+     }
+     if(evidence.previews.length!==1){
+      results[group.offset+index]=unavailable('ISOLATED_ANALYSIS_FAILED');
+      continue;
+     }
+     let report=evidence.previews[0];
+     if(report.status==='SKIPPED_CANCELLED'&&deadlineExpired&&
+        !signal?.aborted)
+      report=unavailable('SKIPPED_BATCH_BUDGET');
+     results[group.offset+index]=report;
+     if(report.status==='SKIPPED_CANCELLED'||
+        report.status==='SKIPPED_BATCH_BUDGET')break;
+    }catch{
+     // A thrown call carries no retirement proof; stop the fallback chain.
+     stopWorkers();
+     break;
+    }
+   }
+  }
  }finally{
   clearTimeout(deadline);
   signal?.removeEventListener('abort',cancel);

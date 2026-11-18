@@ -4,7 +4,7 @@ import type {ImportedScript} from '../../src/import/import-service';
 import {snapshotNativeScripts} from '../../src/jobs/imported-analysis-queue';
 
 import {strict as assert} from 'node:assert';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {importApprovedPaths} from '../../src/import/import-service';
@@ -45,6 +45,174 @@ test('TASK-013/TEST-022: valid later scripts are not skipped by earlier segment 
    assert.equal(previews[i].automaticPatchAllowed,false);
   }
   assert.equal(counts.at(-1),3);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/REQ-022/TEST-022: exhausted segment retries preserve successful sibling AST previews',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-per-script-recovery-'));
+ try{
+  const files:string[]=[];
+  const sources:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'script-'+i+'.user.js');
+   const source='// ==UserScript==\n// @name per-script-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#per-script-'+i+'");';
+   await writeFile(file,source);
+   files.push(file);sources.push(source);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    if(Buffer.from(args[0][0].bytes).toString('utf8').includes('#per-script-1'))
+     return {previews:[unavailableImportPreview(
+      'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:true} as unknown as
+       Awaited<ReturnType<typeof actual>>;
+    return actual(...args);
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','ISOLATED_ANALYSIS_FAILED','STATIC_ANALYSIS_ONLY'
+   ],'each file should keep its own fresh result after one exhausted segment retry');
+   assert.equal(calls,5,'two segment attempts then one bounded attempt per script');
+   assert.ok(previews.every(row=>!row.automaticPatchAllowed&&
+    !row.tampermonkeyVerified&&!row.businessVerified));
+  }finally{patch.mock.restore();}
+  for(let index=0;index<files.length;index++)
+   assert.equal(await readFile(files[index],'utf8'),sources[index],
+    'per-file AST recovery must never modify the selected source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: cancellation during per-script recovery preserves earlier evidence and stops later workers',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-per-script-cancel-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'cancel-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name cancel-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#cancel-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  const controller=new AbortController();
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    const result=await actual(...args);
+    controller.abort();
+    return result;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts,
+    controller.signal);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','SKIPPED_CANCELLED','SKIPPED_CANCELLED'
+   ],'cancellation must retain only completed fresh fallback evidence');
+   assert.equal(calls,3,'cancellation must prevent later per-file Worker launches');
+  }finally{patch.mock.restore();}
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/NFR-009: global deadline bounds per-script recovery',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-fallback-deadline-'));
+ const originalSetTimeout=globalThis.setTimeout;
+ let expireDeadline:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay===120000){
+   expireDeadline=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'deadline-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name deadline-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#deadline-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    const result=await actual(...args);
+    expireDeadline?.();
+    expireDeadline=undefined;
+    return result;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'
+   ]);
+   assert.equal(calls,3,'global deadline must prevent later per-file worker launches');
+  }finally{patch.mock.restore();}
+ }finally{
+  globalThis.setTimeout=originalSetTimeout;
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: unretired single-file fallback stops remaining file retries',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-fallback-unretired-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'unretired-fallback-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name unretired-fallback-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#unretired-fallback-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    return {previews:[unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:false} as unknown as
+      Awaited<ReturnType<typeof actual>>;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.equal(calls,3,'an unretired first fallback worker prevents every later launch');
+   assert.deepEqual(previews.map(row=>row.status),
+    Array(3).fill('ISOLATED_ANALYSIS_FAILED'));
+  }finally{patch.mock.restore();}
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

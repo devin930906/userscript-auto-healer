@@ -1175,16 +1175,19 @@ test('TASK-013/TEST-022: native read-only queue recovers an isolated transient A
  }finally{injected.mock.restore();}
 });
 
-test('TASK-013/TEST-022/026: exhausted malformed AST segment stays failed without omitting subsequent scripts',async()=>{
+test('TASK-013/TEST-022/026: exhausted malformed AST segment recovers each script without omitting later segments',async()=>{
  const scripts=Array.from({length:17},(_,i)=>realNativeScript(1200+i));
  const isolated=require('../../src/analyze/isolated-batch-preview') as
   typeof import('../../src/analyze/isolated-batch-preview');
  const native=isolated.previewImportedBatchOffMain;
  let attempts=0;
+ let segmentAttempts=0,oneFileAttempts=0;
  const progress:Array<[number,number]>=[];
  const injected=mock.method(isolated,'previewImportedBatchOffMain',
   async(...args:Parameters<typeof native>)=>{
    attempts++;
+   if(args[0].length>1)segmentAttempts++;
+   else oneFileAttempts++;
    if(attempts<=2)return {previews:[],safeToContinue:true} as unknown as
     Awaited<ReturnType<typeof native>>;
    return native(...args);
@@ -1192,10 +1195,14 @@ test('TASK-013/TEST-022/026: exhausted malformed AST segment stays failed withou
  try{
   const previews=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
    (processed,total)=>progress.push([processed,total]));
-  assert.equal(attempts,3,'truncated first segment must get exactly two attempts');
+  assert.equal(attempts,19,
+   'two truncated segment attempts are followed by 16 one-file recoveries and one later segment');
+  assert.equal(segmentAttempts,2,'the malformed segment must stop after its bounded attempts');
+  assert.equal(oneFileAttempts,17,'each failed-segment file and the following segment run independently');
   assert.equal(previews.length,17,'never omit even a failed imported file');
   assert.deepEqual(previews.slice(0,16).map(x=>x.status),
-   Array(16).fill('ISOLATED_ANALYSIS_FAILED'));
+   Array(16).fill('STATIC_ANALYSIS_ONLY'),
+   'each script in the malformed segment must receive fresh isolated analysis');
   assert.equal(previews[16].status,'STATIC_ANALYSIS_ONLY');
   assert.deepEqual(progress,[[16,17],[17,17]]);
   assert.ok(previews.every(p=>!p.automaticPatchAllowed&&!p.tampermonkeyVerified&&!p.businessVerified));

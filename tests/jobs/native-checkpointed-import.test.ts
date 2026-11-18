@@ -6,7 +6,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {importApprovedPaths} from '../../src/import/import-service';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
-import {BATCH_JOURNAL_FILENAME} from '../../src/jobs/batch-journal';
+import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
+import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {unavailableImportPreview} from '../../src/analyze/import-preview';
 
 test('TASK-013/TEST-022/026: checkpointed native import must reject an array Proxy without reading properties',async()=>{
@@ -360,6 +361,258 @@ test('TASK-013/TEST-022: repeated AST worker crashes exhaust retry budget withou
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-013/REQ-022/TEST-022: exhausted native segment keeps each fresh per-script result without rewriting FAILED checkpoint',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-per-script-recovery-'));
+ try{
+  const paths:string[]=[];
+  const sources:string[]=[];
+  for(let i=0;i<3;i++){
+   const path=join(home,'source-'+i+'.user.js');
+   const source=header+'document.querySelector("#native-recover-'+i+'");';
+   await writeFile(path,source);
+   paths.push(path);sources.push(source);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    if(Buffer.from(args[0][0].bytes).toString('utf8').includes('#native-recover-1'))
+     return {previews:[unavailableImportPreview(
+      'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:true} as unknown as
+       Awaited<ReturnType<typeof actual>>;
+    return actual(...args);
+   });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    assert.deepEqual(outcome.previews.map(row=>row.status),[
+     'STATIC_ANALYSIS_ONLY','ISOLATED_ANALYSIS_FAILED','STATIC_ANALYSIS_ONLY'
+    ]);
+   assert.equal(calls,5,'two segment attempts then one current AST attempt per script');
+   const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+   const stored=JSON.parse(await readFile(journal,'utf8'));
+   assert.deepEqual(stored.jobs.map((job:{state:string;attempts:number})=>
+    [job.state,job.attempts]),[['FAILED',2]],
+    'per-file display recovery must not change the genuine failed checkpoint');
+  }finally{patch.mock.restore();}
+  for(let index=0;index<paths.length;index++)
+   assert.equal(await readFile(paths[index],'utf8'),sources[index]);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/REQ-022/TEST-022: resumed segment retries preserve per-script results and journal bytes',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-resumed-isolation-'));
+ try{
+  const paths:string[]=[];
+  const sources:string[]=[];
+  for(let i=0;i<3;i++){
+   const path=join(home,'resumed-'+i+'.user.js');
+   const source=header+'document.querySelector("#resumed-'+i+'");';
+   await writeFile(path,source);paths.push(path);sources.push(source);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    if(Buffer.from(args[0][0].bytes).toString('utf8').includes('#resumed-1'))
+     return {previews:[unavailableImportPreview(
+      'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:true} as unknown as
+       Awaited<ReturnType<typeof actual>>;
+    return actual(...args);
+   });
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(resumed.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   if(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+    assert.equal(resumed.resumed,true);
+    assert.deepEqual(resumed.previews.map(row=>row.status),[
+     'STATIC_ANALYSIS_ONLY','ISOLATED_ANALYSIS_FAILED','STATIC_ANALYSIS_ONLY'
+    ]);
+   }
+   assert.equal(calls,5,'two resumed segment checks then one fresh analysis per script');
+  }finally{patch.mock.restore();}
+  assert.deepEqual(await readFile(journal),before,
+   'display recovery after resume must not alter durable scheduling state');
+  for(let index=0;index<paths.length;index++)
+   assert.equal(await readFile(paths[index],'utf8'),sources[index]);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: restored FAILED checkpoint does not imply prior Worker retirement',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-restored-failed-recovery-'));
+ try{
+  const path=join(home,'restored.user.js');
+  const source=header+'document.querySelector("#restored");';
+  await writeFile(path,source);
+  const [script]=(await importApprovedPaths([path])).scripts;
+  const userData=join(home,'userdata');
+  const root=join(userData,'readonly-journals');
+  await mkdir(root,{recursive:true});
+  const nameHash=createHash('sha256')
+   .update('uah-native-import-batch-v4\0')
+   .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
+   .digest('hex');
+  const batchDirectory=join(root,'batch-'+nameHash);
+  await mkdir(batchDirectory);
+  const segmentHash=createHash('sha256')
+   .update('uah-native-import-segment-v3\0').update('0').update('\0')
+   .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
+   .digest('hex');
+  const options={count:1,maxAttempts:2,concurrency:1,timeoutMs:15000,
+   jobHashes:[segmentHash]};
+  const seed=new ReadOnlyBatchCoordinator(options,async()=> 'DONE');
+  const exhausted={...seed.snapshot(),jobs:[{
+   ordinal:0,state:'FAILED' as const,attempts:2
+  }]};
+  const saved=new ReadOnlyBatchCoordinator(options,async()=> 'DONE',exhausted);
+  assert.equal((await saveReadOnlyBatchJournal(batchDirectory,saved)).status,
+   'CHECKPOINT_SAVED_UNVERIFIED');
+  const journal=join(batchDirectory,BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+
+  // The journal does not encode retirement authority. Even when supplied as
+  // a clean-process fixture, FAILED/2 remains untrusted history and cannot
+  // itself authorize a new Worker in this recovery path.
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  let calls=0;
+  const guard=mock.method(isolated,'previewImportedBatchOffMain',async()=>{
+   calls++;
+   throw Error('FAILED_CHECKPOINT_MUST_NOT_AUTHORIZE_WORKER');
+  });
+  let outcome:Awaited<ReturnType<typeof runCheckpointedNativeImportAnalysis>>;
+  try{outcome=await runCheckpointedNativeImportAnalysis(root,[script]);}
+  finally{guard.mock.restore();}
+  assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'){
+   assert.equal(outcome.resumed,true);
+   assert.deepEqual(outcome.previews.map(row=>row.status),[
+    'ISOLATED_ANALYSIS_FAILED'
+   ]);
+   assert.equal(outcome.previews[0].automaticPatchAllowed,false);
+   assert.equal(outcome.previews[0].tampermonkeyVerified,false);
+   assert.equal(outcome.previews[0].businessVerified,false);
+  }
+  assert.equal(calls,0,'FAILED/2 is not proof that any previous Worker retired');
+  assert.deepEqual(await readFile(journal),before,
+   'fresh display recovery must not rewrite a terminal FAILED journal');
+  assert.equal(await readFile(path,'utf8'),source);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: cancelling resumed per-script recovery keeps only completed preview evidence',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-resumed-cancel-'));
+ try{
+  const paths:string[]=[];
+  for(let i=0;i<3;i++){
+   const path=join(home,'cancel-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#cancel-'+i+'");');
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+  const before=await readFile(journal);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  const controller=new AbortController();
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    const result=await actual(...args);
+    controller.abort();
+    return result;
+   });
+  try{
+   const resumed=await runCheckpointedNativeImportAnalysis(root,scripts,
+    controller.signal);
+   assert.equal(resumed.status,'BLOCKED');
+   if(resumed.status==='BLOCKED'){
+    assert.equal(resumed.reason,'CANCELLED');
+    assert.deepEqual(resumed.previews.map(row=>row.status),[
+     'STATIC_ANALYSIS_ONLY','SKIPPED_CANCELLED','SKIPPED_CANCELLED'
+    ]);
+   }
+   assert.equal(calls,3,'cancellation stops all later per-script workers');
+  }finally{patch.mock.restore();}
+  assert.deepEqual(await readFile(journal),before,
+   'cancelled display recovery must leave the checkpoint unchanged');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: unretired native fallback worker stops remaining files and leaves FAILED journal intact',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-fallback-unretired-'));
+ try{
+  const paths:string[]=[];
+  for(let i=0;i<3;i++){
+   const path=join(home,'unretired-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#unretired-'+i+'");');
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    return {previews:[unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:false} as unknown as
+      Awaited<ReturnType<typeof actual>>;
+   });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(calls,3,'an unretired fallback worker blocks the rest of the per-file loop');
+   if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    assert.deepEqual(outcome.previews.map(row=>row.status),
+     Array(3).fill('ISOLATED_ANALYSIS_FAILED'));
+   const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+   const stored=JSON.parse(await readFile(journal,'utf8'));
+   assert.deepEqual(stored.jobs.map((job:{state:string;attempts:number})=>
+    [job.state,job.attempts]),[['FAILED',2]],
+    'per-file fallback lifecycle must not rewrite the FAILED scheduling record');
+  }finally{patch.mock.restore();}
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022/026: unretired initial worker blocks retries and later journal segments',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-unretired-worker-'));
  try{
@@ -658,7 +911,7 @@ test('TASK-013/TEST-022/026: resumed AST worker fault without retirement proof s
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
-test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit imported scripts',async()=>{
+test('TASK-013/TEST-022/026: truncated resumed AST display recovers each script without rewriting the journal',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-resumed-truncated-preview-'));
  try{
   const paths:string[]=[];
@@ -694,14 +947,15 @@ test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit 
     assert.equal(resumed.resumed,true);
     assert.equal(resumed.previews.length,17,'every selected file needs a display receipt');
     assert.deepEqual(resumed.previews.slice(0,16).map(row=>row.status),
-     Array(16).fill('ISOLATED_ANALYSIS_FAILED'),
-     'truncated fresh Worker output must fail closed for its whole segment');
+     Array(16).fill('STATIC_ANALYSIS_ONLY'),
+     'truncated batch replies should receive bounded fresh per-script analysis');
     assert.equal(resumed.previews[16].status,'STATIC_ANALYSIS_ONLY',
      'a failed segment must not discard another independently valid one');
     assert.equal(resumed.previews.every(row=>
      !row.automaticPatchAllowed&&!row.tampermonkeyVerified&&!row.businessVerified),true);
    }
-   assert.equal(calls,3,'truncated segment retries once; next segment independently runs');
+   assert.equal(calls,19,
+    'two segment attempts are followed by 16 single-file rechecks and the last segment');
    assert.deepEqual(progress,[[16,17],[17,17]]);
   }finally{patch.mock.restore();}
   assert.deepEqual(await readFile(journal),before,
