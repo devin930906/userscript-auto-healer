@@ -1,4 +1,4 @@
-import {test} from 'node:test';
+import {mock,test} from 'node:test';
 import {createHash} from 'node:crypto';
 import type {ImportedScript} from '../../src/import/import-service';
 import {snapshotNativeScripts} from '../../src/jobs/imported-analysis-queue';
@@ -9,6 +9,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {importApprovedPaths} from '../../src/import/import-service';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
+import {unavailableImportPreview} from '../../src/analyze/import-preview';
 
 /** TASK-013 / Issue #857 / TEST-022: each imported file must receive its
  * independent read-only AST opportunity. A 16-file count segment cannot
@@ -44,6 +45,38 @@ test('TASK-013/TEST-022: valid later scripts are not skipped by earlier segment 
    assert.equal(previews[i].automaticPatchAllowed,false);
   }
   assert.equal(counts.at(-1),3);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: unretired Worker stops retries and every later segment',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-unretired-worker-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<17;i++){
+   const file=join(root,'unretired-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name unretired-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#unretired-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',async(
+   scripts:readonly Pick<ImportedScript,'bytes'|'textEncoding'>[]
+  )=>{
+   calls++;
+   const failed=Array.from({length:scripts.length},()=>
+    unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+   return {previews:failed,safeToContinue:false};
+  });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.equal(calls,1,'a possibly live Worker must block retry and later segments');
+   assert.equal(previews.length,17);
+   assert.equal(previews.every(row=>row.status==='ISOLATED_ANALYSIS_FAILED'),true);
+  }finally{patch.mock.restore();}
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

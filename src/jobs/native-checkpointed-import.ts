@@ -13,7 +13,7 @@ import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
-import {previewImportedBatchOffMain} from '../analyze/isolated-batch-preview';
+import {previewImportedBatchOffMain,type IsolatedBatchPreviewResult} from '../analyze/isolated-batch-preview';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {snapshotNativeScripts} from './imported-analysis-queue';
 import {ReadOnlyBatchCoordinator,type ReadOnlyBatchSnapshot} from './batch-coordinator';
@@ -32,6 +32,26 @@ const fail=(count:number,reason:BatchJournalFailure|'CANCELLED'):BatchOutcome=>O
 });
 const blank=(count:number,status:'SKIPPED_CANCELLED'|'ISOLATED_ANALYSIS_FAILED')=>
  Array.from({length:count},()=>unavailableImportPreview(status,'NOT_CHECKED'));
+
+/** Only the explicit Worker lifecycle receipt can authorize another dispatch.
+ * Old array-only results and malformed receipts have no retirement proof. */
+function readWorkerResult(value:unknown):IsolatedBatchPreviewResult|null{
+ try{
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||Array.isArray(value))
+   return null;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(fields);
+  if(names.length!==2||
+     !Object.prototype.hasOwnProperty.call(fields,'previews')||
+     !Object.prototype.hasOwnProperty.call(fields,'safeToContinue')||
+     !Object.prototype.hasOwnProperty.call(fields.previews,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.safeToContinue,'value')||
+     !Array.isArray(fields.previews.value)||
+     typeof fields.safeToContinue.value!=='boolean')return null;
+  return {previews:fields.previews.value as ImportAnalysisPreview[],
+   safeToContinue:fields.safeToContinue.value};
+ }catch{return null;}
+}
 
 /** A cancellation claim may come from an untrusted JS boundary even for
  * native-only callers. Require native AbortSignal internal slots BEFORE any
@@ -157,26 +177,37 @@ export async function runCheckpointedNativeImportAnalysis(
   }
  };
  const lifetime=new AbortController();
+ // Keep this process-local stop state after an unconfirmed Worker retirement;
+ // journal rows remain ordinary scheduling states, never lifecycle authority.
+ let safeToLaunchWorkers=true;
  const worker=async(ordinal:number,abort:AbortSignal)=>{
+  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE' as const;
   let previews:ImportAnalysisPreview[];
   try{
-   previews=await previewImportedBatchOffMain(groups[ordinal].scripts,abort);
+   const value=await previewImportedBatchOffMain(groups[ordinal].scripts,abort,
+    undefined,true);
+   const evidence=readWorkerResult(value);
+   if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE' as const;}
+   previews=evidence.previews;
+   if(!evidence.safeToContinue)safeToLaunchWorkers=false;
   }catch{
-   // A dead or rejected isolated AST worker is transient only for this
-   // trusted READ-ONLY task. Bounded retry cannot authorize any file write.
-   return abort.aborted||signal?.aborted||lifetime.signal.aborted
-    ?'PERMANENT_FAILURE' as const:'RETRYABLE_FAILURE' as const;
+   // No structured retirement receipt means a replacement could overlap a
+   // Worker that remains live. Fail closed for this and later segments.
+   safeToLaunchWorkers=false;
+   return 'PERMANENT_FAILURE' as const;
   }
   if(abort.aborted||signal?.aborted||lifetime.signal.aborted||
      previews.some(row=>row.status==='SKIPPED_CANCELLED'||
        row.status==='SKIPPED_BATCH_BUDGET'))
    return 'PERMANENT_FAILURE' as const;
+  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE' as const;
   // A worker crash or malformed / truncated reply has no trusted AST
-  // evidence. Retry once in an independent Worker, never accept partial
-  // output or use stale success as a substitute for fresh validation.
+  // evidence. Retry once only when the structured receipt confirms the
+  // previous Worker retired; never use stale success as fresh evidence.
   if(previews.length!==groups[ordinal].scripts.length||
      previews.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'))
-   return 'RETRYABLE_FAILURE' as const;
+   return safeToLaunchWorkers?'RETRYABLE_FAILURE' as const:
+    'PERMANENT_FAILURE' as const;
   observations[ordinal]=previews;
   return 'DONE' as const;
  };
@@ -231,7 +262,8 @@ export async function runCheckpointedNativeImportAnalysis(
    // A prior success is an unauthenticated scheduling hint. Always rerun
    // its bounded, isolated AST worker to return fresh, source-matched UI data.
    let reports=observations[ordinal];
-   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted){
+   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted&&
+      safeToLaunchWorkers){
     // A persisted success is a scheduling hint, not fresh AST evidence.
     // Resumed display has the same TWO-attempt transient-worker budget as
     // initial read-only analysis. Never rewrite the durable journal, and
@@ -239,8 +271,14 @@ export async function runCheckpointedNativeImportAnalysis(
     for(let attempt=0;attempt<2;attempt++){
      if(signal?.aborted||lifetime.signal.aborted)break;
      try{
-      const fresh=await previewImportedBatchOffMain(group.scripts,lifetime.signal);
+      const value=await previewImportedBatchOffMain(group.scripts,lifetime.signal,
+       undefined,true);
+      const evidence=readWorkerResult(value);
+      if(!evidence){safeToLaunchWorkers=false;break;}
+      const fresh=evidence.previews;
+      if(!evidence.safeToContinue)safeToLaunchWorkers=false;
       if(fresh.length===group.scripts.length&&
+         evidence.safeToContinue&&
          !fresh.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
            row.status==='SKIPPED_CANCELLED'||row.status==='SKIPPED_BATCH_BUDGET')){
        reports=fresh;
@@ -248,9 +286,11 @@ export async function runCheckpointedNativeImportAnalysis(
       }
       if(fresh.some(row=>row.status==='SKIPPED_CANCELLED'||
          row.status==='SKIPPED_BATCH_BUDGET'))break;
+      if(!evidence.safeToContinue)break;
      }catch{
-      // A transient isolated Worker failure may receive one independent
-      // display-only retry. No prior checkpoint grants authenticity.
+      // No retirement receipt means a replacement could overlap a live Worker.
+      safeToLaunchWorkers=false;
+      break;
      }
     }
     if(!reports)reports=blank(group.scripts.length,'ISOLATED_ANALYSIS_FAILED');

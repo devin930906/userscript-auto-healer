@@ -296,8 +296,9 @@ test('TASK-013/TEST-022: transient isolated AST worker failure is retried once a
   let calls=0;
   const changed=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof real>)=>{
-    if(++calls===1)return [
-     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')];
+    if(++calls===1)return {previews:[
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof real>>;
     return real(...args);
    });
   try{
@@ -335,7 +336,9 @@ test('TASK-013/TEST-022: repeated AST worker crashes exhaust retry budget withou
   let calls=0;
   const injected=mock.method(isolated,'previewImportedBatchOffMain',async()=>{
    calls++;
-   return [unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')];
+   return {previews:[unavailableImportPreview('ISOLATED_ANALYSIS_FAILED',
+    'NOT_CHECKED')],safeToContinue:true} as unknown as
+     Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>;
   });
   try{
    const first=await runCheckpointedNativeImportAnalysis(root,scripts);
@@ -354,6 +357,50 @@ test('TASK-013/TEST-022: repeated AST worker crashes exhaust retry budget withou
    assert.equal(calls,2,'persisted terminal failure must not endlessly retry');
   }finally{injected.mock.restore();}
   assert.equal(await readFile(sourcePath,'utf8'),original);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: unretired initial worker blocks retries and later journal segments',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-unretired-worker-'));
+ try{
+  const paths:string[]=[];
+  for(let i=0;i<17;i++){
+   const path=join(home,'segment-'+i+'.user.js');
+   await writeFile(path,header+'document.querySelector("#unretired-'+i+'");');
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const root=join(home,'userdata','readonly-journals');
+  await mkdir(join(home,'userdata'));
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  let calls=0;
+  const patched=mock.method(isolated,'previewImportedBatchOffMain',async(
+   batch:Parameters<typeof isolated.previewImportedBatchOffMain>[0]
+  )=>{
+   calls++;
+   return {previews:Array.from({length:batch.length},()=>
+    unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:false} as unknown as
+     Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+  });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
+   assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(calls,1,'an unretired worker must block retry and the next segment');
+   if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    assert.ok(outcome.previews.every(row=>
+     row.status==='ISOLATED_ANALYSIS_FAILED'&&
+     row.automaticPatchAllowed===false&&row.tampermonkeyVerified===false&&
+     row.businessVerified===false));
+   const journal=join(root,(await readdir(root))[0],BATCH_JOURNAL_FILENAME);
+   const stored=JSON.parse(await readFile(journal,'utf8'));
+   assert.deepEqual(stored.jobs.map((job:{state:string;attempts:number})=>
+    [job.state,job.attempts]),[['FAILED',1],['FAILED',1]],
+    'the journal records failed scheduling attempts without claiming Worker retirement');
+  }finally{patched.mock.restore();}
+  for(const path of paths)
+   assert.equal((await readFile(path,'utf8')).includes('#unretired-'),true);
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
@@ -392,7 +439,7 @@ test('TASK-013/TEST-022/026: new retry policy preserves old v1 checkpoint eviden
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
-test('TASK-013/TEST-022: rejected isolated AST worker restarts only once',async()=>{
+test('TASK-013/TEST-022/026: thrown AST call without retirement proof stops retries',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-ast-reject-'));
  try{
   const sourcePath=join(home,'review.user.js');
@@ -412,10 +459,10 @@ test('TASK-013/TEST-022: rejected isolated AST worker restarts only once',async(
    });
   try{
    const outcome=await runCheckpointedNativeImportAnalysis(root,scripts);
-   assert.equal(calls,2);
+   assert.equal(calls,1,'an exception has no retirement receipt and cannot authorize retry');
    assert.equal(outcome.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
    if(outcome.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
-    assert.deepEqual(outcome.previews.map(p=>p.status),['STATIC_ANALYSIS_ONLY']);
+    assert.deepEqual(outcome.previews.map(p=>p.status),['ISOLATED_ANALYSIS_FAILED']);
   }finally{patched.mock.restore();}
   assert.equal(await readFile(sourcePath,'utf8'),original);
  }finally{await rm(home,{recursive:true,force:true});}
@@ -550,7 +597,7 @@ test('TASK-013/TEST-022: cancellation during resumed AST display analysis cannot
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
-test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segments retain verified static previews',async()=>{
+test('TASK-013/TEST-022/026: resumed AST worker fault without retirement proof stops later segments',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-resumed-worker-failure-'));
  try{
   const files:string[]=[];
@@ -572,8 +619,8 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
   const saved=await readFile(journal);
 
   // A previously persisted SUCCEEDED hint is NOT fresh AST evidence.
-  // Inject a Worker-level exception only in the first resumed segment.
-  // The next independent segment must still yield real preview evidence.
+  // Inject a Worker-level exception in resumed display. Without a retirement
+  // receipt, later segments must not start overlapping isolated workers.
   const isolated=require('../../src/analyze/isolated-batch-preview') as
    typeof import('../../src/analyze/isolated-batch-preview');
   const actual=isolated.previewImportedBatchOffMain;
@@ -581,7 +628,7 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
   const patch=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof actual>)=>{
     calls++;
-    if(calls<=2)throw Error('INJECTED_RESUMED_AST_WORKER_FAILURE');
+    if(calls===1)throw Error('INJECTED_RESUMED_AST_WORKER_FAILURE');
     return actual(...args);
    });
   const progress:Array<[number,number]>=[];
@@ -593,12 +640,13 @@ test('TASK-013/TEST-022: resumed AST worker fault stays isolated and other segme
     assert.equal(resumed.resumed,true);
     assert.deepEqual(resumed.previews.slice(0,16).map(row=>row.status),
      Array(16).fill('ISOLATED_ANALYSIS_FAILED'));
-    assert.equal(resumed.previews[16].status,'STATIC_ANALYSIS_ONLY',
-     'an independent segment must not be lost to a prior Worker failure');
     assert.equal(resumed.previews.every(row=>row.automaticPatchAllowed===false&&
      row.tampermonkeyVerified===false&&row.businessVerified===false),true);
    }
-   assert.equal(calls,3,'failed resumed segment retries once; next segment still runs AST');
+   assert.equal(calls,1,'an unretired resumed Worker stops all later segment dispatch');
+   assert.equal(resumed.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'&&
+    resumed.previews.every(row=>row.status==='ISOLATED_ANALYSIS_FAILED'),true,
+    'later scheduling hints cannot be reanalysed after retirement becomes unknown');
    assert.deepEqual(progress,[[16,17],[17,17]]);
   }finally{patch.mock.restore();}
   assert.deepEqual(await readFile(journal),saved,
@@ -633,7 +681,8 @@ test('TASK-013/TEST-022/026: truncated resumed AST display cannot silently omit 
   let calls=0;
   const patch=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof real>)=>{
-    if(++calls<=2)return [] as Awaited<ReturnType<typeof real>>;
+    if(++calls<=2)return {previews:[],safeToContinue:true} as unknown as
+     Awaited<ReturnType<typeof real>>;
     return real(...args);
    });
   try{
@@ -681,7 +730,9 @@ test('TASK-013/TEST-022: resumed read-only AST display retries one transient Wor
   let calls=0;
   const injected=mock.method(isolated,'previewImportedBatchOffMain',
    async(...args:Parameters<typeof real>)=>{
-    if(++calls===1)throw Error('TRANSIENT_RESUMED_DISPLAY_WORKER_CRASH');
+    if(++calls===1)return {previews:[unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:true} as unknown as
+      Awaited<ReturnType<typeof real>>;
     return real(...args);
    });
   try{
