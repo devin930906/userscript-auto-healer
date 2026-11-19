@@ -12,11 +12,15 @@ import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
 import {verifyWindowsLoopbackListenerPid} from '../browser/cdp-session';
 import {hasDuplicateJsonObjectKeys,TAMPERMONKEY_EXTENSION_ID} from './tampermonkey-adapter';
 
+export const TAMPERMONKEY_WEBSTORE_URL=
+ 'https://chromewebstore.google.com/detail/tampermonkey/'+TAMPERMONKEY_EXTENSION_ID;
+
 export type ManagerToggleState='ENABLED'|'DISABLED'|'UNKNOWN'|'NOT_APPLICABLE';
 
 export type ManagerInstallationResult =
  | {readonly ok:true;readonly status:'NOT_INSTALLED';
     readonly extensionId:typeof TAMPERMONKEY_EXTENSION_ID;
+    readonly installUrl:typeof TAMPERMONKEY_WEBSTORE_URL;
     readonly extensionAuthenticityVerified:false;
     readonly storeProvenanceVerified:false;
     readonly versionVerified:false;
@@ -44,6 +48,15 @@ export type ManagerInstallationResult =
     'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'INVALID_CDP_RESPONSE'}
  | {readonly ok:false;readonly code:'INSPECTION_UNAVAILABLE';readonly stage?:'list-frame'|'manager-card'|'details-frame'};
 
+export type LaunchTampermonkeyInstallResult =
+ | {readonly ok:true;readonly status:'INSTALLATION_PAGE_OPENED';
+    readonly targetId:string;
+    readonly installUrl:typeof TAMPERMONKEY_WEBSTORE_URL;
+    readonly userApproved:true;
+    readonly nativeConfirmationRequired:true}
+ | {readonly ok:false;readonly code:'NOT_AUTHORIZED'|'CANCELLED'|'INVALID_OPTIONS'|
+    'UNVERIFIED_BROWSER'|'UNOWNED_LISTENER'|'CDP_FAILED'};
+
 const EXTENSIONS_LIST_URL='chrome://extensions/';
 const EXTENSIONS_DETAILS_URL='chrome://extensions/?id='+TAMPERMONKEY_EXTENSION_ID;
 const MAX_CDP_MESSAGE_BYTES=512*1024;
@@ -51,6 +64,7 @@ const CDP_COMMAND_TIMEOUT_MS=5000;
 // chrome://extensions renders cards only after its asynchronous inventory load.
 const MANAGER_INVENTORY_READY_TIMEOUT_MS=4000;
 const VERSION_PATTERN=/^\d+\.\d+\.\d+(?:\.\d+)?$/;
+const TAMPERMONKEY_NAME_PATTERN=/^(?:tampermonkey(?:\s*[\(（]?(?:篡改猴|®|beta)[\)）]?)?|篡改猴)$/i;
 
 /** Fixed, read-only expression for Chrome's own extensions management page.
  * It returns only the one allowlisted extension's ID/name/version/enabled
@@ -211,6 +225,7 @@ export function parseTampermonkeyExtensionCardReceipt(
  if(count===0){
   if(!hasOnlyKeys(value,['managerPage','inventoryReady','matchingCount']))return invalidReceipt();
   return {ok:true,status:'NOT_INSTALLED',extensionId:TAMPERMONKEY_EXTENSION_ID,
+   installUrl:TAMPERMONKEY_WEBSTORE_URL,
    extensionAuthenticityVerified:false,storeProvenanceVerified:false,
    versionVerified:false,permissionVerified:false,
    scriptInstallationVerified:false,scriptInjectionVerified:false,
@@ -224,7 +239,7 @@ export function parseTampermonkeyExtensionCardReceipt(
  const version=ownValue(value,'version');
  const enabled=ownValue(value,'enabled');
  if(id!==TAMPERMONKEY_EXTENSION_ID||typeof name!=='string'||
-    !/^tampermonkey$/i.test(name)||typeof version!=='string'||
+    !TAMPERMONKEY_NAME_PATTERN.test(name)||typeof version!=='string'||
     !VERSION_PATTERN.test(version)||
     (enabled!==null&&enabled!==undefined&&typeof enabled!=='boolean'))
   return invalidReceipt();
@@ -554,5 +569,46 @@ export async function inspectApprovedTampermonkeyInstallation(
  if(signal?.aborted||finalOwnership.cancelled)return {ok:false,code:'CANCELLED'};
  if(!finalOwnership.ok)return {ok:false,code:'UNOWNED_LISTENER'};
  return result;
+}
+
+/** Launch the official Chrome Web Store installation page for Tampermonkey
+ * in the user-approved owned Chrome session. Chrome's native extension
+ * installation dialog and user confirmation are strictly required.
+ */
+export async function launchApprovedTampermonkeyInstallation(
+ session:ManagedLaunchResult,userApproved:boolean,signal?:AbortSignal
+):Promise<LaunchTampermonkeyInstallResult>{
+ if(userApproved!==true)return {ok:false,code:'NOT_AUTHORIZED'};
+ if(signal!==undefined&&!isNativeAbortSignal(signal))
+  return {ok:false,code:'INVALID_OPTIONS'};
+ if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+ if(!isLiveApprovedChromeSession(session))return {ok:false,code:'UNVERIFIED_BROWSER'};
+ const endpoint=validBrowserWebSocket(session.browserWebsocket);
+ if(!endpoint)return {ok:false,code:'UNVERIFIED_BROWSER'};
+ const ownership=await awaitListenerProofOrRevocation(endpoint.port,session.pid,signal);
+ if(signal?.aborted||ownership.cancelled)return {ok:false,code:'CANCELLED'};
+ if(!ownership.ok||!isLiveApprovedChromeSession(session))
+  return {ok:false,code:'UNOWNED_LISTENER'};
+ const socket=await connectBrowserWebSocket(endpoint.url);
+ if(!socket)return {ok:false,code:'CDP_FAILED'};
+ try{
+  if(signal?.aborted)return {ok:false,code:'CANCELLED'};
+  const created=await sendCdpCommand(socket,1,'Target.createTarget',
+   {url:TAMPERMONKEY_WEBSTORE_URL,background:false});
+  const targetId=created?ownValue(created,'targetId'):undefined;
+  if(typeof targetId!=='string'||!/^[a-zA-Z0-9_-]{8,128}$/.test(targetId))
+   return {ok:false,code:'CDP_FAILED'};
+  return {
+   ok:true,
+   status:'INSTALLATION_PAGE_OPENED',
+   targetId,
+   installUrl:TAMPERMONKEY_WEBSTORE_URL,
+   userApproved:true,
+   nativeConfirmationRequired:true
+  };
+ }catch{return {ok:false,code:'CDP_FAILED'};}
+ finally{
+  try{socket.close();}catch{/* already closed */}
+ }
 }
 

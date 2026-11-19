@@ -10,7 +10,7 @@ import {launchApprovedIsolatedChrome,isLiveApprovedChromeSession,
 import {prepareApprovedIsolatedProfile} from '../../src/browser/chrome-launcher';
 import {inspectTampermonkeyTargetHints,inspectApprovedTampermonkeyRuntime,
   TAMPERMONKEY_EXTENSION_ID} from '../../src/manager/tampermonkey-adapter';
-import {inspectApprovedTampermonkeyInstallation} from '../../src/manager/tampermonkey-installation';
+import {inspectApprovedTampermonkeyInstallation,TAMPERMONKEY_WEBSTORE_URL} from '../../src/manager/tampermonkey-installation';
 
 const id='1234567890abcdef';
 const worker={targetId:id,type:'service_worker',
@@ -221,6 +221,7 @@ test('TEST-017 stage: real owned Chrome target query remains non-verified',async
  const installation=await inspectApprovedTampermonkeyInstallation(session,true);
  assert.deepEqual(installation,{
   ok:true,status:'NOT_INSTALLED',extensionId:TAMPERMONKEY_EXTENSION_ID,
+  installUrl:TAMPERMONKEY_WEBSTORE_URL,
   extensionAuthenticityVerified:false,storeProvenanceVerified:false,
   versionVerified:false,permissionVerified:false,
   scriptInstallationVerified:false,scriptInjectionVerified:false,
