@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
-import {proposeLiteralSelectorPatch,auditProposedLiteralSelectorPatch,type LiteralPatchRequest} from '../../src/repair/patch-planner';
+import {proposeLiteralSelectorPatch,auditProposedLiteralSelectorPatch,proposeConservativeRepairCandidateFromEvidence,auditReviewableRepairPackage,type LiteralPatchRequest,type DiagnosticFaultEvidence} from '../../src/repair/patch-planner';
 
 const meta='// ==UserScript==\n// @name Repair test\n// @match https://example.com/*\n// @grant GM_getValue\n// ==/UserScript==\n';
 const hash=(s:string)=>createHash('sha256').update(s,'utf8').digest('hex');
@@ -973,4 +973,156 @@ test('TASK-009/TEST-019/026: object-valued source hashes and evidence IDs never 
   }
  }
  assert.equal(calls,0,'the planner must not invoke external ToString or Symbol.toPrimitive');
+});
+
+
+test('TASK-009/TEST-014: proposeConservativeRepairCandidateFromEvidence creates reviewable package from fault evidence', () => {
+  const metaBlock = '// ==UserScript==\n// @name Fault Test\n// @match https://example.com/*\n// @grant GM_getValue\n// ==/UserScript==\n';
+  const scriptSource = metaBlock +
+    'const unrelated = "#old";\n' +
+    'const node = document.querySelector("#old");\n' +
+    'console.log(node);\n';
+
+  const scriptSha = createHash('sha256').update(scriptSource, 'utf8').digest('hex');
+
+  const evidence: DiagnosticFaultEvidence = {
+    faultEvidenceId: 'fault_obs_001',
+    targetUrl: 'https://example.com/page',
+    originalSelector: '#old',
+    replacementSelector: '#new-element',
+    scriptSha256: scriptSha
+  };
+
+  const result = proposeConservativeRepairCandidateFromEvidence(
+    scriptSource,
+    evidence,
+    {userApproved: true}
+  );
+
+  assert.equal(result.status, 'CANDIDATE_READY_FOR_REVIEW');
+  if (result.status === 'CANDIDATE_READY_FOR_REVIEW') {
+    assert.equal(result.originalSha256, scriptSha);
+    assert.equal(result.faultEvidenceId, 'fault_obs_001');
+    assert.equal(result.method, 'querySelector');
+    assert.equal(result.originalSelector, '#old');
+    assert.equal(result.replacementSelector, '#new-element');
+    assert.equal(result.metadataPreserved, true);
+    assert.equal(result.permissionExpansionPrevented, true);
+    assert.equal(result.automaticPatchAllowed, false);
+    assert.equal(result.automaticRollbackAllowed, false);
+    assert.equal(result.tampermonkeyVerified, false);
+    assert.equal(result.businessVerified, false);
+    assert.equal(result.nextPermittedAction, 'USER_REVIEW_AND_STAGE_BACKUP_REQUIRED');
+
+    // Verify diff summary
+    assert.equal(result.diffSummary.line, 7); // line 7: const node = document.querySelector("#old");
+    assert.ok(result.diffSummary.oldLineText.includes('#old'));
+    assert.ok(result.diffSummary.newLineText.includes('#new-element'));
+
+    // Audit the review package
+    const audit = auditReviewableRepairPackage(
+      result,
+      scriptSource,
+      evidence,
+      {userApproved: true}
+    );
+    assert.equal(audit.status, 'AUDIT_PASSED');
+    assert.equal(audit.automaticPatchAllowed, false);
+  }
+});
+
+test('TASK-009/TEST-014: ambiguous selector sites fail closed', () => {
+  const metaBlock = '// ==UserScript==\n// @name Ambiguous Test\n// @match https://example.com/*\n// @grant none\n// ==/UserScript==\n';
+  const ambiguousSource = metaBlock +
+    'const first = document.querySelector("#old");\n' +
+    'const second = document.querySelector("#old");\n';
+
+  const scriptSha = createHash('sha256').update(ambiguousSource, 'utf8').digest('hex');
+
+  const evidence: DiagnosticFaultEvidence = {
+    faultEvidenceId: 'fault_obs_002',
+    targetUrl: 'https://example.com/page',
+    originalSelector: '#old',
+    replacementSelector: '#new',
+    scriptSha256: scriptSha
+  };
+
+  const result = proposeConservativeRepairCandidateFromEvidence(
+    ambiguousSource,
+    evidence,
+    {userApproved: true}
+  );
+
+  assert.equal(result.status, 'BLOCKED');
+  if (result.status === 'BLOCKED') {
+    assert.equal(result.reason, 'AMBIGUOUS_SELECTOR_SITE');
+  }
+});
+
+test('TASK-009/TEST-019: high-privilege grant fails closed with PERMISSION_EXPANSION_DENIED', () => {
+  const privilegedMeta = '// ==UserScript==\n// @name Priv Test\n// @match https://example.com/*\n// @grant GM_xmlhttpRequest\n// ==/UserScript==\n';
+  const privilegedSource = privilegedMeta + 'const n = document.querySelector("#old");\n';
+  const scriptSha = createHash('sha256').update(privilegedSource, 'utf8').digest('hex');
+
+  const evidence: DiagnosticFaultEvidence = {
+    faultEvidenceId: 'fault_obs_003',
+    targetUrl: 'https://example.com/page',
+    originalSelector: '#old',
+    replacementSelector: '#new',
+    scriptSha256: scriptSha
+  };
+
+  const result = proposeConservativeRepairCandidateFromEvidence(
+    privilegedSource,
+    evidence,
+    {userApproved: true}
+  );
+
+  assert.equal(result.status, 'BLOCKED');
+  if (result.status === 'BLOCKED') {
+    assert.equal(result.reason, 'PERMISSION_EXPANSION_DENIED');
+  }
+});
+
+test('TASK-009/TEST-019: unconsented option or proxy trap is refused safely', () => {
+  const metaBlock = '// ==UserScript==\n// @name Unconsented\n// @match https://example.com/*\n// @grant none\n// ==/UserScript==\n';
+  const source = metaBlock + 'const n = document.querySelector("#old");\n';
+  const scriptSha = createHash('sha256').update(source, 'utf8').digest('hex');
+
+  const evidence: DiagnosticFaultEvidence = {
+    faultEvidenceId: 'fault_obs_004',
+    targetUrl: 'https://example.com/page',
+    originalSelector: '#old',
+    replacementSelector: '#new',
+    scriptSha256: scriptSha
+  };
+
+  const unconsented = proposeConservativeRepairCandidateFromEvidence(
+    source,
+    evidence,
+    {userApproved: false}
+  );
+  assert.equal(unconsented.status, 'BLOCKED');
+  if (unconsented.status === 'BLOCKED') {
+    assert.equal(unconsented.reason, 'NOT_AUTHORIZED');
+  }
+
+  let trapCalls = 0;
+  const proxiedEvidence = new Proxy(evidence, {
+    get(target, prop, receiver) {
+      trapCalls++;
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+
+  const proxyBlocked = proposeConservativeRepairCandidateFromEvidence(
+    source,
+    proxiedEvidence,
+    {userApproved: true}
+  );
+  assert.equal(proxyBlocked.status, 'BLOCKED');
+  if (proxyBlocked.status === 'BLOCKED') {
+    assert.equal(proxyBlocked.reason, 'EVIDENCE_INVALID');
+  }
+  assert.equal(trapCalls, 0, 'Proxy trap on evidence must not execute');
 });
