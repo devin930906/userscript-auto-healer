@@ -13,6 +13,15 @@
  * 4. Preserves fail-closed flags (automaticInstallAllowed: false, automaticPatchAllowed: false).
  */
 import {types as nodeTypes} from 'node:util';
+import type {ManagedLaunchResult} from '../browser/owned-chrome';
+import {isLiveApprovedChromeSession} from '../browser/owned-chrome';
+import {
+  validBrowserWebSocket,
+  connectBrowserWebSocket,
+  sendCdpCommand,
+  isNativeAbortSignal,
+  awaitListenerProofOrRevocation
+} from '../manager/tampermonkey-installation';
 
 export type ManagerVersionSyncStatus =
   | 'DISK_EXPORT_ONLY_NOT_INSTALLED'
@@ -225,4 +234,614 @@ export function evaluateManagerVersionState(
   } catch {
     return block('UNTRUSTED_INPUT');
   }
+}
+
+export type ImportedScriptDescriptor = Readonly<{
+  scriptId: string;
+  name: string;
+  version: string;
+  sha256: string;
+  installUrl?: string;
+  exportFileName?: string;
+}>;
+
+export type InstalledScriptObservation = Readonly<{
+  scriptId?: string;
+  name: string;
+  version: string;
+  activeScriptSha256: string;
+  injected: boolean;
+  gmApiVerified: boolean;
+}>;
+
+export type ScriptReconciliationStatus =
+  | 'INSTALLED_MATCH'
+  | 'INSTALLED_VERSION_DIVERGED'
+  | 'INSTALLED_HASH_DIVERGED'
+  | 'MISSING_NOT_INSTALLED'
+  | 'INVALID_DESCRIPTOR';
+
+export type SingleScriptReconciliationResult = Readonly<{
+  scriptId: string;
+  name: string;
+  expectedVersion: string;
+  expectedSha256: string;
+  installUrl?: string;
+  exportFileName?: string;
+  status: ScriptReconciliationStatus;
+  installedVersion?: string;
+  installedSha256?: string;
+  managerVerified: boolean;
+}>;
+
+export type BatchReconciliationResult = Readonly<{
+  status: 'COMPLETED' | 'BLOCKED';
+  reason?: ManagerVersionBlockReason;
+  totalCount: number;
+  matchedCount: number;
+  divergedCount: number;
+  missingCount: number;
+  invalidCount: number;
+  items: readonly SingleScriptReconciliationResult[];
+  missingScriptIds: readonly string[];
+} & typeof noAuthority>;
+
+export function reconcileBatchImportedScriptsVersionState(
+  untrustedImportedScripts: unknown,
+  untrustedInstalledObservations: unknown | null | undefined,
+  untrustedOptions: unknown
+): BatchReconciliationResult {
+  try {
+    const opts = extractPlain(untrustedOptions, OPTION_KEYS);
+    if (!opts || typeof opts.userApproved !== 'boolean') {
+      return Object.freeze({
+        status: 'BLOCKED' as const,
+        reason: 'INVALID_OPTIONS' as const,
+        totalCount: 0,
+        matchedCount: 0,
+        divergedCount: 0,
+        missingCount: 0,
+        invalidCount: 0,
+        items: Object.freeze([]),
+        missingScriptIds: Object.freeze([]),
+        ...noAuthority
+      });
+    }
+    if (opts.userApproved !== true) {
+      return Object.freeze({
+        status: 'BLOCKED' as const,
+        reason: 'NOT_AUTHORIZED' as const,
+        totalCount: 0,
+        matchedCount: 0,
+        divergedCount: 0,
+        missingCount: 0,
+        invalidCount: 0,
+        items: Object.freeze([]),
+        missingScriptIds: Object.freeze([]),
+        ...noAuthority
+      });
+    }
+
+    if (!Array.isArray(untrustedImportedScripts) || nodeTypes.isProxy(untrustedImportedScripts)) {
+      return Object.freeze({
+        status: 'BLOCKED' as const,
+        reason: 'UNTRUSTED_INPUT' as const,
+        totalCount: 0,
+        matchedCount: 0,
+        divergedCount: 0,
+        missingCount: 0,
+        invalidCount: 0,
+        items: Object.freeze([]),
+        missingScriptIds: Object.freeze([]),
+        ...noAuthority
+      });
+    }
+
+    if (untrustedImportedScripts.length > 500) {
+      return Object.freeze({
+        status: 'BLOCKED' as const,
+        reason: 'UNTRUSTED_INPUT' as const,
+        totalCount: 0,
+        matchedCount: 0,
+        divergedCount: 0,
+        missingCount: 0,
+        invalidCount: 0,
+        items: Object.freeze([]),
+        missingScriptIds: Object.freeze([]),
+        ...noAuthority
+      });
+    }
+
+    const observationMap = new Map<string, InstalledScriptObservation>();
+    const observationByName = new Map<string, InstalledScriptObservation>();
+
+    if (untrustedInstalledObservations !== null && untrustedInstalledObservations !== undefined) {
+      if (!Array.isArray(untrustedInstalledObservations) || nodeTypes.isProxy(untrustedInstalledObservations)) {
+        return Object.freeze({
+          status: 'BLOCKED' as const,
+          reason: 'PROBE_EVIDENCE_INVALID' as const,
+          totalCount: 0,
+          matchedCount: 0,
+          divergedCount: 0,
+          missingCount: 0,
+          invalidCount: 0,
+          items: Object.freeze([]),
+          missingScriptIds: Object.freeze([]),
+          ...noAuthority
+        });
+      }
+
+      for (const obs of untrustedInstalledObservations) {
+        if (!obs || typeof obs !== 'object' || Array.isArray(obs) || nodeTypes.isProxy(obs)) {
+          return Object.freeze({
+            status: 'BLOCKED' as const,
+            reason: 'PROBE_EVIDENCE_INVALID' as const,
+            totalCount: 0,
+            matchedCount: 0,
+            divergedCount: 0,
+            missingCount: 0,
+            invalidCount: 0,
+            items: Object.freeze([]),
+            missingScriptIds: Object.freeze([]),
+            ...noAuthority
+          });
+        }
+        const desc = Object.getOwnPropertyDescriptors(obs);
+        const nameVal = desc.name?.value;
+        const verVal = desc.version?.value;
+        const shaVal = desc.activeScriptSha256?.value;
+        const injVal = desc.injected?.value;
+        const gmVal = desc.gmApiVerified?.value;
+        const idVal = desc.scriptId?.value;
+
+        if (
+          typeof nameVal !== 'string' || nameVal.length === 0 ||
+          typeof verVal !== 'string' ||
+          typeof shaVal !== 'string' || !SHA256_RE.test(shaVal) ||
+          typeof injVal !== 'boolean' ||
+          typeof gmVal !== 'boolean'
+        ) {
+          return Object.freeze({
+            status: 'BLOCKED' as const,
+            reason: 'PROBE_EVIDENCE_INVALID' as const,
+            totalCount: 0,
+            matchedCount: 0,
+            divergedCount: 0,
+            missingCount: 0,
+            invalidCount: 0,
+            items: Object.freeze([]),
+            missingScriptIds: Object.freeze([]),
+            ...noAuthority
+          });
+        }
+
+        const validObs: InstalledScriptObservation = Object.freeze({
+          scriptId: typeof idVal === 'string' ? idVal : undefined,
+          name: nameVal,
+          version: verVal,
+          activeScriptSha256: shaVal,
+          injected: injVal,
+          gmApiVerified: gmVal
+        });
+
+        if (validObs.scriptId) {
+          observationMap.set(validObs.scriptId, validObs);
+        }
+        observationByName.set(validObs.name.trim().toLowerCase(), validObs);
+      }
+    }
+
+    const items: SingleScriptReconciliationResult[] = [];
+    const missingScriptIds: string[] = [];
+    let matchedCount = 0;
+    let divergedCount = 0;
+    let missingCount = 0;
+    let invalidCount = 0;
+
+    for (const raw of untrustedImportedScripts) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) {
+        invalidCount++;
+        items.push(Object.freeze({
+          scriptId: 'unknown',
+          name: 'unknown',
+          expectedVersion: '',
+          expectedSha256: '',
+          status: 'INVALID_DESCRIPTOR' as const,
+          managerVerified: false
+        }));
+        continue;
+      }
+      const desc = Object.getOwnPropertyDescriptors(raw);
+      const idVal = desc.scriptId?.value;
+      const nameVal = desc.name?.value;
+      const verVal = desc.version?.value;
+      const shaVal = desc.sha256?.value;
+      const urlVal = desc.installUrl?.value;
+      const fileVal = desc.exportFileName?.value;
+
+      if (
+        typeof idVal !== 'string' || idVal.length === 0 || idVal.length > 128 ||
+        typeof nameVal !== 'string' || nameVal.length === 0 || nameVal.length > 256 ||
+        typeof verVal !== 'string' || verVal.length > 64 ||
+        typeof shaVal !== 'string' || !SHA256_RE.test(shaVal)
+      ) {
+        invalidCount++;
+        items.push(Object.freeze({
+          scriptId: typeof idVal === 'string' ? idVal : 'unknown',
+          name: typeof nameVal === 'string' ? nameVal : 'unknown',
+          expectedVersion: typeof verVal === 'string' ? verVal : '',
+          expectedSha256: typeof shaVal === 'string' ? shaVal : '',
+          status: 'INVALID_DESCRIPTOR' as const,
+          managerVerified: false
+        }));
+        continue;
+      }
+
+      const scriptId = idVal;
+      const name = nameVal;
+      const expectedVersion = verVal;
+      const expectedSha256 = shaVal;
+      const installUrl = typeof urlVal === 'string' ? urlVal : undefined;
+      const exportFileName = typeof fileVal === 'string' ? fileVal : undefined;
+
+      const matchedObs = observationMap.get(scriptId) || observationByName.get(name.trim().toLowerCase());
+
+      if (!matchedObs) {
+        missingCount++;
+        missingScriptIds.push(scriptId);
+        items.push(Object.freeze({
+          scriptId,
+          name,
+          expectedVersion,
+          expectedSha256,
+          installUrl,
+          exportFileName,
+          status: 'MISSING_NOT_INSTALLED' as const,
+          managerVerified: false
+        }));
+      } else if (
+        matchedObs.activeScriptSha256 === expectedSha256 &&
+        matchedObs.injected === true &&
+        matchedObs.gmApiVerified === true
+      ) {
+        matchedCount++;
+        items.push(Object.freeze({
+          scriptId,
+          name,
+          expectedVersion,
+          expectedSha256,
+          installUrl,
+          exportFileName,
+          status: 'INSTALLED_MATCH' as const,
+          installedVersion: matchedObs.version,
+          installedSha256: matchedObs.activeScriptSha256,
+          managerVerified: true
+        }));
+      } else {
+        divergedCount++;
+        const status = (matchedObs.version !== expectedVersion)
+          ? ('INSTALLED_VERSION_DIVERGED' as const)
+          : ('INSTALLED_HASH_DIVERGED' as const);
+        items.push(Object.freeze({
+          scriptId,
+          name,
+          expectedVersion,
+          expectedSha256,
+          installUrl,
+          exportFileName,
+          status,
+          installedVersion: matchedObs.version,
+          installedSha256: matchedObs.activeScriptSha256,
+          managerVerified: false
+        }));
+      }
+    }
+
+    return Object.freeze({
+      status: 'COMPLETED' as const,
+      totalCount: items.length,
+      matchedCount,
+      divergedCount,
+      missingCount,
+      invalidCount,
+      items: Object.freeze(items),
+      missingScriptIds: Object.freeze(missingScriptIds),
+      ...noAuthority
+    });
+  } catch {
+    return Object.freeze({
+      status: 'BLOCKED' as const,
+      reason: 'UNTRUSTED_INPUT' as const,
+      totalCount: 0,
+      matchedCount: 0,
+      divergedCount: 0,
+      missingCount: 0,
+      invalidCount: 0,
+      items: Object.freeze([]),
+      missingScriptIds: Object.freeze([]),
+      ...noAuthority
+    });
+  }
+}
+
+export type BatchInstallItem = Readonly<{
+  scriptId: string;
+  name: string;
+  installUrl: string;
+  sha256?: string;
+}>;
+
+export type SingleInstallOutcomeStatus =
+  | 'LAUNCHED_PENDING_USER_CONFIRMATION'
+  | 'REFUSED'
+  | 'CANCELLED'
+  | 'FAILED';
+
+export type SingleInstallOutcome = Readonly<{
+  scriptId: string;
+  name: string;
+  installUrl: string;
+  status: SingleInstallOutcomeStatus;
+  targetId?: string;
+  code?: string;
+  nativeConfirmationRequired: true;
+}>;
+
+export type BatchInstallLaunchResult = Readonly<{
+  status: 'COMPLETED' | 'PARTIAL' | 'BLOCKED' | 'CANCELLED';
+  code?: 'NOT_AUTHORIZED' | 'INVALID_OPTIONS' | 'UNVERIFIED_BROWSER' | 'UNOWNED_LISTENER' | 'CDP_FAILED' | 'CANCELLED';
+  totalCount: number;
+  launchedCount: number;
+  refusedCount: number;
+  cancelledCount: number;
+  failedCount: number;
+  items: readonly SingleInstallOutcome[];
+  automaticSilentInstallForbidden: true;
+  automaticInstallAllowed: false;
+}>;
+
+export async function launchBatchUserscriptInstallation(
+  untrustedSession: unknown,
+  untrustedScripts: unknown,
+  untrustedOptions: unknown,
+  signal?: AbortSignal
+): Promise<BatchInstallLaunchResult> {
+  const failResult = (
+    status: 'BLOCKED' | 'CANCELLED',
+    code: 'NOT_AUTHORIZED' | 'INVALID_OPTIONS' | 'UNVERIFIED_BROWSER' | 'UNOWNED_LISTENER' | 'CDP_FAILED' | 'CANCELLED',
+    total = 0,
+    items: SingleInstallOutcome[] = []
+  ): BatchInstallLaunchResult =>
+    Object.freeze({
+      status,
+      code,
+      totalCount: total,
+      launchedCount: 0,
+      refusedCount: 0,
+      cancelledCount: status === 'CANCELLED' ? total : 0,
+      failedCount: 0,
+      items: Object.freeze(items),
+      automaticSilentInstallForbidden: true as const,
+      automaticInstallAllowed: false as const
+    });
+
+  if (signal !== undefined && !isNativeAbortSignal(signal)) {
+    return failResult('BLOCKED', 'INVALID_OPTIONS');
+  }
+  if (signal?.aborted) {
+    return failResult('CANCELLED', 'CANCELLED');
+  }
+
+  const opts = extractPlain(untrustedOptions, OPTION_KEYS);
+  if (!opts || typeof opts.userApproved !== 'boolean') {
+    return failResult('BLOCKED', 'INVALID_OPTIONS');
+  }
+  if (opts.userApproved !== true) {
+    return failResult('BLOCKED', 'NOT_AUTHORIZED');
+  }
+
+  if (!Array.isArray(untrustedScripts) || nodeTypes.isProxy(untrustedScripts)) {
+    return failResult('BLOCKED', 'INVALID_OPTIONS');
+  }
+
+  if (untrustedScripts.length === 0) {
+    return Object.freeze({
+      status: 'COMPLETED' as const,
+      totalCount: 0,
+      launchedCount: 0,
+      refusedCount: 0,
+      cancelledCount: 0,
+      failedCount: 0,
+      items: Object.freeze([]),
+      automaticSilentInstallForbidden: true as const,
+      automaticInstallAllowed: false as const
+    });
+  }
+
+  const session = untrustedSession as ManagedLaunchResult;
+  if (!isLiveApprovedChromeSession(session)) {
+    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', untrustedScripts.length);
+  }
+
+  const endpoint = validBrowserWebSocket(session.browserWebsocket);
+  if (!endpoint) {
+    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', untrustedScripts.length);
+  }
+
+  const ownership = await awaitListenerProofOrRevocation(endpoint.port, session.pid, signal);
+  if (signal?.aborted || ownership.cancelled) {
+    return failResult('CANCELLED', 'CANCELLED', untrustedScripts.length);
+  }
+  if (!ownership.ok || !isLiveApprovedChromeSession(session)) {
+    return failResult('BLOCKED', 'UNOWNED_LISTENER', untrustedScripts.length);
+  }
+
+  const socket = await connectBrowserWebSocket(endpoint.url);
+  if (!socket) {
+    return failResult('BLOCKED', 'CDP_FAILED', untrustedScripts.length);
+  }
+
+  const items: SingleInstallOutcome[] = [];
+  let launchedCount = 0;
+  let refusedCount = 0;
+  let cancelledCount = 0;
+  let failedCount = 0;
+  let commandId = 1;
+
+  try {
+    for (const raw of untrustedScripts) {
+      if (signal?.aborted) {
+        items.push(Object.freeze({
+          scriptId: (raw && typeof (raw as any).scriptId === 'string') ? (raw as any).scriptId : 'unknown',
+          name: (raw && typeof (raw as any).name === 'string') ? (raw as any).name : 'unknown',
+          installUrl: (raw && typeof (raw as any).installUrl === 'string') ? (raw as any).installUrl : '',
+          status: 'CANCELLED' as const,
+          code: 'CANCELLED',
+          nativeConfirmationRequired: true as const
+        }));
+        cancelledCount++;
+        continue;
+      }
+
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) {
+        items.push(Object.freeze({
+          scriptId: 'unknown',
+          name: 'unknown',
+          installUrl: '',
+          status: 'REFUSED' as const,
+          code: 'INVALID_DESCRIPTOR',
+          nativeConfirmationRequired: true as const
+        }));
+        refusedCount++;
+        continue;
+      }
+
+      const desc = Object.getOwnPropertyDescriptors(raw);
+      const idVal = desc.scriptId?.value;
+      const nameVal = desc.name?.value;
+      const urlVal = desc.installUrl?.value;
+
+      if (
+        typeof idVal !== 'string' || idVal.length === 0 ||
+        typeof nameVal !== 'string' || nameVal.length === 0 ||
+        typeof urlVal !== 'string' || urlVal.length === 0
+      ) {
+        items.push(Object.freeze({
+          scriptId: typeof idVal === 'string' ? idVal : 'unknown',
+          name: typeof nameVal === 'string' ? nameVal : 'unknown',
+          installUrl: typeof urlVal === 'string' ? urlVal : '',
+          status: 'REFUSED' as const,
+          code: 'INVALID_DESCRIPTOR',
+          nativeConfirmationRequired: true as const
+        }));
+        refusedCount++;
+        continue;
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(urlVal);
+        if (
+          parsedUrl.protocol !== 'http:' &&
+          parsedUrl.protocol !== 'https:' &&
+          parsedUrl.protocol !== 'file:'
+        ) {
+          items.push(Object.freeze({
+            scriptId: idVal,
+            name: nameVal,
+            installUrl: urlVal,
+            status: 'REFUSED' as const,
+            code: 'DISALLOWED_OR_INVALID_URL',
+            nativeConfirmationRequired: true as const
+          }));
+          refusedCount++;
+          continue;
+        }
+      } catch {
+        items.push(Object.freeze({
+          scriptId: idVal,
+          name: nameVal,
+          installUrl: urlVal,
+          status: 'REFUSED' as const,
+          code: 'DISALLOWED_OR_INVALID_URL',
+          nativeConfirmationRequired: true as const
+        }));
+        refusedCount++;
+        continue;
+      }
+
+      try {
+        const created = await sendCdpCommand(
+          socket,
+          commandId++,
+          'Target.createTarget',
+          {url: parsedUrl.href, background: false}
+        );
+        const targetId = created && typeof created.targetId === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(created.targetId)
+          ? (created.targetId as string)
+          : undefined;
+
+        if (targetId) {
+          items.push(Object.freeze({
+            scriptId: idVal,
+            name: nameVal,
+            installUrl: parsedUrl.href,
+            status: 'LAUNCHED_PENDING_USER_CONFIRMATION' as const,
+            targetId,
+            nativeConfirmationRequired: true as const
+          }));
+          launchedCount++;
+        } else {
+          items.push(Object.freeze({
+            scriptId: idVal,
+            name: nameVal,
+            installUrl: parsedUrl.href,
+            status: 'FAILED' as const,
+            code: 'CDP_FAILED',
+            nativeConfirmationRequired: true as const
+          }));
+          failedCount++;
+        }
+      } catch {
+        items.push(Object.freeze({
+          scriptId: idVal,
+          name: nameVal,
+          installUrl: parsedUrl.href,
+          status: 'FAILED' as const,
+          code: 'CDP_FAILED',
+          nativeConfirmationRequired: true as const
+        }));
+        failedCount++;
+      }
+    }
+  } finally {
+    try {
+      socket.close();
+    } catch {}
+  }
+
+  if (!isLiveApprovedChromeSession(session)) {
+    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', items.length, items);
+  }
+
+  let finalStatus: 'COMPLETED' | 'PARTIAL' | 'CANCELLED';
+  if (cancelledCount > 0 && launchedCount === 0 && failedCount === 0) {
+    finalStatus = 'CANCELLED';
+  } else if (failedCount === 0 && refusedCount === 0 && cancelledCount === 0) {
+    finalStatus = 'COMPLETED';
+  } else {
+    finalStatus = 'PARTIAL';
+  }
+
+  return Object.freeze({
+    status: finalStatus,
+    totalCount: items.length,
+    launchedCount,
+    refusedCount,
+    cancelledCount,
+    failedCount,
+    items: Object.freeze(items),
+    automaticSilentInstallForbidden: true as const,
+    automaticInstallAllowed: false as const
+  });
 }

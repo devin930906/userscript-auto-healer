@@ -269,7 +269,7 @@ export function parseTampermonkeyUserScriptsReceipt(
  return typeof enabled==='boolean'?(enabled?'ENABLED':'DISABLED'):'UNKNOWN';
 }
 
-function isNativeAbortSignal(signal:unknown):signal is AbortSignal{
+export function isNativeAbortSignal(signal:unknown):signal is AbortSignal{
  try{
   if(!signal||typeof signal!=='object'||nodeTypes.isProxy(signal)||
      Object.getPrototypeOf(signal)!==AbortSignal.prototype||
@@ -279,7 +279,7 @@ function isNativeAbortSignal(signal:unknown):signal is AbortSignal{
   return typeof getter==='function'&&typeof getter.call(signal)==='boolean';
  }catch{return false;}
 }
-async function awaitListenerProofOrRevocation(port:number,pid:number,signal?:AbortSignal):
+export async function awaitListenerProofOrRevocation(port:number,pid:number,signal?:AbortSignal):
  Promise<{readonly cancelled:true}|{readonly cancelled:false;readonly ok:boolean}>{
  if(signal?.aborted)return {cancelled:true};
  let onAbort=()=>{};
@@ -295,7 +295,7 @@ async function awaitListenerProofOrRevocation(port:number,pid:number,signal?:Abo
   return signal?await Promise.race([pending,revoked]):await pending;
  }finally{signal?.removeEventListener('abort',onAbort);}
 }
-function validBrowserWebSocket(raw:string):{readonly url:string;readonly port:number}|null{
+export function validBrowserWebSocket(raw:string):{readonly url:string;readonly port:number}|null{
  try{
   const url=new URL(raw),port=Number(url.port);
   if(url.protocol!=='ws:'||url.hostname!=='127.0.0.1'||
@@ -315,7 +315,7 @@ function readCdpMessage(raw:unknown):Record<string,unknown>|null{
   return parsed;
  }catch{return null;}
 }
-function connectBrowserWebSocket(url:string):Promise<WebSocket|null>{
+export function connectBrowserWebSocket(url:string):Promise<WebSocket|null>{
  return new Promise(resolve=>{
   let socket:WebSocket|undefined;
   let settled=false;
@@ -334,7 +334,7 @@ function connectBrowserWebSocket(url:string):Promise<WebSocket|null>{
   }catch{finish(null);}
  });
 }
-function sendCdpCommand(
+export function sendCdpCommand(
  socket:WebSocket,id:number,method:string,params:Record<string,unknown>,
  sessionId?:string,timeoutMs=CDP_COMMAND_TIMEOUT_MS
 ):Promise<Record<string,unknown>|null>{
