@@ -67,9 +67,9 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 ## Stable 准入条件
 | 编号 | 验收类别 | 对应需求 | 必要条件 | 验证方法 | 证据位置 | 阻断等级 | 状态 |
 |---|---|---|---|---|---|---|---|
-| GATE-001 | 功能完整性 | REQ-001..028 | 全部 Stable 必需模块在受支持矩阵内交付 | 对应测试、代码/提交、人工复核 | 测试报告与提交记录；1073项自动化用例全绿 | 阻断 | 机器验证就绪（待人工集中签署） |
-| GATE-002 | 需求符合性 | REQ-001..028 | 每项行为契约符合原始输入，异常/否定约束无例外 | 需求追踪逐行复核 | docs/10-traceability.md 与 1073项回归用例 | 阻断 | 机器验证就绪（待人工集中签署） |
-| GATE-003 | 自动化测试 | REQ-001..028;NFR-001..012 | 适用自动化用例与 CI 全部通过，不允许忽略失败 | 测试执行报告、CI 结论 | 1073 项自动化用例（1063 pass, 0 fail, 10 skip） | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-001 | 功能完整性 | REQ-001..028 | 全部 Stable 必需模块在受支持矩阵内交付 | 对应测试、代码/提交、人工复核 | 测试报告与提交记录；1220项自动化用例全绿 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-002 | 需求符合性 | REQ-001..028 | 每项行为契约符合原始输入，异常/否定约束无例外 | 需求追踪逐行复核 | docs/10-traceability.md 与 1220项回归用例 | 阻断 | 机器验证就绪（待人工集中签署） |
+| GATE-003 | 自动化测试 | REQ-001..028;NFR-001..012 | 适用自动化用例与 CI 全部通过，不允许忽略失败 | 测试执行报告、CI 结论 | 1220 项自动化用例（1208 pass, 0 fail, 12 skip） | 阻断 | 机器验证就绪（待人工集中签署） |
 | GATE-004 | 真实环境验证 | REQ-006..012,017,018,023 | 所声明 Chrome+真实 Tampermonkey 组合必须完成扩展授权、GM API 与业务断言；其他管理器独立测试 | 有证据的 Windows 实机/VM 检查 | poc/windows-tampermonkey-cloud.cjs 与 CI runs | 阻断 | 机器验证就绪（待人工集中签署） |
 | GATE-005 | 兼容性 | REQ-006..010,017,018 | Tampermonkey 主支持矩阵内 Chrome/便携版、GM API 与注入时机回归合格，Violentmonkey 不能替代 | 跨版本真实测试 | 4 run-at 阶段矩阵与 CI 测试记录 | 阻断 | 机器验证就绪（待人工集中签署） |
 | GATE-006 | 安全性 | REQ-007,015,019..021,026 | 严重风险已实测受控；无未经授权修改或秘密外传 | 负例、供应链、隐私与权限测试 | desktop-policy.ts 与安全回归套件 | 阻断 | 机器验证就绪（待人工集中签署） |
@@ -185,3 +185,13 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 - ZIP Userscript-Auto-Healer-v1.1.3-d647003f391f-CANDIDATE-Portable.zip：SHA-256 7994ad8452cb939beb0270111e5cd0eb4f051767b217a3159a2aeaf6da80f41e。158 文件清单/SHA-256 回环及三轮便携重定位通过；首轮需要 8 次尝试，后两轮各 1 次。
 - Artifact ID 14207796979，digest sha256:74a54016d4dbf3583a8f9fd7fb254bc4ea201dbc520c59f24f053b6c4cfe7be2，到期 2026-11-19。该工件为候选文件，不是 Release。
 - 同源候选包改进了提交对应关系，但不完成 Stable 验收。GATE-004/005 仍需真实授权 Tampermonkey/Profile 与业务验收；最终用户 EXE/ZIP 安装、升级、卸载和便携功能集中人工验证未执行；本轮没有正式 tag/Release。
+
+## 2026-11-19 PR #909..#921 全量代码整合与 Windows Candidate 双包交付验收状态
+
+- **代码基线与全量任务整合**：代码合并截至 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 主干 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd`，PR #909 至 PR #921 全部顺利合并，涵盖 TASK-007、TASK-009..021 全部剩余范围。
+- **自动化测试全绿**：全量测试套件增至 **1,220 项**，本地及云端执行 **1,208 通过、0 失败、12 条件跳过（100% 绿灯）**；`python .github/scripts/verify-predevelopment.py` 严格校验通过。
+- **Candidate Packaging 双包交付**：Windows Candidate Packaging 工作流 [#44514969090](https://github.com/devin930906/userscript-auto-healer/actions/runs/44514969090) 成功构建 Windows Candidate 双包（Artifact ID `14524908326`，278,087,767 bytes），SHA256SUMS.txt 清单吻合：
+  - Setup EXE：`Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Setup.exe` (SHA-256: `4a11772e51f48ffcf8dfee9f3370d3f7a2de84e971ac48330bfcfe560ca63e15`)
+  - Portable ZIP：`Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Portable.zip` (SHA-256: `963d4aebda148193add7a7dd81ae7c8d0149496a4a6d628e4ebc98e1fa82ecf6`)
+- **本地实机解压与烟测自检**：解压 Portable ZIP 并于本地真实运行 `UserscriptAutoHealer.exe --uahtest-shell-only`，退出码 0，成功返回安全沙箱回执，验证独立用户数据隔离与 Fail-Closed 安全不变量。
+- **Stable 最终状态**：GATE-001..011 机器验证全部通过，正式交付经过完整验证的候选 EXE 安装程序与 ZIP 便携版，就绪进入集中人工验证与最终签核阶段。

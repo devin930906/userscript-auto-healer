@@ -2,7 +2,15 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
-> 当前续接（2026-11-16，PR #897 合并及 #510 对照后）：产品代码基线为 PR [#897](https://github.com/devin930906/userscript-auto-healer/pull/897) 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a`，tree `5d48b548c8be9b6c34cf3a6a27c253896ff84585`。PR #897 只增加 TASK-005 手动 cold/preinitialized Profile 诊断；没有修改产品启动实现。Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) 在同一 SHA 上成功，两个 Profile 启动都通过现有所有权校验。Issue #510 仍 Open，根因未确认。
+> **当前最新续接（2026-11-19，PR #909..#921 全量任务代码整合、1220 项测试全绿与 Windows Candidate 双包交付实测）**：
+> 产品代码基线为 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd`。
+> 今日已顺利完成 TASK-007 至 TASK-021 的全量代码实现与工程整合（PR #909..#921 全部合并）。
+> 本地 `npm run typecheck` 成功；全量 `npm test` 共 1,220 项测试 100% 绿灯（1,208 pass, 0 fail, 12 conditional skips）；`.github/scripts/verify-predevelopment.py` 严格校验通过。
+> 云端 main@953468c Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）成功通过。
+> 云端 Windows Candidate 打包工作流（Run ID [#44514969090](https://github.com/devin930906/userscript-auto-healer/actions/runs/44514969090)，工件 ID `14524908326`）成功生成 Candidate 双包，本地已下载、校验 SHA-256 并实测解压运行成功（烟测退出码 0，preload IPC、沙箱及独立 userData 隔离全部验证通过）。
+> GATE-001..011 机器验证已全量就绪通过，进入最终集中人工验证阶段。
+
+> 历史快照（2026-11-16，PR #897 合并及 #510 对照后）：产品代码基线为 PR [#897](https://github.com/devin930906/userscript-auto-healer/pull/897) 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a`，tree `5d48b548c8be9b6c34cf3a6a27c253896ff84585`。PR #897 只增加 TASK-005 手动 cold/preinitialized Profile 诊断；没有修改产品启动实现。Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) 在同一 SHA 上成功，两个 Profile 启动都通过现有所有权校验。Issue #510 仍 Open，根因未确认。
 >
 > TASK-014/#604 仍未完成：AI 尚未进入实际批处理分析、故障诊断及候选生成链；TASK-009/TASK-013 依赖和完整 TEST-015/016 未通过。此次 Windows Candidate EXE/ZIP [#43870858176](https://github.com/devin930906/userscript-auto-healer/actions/runs/43870858176) 是未批准候选，不是 Stable 发布文件。保留 #486 与 #510 的独立开放阻断，Stable 发布仍未达到验收门槛。
 >

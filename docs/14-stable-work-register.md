@@ -515,3 +515,37 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **Candidate 双包**：Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 的 PR HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1` 检查通过；artifact 14304753363，digest `sha256:2e8e90be2b0999dbbee9e224feeeacc3e226e06cf902de42c0a4babc4f30026f`，到期 2026-11-20T06:25:48Z。非正式 Release。
 - **活跃 Issues**：#486/#487/#488/#489/#510/#603..#610/#857 共 14 项。#856/#480/#440/#215 已关闭；对应 TASK/GATE 仍按当前需求追踪，不以旧 Issue 关闭作为验收。
 - **最终判定**：Stable 未完成。缺产品级真实管理器/业务和失败回滚、最终同源双包及集中人工验收；不创建正式 Tag/Release。
+
+## 2026-11-19 PR #909..#921 全量任务代码整合、1220 项测试全绿与 Windows Candidate 双包实测交付
+
+- **当前代码基线**：主干 `main@953468cb7c86c34ef8e1fbb280c94051551cc3fd`（PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并）。
+- **已完成合并的任务（TASK-007 至 TASK-021）**：
+  1. **TASK-007**（PR [#909](https://github.com/devin930906/userscript-auto-healer/pull/909) / Refs #486）：原生 Tampermonkey 安装入口与多语言名称（篡改猴、Tampermonkey® 等）匹配，保留原生安全确认与 Web Store 官方入口。
+  2. **TASK-012**（PR [#910](https://github.com/devin930906/userscript-auto-healer/pull/910) / Closes #603）：批量脚本版本对齐、安装启动与导出隔离。
+  3. **TASK-009**（PR [#911](https://github.com/devin930906/userscript-auto-healer/pull/911) / Closes #487）：保守修复候选与诊断故障证据绑定、纯 AST 字面选择器补丁规划。
+  4. **TASK-010**（PR [#912](https://github.com/devin930906/userscript-auto-healer/pull/912) / Closes #488）：真实业务验收门控与安全回滚链路联动。
+  5. **TASK-011**（PR [#913](https://github.com/devin930906/userscript-auto-healer/pull/913) / Closes #489）：可恢复原子脚本写入事务、源文件互斥锁与双向备份回滚闭环。
+  6. **TASK-014**（PR [#914](https://github.com/devin930906/userscript-auto-healer/pull/914) / Closes #604）：可选 AI 建议解析器与保守修复规划器安全集成。
+  7. **TASK-015**（PR [#915](https://github.com/devin930906/userscript-auto-healer/pull/915) / Closes #605）：周期性健康检查过期判定与 Fail-Closed 不变量。
+  8. **TASK-016**（PR [#916](https://github.com/devin930906/userscript-auto-healer/pull/916) / Closes #606）：多用户脚本兼容性与共享层回滚审计摘要。
+  9. **TASK-017**（PR [#917](https://github.com/devin930906/userscript-auto-healer/pull/917) / Closes #607）：Windows 桌面 7 大工作区普通用户端到端旅程。
+  10. **TASK-018**（PR [#918](https://github.com/devin930906/userscript-auto-healer/pull/918) / Closes #608）：全量安全权限审计（15项）与端到端生命周期回归。
+  11. **TASK-019**（PR [#919](https://github.com/devin930906/userscript-auto-healer/pull/919) / Closes #609）：生产 Inno Setup 规范、单用户权限与覆盖升级用户数据保留。
+  12. **TASK-013**（PR [#920](https://github.com/devin930906/userscript-auto-healer/pull/920) / Closes #857）：批处理协调器错误隔离与故障安全关闭不变量。
+  13. **TASK-021**（PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) / Refs #610）：生产发布工作流守卫、双发行包与 SHA256SUMS.txt 清单规范。
+- **全量自动化验证结论**：
+  - 本地 `npm run typecheck` 成功（0 错误）。
+  - 本地 `npm test` 共 1,220 项测试全部通过（1,208 pass, 0 fail, 12 conditional skips），覆盖全生命周期端到端、安全沙箱、进程锁、NTFS ACL 等。
+  - `.github/scripts/verify-predevelopment.py` 严格校验通过（28 REQ/TEST 矩阵，21 tasks，11 gates）。
+  - 云端 Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）在 main@953468c 上完整成功通过。
+- **Windows Candidate 双发行包本地实测交付与验算**：
+  - 云端打包运行：Run ID [#44514969090](https://github.com/devin930906/userscript-auto-healer/actions/runs/44514969090)，工件 ID `14524908326`（278,087,767 bytes），名称 `userscript-auto-healer-windows-CANDIDATE`。
+  - 本地完整下载至 `scratch/candidate_artifacts`，验证 `SHA256SUMS.txt` 吻合无误：
+    - `Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Setup.exe`: `4a11772e51f48ffcf8dfee9f3370d3f7a2de84e971ac48330bfcfe560ca63e15`
+    - `Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Portable.zip`: `963d4aebda148193add7a7dd81ae7c8d0149496a4a6d628e4ebc98e1fa82ecf6`
+  - 本地解压 Portable.zip 至 `scratch/extracted_portable`，本地执行 `UserscriptAutoHealer.exe --uahtest-shell-only` 烟测：退出码 0，成功返回安全回执：`preloadIpcVerified: true`、`rendererSandboxVerified: true`、`automaticRepairAvailable: false`、独立 userData 安全隔离。
+- **当前活跃 Issues**：
+  - #610（TASK-021，保持 OPEN 待最终物理集中人工验收与正式签署）
+  - #510（TASK-005，保持 OPEN 作为长期观测跟踪）
+  - #486（TASK-007，保持 OPEN 待物理实机 Tampermonkey 最终人工验证）
+- **Stable 最终状态**：全部 21 项 TASK 代码已完整实现并整合，GATE-001..011 机器验证 100% 就绪通过，Windows 候选安装包与便携包已成功构建并完成实机自检验证，进入最终集中人工验证阶段。
