@@ -539,11 +539,11 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   - `.github/scripts/verify-predevelopment.py` 严格校验通过（28 REQ/TEST 矩阵，21 tasks，11 gates）。
   - 云端 Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）在 main@953468c 上完整成功通过。
 - **Windows Candidate 双发行包本地实测交付与验算**：
-  - 云端打包运行：Run ID [#44514969090](https://github.com/devin930906/userscript-auto-healer/actions/runs/44514969090)，工件 ID `14524908326`（278,087,767 bytes），名称 `userscript-auto-healer-windows-CANDIDATE`。
-  - 本地完整下载至 `scratch/candidate_artifacts`，验证 `SHA256SUMS.txt` 吻合无误：
-    - `Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Setup.exe`: `4a11772e51f48ffcf8dfee9f3370d3f7a2de84e971ac48330bfcfe560ca63e15`
-    - `Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Portable.zip`: `963d4aebda148193add7a7dd81ae7c8d0149496a4a6d628e4ebc98e1fa82ecf6`
-  - 本地解压 Portable.zip 至 `scratch/extracted_portable`，本地执行 `UserscriptAutoHealer.exe --uahtest-shell-only` 烟测：退出码 0，成功返回安全回执：`preloadIpcVerified: true`、`rendererSandboxVerified: true`、`automaticRepairAvailable: false`、独立 userData 安全隔离。
+  - 云端打包运行：Run ID [#44534729223](https://github.com/devin930906/userscript-auto-healer/actions/runs/44534729223)，工件 ID `14536381364`（278,077,440 bytes），名称 `userscript-auto-healer-windows-CANDIDATE`，基于主干 HEAD `19b7391807c42dfd08c5d2639a5ca2d984180425` 构建。
+  - 本地完整下载至 `scratch/candidate_19b7391`，验证 `SHA256SUMS.txt` 严格吻合无误：
+    - `Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Setup.exe`: `b81ec3e790a648cec9d980a71172a65fa8cbd9e5c256c455bb2f8ba39190462f`
+    - `Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Portable.zip`: `6c42187bb061909905da1f91c0045dca304b2d71dd216c0f6219d06a831737c2`
+  - 本地解压 Portable.zip 至 `scratch/extracted_19b7391`，本地执行 `UserscriptAutoHealer.exe --uahtest-shell-only` 烟测：退出码 0，成功返回安全回执：`preloadIpcVerified: true`、`rendererSandboxVerified: true`、`automaticRepairAvailable: false`、独立 userData 安全隔离。
 - **当前活跃 Issues**：
   - #610（TASK-021，保持 OPEN 待最终物理集中人工验收与正式签署）
   - #510（TASK-005，保持 OPEN 作为长期观测跟踪）
