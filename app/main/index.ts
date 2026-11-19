@@ -1674,24 +1674,6 @@ async function createMainWindow(): Promise<void> {
   });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
-    // TASK-013/TEST-022: abandoning a renderer-owned batch during main-frame
-    // reload must release its source bytes and app-wide import lock.
-    const abandonedDroppedBatch=await win.webContents.executeJavaScript(
-      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
-      "if(!started.ok||typeof started.batchId!=='string')return false;"+
-      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned\\n// ==/UserScript==\\n');"+
-      "const appended=await a.addDroppedImportBatch(started.batchId,'abandoned.user.js',bytes);"+
-      "return appended.ok===true;})()"
-    ) as boolean;
-    if(!abandonedDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_SETUP_FAILED');
-    await win.webContents.loadFile(uiFile);
-    const recoveredDroppedBatch=await win.webContents.executeJavaScript(
-      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
-      "if(!started.ok||typeof started.batchId!=='string')return false;"+
-      "const finished=await a.finishDroppedImportBatch(started.batchId);"+
-      "return finished.ok===true&&finished.scripts.length===0&&finished.errors.length===0;})()"
-    ) as boolean;
-    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_CLEANUP_FAILED');
     if (useWindowsTitleBar) {
       const titleBarReady = await win.webContents.executeJavaScript(
         `(() => {
@@ -2128,9 +2110,10 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
-    if (!probe?.ok || probe.keys?.join(',') !==
+    if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
+    if (probe.keys?.join(',') !==
         'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
-      throw new Error('SHELL_SMOKE_SECURITY_FAILED');
+      throw new Error('SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
     // renderer controls. Only renderer state is staged; the real preload IPC
@@ -2233,6 +2216,25 @@ async function createMainWindow(): Promise<void> {
        !preCommitAborted||duringCommit.ok!==false||
        duringCommit.code!=='EXPORT_WRITE_ALREADY_STARTED'||!commitUnaffected)
       throw new Error('MANUAL_EXPORT_CANCEL_GATE_FAILED');
+    // TASK-013/TEST-022: exercise abandoned-batch cleanup only after the
+    // existing renderer smoke has completed, so the reload cannot disturb
+    // its in-flight UI assertions or event listeners.
+    const abandonedDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
+      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned\\n// ==/UserScript==\\n');"+
+      "const appended=await a.addDroppedImportBatch(started.batchId,'abandoned.user.js',bytes);"+
+      "return appended.ok===true;})()"
+    ) as boolean;
+    if(!abandonedDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_SETUP_FAILED');
+    await win.webContents.loadFile(uiFile);
+    const recoveredDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
+      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "const finished=await a.finishDroppedImportBatch(started.batchId);"+
+      "return finished.ok===true&&finished.scripts.length===0&&finished.errors.length===0;})()"
+    ) as boolean;
+    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_CLEANUP_FAILED');
     const receipt = process.env.UAH_SMOKE_RECEIPT;
     if (!receipt) throw new Error('SHELL_SMOKE_RECEIPT_NOT_CONFIGURED');
     writeFileSync(receipt, JSON.stringify({
