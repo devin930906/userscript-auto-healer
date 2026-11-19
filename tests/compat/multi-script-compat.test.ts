@@ -257,3 +257,22 @@ test('TEST-025: planSharedLayerRollback 拒绝未经授权或前向升级冒充�
   assert.equal(unauthRollback.status, 'REJECTED');
   assert.equal(unauthRollback.reason, 'UNAUTHORIZED');
 });
+
+test('TASK-016/TEST-025: planSharedLayerRollback preserves fail-closed flags and never claims automatic execution without native transaction', () => {
+  const currentLayer = new LimitedCompatibilityLayer(candidateUpgrade);
+  const rollbackPlan = planSharedLayerRollback({
+    currentLayer,
+    targetBaseline: initialVersion,
+    registrations,
+    userConsentToken: 'USER_VERIFIED_ROLLBACK_CONSENT'
+  });
+
+  assert.equal(rollbackPlan.status, 'APPROVED_FOR_ROLLBACK');
+  if (rollbackPlan.status === 'APPROVED_FOR_ROLLBACK') {
+    assert.equal(rollbackPlan.automaticRollbackAllowed, false);
+    assert.equal(rollbackPlan.fromVersion, '1.1.0');
+    assert.equal(rollbackPlan.toVersion, '1.0.0');
+    assert.ok(rollbackPlan.affectedConsumers.length > 0);
+    assert.match(rollbackPlan.rollbackAuditDigest, /^[a-f0-9]{64}$/);
+  }
+});
