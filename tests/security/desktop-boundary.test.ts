@@ -2104,3 +2104,36 @@ test('TASK-007/TEST-017: silent Tampermonkey runtime produces actionable unknown
  assert.doesNotMatch(branch[1],/automaticPatchAllowed|scriptInstallationVerified:true/,
   'an absent runtime hint must never become installation or patch authority');
 });
+
+
+test('TASK-017/TEST-002/022: desktop ordinary user journey enforces unforced selector entry and explicit blocking visibility', () => {
+  const html = readFileSync(join(process.cwd(), 'app/ui/index.html'), 'utf8');
+  const ui = readFileSync(join(process.cwd(), 'app/ui/index.ts'), 'utf8');
+
+  const expectedWorkspaces = [
+    'import-workspace',
+    'browser-workspace',
+    'scenario-workspace',
+    'diagnosis-workspace',
+    'candidate-workspace',
+    'restore-workspace',
+    'ai-workspace',
+  ];
+  for (const id of expectedWorkspaces) {
+    assert.match(html, new RegExp(`<section id="${id}"`));
+  }
+
+  const scenarioWorkspace = html.match(/<section id="scenario-workspace"[\s\S]*?<\/section>/)?.[0] ?? '';
+  assert.ok(scenarioWorkspace.includes('普通批量流程不要求逐脚本填写网址或 CSS 选择器'));
+  assert.ok(scenarioWorkspace.includes('data-advanced-workspace="manual-scenario"'));
+
+  const browserWorkspace = html.match(/<section id="browser-workspace"[\s\S]*?<\/section>/)?.[0] ?? '';
+  assert.ok(browserWorkspace.includes('data-advanced-workspace="manual-gm"'));
+  assert.ok(browserWorkspace.includes('开发与验收工具：手动 GM 诊断（不属于普通修复流程）'));
+
+  const importWorkspace = html.match(/<section id="import-workspace"[\s\S]*?<\/section>/)?.[0] ?? '';
+  assert.match(importWorkspace, /data-open-workspace="browser-workspace"/);
+
+  assert.ok(html.includes('UNKNOWN / 受阻'));
+  assert.ok(ui.includes('无法判断是否已安装'));
+});
