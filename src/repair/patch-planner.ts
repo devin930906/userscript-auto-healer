@@ -697,3 +697,374 @@ export function auditProposedLiteralSelectorPatch(
    return blockedAudit('UNTRUSTED_CANDIDATE');
  }
 }
+
+
+export type DiagnosticFaultEvidence = Readonly<{
+  faultEvidenceId: string;
+  targetUrl: string;
+  originalSelector: string;
+  replacementSelector: string;
+  scriptSha256: string;
+}>;
+
+export type RepairCandidateReviewPackage =
+  | Readonly<{
+      status: 'BLOCKED';
+      reason:
+        | 'INVALID_OPTIONS'
+        | 'NOT_AUTHORIZED'
+        | 'EVIDENCE_INVALID'
+        | 'STALE_SOURCE'
+        | 'AMBIGUOUS_SELECTOR_SITE'
+        | 'UNSUPPORTED_TARGET'
+        | 'PERMISSION_EXPANSION_DENIED'
+        | 'METADATA_MUTATION_DENIED'
+        | 'PLANNER_FAILED'
+        | 'UNTRUSTED_INPUT';
+      automaticPatchAllowed: false;
+      automaticRollbackAllowed: false;
+      tampermonkeyVerified: false;
+      businessVerified: false;
+    }>
+  | Readonly<{
+      status: 'CANDIDATE_READY_FOR_REVIEW';
+      originalSha256: string;
+      candidateSha256: string;
+      faultEvidenceId: string;
+      callOffset: number;
+      method: 'querySelector' | 'querySelectorAll' | 'getElementById';
+      originalSelector: string;
+      replacementSelector: string;
+      diffSummary: Readonly<{
+        line: number;
+        column: number;
+        oldLineText: string;
+        newLineText: string;
+        originalSlice: string;
+        candidateSlice: string;
+      }>;
+      candidateSource: string;
+      metadataPreserved: true;
+      permissionExpansionPrevented: true;
+      automaticPatchAllowed: false;
+      automaticRollbackAllowed: false;
+      tampermonkeyVerified: false;
+      businessVerified: false;
+      nextPermittedAction: 'USER_REVIEW_AND_STAGE_BACKUP_REQUIRED';
+    }>;
+
+export function proposeConservativeRepairCandidateFromEvidence(
+  untrustedSource: unknown,
+  untrustedEvidence: unknown,
+  untrustedOptions: unknown
+): RepairCandidateReviewPackage {
+  const fail = (
+    reason: Extract<RepairCandidateReviewPackage, {status: 'BLOCKED'}>['reason']
+  ): RepairCandidateReviewPackage =>
+    Object.freeze({
+      status: 'BLOCKED' as const,
+      reason,
+      automaticPatchAllowed: false as const,
+      automaticRollbackAllowed: false as const,
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const
+    });
+
+  try {
+    if (
+      !untrustedOptions ||
+      typeof untrustedOptions !== 'object' ||
+      Array.isArray(untrustedOptions) ||
+      nodeTypes.isProxy(untrustedOptions)
+    ) {
+      return fail('INVALID_OPTIONS');
+    }
+    const optProto = Object.getPrototypeOf(untrustedOptions);
+    if (optProto !== Object.prototype && optProto !== null) {
+      return fail('INVALID_OPTIONS');
+    }
+    const optDesc = Object.getOwnPropertyDescriptors(untrustedOptions);
+    const optKeys = Reflect.ownKeys(optDesc);
+    if (
+      optKeys.length !== 1 ||
+      optKeys[0] !== 'userApproved' ||
+      !Object.prototype.hasOwnProperty.call(optDesc, 'userApproved') ||
+      typeof optDesc.userApproved.value !== 'boolean'
+    ) {
+      return fail('INVALID_OPTIONS');
+    }
+    if (optDesc.userApproved.value !== true) {
+      return fail('NOT_AUTHORIZED');
+    }
+
+    if (
+      !untrustedEvidence ||
+      typeof untrustedEvidence !== 'object' ||
+      Array.isArray(untrustedEvidence) ||
+      nodeTypes.isProxy(untrustedEvidence)
+    ) {
+      return fail('EVIDENCE_INVALID');
+    }
+    const evProto = Object.getPrototypeOf(untrustedEvidence);
+    if (evProto !== Object.prototype && evProto !== null) {
+      return fail('EVIDENCE_INVALID');
+    }
+    const evDesc = Object.getOwnPropertyDescriptors(untrustedEvidence);
+    const evKeys = Reflect.ownKeys(evDesc);
+    const requiredEvKeys = [
+      'faultEvidenceId',
+      'targetUrl',
+      'originalSelector',
+      'replacementSelector',
+      'scriptSha256'
+    ];
+    if (
+      evKeys.length !== requiredEvKeys.length ||
+      evKeys.some(k => typeof k !== 'string' || !requiredEvKeys.includes(k)) ||
+      requiredEvKeys.some(
+        k =>
+          !Object.prototype.hasOwnProperty.call(evDesc, k) ||
+          !Object.prototype.hasOwnProperty.call(evDesc[k], 'value')
+      )
+    ) {
+      return fail('EVIDENCE_INVALID');
+    }
+    const faultEvidenceId = evDesc.faultEvidenceId.value;
+    const targetUrl = evDesc.targetUrl.value;
+    const originalSelector = evDesc.originalSelector.value;
+    const replacementSelector = evDesc.replacementSelector.value;
+    const scriptSha256 = evDesc.scriptSha256.value;
+
+    if (
+      typeof faultEvidenceId !== 'string' ||
+      !EVIDENCE_ID.test(faultEvidenceId) ||
+      typeof targetUrl !== 'string' ||
+      targetUrl.length === 0 ||
+      typeof scriptSha256 !== 'string' ||
+      !SHA256.test(scriptSha256) ||
+      typeof originalSelector !== 'string' ||
+      !SIMPLE_SELECTOR.test(originalSelector) ||
+      typeof replacementSelector !== 'string' ||
+      !SIMPLE_SELECTOR.test(replacementSelector) ||
+      originalSelector === replacementSelector
+    ) {
+      return fail('EVIDENCE_INVALID');
+    }
+
+    if (
+      typeof untrustedSource !== 'string' ||
+      Buffer.byteLength(untrustedSource, 'utf8') > MAX_SOURCE_BYTES
+    ) {
+      return fail('UNTRUSTED_INPUT');
+    }
+    const computedSha = hash(untrustedSource);
+    if (computedSha !== scriptSha256) {
+      return fail('STALE_SOURCE');
+    }
+
+    const metadata = parseUserscriptMetadata({
+      bytes: Buffer.from(untrustedSource, 'utf8'),
+      textEncoding: 'utf-8'
+    });
+    if (metadata.status !== 'OK') {
+      return fail('METADATA_MUTATION_DENIED');
+    }
+
+    const grants = metadata.tags.grant || [];
+    const forbiddenGrants = [
+      'GM_xmlhttpRequest',
+      'GM.xmlHttpRequest',
+      'GM_download',
+      'GM.download',
+      'GM_setValue',
+      'GM.setValue',
+      'GM_openInTab',
+      'GM.openInTab',
+      'unsafeWindow'
+    ];
+    if (grants.some(g => forbiddenGrants.includes(g))) {
+      return fail('PERMISSION_EXPANSION_DENIED');
+    }
+    if (metadata.tags.connect && metadata.tags.connect.length > 0) {
+      return fail('PERMISSION_EXPANSION_DENIED');
+    }
+
+    const matches = metadata.tags.match || [];
+    const includes = metadata.tags.include || [];
+    const allScopes = [...matches, ...includes];
+    if (allScopes.length === 0) {
+      return fail('UNSUPPORTED_TARGET');
+    }
+
+    const analysis = analyzeSelectors(untrustedSource);
+    if (analysis.status !== 'OK') {
+      return fail('UNSUPPORTED_TARGET');
+    }
+
+    const matchingSites = analysis.sites.filter(site => {
+      if (site.kind !== 'literal') return false;
+      if (site.method === 'getElementById') {
+        return originalSelector.startsWith('#') && site.selector === originalSelector.slice(1);
+      }
+      return site.selector === originalSelector;
+    });
+
+    if (matchingSites.length === 0) {
+      return fail('UNSUPPORTED_TARGET');
+    }
+    if (matchingSites.length > 1) {
+      return fail('AMBIGUOUS_SELECTOR_SITE');
+    }
+
+    const selectedSite = matchingSites[0];
+    if (
+      selectedSite.method !== 'querySelector' &&
+      selectedSite.method !== 'querySelectorAll' &&
+      selectedSite.method !== 'getElementById'
+    ) {
+      return fail('UNSUPPORTED_TARGET');
+    }
+    const validMethod: 'querySelector' | 'querySelectorAll' | 'getElementById' = selectedSite.method;
+
+    const patchReq: LiteralPatchRequest = {
+      source: untrustedSource,
+      expectedSourceSha256: scriptSha256,
+      callOffset: selectedSite.offset,
+      method: validMethod,
+      originalSelector,
+      replacementSelector,
+      faultEvidenceId
+    };
+
+    const planned = proposeLiteralSelectorPatch(patchReq);
+    if (planned.status !== 'CANDIDATE_ONLY') {
+      return fail('PLANNER_FAILED');
+    }
+
+    const boundary = headerEnd(untrustedSource);
+    if (boundary === null) {
+      return fail('METADATA_MUTATION_DENIED');
+    }
+    const origHeader = untrustedSource.slice(0, boundary);
+    const candHeader = planned.candidateSource.slice(0, boundary);
+    if (origHeader !== candHeader) {
+      return fail('METADATA_MUTATION_DENIED');
+    }
+
+    const start = planned.change.start;
+    const beforeChange = untrustedSource.slice(0, start);
+    const lines = beforeChange.split('\n');
+    const lineNumber = lines.length;
+    const columnNumber = lines[lines.length - 1].length + 1;
+
+    const origLines = untrustedSource.split('\n');
+    const candLines = planned.candidateSource.split('\n');
+    const oldLineText = origLines[lineNumber - 1] || '';
+    const newLineText = candLines[lineNumber - 1] || '';
+
+    return Object.freeze({
+      status: 'CANDIDATE_READY_FOR_REVIEW' as const,
+      originalSha256: planned.originalSha256,
+      candidateSha256: planned.candidateSha256,
+      faultEvidenceId,
+      callOffset: selectedSite.offset,
+      method: validMethod,
+      originalSelector,
+      replacementSelector,
+      diffSummary: Object.freeze({
+        line: lineNumber,
+        column: columnNumber,
+        oldLineText,
+        newLineText,
+        originalSlice: planned.change.before,
+        candidateSlice: planned.change.after
+      }),
+      candidateSource: planned.candidateSource,
+      metadataPreserved: true as const,
+      permissionExpansionPrevented: true as const,
+      automaticPatchAllowed: false as const,
+      automaticRollbackAllowed: false as const,
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const,
+      nextPermittedAction: 'USER_REVIEW_AND_STAGE_BACKUP_REQUIRED' as const
+    });
+  } catch {
+    return fail('UNTRUSTED_INPUT');
+  }
+}
+
+export function auditReviewableRepairPackage(
+  untrustedPackage: unknown,
+  untrustedSource: unknown,
+  untrustedEvidence: unknown,
+  untrustedOptions: unknown
+): Readonly<{
+  status: 'AUDIT_PASSED' | 'AUDIT_FAILED';
+  reason?: string;
+  originalSha256?: string;
+  candidateSha256?: string;
+  automaticPatchAllowed: false;
+  automaticRollbackAllowed: false;
+  tampermonkeyVerified: false;
+  businessVerified: false;
+}> {
+  const fail = (reason: string) =>
+    Object.freeze({
+      status: 'AUDIT_FAILED' as const,
+      reason,
+      automaticPatchAllowed: false as const,
+      automaticRollbackAllowed: false as const,
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const
+    });
+
+  try {
+    if (
+      !untrustedPackage ||
+      typeof untrustedPackage !== 'object' ||
+      Array.isArray(untrustedPackage) ||
+      nodeTypes.isProxy(untrustedPackage)
+    ) {
+      return fail('UNTRUSTED_PACKAGE');
+    }
+
+    const regenerated = proposeConservativeRepairCandidateFromEvidence(
+      untrustedSource,
+      untrustedEvidence,
+      untrustedOptions
+    );
+
+    if (regenerated.status !== 'CANDIDATE_READY_FOR_REVIEW') {
+      return fail(`REGENERATION_BLOCKED_${regenerated.reason}`);
+    }
+
+    const pkg = untrustedPackage as Record<string, unknown>;
+    if (
+      pkg.status !== 'CANDIDATE_READY_FOR_REVIEW' ||
+      pkg.originalSha256 !== regenerated.originalSha256 ||
+      pkg.candidateSha256 !== regenerated.candidateSha256 ||
+      pkg.faultEvidenceId !== regenerated.faultEvidenceId ||
+      pkg.originalSelector !== regenerated.originalSelector ||
+      pkg.replacementSelector !== regenerated.replacementSelector ||
+      pkg.candidateSource !== regenerated.candidateSource ||
+      pkg.automaticPatchAllowed !== false ||
+      pkg.automaticRollbackAllowed !== false ||
+      pkg.tampermonkeyVerified !== false ||
+      pkg.businessVerified !== false
+    ) {
+      return fail('PACKAGE_CONTENT_MISMATCH');
+    }
+
+    return Object.freeze({
+      status: 'AUDIT_PASSED' as const,
+      originalSha256: regenerated.originalSha256,
+      candidateSha256: regenerated.candidateSha256,
+      automaticPatchAllowed: false as const,
+      automaticRollbackAllowed: false as const,
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const
+    });
+  } catch {
+    return fail('AUDIT_EXCEPTION');
+  }
+}
