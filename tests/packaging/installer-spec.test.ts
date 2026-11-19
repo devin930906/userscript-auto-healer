@@ -87,3 +87,29 @@ test('TASK-019/TEST-027: desktop shortcut is optional and unchecked by default',
     'Desktop icon task must have Flags: unchecked to respect user choice'
   );
 });
+
+
+test('TASK-019/TEST-027: installer preserves user profile and persistent data retention across upgrades', () => {
+  const content = readFileSync(ISS_PATH, 'utf8');
+
+  // Verify that files are installed only to {app} and not overwriting userData
+  assert.match(
+    content,
+    /DestDir:\s*"\{app\}"/i,
+    'Installer files must only be deployed into {app} directory'
+  );
+
+  // Verify no destructive deletion tasks exist for user data paths
+  assert.doesNotMatch(
+    content,
+    /Type:\s*filesandordirs;\s*Name:\s*"\{localappdata\}\\UserscriptAutoHealer"/i,
+    'Installer must not wipe user data or profile cache directories'
+  );
+
+  // Verify UsePreviousAppDir preserves install location
+  assert.match(
+    content,
+    /UsePreviousAppDir=yes/i,
+    'Installer must preserve existing installation directory on upgrade'
+  );
+});
