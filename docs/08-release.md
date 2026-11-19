@@ -190,8 +190,8 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 
 - **代码基线与全量任务整合**：代码合并截至 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 主干 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd`，PR #909 至 PR #921 全部顺利合并，涵盖 TASK-007、TASK-009..021 全部剩余范围。
 - **自动化测试全绿**：全量测试套件增至 **1,220 项**，本地及云端执行 **1,208 通过、0 失败、12 条件跳过（100% 绿灯）**；`python .github/scripts/verify-predevelopment.py` 严格校验通过。
-- **Candidate Packaging 双包交付**：Windows Candidate Packaging 工作流 [#44514969090](https://github.com/devin930906/userscript-auto-healer/actions/runs/44514969090) 成功构建 Windows Candidate 双包（Artifact ID `14524908326`，278,087,767 bytes），SHA256SUMS.txt 清单吻合：
-  - Setup EXE：`Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Setup.exe` (SHA-256: `4a11772e51f48ffcf8dfee9f3370d3f7a2de84e971ac48330bfcfe560ca63e15`)
-  - Portable ZIP：`Userscript-Auto-Healer-v1.1.3-a8908a2c53b7-CANDIDATE-Portable.zip` (SHA-256: `963d4aebda148193add7a7dd81ae7c8d0149496a4a6d628e4ebc98e1fa82ecf6`)
-- **本地实机解压与烟测自检**：解压 Portable ZIP 并于本地真实运行 `UserscriptAutoHealer.exe --uahtest-shell-only`，退出码 0，成功返回安全沙箱回执，验证独立用户数据隔离与 Fail-Closed 安全不变量。
+- **Candidate Packaging 双包交付**：Windows Candidate Packaging 工作流 [#44534729223](https://github.com/devin930906/userscript-auto-healer/actions/runs/44534729223) 基于主干 HEAD `19b7391807c42dfd08c5d2639a5ca2d984180425` 成功构建全新 Windows Candidate 双包（Artifact ID `14536381364`，278,077,440 bytes），SHA256SUMS.txt 清单严格吻合：
+  - Setup EXE：`Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Setup.exe` (SHA-256: `b81ec3e790a648cec9d980a71172a65fa8cbd9e5c256c455bb2f8ba39190462f`)
+  - Portable ZIP：`Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Portable.zip` (SHA-256: `6c42187bb061909905da1f91c0045dca304b2d71dd216c0f6219d06a831737c2`)
+- **本地实机解压与烟测自检**：解压 Portable ZIP 并于本地真实运行 `UserscriptAutoHealer.exe --uahtest-shell-only`，退出码 0，成功返回安全沙箱回执（`{"shell":"development-skeleton","preloadIpcVerified":true,"rendererSandboxVerified":true,"automaticRepairAvailable":false,"userDataDirectory":"C:\\Users\\Administrator\\AppData\\Roaming\\Userscript Auto Healer Candidate"}`），验证独立用户数据隔离与 Fail-Closed 安全不变量。
 - **Stable 最终状态**：GATE-001..011 机器验证全部通过，正式交付经过完整验证的候选 EXE 安装程序与 ZIP 便携版，就绪进入集中人工验证与最终签核阶段。
