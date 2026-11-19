@@ -3,7 +3,7 @@
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
 > **当前最新续接（2026-11-19，PR #909..#922 全量任务代码整合、1220 项测试全绿与 main@19b7391 Windows Candidate 双包交付实测）**：
-> 产品代码基线为 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd` 与文档对账 PR [#922](https://github.com/devin930906/userscript-auto-healer/pull/922) 合并 SHA `19b7391807c42dfd08c5d2639a5ca2d984180425`。
+> 产品代码基线为 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd` 与文档对账 PR [#922](https://github.com/devin930906/userscript-auto-healer/pull/922) 合并 SHA `19b7391caa29991c3ded9750e78b2fc1e19b5e30`。
 > 今日已顺利完成 TASK-007 至 TASK-021 的全量代码实现与工程整合（PR #909..#922 全部合并）。
 > 本地 `npm run typecheck` 成功；全量 `npm test` 共 1,220 项测试 100% 绿灯（1,208 pass, 0 fail, 12 conditional skips）；`.github/scripts/verify-predevelopment.py` 严格校验通过。
 > 云端 main@953468c Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）成功通过。

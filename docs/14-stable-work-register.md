@@ -539,7 +539,7 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   - `.github/scripts/verify-predevelopment.py` 严格校验通过（28 REQ/TEST 矩阵，21 tasks，11 gates）。
   - 云端 Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）在 main@953468c 上完整成功通过。
 - **Windows Candidate 双发行包本地实测交付与验算**：
-  - 云端打包运行：Run ID [#44534729223](https://github.com/devin930906/userscript-auto-healer/actions/runs/44534729223)，工件 ID `14536381364`（278,077,440 bytes），名称 `userscript-auto-healer-windows-CANDIDATE`，基于主干 HEAD `19b7391807c42dfd08c5d2639a5ca2d984180425` 构建。
+  - 云端打包运行：Run ID [#44534729223](https://github.com/devin930906/userscript-auto-healer/actions/runs/44534729223)，工件 ID `14536381364`（278,077,440 bytes），名称 `userscript-auto-healer-windows-CANDIDATE`，基于主干 HEAD `19b7391caa29991c3ded9750e78b2fc1e19b5e30` 构建。
   - 本地完整下载至 `scratch/candidate_19b7391`，验证 `SHA256SUMS.txt` 严格吻合无误：
     - `Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Setup.exe`: `b81ec3e790a648cec9d980a71172a65fa8cbd9e5c256c455bb2f8ba39190462f`
     - `Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Portable.zip`: `6c42187bb061909905da1f91c0045dca304b2d71dd216c0f6219d06a831737c2`
