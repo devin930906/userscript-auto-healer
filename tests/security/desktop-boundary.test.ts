@@ -396,6 +396,21 @@ test('TASK-013/TEST-026: dropped batch IPC is main-owned, frame-authorized and p
     'renderer must not launch one IPC analysis job per file');
 });
 
+test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped batch',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const cleanup=main.match(/function abortDroppedImportForWindow\(win:BrowserWindow\):void\{[\s\S]*?\n\}/)?.[0]??'';
+  assert.ok(cleanup.includes('const session=droppedImportBatchSession;')&&cleanup.includes('session.batch.finish()'),
+    'teardown must discard staged source bytes');
+  assert.ok(cleanup.includes('droppedImportBatchSession=null'),
+    'teardown must release the batch session ID');
+  assert.ok(cleanup.includes('controller.abort()')&&cleanup.includes('droppedImportController=null'),
+    'teardown must cancel analysis and release the busy lock');
+  assert.ok(/win\.webContents\.on\('render-process-gone',[^;]*abortDroppedImportForWindow\(win\)/.test(main),
+    'renderer process loss must clean up its batch');
+  assert.ok(/win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame\)[\s\S]*?abortDroppedImportForWindow\(win\)/.test(main),
+    'main-frame reload must clean up its batch');
+});
+
 test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attesting page exception signals',()=>{
   const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
   const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');

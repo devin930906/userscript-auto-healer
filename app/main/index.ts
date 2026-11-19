@@ -190,9 +190,25 @@ let droppedImportController: AbortController | null = null;
 interface ActiveDroppedImportBatch{
   readonly id:string;
   readonly owner:BrowserWindow;
+  readonly frameEpoch:number;
   readonly batch:DroppedImportBatch;
 }
 let droppedImportBatchSession:ActiveDroppedImportBatch|null=null;
+let mainFrameNavigationEpoch=0;
+function abortDroppedImportForWindow(win:BrowserWindow):void{
+  if(mainWindow!==win)return;
+  mainFrameNavigationEpoch++;
+  const session=droppedImportBatchSession;
+  if(session?.owner===win){
+    session.batch.finish();
+    droppedImportBatchSession=null;
+  }
+  const controller=droppedImportController;
+  if(controller){
+    controller.abort();
+    if(droppedImportController===controller)droppedImportController=null;
+  }
+}
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -1252,7 +1268,10 @@ function registerSafeIpc(): void {
     const controller=new AbortController();
     const batchId=randomUUID();
     droppedImportController=controller;
-    droppedImportBatchSession={id:batchId,owner:win,batch:new DroppedImportBatch()};
+    droppedImportBatchSession={
+      id:batchId,owner:win,frameEpoch:mainFrameNavigationEpoch,
+      batch:new DroppedImportBatch()
+    };
     return {ok:true,batchId};
   });
   ipcMain.handle('import:dropped-batch:add',(event,batchId:unknown,name:unknown,data:unknown)=>{
@@ -1260,6 +1279,7 @@ function registerSafeIpc(): void {
     const session=droppedImportBatchSession;
     const win=mainWindow;
     if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.frameEpoch!==mainFrameNavigationEpoch||
         session.owner!==win||!win||win.isDestroyed())
       return {ok:false,processed:0,code:'STALE_BATCH'};
     return session.batch.add(name,data);
@@ -1270,14 +1290,17 @@ function registerSafeIpc(): void {
     const win=mainWindow;
     const controller=droppedImportController;
     if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.frameEpoch!==mainFrameNavigationEpoch||
         session.owner!==win||!win||win.isDestroyed()||!controller)
       return {ok:false,code:'STALE_BATCH'};
+    const frameEpoch=session.frameEpoch;
     const result=session.batch.finish();
     if(!result)return {ok:false,code:'BATCH_FINALIZED'};
     droppedImportBatchSession=null;
     try{
       const summary=await summarizeResult(result,controller.signal);
-      if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'WINDOW_CLOSED'};
+      if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch)
+        return {ok:false,code:'STALE_BATCH'};
       for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
       return {ok:true,...summary};
     }catch{return {ok:false,code:'DROPPED_IMPORT_FAILED'};}
@@ -1628,6 +1651,10 @@ async function createMainWindow(): Promise<void> {
   });
   if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
+  win.webContents.on('render-process-gone',()=>abortDroppedImportForWindow(win));
+  win.webContents.on('did-start-navigation',(_event,_url,_isInPlace,isMainFrame)=>{
+    if(isMainFrame)abortDroppedImportForWindow(win);
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
@@ -1636,11 +1663,7 @@ async function createMainWindow(): Promise<void> {
       nativeAiDiscoveryController?.abort();
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
-      if(droppedImportBatchSession?.owner===win){
-        droppedImportBatchSession.batch.finish();
-        droppedImportBatchSession=null;
-      }
-      droppedImportController?.abort();
+      abortDroppedImportForWindow(win);
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -1651,6 +1674,24 @@ async function createMainWindow(): Promise<void> {
   });
   await win.loadFile(uiFile);
   if (process.argv.includes('--uahtest-shell-only')) {
+    // TASK-013/TEST-022: abandoning a renderer-owned batch during main-frame
+    // reload must release its source bytes and app-wide import lock.
+    const abandonedDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
+      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned\\n// ==/UserScript==\\n');"+
+      "const appended=await a.addDroppedImportBatch(started.batchId,'abandoned.user.js',bytes);"+
+      "return appended.ok===true;})()"
+    ) as boolean;
+    if(!abandonedDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_SETUP_FAILED');
+    await win.webContents.loadFile(uiFile);
+    const recoveredDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
+      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "const finished=await a.finishDroppedImportBatch(started.batchId);"+
+      "return finished.ok===true&&finished.scripts.length===0&&finished.errors.length===0;})()"
+    ) as boolean;
+    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_CLEANUP_FAILED');
     if (useWindowsTitleBar) {
       const titleBarReady = await win.webContents.executeJavaScript(
         `(() => {
