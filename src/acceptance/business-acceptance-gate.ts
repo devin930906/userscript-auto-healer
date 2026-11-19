@@ -122,6 +122,20 @@ const AUDIT_KEYS = [
   'status', 'originalSha256', 'candidateSha256', 'faultEvidenceId',
   'change', 'automaticPatchAllowed', 'tampermonkeyVerified', 'businessRecoveredVerified'
 ] as const;
+const TASK009_CANDIDATE_KEYS = [
+  'status', 'originalSha256', 'candidateSha256', 'faultEvidenceId',
+  'callOffset', 'method', 'originalSelector', 'replacementSelector',
+  'diffSummary', 'candidateSource', 'metadataPreserved',
+  'permissionExpansionPrevented', 'automaticPatchAllowed',
+  'automaticRollbackAllowed', 'tampermonkeyVerified', 'businessVerified',
+  'nextPermittedAction'
+] as const;
+const RESTORE_RECEIPT_KEYS = [
+  'status', 'originalSha256', 'displacedSha256',
+  'displacedBackupFileName', 'journalFileName',
+  'automaticPatchAllowed', 'automaticRollbackAllowed',
+  'tampermonkeyVerified', 'businessRecoveredVerified'
+] as const;
 const BACKUP_KEYS = [
   'status', 'backupFileName', 'sourceSha256', 'candidateSha256',
   'backupByteLength', 'automaticPatchAllowed', 'automaticRollbackAllowed',
@@ -145,9 +159,14 @@ export function evaluateBusinessAcceptanceGate(
   backupReceipt: unknown,
   originalEvidence: unknown,
   candidateEvidence: unknown,
-  untrustedOptions: unknown
+  untrustedOptions: unknown,
+  signal?: AbortSignal
 ): BusinessAcceptanceResult {
   try {
+    if (signal?.aborted) {
+      return blocked('NOT_AUTHORIZED');
+    }
+
     const opts = extractPlainDataRecord(untrustedOptions, OPTION_KEYS);
     if (!opts || typeof opts.userApproved !== 'boolean') {
       return blocked('INVALID_OPTIONS');
@@ -156,12 +175,39 @@ export function evaluateBusinessAcceptanceGate(
       return blocked('NOT_AUTHORIZED');
     }
 
+    let origSha = '';
+    let candSha = '';
+    let faultEvidenceId = '';
+
     const audit = extractPlainDataRecord(auditReceipt, AUDIT_KEYS);
-    if (!audit || audit.status !== 'REVIEWABLE_ONLY' ||
+    if (audit) {
+      if (
+        audit.status !== 'REVIEWABLE_ONLY' ||
         audit.automaticPatchAllowed !== false ||
         audit.tampermonkeyVerified !== false ||
-        audit.businessRecoveredVerified !== false) {
-      return blocked('AUDIT_NOT_REVIEWABLE');
+        audit.businessRecoveredVerified !== false
+      ) {
+        return blocked('AUDIT_NOT_REVIEWABLE');
+      }
+      origSha = audit.originalSha256 as string;
+      candSha = audit.candidateSha256 as string;
+      faultEvidenceId = audit.faultEvidenceId as string;
+    } else {
+      const task009Audit = extractPlainDataRecord(auditReceipt, TASK009_CANDIDATE_KEYS);
+      if (
+        !task009Audit ||
+        task009Audit.status !== 'CANDIDATE_READY_FOR_REVIEW' ||
+        task009Audit.automaticPatchAllowed !== false ||
+        task009Audit.automaticRollbackAllowed !== false ||
+        task009Audit.tampermonkeyVerified !== false ||
+        task009Audit.businessVerified !== false ||
+        task009Audit.nextPermittedAction !== 'USER_REVIEW_AND_STAGE_BACKUP_REQUIRED'
+      ) {
+        return blocked('AUDIT_NOT_REVIEWABLE');
+      }
+      origSha = task009Audit.originalSha256 as string;
+      candSha = task009Audit.candidateSha256 as string;
+      faultEvidenceId = task009Audit.faultEvidenceId as string;
     }
 
     const backup = extractPlainDataRecord(backupReceipt, BACKUP_KEYS);
@@ -186,8 +232,6 @@ export function evaluateBusinessAcceptanceGate(
       return blocked('CANDIDATE_EVIDENCE_INVALID');
     }
 
-    const origSha = audit.originalSha256;
-    const candSha = audit.candidateSha256;
     if (typeof origSha !== 'string' || !SHA256.test(origSha) ||
         typeof candSha !== 'string' || !SHA256.test(candSha)) {
       return blocked('AUDIT_NOT_REVIEWABLE');
@@ -235,7 +279,6 @@ export function evaluateBusinessAcceptanceGate(
     }
 
     const backupFileName = backup.backupFileName;
-    const faultEvidenceId = audit.faultEvidenceId;
     if (typeof backupFileName !== 'string' || backupFileName.length === 0 ||
         typeof faultEvidenceId !== 'string' || faultEvidenceId.length === 0) {
       return blocked('UNTRUSTED_EVIDENCE_INPUT');
@@ -254,5 +297,115 @@ export function evaluateBusinessAcceptanceGate(
     });
   } catch {
     return blocked('UNTRUSTED_EVIDENCE_INPUT');
+  }
+}
+
+export type RollbackAcceptanceBlockReason =
+  | 'INVALID_OPTIONS'
+  | 'NOT_AUTHORIZED'
+  | 'ROLLBACK_RECEIPT_INVALID'
+  | 'ORIGINAL_HASH_MISMATCH'
+  | 'DISPLACED_HASH_MISMATCH'
+  | 'UNTRUSTED_INPUT';
+
+export type RollbackAcceptanceResult =
+  | Readonly<{
+      status: 'BLOCKED';
+      reason: RollbackAcceptanceBlockReason;
+      automaticPatchAllowed: false;
+      automaticRollbackAllowed: false;
+      tampermonkeyVerified: false;
+      businessVerified: false;
+    }>
+  | Readonly<{
+      status: 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED';
+      originalSha256: string;
+      displacedSha256: string;
+      displacedBackupFileName: string;
+      journalFileName: string;
+      automaticPatchAllowed: false;
+      automaticRollbackAllowed: false;
+      tampermonkeyVerified: true;
+      businessVerified: true;
+    }>;
+
+export function evaluateRollbackAcceptanceGate(
+  untrustedRollbackReceipt: unknown,
+  expectedOriginalSha256: unknown,
+  expectedDisplacedSha256: unknown,
+  untrustedOptions: unknown,
+  signal?: AbortSignal
+): RollbackAcceptanceResult {
+  const fail = (reason: RollbackAcceptanceBlockReason): RollbackAcceptanceResult =>
+    Object.freeze({
+      status: 'BLOCKED' as const,
+      reason,
+      ...failFlags
+    });
+
+  try {
+    if (signal?.aborted) {
+      return fail('NOT_AUTHORIZED');
+    }
+
+    const opts = extractPlainDataRecord(untrustedOptions, OPTION_KEYS);
+    if (!opts || typeof opts.userApproved !== 'boolean') {
+      return fail('INVALID_OPTIONS');
+    }
+    if (opts.userApproved !== true) {
+      return fail('NOT_AUTHORIZED');
+    }
+
+    if (
+      typeof expectedOriginalSha256 !== 'string' ||
+      !SHA256.test(expectedOriginalSha256) ||
+      typeof expectedDisplacedSha256 !== 'string' ||
+      !SHA256.test(expectedDisplacedSha256)
+    ) {
+      return fail('UNTRUSTED_INPUT');
+    }
+
+    const receipt = extractPlainDataRecord(untrustedRollbackReceipt, RESTORE_RECEIPT_KEYS);
+    if (
+      !receipt ||
+      receipt.status !== 'RESTORED_NATIVE_ONLY' ||
+      receipt.automaticPatchAllowed !== false ||
+      receipt.automaticRollbackAllowed !== false ||
+      receipt.tampermonkeyVerified !== false ||
+      receipt.businessRecoveredVerified !== false
+    ) {
+      return fail('ROLLBACK_RECEIPT_INVALID');
+    }
+
+    if (receipt.originalSha256 !== expectedOriginalSha256) {
+      return fail('ORIGINAL_HASH_MISMATCH');
+    }
+
+    if (receipt.displacedSha256 !== expectedDisplacedSha256) {
+      return fail('DISPLACED_HASH_MISMATCH');
+    }
+
+    if (
+      typeof receipt.displacedBackupFileName !== 'string' ||
+      receipt.displacedBackupFileName.length === 0 ||
+      typeof receipt.journalFileName !== 'string' ||
+      receipt.journalFileName.length === 0
+    ) {
+      return fail('ROLLBACK_RECEIPT_INVALID');
+    }
+
+    return Object.freeze({
+      status: 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED' as const,
+      originalSha256: receipt.originalSha256 as string,
+      displacedSha256: receipt.displacedSha256 as string,
+      displacedBackupFileName: receipt.displacedBackupFileName as string,
+      journalFileName: receipt.journalFileName as string,
+      automaticPatchAllowed: false as const,
+      automaticRollbackAllowed: false as const,
+      tampermonkeyVerified: true as const,
+      businessVerified: true as const
+    });
+  } catch {
+    return fail('UNTRUSTED_INPUT');
   }
 }
