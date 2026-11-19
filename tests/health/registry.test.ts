@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
-import {LimitedHealthRegistry} from '../../src/health/health-registry';
+import {LimitedHealthRegistry, LIMITED_HEALTH_FRESHNESS_MS} from '../../src/health/health-registry';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64), E = 'e'.repeat(64);
 const hit = (scriptHash = A) =>
@@ -259,4 +259,42 @@ test('TASK-015/TEST-024/026: invalid clock permanently revokes prior limited hea
  assert.equal(newObservation.businessVerified,false);
  assert.equal(newObservation.automaticPatchAllowed,false);
  assert.equal(newObservation.automaticRollbackAllowed,false);
+});
+
+test('TASK-015/TEST-024: periodic health check aging strictly drops to INDETERMINATE and preserves fail-closed invariants', () => {
+  let time = 100000;
+  const registry = new LimitedHealthRegistry(() => time);
+  const scriptA = 'a'.repeat(64);
+
+  // Initial untested status
+  const initial = registry.snapshot(scriptA);
+  assert.equal(initial.status, 'UNTESTED');
+  assert.equal(initial.tampermonkeyVerified, false);
+  assert.equal(initial.businessVerified, false);
+  assert.equal(initial.automaticPatchAllowed, false);
+  assert.equal(initial.automaticRollbackAllowed, false);
+
+  // Record valid DOM observation
+  registry.record({
+    scriptHash: scriptA,
+    kind: 'LIMITED_DOM_OBSERVATION',
+    evidenceHash: 'e'.repeat(64)
+  });
+
+  const active = registry.snapshot(scriptA);
+  assert.equal(active.status, 'ELEMENT_FOUND_ONLY');
+  assert.equal(active.tampermonkeyVerified, false);
+  assert.equal(active.businessVerified, false);
+  assert.equal(active.automaticPatchAllowed, false);
+  assert.equal(active.automaticRollbackAllowed, false);
+
+  // Advance time past LIMITED_HEALTH_FRESHNESS_MS (10 minutes)
+  time += LIMITED_HEALTH_FRESHNESS_MS + 1000;
+
+  const expired = registry.snapshot(scriptA);
+  assert.equal(expired.status, 'INDETERMINATE', 'Aged periodic health observation must drop to INDETERMINATE');
+  assert.equal(expired.tampermonkeyVerified, false);
+  assert.equal(expired.businessVerified, false);
+  assert.equal(expired.automaticPatchAllowed, false);
+  assert.equal(expired.automaticRollbackAllowed, false);
 });
