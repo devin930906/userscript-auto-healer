@@ -3,8 +3,14 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {
   evaluateBusinessAcceptanceGate,
-  type BusinessAcceptanceResult
+  evaluateRollbackAcceptanceGate,
+  type BusinessAcceptanceResult,
+  type RollbackAcceptanceResult
 } from '../../src/acceptance/business-acceptance-gate';
+import {
+  proposeConservativeRepairCandidateFromEvidence,
+  type DiagnosticFaultEvidence
+} from '../../src/repair/patch-planner';
 
 const fixtureNow = Date.now();
 const iso = (offsetMs: number): string => new Date(fixtureNow + offsetMs).toISOString();
@@ -288,4 +294,162 @@ test('TASK-010 / TEST-018/021/026: contradictory audit authority and backup veri
     assert.equal(result.automaticPatchAllowed,false,field);
     assert.equal(result.businessVerified,false,field);
   }
+});
+
+test('TASK-010 / TEST-018/021: TASK-009 CANDIDATE_READY_FOR_REVIEW passes business acceptance', () => {
+  const metaBlock = '// ==UserScript==\n// @name Fault Test\n// @match https://example.com/*\n// @grant GM_getValue\n// ==/UserScript==\n';
+  const scriptSource = metaBlock +
+    'const unrelated = "#old";\n' +
+    'const node = document.querySelector("#old");\n' +
+    'console.log(node);\n';
+
+  const scriptSha = createHash('sha256').update(scriptSource, 'utf8').digest('hex');
+
+  const evidence: DiagnosticFaultEvidence = {
+    faultEvidenceId: 'fault_obs_001',
+    targetUrl: 'https://example.com/page',
+    originalSelector: '#old',
+    replacementSelector: '#new-element',
+    scriptSha256: scriptSha
+  };
+
+  const candidatePkg = proposeConservativeRepairCandidateFromEvidence(
+    scriptSource,
+    evidence,
+    {userApproved: true}
+  );
+
+  assert.equal(candidatePkg.status, 'CANDIDATE_READY_FOR_REVIEW');
+  if (candidatePkg.status === 'CANDIDATE_READY_FOR_REVIEW') {
+    const backup = {
+      ...validBackup,
+      sourceSha256: scriptSha,
+      candidateSha256: candidatePkg.candidateSha256
+    };
+    const origEv = {
+      ...validOriginalEvidence,
+      sourceSha256: scriptSha
+    };
+    const candEv = {
+      ...validCandidateEvidence,
+      candidateSha256: candidatePkg.candidateSha256
+    };
+
+    const result = evaluateBusinessAcceptanceGate(
+      candidatePkg,
+      backup,
+      origEv,
+      candEv,
+      validOptions
+    );
+
+    assert.equal(result.status, 'BUSINESS_ACCEPTED_AWAITING_TRANSACTION');
+    assert.equal(result.originalSha256, scriptSha);
+    assert.equal(result.candidateSha256, candidatePkg.candidateSha256);
+    assert.equal(result.faultEvidenceId, 'fault_obs_001');
+    assert.equal(result.automaticPatchAllowed, false);
+    assert.equal(result.tampermonkeyVerified, true);
+    assert.equal(result.businessVerified, true);
+  }
+});
+
+test('TASK-010 / TEST-018/021: AbortSignal cancellation fails closed', () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = evaluateBusinessAcceptanceGate(
+    validAudit,
+    validBackup,
+    validOriginalEvidence,
+    validCandidateEvidence,
+    validOptions,
+    controller.signal
+  );
+
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.reason, 'NOT_AUTHORIZED');
+  assert.equal(result.automaticPatchAllowed, false);
+  assert.equal(result.businessVerified, false);
+});
+
+test('TASK-010 / TEST-018/021: evaluateRollbackAcceptanceGate validates native restore receipt', () => {
+  const validRollbackReceipt = {
+    status: 'RESTORED_NATIVE_ONLY' as const,
+    originalSha256: origSha,
+    displacedSha256: candSha,
+    displacedBackupFileName: 'candidate.user.js.bak-12345',
+    journalFileName: 'restore.journal.json',
+    automaticPatchAllowed: false as const,
+    automaticRollbackAllowed: false as const,
+    tampermonkeyVerified: false as const,
+    businessRecoveredVerified: false as const
+  };
+
+  const success = evaluateRollbackAcceptanceGate(
+    validRollbackReceipt,
+    origSha,
+    candSha,
+    validOptions
+  );
+
+  assert.equal(success.status, 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED');
+  assert.equal(success.originalSha256, origSha);
+  assert.equal(success.displacedSha256, candSha);
+  assert.equal(success.displacedBackupFileName, 'candidate.user.js.bak-12345');
+  assert.equal(success.journalFileName, 'restore.journal.json');
+  assert.equal(success.automaticPatchAllowed, false);
+  assert.equal(success.automaticRollbackAllowed, false);
+  assert.equal(success.tampermonkeyVerified, true);
+  assert.equal(success.businessVerified, true);
+
+  // Hash mismatch
+  const foreignSha = 'f'.repeat(64);
+  const badOrig = evaluateRollbackAcceptanceGate(
+    validRollbackReceipt,
+    foreignSha,
+    candSha,
+    validOptions
+  );
+  assert.equal(badOrig.status, 'BLOCKED');
+  assert.equal(badOrig.reason, 'ORIGINAL_HASH_MISMATCH');
+
+  const badDisplaced = evaluateRollbackAcceptanceGate(
+    validRollbackReceipt,
+    origSha,
+    foreignSha,
+    validOptions
+  );
+  assert.equal(badDisplaced.status, 'BLOCKED');
+  assert.equal(badDisplaced.reason, 'DISPLACED_HASH_MISMATCH');
+
+  // Cancelled signal
+  const abortCtrl = new AbortController();
+  abortCtrl.abort();
+  const aborted = evaluateRollbackAcceptanceGate(
+    validRollbackReceipt,
+    origSha,
+    candSha,
+    validOptions,
+    abortCtrl.signal
+  );
+  assert.equal(aborted.status, 'BLOCKED');
+  assert.equal(aborted.reason, 'NOT_AUTHORIZED');
+
+  // Proxy trap refused
+  let trapCount = 0;
+  const proxiedReceipt = new Proxy(validRollbackReceipt, {
+    get(target, prop, receiver) {
+      trapCount++;
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+  const proxyResult = evaluateRollbackAcceptanceGate(
+    proxiedReceipt,
+    origSha,
+    candSha,
+    validOptions
+  );
+  assert.equal(proxyResult.status, 'BLOCKED');
+  assert.equal(proxyResult.reason, 'ROLLBACK_RECEIPT_INVALID');
+  assert.equal(trapCount, 0, 'Proxy traps on rollback receipt must not execute');
 });
