@@ -1,7 +1,11 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {formatNativeAiReviewDisclosure,NativeAiEvidenceStore,
-  requestNativeReviewedAiSuggestion} from '../../src/ai/native-reviewed-suggestion';
+  requestNativeReviewedAiSuggestion,
+  extractAiAssistedReplacementSelector,
+  buildAiAssistedDiagnosticEvidence} from '../../src/ai/native-reviewed-suggestion';
+import {proposeConservativeRepairCandidateFromEvidence} from '../../src/repair/patch-planner';
+import {createHash} from 'node:crypto';
 
 const A='a'.repeat(64);
 const config=()=>JSON.stringify({baseUrl:'https://models.example.com/v1',
@@ -293,4 +297,146 @@ test('TASK-014/TEST-015/026: distinct unpaired UTF-16 selectors cannot alias nat
   assert.equal(store.record('paired_ok',A,'div.\uD83D\uDE00','UNKNOWN'),true);
   assert.ok(store.resolve('paired_ok'));
   assert.equal(store.record('ordinary_ok',A,'div.target','UNKNOWN'),true);
+});
+
+test('TASK-014/TEST-015/016: extractAiAssistedReplacementSelector safely parses valid simple selectors', () => {
+  // Plain selector
+  assert.equal(
+    extractAiAssistedReplacementSelector({
+      ok: true,
+      status: 'UNTRUSTED_AI_TEXT_ONLY',
+      candidateText: '#healed',
+      model: 'test-model',
+      tampermonkeyVerified: false,
+      businessVerified: false,
+      automaticPatchAllowed: false,
+      automaticRollbackAllowed: false
+    }),
+    '#healed'
+  );
+
+  // Markdown code block
+  assert.equal(
+    extractAiAssistedReplacementSelector({
+      ok: true,
+      status: 'UNTRUSTED_AI_TEXT_ONLY',
+      candidateText: '```css\n.healed-button\n```',
+      model: 'test-model',
+      tampermonkeyVerified: false,
+      businessVerified: false,
+      automaticPatchAllowed: false,
+      automaticRollbackAllowed: false
+    }),
+    '.healed-button'
+  );
+
+  // JSON structured format
+  assert.equal(
+    extractAiAssistedReplacementSelector({
+      ok: true,
+      status: 'UNTRUSTED_AI_TEXT_ONLY',
+      candidateText: '{"replacementSelector": "#submit-btn-v2"}',
+      model: 'test-model',
+      tampermonkeyVerified: false,
+      businessVerified: false,
+      automaticPatchAllowed: false,
+      automaticRollbackAllowed: false
+    }),
+    '#submit-btn-v2'
+  );
+
+  // Rejects invalid, complex, or script-injection attempts
+  for (const badText of [
+    'document.querySelector("#foo")',
+    'alert(1)',
+    'div > span.active',
+    '#foo[bar="baz"]',
+    '.class with spaces',
+    '',
+    '   ',
+    '#',
+    '.'
+  ]) {
+    assert.equal(
+      extractAiAssistedReplacementSelector({
+        ok: true,
+        status: 'UNTRUSTED_AI_TEXT_ONLY',
+        candidateText: badText,
+        model: 'test-model',
+        tampermonkeyVerified: false,
+        businessVerified: false,
+        automaticPatchAllowed: false,
+        automaticRollbackAllowed: false
+      }),
+      null,
+      `Should reject unsafe selector: ${badText}`
+    );
+  }
+
+  // Rejects null / proxy / invalid status
+  assert.equal(extractAiAssistedReplacementSelector(null), null);
+  assert.equal(extractAiAssistedReplacementSelector(new Proxy({}, {})), null);
+  assert.equal(
+    extractAiAssistedReplacementSelector({
+      ok: false,
+      code: 'NETWORK_FAILED'
+    }),
+    null
+  );
+});
+
+test('TASK-014/TEST-015/016: buildAiAssistedDiagnosticEvidence creates valid evidence and feeds proposeConservativeRepairCandidateFromEvidence', () => {
+  const dummySource =
+    '// ==UserScript==\n// @name TestScript\n// @match *://*/*\n// ==/UserScript==\nconst el = document.querySelector("#broken");\n';
+  const scriptSha256 = createHash('sha256').update(dummySource).digest('hex');
+
+  const validSuggestion = Object.freeze({
+    ok: true as const,
+    status: 'UNTRUSTED_AI_TEXT_ONLY' as const,
+    candidateText: '#healed',
+    model: 'gpt-4o-mini',
+    tampermonkeyVerified: false as const,
+    businessVerified: false as const,
+    automaticPatchAllowed: false as const,
+    automaticRollbackAllowed: false as const
+  });
+
+  const faultContext = {
+    faultEvidenceId: 'scenario_test_ai_1',
+    targetUrl: 'https://example.com/app',
+    originalSelector: '#broken',
+    scriptSha256
+  };
+
+  const evidence = buildAiAssistedDiagnosticEvidence(validSuggestion, faultContext);
+  assert.ok(evidence);
+  assert.equal(evidence?.replacementSelector, '#healed');
+  assert.equal(evidence?.originalSelector, '#broken');
+  assert.equal(evidence?.faultEvidenceId, 'scenario_test_ai_1');
+
+  // Negative: same selector rejected
+  const sameContext = { ...faultContext, originalSelector: '#healed' };
+  assert.equal(buildAiAssistedDiagnosticEvidence(validSuggestion, sameContext), null);
+
+  // Negative: proxy rejected
+  assert.equal(buildAiAssistedDiagnosticEvidence(validSuggestion, new Proxy(faultContext, {})), null);
+
+  // Integration with proposeConservativeRepairCandidateFromEvidence
+  const candidatePkg = proposeConservativeRepairCandidateFromEvidence(
+    dummySource,
+    evidence,
+    { userApproved: true }
+  );
+
+  assert.equal(candidatePkg.status, 'CANDIDATE_READY_FOR_REVIEW');
+  if (candidatePkg.status === 'CANDIDATE_READY_FOR_REVIEW') {
+    assert.equal(candidatePkg.originalSelector, '#broken');
+    assert.equal(candidatePkg.replacementSelector, '#healed');
+    assert.equal(candidatePkg.automaticPatchAllowed, false);
+    assert.equal(candidatePkg.automaticRollbackAllowed, false);
+    assert.equal(candidatePkg.tampermonkeyVerified, false);
+    assert.equal(candidatePkg.businessVerified, false);
+    assert.equal(candidatePkg.nextPermittedAction, 'USER_REVIEW_AND_STAGE_BACKUP_REQUIRED');
+    assert.ok(candidatePkg.candidateSource.includes('document.querySelector("#healed")'));
+  }
 });

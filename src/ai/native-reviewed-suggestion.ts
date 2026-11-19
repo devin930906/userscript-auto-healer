@@ -9,6 +9,7 @@ import {createHmac,randomBytes} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import {OptionalAiGateway,type AiSuggestion,type GatewayCode,
   type SuggestionRequestTarget} from './model-gateway';
+import type {DiagnosticFaultEvidence} from '../repair/patch-planner';
 
 type Evidence=Readonly<{diagnosticCode:'SELECTOR_ASSERTION'|'UNKNOWN';
   scenarioHash:string;selectorHash:string}>;
@@ -185,4 +186,109 @@ export async function requestNativeReviewedAiSuggestion(
     return await gateway.suggest(consent,evidence,signal);
   }catch{return blocked('CANCELLED');
   }finally{gateway.disable();}
+}
+
+const SIMPLE_SELECTOR_RE = /^[#.][A-Za-z_][A-Za-z0-9_-]{0,127}$/;
+
+/**
+ * TASK-014 / PR #858 calibration:
+ * Extract and validate an untrusted AI suggestion text into a candidate replacement selector.
+ *
+ * Safety invariants:
+ * 1. AI output is strictly untrusted text.
+ * 2. Only valid simple CSS selectors matching /^[#.][A-Za-z_][A-Za-z0-9_-]{0,127}$/ are accepted.
+ * 3. Never authorizes a write or auto-patch; candidate must be verified by real Tampermonkey & business gates.
+ */
+export function extractAiAssistedReplacementSelector(suggestion: unknown): string | null {
+  if (!suggestion || typeof suggestion !== 'object' || nodeTypes.isProxy(suggestion)) {
+    return null;
+  }
+  const s = suggestion as Record<string, unknown>;
+  if (s.ok !== true || s.status !== 'UNTRUSTED_AI_TEXT_ONLY' || typeof s.candidateText !== 'string') {
+    return null;
+  }
+
+  let text = s.candidateText.trim();
+  // Strip markdown code fences if present: ```css\n#selector\n``` or `#selector`
+  if (text.startsWith('```')) {
+    const lines = text.split('\n');
+    if (lines.length >= 2) {
+      lines.shift();
+      if (lines[lines.length - 1].trim().startsWith('```')) {
+        lines.pop();
+      }
+      text = lines.join('\n').trim();
+    }
+  }
+
+  // If text is wrapped in single or double quotes or backticks, unwrap
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'")) ||
+    (text.startsWith('`') && text.endsWith('`'))
+  ) {
+    text = text.slice(1, -1).trim();
+  }
+
+  // Attempt JSON parse if structured response format was used
+  if (text.startsWith('{') && text.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if (typeof parsed.replacementSelector === 'string') {
+          text = parsed.replacementSelector.trim();
+        } else if (typeof parsed.selector === 'string') {
+          text = parsed.selector.trim();
+        }
+      }
+    } catch {
+      // not JSON, fallback to raw trimmed text
+    }
+  }
+
+  if (!SIMPLE_SELECTOR_RE.test(text)) {
+    return null;
+  }
+
+  return text;
+}
+
+/**
+ * TASK-014 / PR #858 calibration:
+ * Create a DiagnosticFaultEvidence assisted by an untrusted AI suggestion.
+ * The resulting evidence must still pass proposeConservativeRepairCandidateFromEvidence
+ * and undergo real manager assertion before any repair or acceptance.
+ */
+export function buildAiAssistedDiagnosticEvidence(
+  suggestion: unknown,
+  faultContext: {
+    faultEvidenceId: string;
+    targetUrl: string;
+    originalSelector: string;
+    scriptSha256: string;
+  }
+): DiagnosticFaultEvidence | null {
+  const replacementSelector = extractAiAssistedReplacementSelector(suggestion);
+  if (!replacementSelector) return null;
+
+  if (
+    typeof faultContext !== 'object' ||
+    !faultContext ||
+    nodeTypes.isProxy(faultContext) ||
+    typeof faultContext.faultEvidenceId !== 'string' ||
+    typeof faultContext.targetUrl !== 'string' ||
+    typeof faultContext.originalSelector !== 'string' ||
+    typeof faultContext.scriptSha256 !== 'string' ||
+    replacementSelector === faultContext.originalSelector
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    faultEvidenceId: faultContext.faultEvidenceId,
+    targetUrl: faultContext.targetUrl,
+    originalSelector: faultContext.originalSelector,
+    replacementSelector,
+    scriptSha256: faultContext.scriptSha256
+  });
 }
