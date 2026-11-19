@@ -23,7 +23,7 @@
 | TASK-010 | REQ-018/021；TEST-018/021 | 阶段代码已整合，产品门槛未完成 | 离线审计与阻断逻辑不提供可信管理器/业务/备份证明 | 自动验收 | TASK-007/009/011 | src/acceptance/；docs/09-development-plan.md | 增加独立真实业务前后验收及可信备份绑定 | 可信正反证据可重演且未知状态安全拒绝 |
 | TASK-011 | REQ-020/021；TEST-020/021 | 阶段代码已整合，事务能力未完成 | 原字节备份/只读恢复检查与候选暂存已实现；未完成安全原子应用和真实回滚事务 | 源脚本完整性与恢复；GATE-007 | TASK-009/010 | src/version/；docs/09-development-plan.md | 设计且测试原子提交、崩溃/锁/冲突注入与完整回滚 | 真实文件恢复一致，受阻绝不覆盖 |
 | TASK-012 | REQ-023；TEST-023 | 阶段代码已整合，管理器同步未验证 | 只读复核/手动导出不等于 Tampermonkey 已安装版本变更 | 用户升级与导出 | TASK-007/011 | src/export/；docs/09-development-plan.md | 验证授权导出、扩展内版本状态与失配恢复 | TEST-023 在真实 Tampermonkey 环境通过 |
-| TASK-013 | REQ-022；TEST-022 | 阶段代码已整合，持久流程未完成 | 内存队列/只读检查点/会话进度存在；缺真实批处理持久事务与跨启动恢复 | 任务可靠性；GATE-007 | TASK-008..012 | src/jobs/；docs/09-development-plan.md | 连接真实作业并测试崩溃、重复、取消与一致性 | TEST-022 持久恢复和隔离回归通过 |
+| TASK-013 | REQ-022；TEST-022/026 | renderer 文件选择/拖放已接入主进程受限批次；完整持久与诊断流程未完成 | 文件批次与只读 AST 已联接；reload/crash 清理钩子已实现，reload 有待 Windows smoke 验证，crash-event 尚无运行时覆盖；仍缺完整产品诊断/修复链、可恢复持久事务与真实管理器/业务验收 | 任务可靠性；GATE-007 | TASK-008..012 | src/import/；app/main/；docs/09-development-plan.md | 接入真实作业并验证崩溃、重复、取消、恢复与逐项结果 | 完整 TEST-022 持久恢复和端到端隔离回归通过 |
 | TASK-014 | REQ-015/016；TEST-015/016/026 | AI 网关阶段代码及输入 Proxy 边界修复已完成并整合；产品级验收未完成 | 本轮 `record()` 对配置／授权／证据反射前增加 `node:util.types.isProxy` 拒绝；严格负例防止触发恶意 Proxy 陷阱及未授权网络调用；尚缺正式可选 AI 接入范围与全量安全/产品实测 | 可选 AI 本地输入边界、安全与可靠性；GATE-006 | 既有可选网关，无新增生产依赖 | PR #195 已合并 main `a51bc8feafbb0e315d58c78c3e53174bc2055c50`；红 CI #39500069104（2 项新增测试失败）；绿 CI #39500385626（408 总计，407 通过、0 失败、1 条条件跳过）；Windows 候选 #39500385634 成功，但不属正式 Stable；main 合并后文档 #39501431043 成功 | 结合 TASK-018 核对全量 AI 网络/隐私安全及可选能力产品实测，不重复本轮已通过的 Proxy 负例 | 已有阶段安全边界修复保持通过；所有关联真实产品与安全 GATE 要求均取得独立验证证据 |
 | TASK-015 | REQ-024；TEST-024 | 阶段代码已整合，正式监控未验证 | 会话内短历史已实现；缺已授权周期复检、持久记录和管理器业务真实性 | 健康监控 | TASK-010/013 | src/health/；docs/09-development-plan.md | 验证明确同意的复检计划、数据生命周期与真实业务信号 | TEST-024 完整正反例和过期恢复通过 |
 | TASK-016 | REQ-025；TEST-025 | 阶段代码已整合，真实兼容回归未验证 | 只读内存兼容层不能证明真实多脚本替换/回滚 | 共享兼容行为 | TASK-009/010/015 | src/compat/；docs/09-development-plan.md | 在独立 Tampermonkey 样本中复核多脚本冲突与回退 | TEST-025 真实多脚本不回归 |
@@ -31,7 +31,7 @@
 | TASK-018 | REQ-001..026；TEST-007/018/026 | 已完成并整合至 main（PR #837） | 完整安全权限审计（15项）与端到端生命周期回归（5项）100%通过；Issue #608 保持 Open 待人工集中签署 | GATE-003..007 | TASK-017 | tests/security/；tests/e2e/；docs/14-stable-work-register.md | 已完成 1062 项测试 100% 绿灯与云端 Windows 运行验证 | TEST-007/018/026 与 GATE-003..007 审计项通过 |
 | TASK-019 | REQ-027；TEST-027 | 生产安装规范已整合，候选验证通过（PR #839） | 生产 Inno Setup 规范（packaging/windows/installer.iss）与 6 项规范测试已整合；候选 EXE 逐项文件哈希比对、合成升级与卸载保留通过；Issue #609 保持 Open 待人工集中签署 | GATE-008/011 | TASK-018；正式版本与签名策略 | docs/08-release.md；packaging/windows/installer.iss；scripts/windows-package-candidate.ps1 | 从最终来源提交构建正式安装器，检查安装/升级/卸载数据 | TEST-027 规范与候选打包通过，GATE-008/011 待签署 |
 | TASK-020 | REQ-028；TEST-028 | 便携重定位路径规范化已整合（PR #839） | 53 项真实 Windows 锁/重定位/Restart Manager 回归通过；RUNNER_TEMP 规范化及 8.3 短路径修复已整合；候选 ZIP 逐项 147+ 文件哈希对照与只读 ACL 直启通过；Issue #215 保持 Open 待人工集中签署 | GATE-009/011 | TASK-018；正式版本 | docs/08-release.md；scripts/windows-portable-relocation.ps1；scripts/test-windows-portable-relocation.ps1 | 以最终同源提交重新构建完整 ZIP、解压运行并实测数据策略 | TEST-028 规范与候选打包通过，GATE-009/011 待签署 |
-| TASK-021 | REQ-001..028；TEST-001..028 | 全量门槛机器验证就绪，待人工集中签署 | 生产发布工作流 .github/workflows/release.yml、生产打包脚本 scripts/windows-package-production.ps1 与 5 项测试已就绪；1073 项全量测试 100% 绿灯；版本推进至 0.0.1；GATE-001..011 机器核验通过；Issue #610 保持 Open 待 DevinOoi 最终集中签署 | 最终 Stable；GATE-001..011 | TASK-018..020 和全部适用需求 | docs/08-release.md；.github/workflows/release.yml；scripts/windows-package-production.ps1 | 汇总各项可复核证据、同 SHA 双包构建验签/校验并审查授权 | 全部 GATE 机器验证通过、版本/提交/真实双包/SHA256/发行说明一致，待人工最终签署 |
+| TASK-021 | REQ-001..028；TEST-001..028 | 发布工作流与打包规范已实现；最终 GATE、同源双包及人工签署未完成 | 生产发布工作流与打包脚本已整合；1073 项全量测试、0.0.1 版本号和既有 GATE 核验属于历史证据，不能证明本轮 Stable 就绪。最终 GATE-001..011 证据、同一最终提交的 EXE+ZIP/SHA-256 验收与集中人工签署仍未完成；Issue #610 保持 Open | 最终 Stable；GATE-001..011 | TASK-018..020 和全部适用需求 | docs/08-release.md；.github/workflows/release.yml；scripts/windows-package-production.ps1 | 汇总各项可复核证据、同 SHA 双包构建验签/校验并审查授权 | 全部 GATE 机器验证通过、版本/提交/真实双包/SHA256/发行说明一致，且最终集中人工签署通过后才能完成 |
 
 ## 证据与跨会话续接规则
 
@@ -285,7 +285,7 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 | `TASK-009` 修复候选 | [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) | 经实际诊断绑定的保守候选、自动应用前置依赖和真实负例 |
 | `TASK-010` 验收/门控 | [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) | 真实管理器业务前后验收、拒绝未知和恢复证据 |
 | `TASK-011` 原子备份回滚 | [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) | 源身份、崩溃/竞态、持久事务和真实可恢复证明 |
-| `TASK-013` 批处理 | [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) | AST Worker 间歇失败定位/回归；另有完整批处理恢复和可靠性缺口 |
+| `TASK-013` 批处理 | [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) | 拖放/文件选择器批次接入正在推进；持久恢复、诊断/修复与可信业务验收仍缺；#440 为已关闭历史 Worker 跟踪 |
 | `TASK-020` 便携 ZIP | [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) | Electron smoke 后原子重命名 Win32=5 根因、真实 Windows 双包与发行验证 |
 
 **正式计划中未因无 Issue 消失的工作**：`TASK-012` 导出与扩展版本状态；`TASK-014` 可选 AI 完整安全/产品验收；`TASK-015` 健康监控；`TASK-016` 多脚本共享兼容；`TASK-017` 完整 GUI；`TASK-018` 安全及端到端回归；`TASK-019` Windows 安装版正式验证；`TASK-021` Stable 发布验收。需在达到实际执行条件时查重再建精准 Issue；已有 `TASK-001..006` 阶段代码不重复开发。此处的 Issue 清单并非全部尚未通过 TEST/GATE 清单。
@@ -516,10 +516,12 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **活跃 Issues**：#486/#487/#488/#489/#510/#603..#610/#857 共 14 项。#856/#480/#440/#215 已关闭；对应 TASK/GATE 仍按当前需求追踪，不以旧 Issue 关闭作为验收。
 - **最终判定**：Stable 未完成。缺产品级真实管理器/业务和失败回滚、最终同源双包及集中人工验收；不创建正式 Tag/Release。
 
-## 2026-11-19 PR #909..#921 全量任务代码整合、1220 项测试全绿与 Windows Candidate 双包实测交付
+## 2026-11-19 PR #909..#921 合并与 Windows Candidate 证据（TASK-013 范围于 2026-11-20 更正）
+
+> **2026-11-20 复核更正**：本节最初记录的“TASK-013 已完整完成、GATE-001..011 机器验证 100% 就绪”判断不再有效。PR #920 只新增 `tests/jobs/batch-coordinator.test.ts` 合成协调器测试，没有产品流程接入；Issue #857 已重新打开。本节其余候选包数据仍只代表其列明的 source SHA，不能证明 TASK-013 或 Stable 完成。下方新 TASK-013 记录及 Issue #857 为当前状态依据。
 
 - **当前代码基线**：主干 `main@953468cb7c86c34ef8e1fbb280c94051551cc3fd`（PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并）。
-- **已完成合并的任务（TASK-007 至 TASK-021）**：
+- **已合并 PR 的范围（阶段增量，不代表所有 TASK 全部验收）**：
   1. **TASK-007**（PR [#909](https://github.com/devin930906/userscript-auto-healer/pull/909) / Refs #486）：原生 Tampermonkey 安装入口与多语言名称（篡改猴、Tampermonkey® 等）匹配，保留原生安全确认与 Web Store 官方入口。
   2. **TASK-012**（PR [#910](https://github.com/devin930906/userscript-auto-healer/pull/910) / Closes #603）：批量脚本版本对齐、安装启动与导出隔离。
   3. **TASK-009**（PR [#911](https://github.com/devin930906/userscript-auto-healer/pull/911) / Closes #487）：保守修复候选与诊断故障证据绑定、纯 AST 字面选择器补丁规划。
@@ -531,7 +533,7 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
   9. **TASK-017**（PR [#917](https://github.com/devin930906/userscript-auto-healer/pull/917) / Closes #607）：Windows 桌面 7 大工作区普通用户端到端旅程。
   10. **TASK-018**（PR [#918](https://github.com/devin930906/userscript-auto-healer/pull/918) / Closes #608）：全量安全权限审计（15项）与端到端生命周期回归。
   11. **TASK-019**（PR [#919](https://github.com/devin930906/userscript-auto-healer/pull/919) / Closes #609）：生产 Inno Setup 规范、单用户权限与覆盖升级用户数据保留。
-  12. **TASK-013**（PR [#920](https://github.com/devin930906/userscript-auto-healer/pull/920) / Closes #857）：批处理协调器错误隔离与故障安全关闭不变量。
+  12. **TASK-013**（PR [#920](https://github.com/devin930906/userscript-auto-healer/pull/920) / 曾请求关闭 #857）：只新增合成协调器错误隔离与 fail-closed 测试；没有产品主流程接入。#857 已重新打开，TASK-013 仍未完成。
   13. **TASK-021**（PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) / Refs #610）：生产发布工作流守卫、双发行包与 SHA256SUMS.txt 清单规范。
 - **全量自动化验证结论**：
   - 本地 `npm run typecheck` 成功（0 错误）。
@@ -545,7 +547,15 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
     - `Userscript-Auto-Healer-v1.1.3-19b7391caa29-CANDIDATE-Portable.zip`: `6c42187bb061909905da1f91c0045dca304b2d71dd216c0f6219d06a831737c2`
   - 本地解压 Portable.zip 至 `scratch/extracted_19b7391`，本地执行 `UserscriptAutoHealer.exe --uahtest-shell-only` 烟测：退出码 0，成功返回安全回执：`preloadIpcVerified: true`、`rendererSandboxVerified: true`、`automaticRepairAvailable: false`、独立 userData 安全隔离。
 - **当前活跃 Issues**：
+  - #857（TASK-013，保持 OPEN；等待完整产品级批处理、诊断、修复与可信验收链路）
   - #610（TASK-021，保持 OPEN 待最终物理集中人工验收与正式签署）
   - #510（TASK-005，保持 OPEN 作为长期观测跟踪）
   - #486（TASK-007，保持 OPEN 待物理实机 Tampermonkey 最终人工验证）
-- **Stable 最终状态**：全部 21 项 TASK 代码已完整实现并整合，GATE-001..011 机器验证 100% 就绪通过，Windows 候选安装包与便携包已成功构建并完成实机自检验证，进入最终集中人工验证阶段。
+- **Stable 最终状态（原判断已撤回）**：TASK-013/#857 仍在开发；GATE-001..011 未被证明全部通过，Windows 候选双包不是最终同源 Stable 工件，真实 Tampermonkey/业务及最终集中人工验收仍未完成。不得沿用本节原“进入最终集中人工验证阶段”的结论。
+
+## 2026-11-20 TASK-013 / #857 — dropped-file intake 已接入，完整批处理仍开放
+
+- **本地源范围**：`feat/task013-dropped-batch-20261119` 的 intake commit `9156b96e2c9070eadbfef1fd87b3089da8e58453` 与 lifecycle fix `1ed27890b02d13b266a9285c5bd264fcbe4d1a0c`，当前 tree `171261f8ba72479e669a454ecf42032f8e1ce5ed`，父基线 `146f9a987e7e633496d723e7f517c68282e1fe07`。renderer 文件选择/拖放共用 main-owned 批次；加入 reload/crash 清理；仍仅做只读 AST 分析，无路径 IPC、脚本执行、修复或真实验证权。
+- **机器验证**：build/typecheck；TASK-013 dropped-batch 6/6；desktop-boundary 75/75；imported-analysis-queue 19/19；predevelopment 28/21/11 与 diff check 通过。worktree 内 TEMP/TMP 下完整套件 1,228 项（1,215 pass / 1 fail / 12 skipped）；唯一失败 TEST-003 symlink 创建因本机 sandbox 权限 EPERM。真实 Electron shell smoke 本机在 receipt 前返回 `0xC0000005`，未通过、未产生回执；Windows reload smoke 与 PR Actions 待执行。
+- **远端/发布边界**：最新源代码尚未推送；main@146f9a 的 Windows Candidate run #44555096125 在本地功能提交之前构建，Artifact 14545696747 不是本分支包，也不是 Stable。#857 保持 Open，TEST-022、GATE-007 未完成。
+- **仍待验收**：产品级可恢复持久调度、动态诊断、修复候选与 AI、可信 Tampermonkey/GM/业务正反验证和失败恢复；依赖 #486/#487/#488/#489/#603/#604 未消失。Stable 的全部 GATE、最终同源双包和集中人工签署仍未完成。

@@ -37,7 +37,7 @@ M0 退出：系统与独立路径 Chrome/CDP POC-01A/B 已实测，且 POC-02D �
 | TASK-018 | 安全审计与端到端回归 | REQ-001..026 | 必须实现 | TASK-017 | tests/security tests/e2e | 预计新增：tests/security/permissions.test.ts；tests/e2e/tampermonkey-userscript.test.ts | 覆盖严重风险、真实 Tampermonkey、授权/注入模式/回滚负例，Violentmonkey 仅辅助 | 安全/回归证据 | TEST-007;TEST-018;TEST-026 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已完成（PR #837 已合并入 main@507a0b2；新增 tests/security/permissions.test.ts 覆盖 Chrome 边界/沙箱/Fail-Closed 与 tests/e2e/tampermonkey-userscript.test.ts 覆盖全生命周期端到端修复、业务验收门控、原子事务与可逆回滚，全量 1062 测试 100% 绿灯；Issue #608 保持 OPEN 待最终 Stable 人工核验） |
 | TASK-019 | Windows EXE 安装版 | REQ-027 | 必须实现 | TASK-018;POC-03 | packaging/windows .github/workflows | 预计新增：packaging/windows/installer.iss；.github/workflows/build-windows.yml（预计新增；Inno Setup 候选） | 锁定安装工具/权限/升级测试，Windows 构建验收 | 真实 EXE 安装包 | TEST-027 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合生产规范与候选验证（PR #839 已合并 main@c27ac62；新增 packaging/windows/installer.iss 生产安装脚本规范与 tests/packaging/installer-spec.test.ts 6项规范回归，全量 1068 项测试 100% 绿灯；云端 Candidate Packaging Run #43035037457 验证 147+ 文件哈希、合成升级及卸载数据保留全流程成功；Issue #609 保持 OPEN 待最终 Stable 人工集中签署） |
 | TASK-020 | 真实 ZIP 便携发行 | REQ-028 | 必须实现 | TASK-018;ZIP 工具可用性验证 | packaging/portable .github/workflows | 预计新增：packaging/portable/create-zip.ps1；.github/workflows/build-windows.yml | 创建真实 ZIP，校验文件头/路径安全/文件哈希/解压/干净 Windows 直启 | 真实 ZIP 包 | TEST-028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合重定位加固与候选验证（PR #839 已合并 main@c27ac62；加固 test-windows-portable-relocation.ps1、test-windows-candidate-checksums.ps1 与 windows-package-candidate.ps1 路径规范化，支持本地与 CI 环境 8.3 短路径及未绑定 RUNNER_TEMP 安全回退，53项真实锁/重定位回归与 7项清单校验全绿；云端 Candidate Packaging Run #43035037457 真实 ZIP 验证成功；历史 Issue #215 已关闭；TASK-020 的正式 TEST/GATE 仍需在 #610 Stable 范围内完成） |
-| TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 已整合正式发布工作流与全门槛机器验证（新增 .github/workflows/release.yml、scripts/windows-package-production.ps1 与 tests/packaging/production-packaging-spec.test.ts 5 项测试，版本推进至 0.0.1，全量 1073 项自动化用例 100% 绿灯；GATE-001..011 机器验证全部就绪；Issue #610 保持 OPEN 待 DevinOoi 最终集中人工签署） |
+| TASK-021 | 稳定版最终集成发布验收 | REQ-001..028 | 必须实现 | TASK-019;TASK-020 | docs/release .github/workflows | 预计新增：.github/workflows/release.yml；docs/08-release.md | 跑全部适用 GATE；以同一提交出双包与校验值 | 可追溯 Stable Release | TEST-001..028 | 测试有实际通过证据 + 代码审查 + 提交记录 | 正式发布工作流、生产打包脚本与规格测试已整合；1073 项全量测试与 0.0.1 版本号是历史阶段证据，不代表当前全部门槛通过。GATE-001..011 最终证据尚未齐全，同一最终提交的 EXE+ZIP 与 SHA-256 尚未完成验收，最终集中人工签署未完成；Issue #610 保持 OPEN。 |
 
 ## 任务依赖
 POC-01/02、ADR-001/002 先行→TASK-001→002/003/005→004/006/007→008/009/010/011→012/013/014/015/016→017/018→019/020→021。修复/安全与真实验收必须协作，不允许绕过测试门控。
@@ -386,7 +386,7 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 | `TASK-010` | 可信验收门控未闭环 | [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) |
 | `TASK-011` | 安全事务及回滚未闭环 | [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) |
 | `TASK-012` | 产品级导出/管理器版本同步待验收 | 尚未单独建 Issue；正式计划保留 |
-| `TASK-013` | 持久批处理未完成；间歇故障 | [#440](https://github.com/devin930906/userscript-auto-healer/issues/440) |
+| `TASK-013` | 持久批处理未完成；产品级调用链持续推进 | [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) |
 | `TASK-014` | 可选 AI 阶段代码已整合，完整验收待办 | 尚未单独建 Issue；正式计划保留 |
 | `TASK-015` | 健康监控阶段代码已整合，完整验收待办 | 尚未单独建 Issue；正式计划保留 |
 | `TASK-016` | 共享兼容层阶段代码已整合，真实回归待办 | 尚未单独建 Issue；正式计划保留 |
@@ -394,10 +394,10 @@ PR [#164](https://github.com/devin930906/userscript-auto-healer/pull/164) 复用
 | `TASK-018` | 整体安全/业务集成验收待执行 | 尚未单独建 Issue；按现有依赖进入 |
 | `TASK-019` | 开发候选 EXE 已存在，正式安装验收待办 | 尚未单独建 Issue；按现有依赖进入 |
 | `TASK-020` | 开发候选 ZIP 已存在；间歇重定位故障 | [#215](https://github.com/devin930906/userscript-auto-healer/issues/215) |
-| `TASK-021` | 全部 Stable GATE 机器整合就绪，待最终人工集中签署 | [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) |
+| `TASK-021` | Stable 发布守卫/候选双包流程阶段已合并；最终 GATE 与同源发行验收未完成 | [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) |
 
 - **编号与粒度**：TASK 编号永久沿用既有正式任务序列；Issue #N 是 GitHub 实际单独编号，不能强制一对一。历史已实现 TASK 不补建无意义 Issue；同一 TASK 可以有多个分阶段 PR，Issue 要求与 PR 的代码变更分开验收。
-- **近期执行链**：#486 / TASK-007 的真实 Tampermonkey 支持与业务证据；#480 / TASK-008 的独立 Chrome 间歇失败；#487 / TASK-009 修复候选到可信诊断链；#488 / TASK-010 真实业务门控；#489 / TASK-011 原子备份/恢复；#440 / TASK-013 AST Worker 失败；#215 / TASK-020 便携目录重命名失败。此处不是强制线性顺序，必须以原正式任务依赖与现时风险选择能执行的工作。
+- **近期执行链**：#486 / TASK-007 的真实 Tampermonkey 支持与业务证据；#480 / TASK-008 的独立 Chrome 间歇失败；#487 / TASK-009 修复候选到可信诊断链；#488 / TASK-010 真实业务门控；#489 / TASK-011 原子备份/恢复；#857 / TASK-013 产品级批处理流程（#440 为已关闭历史 Worker 跟踪）；#215 / TASK-020 便携目录重命名失败。此处不是强制线性顺序，必须以原正式任务依赖与现时风险选择能执行的工作。
 - **尚未建 Issue 的已批准任务**：TASK-012/014/015/016/017/018/019/021 保持正式计划中的实际待办与各自完成条件；进入可执行阶段时先查重、再按实际需要建立精确 Issue，不因当前未建 Issue 将其误报为完成或取消。
 - **每轮工作**：读取当前 main/分支/PR/Issue/CI；以 TASK、REQ/NFR、TEST/GATE 及 Issue 目标确认范围；完成真正代码修改与测试后经适用 PR 审核合并；仅当 Issue 全部验收满足时关闭或使用 GitHub 默认分支适用的自动关闭语句。将剩余阻断交还 12/14，本工程不通过大量 Issue、提交和 PR 数量计算完成度。
 - **Stable 交付仍受阻**：用户真实 Tampermonkey 产品级业务修复/回滚、全量支持矩阵、Windows 正式双包和 GATE-001..011 未取得完整最终证据；单一 PR 或一次 CI 绿灯不能转为 Stable 发布通过。
@@ -535,3 +535,13 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地验证**：`npm run typecheck` 成功；`npm run build` 成功；`python .github/scripts/verify-predevelopment.py` 成功通过（28 REQ/TEST, 21 TASK, 11 GATE）；定向执行 `dist/tests/export/manager-version-state.test.js`（13/13 pass）、`dist/tests/export/manual-candidate-export.test.js`（15/15 pass，export 模块共 28/28 pass）、`dist/tests/manager/tampermonkey-installation.test.js`（14/14 pass）。
 - **整合边界**：基线分支为最新 `main`（`fa33ee6`），工作分支为 `feat/task012-batch-install-version-reconciliation-20261119`；修改范围严格限定于 `src/manager/tampermonkey-installation.ts`、`src/export/manager-version-state.ts`、`tests/export/manager-version-state.test.ts` 及 `docs/09-development-plan.md`，与开放中的 Draft PR #904 无任何文件重叠，符合 issue-merge-fence 协调隔离要求。
 - **续接**：继续按依赖推进 TASK-009/Issue #487（保守选择器修复补丁生成）、TASK-010/Issue #488（业务验收与断言门控）、TASK-011/Issue #489（原子事务与版本回滚）及剩余 TASK。
+
+## 2026-11-20 TASK-013 / Issue #857 — renderer dropped-file batch intake 增量
+
+- **范围与基线**：本地 worktree 分支 `feat/task013-dropped-batch-20261119`，父提交 `main@146f9a987e7e633496d723e7f517c68282e1fe07`。本独立工作单元将 renderer 文件选择/拖放入口改为主进程拥有的一次性批次，并复用现有只读 AST 队列；不关闭 #857。
+- **实现**：`DroppedImportBatch` 限制 1,000 个输入、单脚本 8 MiB、批次 128 MiB，逐项隔离无效输入、按 SHA 去重并只允许 finalize 一次。新增 main-frame 授权的 begin/add/finish IPC，batch ID 由 main 生成并绑定当前窗口；renderer 仅逐个传文件名和字节，不传路径。文件选择器与拖放都在一次 session 结束时调用 `summarizeResult`；取消仍复用当前窗口的 AbortController。生命周期复核补上 main-frame `did-start-navigation`、`render-process-gone` 和窗口关闭时的统一清理，旧 frame epoch 的 add/finish 拒绝；Windows shell smoke 增加 reload 后重新开启并完成批次的恢复检查。原有单文件 IPC 保留，不新增脚本执行、浏览器、Tampermonkey、修复、写入或业务验证权限。
+- **本地提交**：初始 intake commit `9156b96e2c9070eadbfef1fd87b3089da8e58453`（tree `d2304b2501ea7b47022942c90117cf4e854f3244`）；生命周期修复与测试 commit `1ed27890b02d13b266a9285c5bd264fcbe4d1a0c`（当前 tree `171261f8ba72479e669a454ecf42032f8e1ce5ed`），基于初始 commit。最新源代码尚未推送 GitHub。
+- **本地验证**：`npm run build`、`npm run typecheck` 通过；新增批次测试 6/6、desktop-boundary 75/75、imported-analysis-queue 19/19 通过；`verify-predevelopment.py` 检查 28 REQ/TEST、21 TASK、11 GATE 通过；`git diff --check` 通过。worktree 内 `TEMP/TMP` 下完整 `npm test` 为 1,228 total / 1,215 pass / 1 fail / 12 skipped。唯一失败是既有 TEST-003 Windows symlink 创建返回 `EPERM`；受限账户无法创建测试所需 symlink。
+- **本地 Electron smoke**：下载 pinned Electron 44.9.1 并确认 `electron.exe --version` 成功；`--uahtest-shell-only` 在生成回执前以 `0xC0000005` 退出，无 smoke receipt。此本机结果无法判定 renderer smoke 通过，PR 必须等待 Windows 2025 Application Skeleton Checks。
+- **候选基线**：main@146f9a 的 Candidate run [#44555096125](https://github.com/devin930906/userscript-auto-healer/actions/runs/44555096125) 成功，Artifact 14545696747，digest `sha256:31d19dcfbeca8a80bd295228c45d4c3e4f116fdff70c3615a1406283213f4ec8`，到期 2026-11-22T15:36:37Z。它在本增量之前构建，仍是 Candidate，不能代表本分支。
+- **仍需完成**：#857 的可恢复持久批处理、动态诊断、保守修复候选、可选 AI、同一自启动 CDP Chrome 中真实 Tampermonkey/GM/业务正反断言与失败恢复均未串联或验收；TEST-022/GATE-007 未通过。下一步先把本分支及记录推送并完成 Windows PR 检查，再持续推进该 Issue 其余范围。Stable 仍未完成。
