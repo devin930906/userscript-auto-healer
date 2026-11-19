@@ -130,7 +130,14 @@ const TASK009_CANDIDATE_KEYS = [
   'automaticRollbackAllowed', 'tampermonkeyVerified', 'businessVerified',
   'nextPermittedAction'
 ] as const;
-const RESTORE_RECEIPT_KEYS = [
+const NATIVE_RESTORE_RECEIPT_KEYS = [
+  'status', 'originalSha256', 'displacedSha256',
+  'displacedBackupFileName', 'journalFileName',
+  'automaticPatchAllowed', 'automaticRollbackAllowed',
+  'tampermonkeyVerified', 'businessVerified'
+] as const;
+
+const LEGACY_RESTORE_RECEIPT_KEYS = [
   'status', 'originalSha256', 'displacedSha256',
   'displacedBackupFileName', 'journalFileName',
   'automaticPatchAllowed', 'automaticRollbackAllowed',
@@ -365,15 +372,22 @@ export function evaluateRollbackAcceptanceGate(
       return fail('UNTRUSTED_INPUT');
     }
 
-    const receipt = extractPlainDataRecord(untrustedRollbackReceipt, RESTORE_RECEIPT_KEYS);
+    const nativeReceipt = extractPlainDataRecord(untrustedRollbackReceipt, NATIVE_RESTORE_RECEIPT_KEYS);
+    const legacyReceipt = extractPlainDataRecord(untrustedRollbackReceipt, LEGACY_RESTORE_RECEIPT_KEYS);
+    const receipt = nativeReceipt ?? legacyReceipt;
     if (
       !receipt ||
       receipt.status !== 'RESTORED_NATIVE_ONLY' ||
       receipt.automaticPatchAllowed !== false ||
       receipt.automaticRollbackAllowed !== false ||
-      receipt.tampermonkeyVerified !== false ||
-      receipt.businessRecoveredVerified !== false
+      receipt.tampermonkeyVerified !== false
     ) {
+      return fail('ROLLBACK_RECEIPT_INVALID');
+    }
+    if (nativeReceipt && nativeReceipt.businessVerified !== false) {
+      return fail('ROLLBACK_RECEIPT_INVALID');
+    }
+    if (legacyReceipt && legacyReceipt.businessRecoveredVerified !== false) {
       return fail('ROLLBACK_RECEIPT_INVALID');
     }
 
