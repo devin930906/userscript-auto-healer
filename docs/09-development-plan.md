@@ -524,3 +524,14 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地验证**：`npm run typecheck` 成功；`npm run build` 成功；`python .github/scripts/verify-predevelopment.py` 成功通过（28 REQ/TEST, 21 TASK, 11 GATE）；定向执行 `dist/tests/manager/tampermonkey-installation.test.js`（14/14 pass）、`dist/tests/manager/tampermonkey-adapter.test.js`、`dist/tests/manager/tampermonkey-preflight.test.js`、`dist/tests/manager/tampermonkey-diagnostic.test.js`、`dist/tests/manager/tampermonkey-gm-probe.test.js`、`dist/tests/manager/gm-report.test.js`，全部通过（157 项测试通过，0 失败，3 项 Actions 专用跳过）。
 - **整合边界**：基线分支为最新 `main`（`66bf7e5`），创建独立开发分支 `feat/task007-tampermonkey-native-install-20261119`；修改范围严格限定于 `src/manager/tampermonkey-installation.ts`、`tests/manager/tampermonkey-installation.test.ts` 及 `docs/09-development-plan.md`，与开放中的 Draft PR #904 无任何文件重叠，符合 issue-merge-fence 协调隔离要求。
 - **续接**：继续按依赖推进 TASK-012/Issue #603（批量导入脚本安装与版本确认）及 TASK-009..013、#857、#604..#610，为最终 Windows 真实环境集中人工验收创造充分前置条件。
+
+## 2026-11-19 TASK-012 / Issue #603 — Batch userscript version reconciliation & installation launch 增量
+
+- **范围**：针对 Issue #603 的原始需求校准（自动比对所有已导入脚本是否已安装及其身份、版本与内容；提供一键批量安装缺失脚本，逐项报告成功、取消、拒绝与失败，不仅检查文件是否已导出；复用 #486 的真实自启 Chrome/Tampermonkey）进行工程实现与严格质量门控。Issue #603 保持 Open。
+- **实现**：
+  1. 在 `src/export/manager-version-state.ts` 新增 `reconcileBatchImportedScriptsVersionState` API，支持批量导入脚本（最多 500 个）与扩展管理器内观测状态（或缺失状态）的原子比对；逐项判断 `INSTALLED_MATCH`、`INSTALLED_VERSION_DIVERGED`、`INSTALLED_HASH_DIVERGED`、`MISSING_NOT_INSTALLED` 与 `INVALID_DESCRIPTOR`，汇总输出缺失脚本列表（`missingScriptIds`）及统计指标，严格保持 fail-closed 权限标志（`automaticInstallAllowed: false, automaticPatchAllowed: false, automaticRollbackAllowed: false`）。
+  2. 新增 `launchBatchUserscriptInstallation` API，复用受控 Chrome 实例及回环端口 PID 校验，受控通过 CDP `Target.createTarget` 依次发起各缺失脚本的官方/合法安装通道导航（支持 `http:`, `https:`, `file:` 协议，严格拦截 `javascript:` 等非法协议）；严格设置 `nativeConfirmationRequired: true` 与 `automaticSilentInstallForbidden: true`，逐项报告 `LAUNCHED_PENDING_USER_CONFIRMATION`、`REFUSED`、`CANCELLED` 或 `FAILED`。
+  3. 严格防范 Proxy 注入攻击与原型污染：对传入的批次列表、单独描述符、观测凭据与用户选项均执行 strict prototype、isProxy 拦截与 ownPropertyDescriptors 提取，确保不触发任何 Proxy 陷阱。
+- **本地验证**：`npm run typecheck` 成功；`npm run build` 成功；`python .github/scripts/verify-predevelopment.py` 成功通过（28 REQ/TEST, 21 TASK, 11 GATE）；定向执行 `dist/tests/export/manager-version-state.test.js`（13/13 pass）、`dist/tests/export/manual-candidate-export.test.js`（15/15 pass，export 模块共 28/28 pass）、`dist/tests/manager/tampermonkey-installation.test.js`（14/14 pass）。
+- **整合边界**：基线分支为最新 `main`（`fa33ee6`），工作分支为 `feat/task012-batch-install-version-reconciliation-20261119`；修改范围严格限定于 `src/manager/tampermonkey-installation.ts`、`src/export/manager-version-state.ts`、`tests/export/manager-version-state.test.ts` 及 `docs/09-development-plan.md`，与开放中的 Draft PR #904 无任何文件重叠，符合 issue-merge-fence 协调隔离要求。
+- **续接**：继续按依赖推进 TASK-009/Issue #487（保守选择器修复补丁生成）、TASK-010/Issue #488（业务验收与断言门控）、TASK-011/Issue #489（原子事务与版本回滚）及剩余 TASK。
