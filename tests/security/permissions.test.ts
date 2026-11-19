@@ -25,6 +25,7 @@ import {
 } from '../../src/security/desktop-policy';
 import {
   evaluateBusinessAcceptanceGate,
+  evaluateRollbackAcceptanceGate,
   type BusinessAcceptanceResult
 } from '../../src/acceptance/business-acceptance-gate';
 import {
@@ -543,4 +544,78 @@ test('TASK-005/TEST-008: requested 9896 default and configurable existing Chrome
     assert.equal(result.ok, true, 'custom CDP port should remain supported: ' + port);
     if (result.ok) assert.equal(result.config.remoteDebuggingPort, port);
   }
+});
+
+
+test('TASK-018/TEST-018/026: rollback acceptance gate strictly rejects corrupt receipts, mismatched digests and hostile proxies', () => {
+  const origSha = sha256('original-content-for-rollback');
+  const candSha = sha256('candidate-content-for-rollback');
+  const foreignSha = 'e'.repeat(64);
+
+  const validReceipt = {
+    status: 'RESTORED_NATIVE_ONLY' as const,
+    originalSha256: origSha,
+    displacedSha256: candSha,
+    displacedBackupFileName: 'candidate.user.js.bak-99999',
+    journalFileName: 'restore.journal.json',
+    automaticPatchAllowed: false as const,
+    automaticRollbackAllowed: false as const,
+    tampermonkeyVerified: false as const,
+    businessRecoveredVerified: false as const
+  };
+
+  const validOptions = {
+    userApproved: true
+  };
+
+  // 1. Success on genuine matching receipt
+  const accepted = evaluateRollbackAcceptanceGate(
+    validReceipt,
+    origSha,
+    candSha,
+    validOptions
+  );
+  assert.equal(accepted.status, 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED');
+  assert.equal(accepted.automaticPatchAllowed, false);
+  assert.equal(accepted.automaticRollbackAllowed, false);
+  assert.equal(accepted.tampermonkeyVerified, true);
+  assert.equal(accepted.businessVerified, true);
+
+  // 2. Refusal on mismatched original digest
+  const badOrig = evaluateRollbackAcceptanceGate(
+    validReceipt,
+    foreignSha,
+    candSha,
+    validOptions
+  );
+  assert.equal(badOrig.status, 'BLOCKED');
+  assert.equal(badOrig.reason, 'ORIGINAL_HASH_MISMATCH');
+
+  // 3. Refusal on unapproved user options
+  const unapproved = evaluateRollbackAcceptanceGate(
+    validReceipt,
+    origSha,
+    candSha,
+    { userApproved: false }
+  );
+  assert.equal(unapproved.status, 'BLOCKED');
+  assert.equal(unapproved.reason, 'NOT_AUTHORIZED');
+
+  // 4. Refusal on hostile Proxy receipt
+  let traps = 0;
+  const hostileProxy = new Proxy(validReceipt, {
+    get(target, prop, receiver) {
+      traps++;
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+  const proxyResult = evaluateRollbackAcceptanceGate(
+    hostileProxy,
+    origSha,
+    candSha,
+    validOptions
+  );
+  assert.equal(proxyResult.status, 'BLOCKED');
+  assert.equal(proxyResult.reason, 'ROLLBACK_RECEIPT_INVALID');
+  assert.equal(traps, 0, 'Proxy inspection must fail closed without invoking traps');
 });
