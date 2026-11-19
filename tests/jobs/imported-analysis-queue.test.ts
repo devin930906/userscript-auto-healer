@@ -1,15 +1,341 @@
 import {mock,test} from 'node:test';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import type {ImportedScript} from '../../src/import/import-service';
 import {snapshotNativeScripts} from '../../src/jobs/imported-analysis-queue';
 
 import {strict as assert} from 'node:assert';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {importApprovedPaths} from '../../src/import/import-service';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import {unavailableImportPreview} from '../../src/analyze/import-preview';
+import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
+import {EventEmitter} from 'node:events';
+
+function isolateQueuePoisoningTest(pattern:string,childKey:string):boolean{
+ if(process.env.UAH_TASK013_QUEUE_CHILD===childKey)return false;
+ const env:NodeJS.ProcessEnv={...process.env,UAH_TASK013_QUEUE_CHILD:childKey};
+ delete env.NODE_TEST_CONTEXT;
+ const output=execFileSync(process.execPath,
+  ['--test','--test-reporter=tap','--test-name-pattern',pattern,__filename],
+  {encoding:'utf8',env});
+ assert.match(output,/(?:^|\r?\n)# tests 1(?:\r?\n|$)/);
+ assert.match(output,/(?:^|\r?\n)# pass 1(?:\r?\n|$)/);
+ assert.match(output,/(?:^|\r?\n)# fail 0(?:\r?\n|$)/);
+ assert.doesNotMatch(output,/(?:^|\r?\n)# skipped [1-9]/);
+ const targetLine=output.split(/\r?\n/).find(line=>
+  /^ok \d+ - /.test(line)&&line.includes(pattern)&&!line.includes('# SKIP'));
+ assert.ok(targetLine,'the named target test itself must have an executed TAP success line');
+ return true;
+}
+
+test('TASK-013/TEST-022/026: reentrant queue cannot steal a later segment Worker',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-reentrant-queue-'));
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(root,`reentrant-${index}.user.js`);
+   await writeFile(path,'// ==UserScript==\n// @name reentrant-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#reentrant-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  assert.equal(scripts.length,17);
+  let nested:ReturnType<typeof runImportedReadOnlyAnalysisQueue>|undefined;
+  const previews=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
+   (processed,total)=>{
+    assert.equal(total,17);
+    if(processed===16&&!nested)
+     nested=runImportedReadOnlyAnalysisQueue([scripts[0]]);
+   });
+  assert.equal(previews.length,17);
+  assert.equal(previews[16].status,'STATIC_ANALYSIS_ONLY',
+   'a reentrant callback must not displace the original queue’s final segment');
+  assert.ok(nested,'the callback should have requested an overlapping queue');
+  assert.deepEqual((await nested).map(row=>row.status),['ISOLATED_ANALYSIS_FAILED'],
+   'the second queue is refused while the first queue owns the Worker lease');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: cancelled queue waits for Worker retirement',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-cancel-retirement-'));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const realWorker=workers.Worker;
+ const controller=new AbortController();
+ let markStarted!:()=>void;
+ const started=new Promise<void>(resolve=>{markStarted=resolve;});
+ let finishRetirement!:()=>void;
+ const retirement=new Promise<number>(resolve=>{finishRetirement=()=>resolve(0);});
+ let queue:ReturnType<typeof runImportedReadOnlyAnalysisQueue>|undefined;
+ let settled=false;
+ let retirementRequested=false;
+ try{
+  const file=join(root,'cancellation.user.js');
+  await writeFile(file,'// ==UserScript==\n// @name cancellation\n'+
+   '// @match https://example.org/*\n// ==/UserScript==\n'+
+   'document.querySelector("#target");');
+  const {scripts}=await importApprovedPaths([file]);
+  assert.equal(scripts.length,1);
+  workers.Worker=class extends EventEmitter{
+   constructor(){super();markStarted();}
+   terminate(){retirementRequested=true;return retirement;}
+  } as unknown as typeof realWorker;
+  queue=runImportedReadOnlyAnalysisQueue(scripts,controller.signal)
+   .finally(()=>{settled=true;});
+  await started;
+  controller.abort();
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(retirementRequested,true);
+  assert.equal(settled,false,'the scheduler must not return while termination is pending');
+  finishRetirement();
+  assert.deepEqual((await queue).map(row=>row.status),['SKIPPED_CANCELLED']);
+ }finally{
+  controller.abort();
+  finishRetirement();
+  await queue?.catch(()=>{});
+  workers.Worker=realWorker;
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: ordinary queue rejects a malformed single preview',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-malformed-preview-'));
+ try{
+  const file=join(root,'malformed.user.js');
+  await writeFile(file,'// ==UserScript==\n// @name malformed\n'+
+   '// @match https://example.org/*\n// ==/UserScript==\n'+
+   'document.querySelector("#target");');
+  const scripts=(await importApprovedPaths([file])).scripts;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',async()=>({
+   previews:[{status:'UNRECOGNIZED_PREVIEW'}],safeToContinue:true
+  } as unknown as Awaited<ReturnType<typeof actual>>));
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(scripts);
+   assert.equal(previews.length,1);
+   assert.equal(previews[0].status,'ISOLATED_ANALYSIS_FAILED');
+   assert.equal(previews[0].automaticPatchAllowed,false);
+   assert.equal(previews[0].tampermonkeyVerified,false);
+   assert.equal(previews[0].businessVerified,false);
+  }finally{patch.mock.restore();}
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: queue cleanup bounds an adapter promise that ignores cancellation',async()=>{
+ if(isolateQueuePoisoningTest(
+  'queue cleanup bounds an adapter promise that ignores cancellation','hung-adapter-cleanup'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-hung-adapter-cleanup-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ let notifyCall!:()=>void;
+ const called=new Promise<void>(resolve=>{notifyCall=resolve;});
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',()=>{
+  controller.abort();
+  now=120001;
+  notifyCall();
+  return never;
+ });
+ try{
+  const file=join(root,'hung-adapter.user.js');
+  await writeFile(file,'// ==UserScript==\n// @name hung-adapter\n'+
+   '// @match https://example.org/*\n// ==/UserScript==\n'+
+   'document.querySelector("#hung-adapter");');
+  const scripts=(await importApprovedPaths([file])).scripts;
+  const pending=runImportedReadOnlyAnalysisQueue(scripts,controller.signal);
+  await called;
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   setTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','cleanup must not await an unresponsive adapter forever');
+  assert.deepEqual((result as Awaited<typeof pending>).map(row=>row.status),
+   ['SKIPPED_CANCELLED']);
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: unretired coordinator timeout blocks every later segment and recovery',async()=>{
+ if(isolateQueuePoisoningTest(
+  'unretired coordinator timeout blocks every later segment and recovery',
+  'unretired-coordinator-no-overlap'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-unretired-coordinator-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const originalSetTimeout=globalThis.setTimeout;
+ let triggerLifecycleTimeout:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay===10000){
+   triggerLifecycleTimeout=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay,...args);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+ let calls=0;
+ let notifyPending!:()=>void;
+ const pendingStarted=new Promise<void>(resolve=>{notifyPending=resolve;});
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>{
+   calls++;
+   if(args[0].length>1)return {previews:args[0].map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<
+      ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+   notifyPending();
+   return never;
+  });
+ try{
+  const files:string[]=[];
+  for(let index=0;index<17;index++){
+   const file=join(root,`unretired-segment-${index}.user.js`);
+   await writeFile(file,'// ==UserScript==\n// @name unretired-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#unretired-${index}");`);
+   files.push(file);
+  }
+  const scripts=(await importApprovedPaths(files)).scripts;
+  const pending=runImportedReadOnlyAnalysisQueue(scripts);
+  await pendingStarted;
+  assert.ok(triggerLifecycleTimeout,'the active adapter must have a bounded lifecycle timer');
+  triggerLifecycleTimeout();
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   originalSetTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','an unretired adapter must not hang the queue');
+  assert.equal(calls,3,'the queue must stop after two failed attempts and one unretired task');
+  assert.deepEqual((result as Awaited<typeof pending>).map(row=>row.status),
+   Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
+ }finally{
+  patch.mock.restore();globalThis.setTimeout=originalSetTimeout;
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: unresponsive single-file recovery is bounded after user cancellation',async()=>{
+ if(isolateQueuePoisoningTest(
+  'unresponsive single-file recovery is bounded after user cancellation',
+  'hung-recovery-cancellation'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-hung-recovery-cancel-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ let calls=0;
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>{
+   calls++;
+   if(args[0].length>1)return {previews:args[0].map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<
+      ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+   controller.abort();
+   now=120001;
+   return never;
+  });
+ try{
+  const files:string[]=[];
+  for(let index=0;index<2;index++){
+   const file=join(root,`hung-recovery-${index}.user.js`);
+   await writeFile(file,'// ==UserScript==\n// @name hung-recovery-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#hung-recovery-${index}");`);
+   files.push(file);
+  }
+  const scripts=(await importApprovedPaths(files)).scripts;
+  const pending=runImportedReadOnlyAnalysisQueue(scripts,controller.signal);
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   setTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','per-file recovery must not await an adapter forever');
+  assert.equal(calls,3,'two failed group attempts are followed by one bounded fallback');
+  assert.deepEqual((result as Awaited<typeof pending>).map(row=>row.status),
+   ['SKIPPED_CANCELLED','SKIPPED_CANCELLED']);
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: first global budget stop is not overwritten by later user cancellation',async()=>{
+ if(isolateQueuePoisoningTest(
+  'first global budget stop is not overwritten by later user cancellation',
+  'budget-before-user-cancel'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-stop-reason-order-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const originalSetTimeout=globalThis.setTimeout;
+ let fireBudgetTimer:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay!==undefined&&delay>100000){
+   fireBudgetTimer=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay,...args);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+  let notifyRecovery!:()=>void;
+  const recoveryStarted=new Promise<void>(resolve=>{notifyRecovery=resolve;});
+  let finishRecovery!:(value:unknown)=>void;
+  let calls=0;
+  const actual=isolated.previewImportedBatchOffMain;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    notifyRecovery();
+    return await new Promise<unknown>(resolve=>{
+     finishRecovery=resolve;
+    }) as Awaited<ReturnType<typeof actual>>;
+   });
+ try{
+   const files:string[]=[];
+   for(let index=0;index<2;index++){
+    const file=join(root,`stop-reason-${index}.user.js`);
+    await writeFile(file,'// ==UserScript==\n// @name stop-reason-'+index+
+     '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+     `document.querySelector("#stop-reason-${index}");`);
+    files.push(file);
+   }
+   const scripts=(await importApprovedPaths(files)).scripts;
+  const pending=runImportedReadOnlyAnalysisQueue(scripts,controller.signal);
+   await recoveryStarted;
+   assert.ok(fireBudgetTimer);
+  now=120001;
+  fireBudgetTimer();
+  controller.abort();
+   finishRecovery({previews:[unavailableImportPreview(
+    'SKIPPED_CANCELLED','NOT_CHECKED')],safeToContinue:true});
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   originalSetTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING');
+   assert.equal(calls,3,'the cancellation occurs during per-file fallback after two failed group attempts');
+  assert.deepEqual((result as Awaited<typeof pending>).map(row=>row.status),
+    ['SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'],
+    'a later AbortSignal and cancelled adapter reply must not overwrite the first budget stop');
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  globalThis.setTimeout=originalSetTimeout;
+  await rm(root,{recursive:true,force:true});
+ }
+});
 
 /** TASK-013 / Issue #857 / TEST-022: each imported file must receive its
  * independent read-only AST opportunity. A 16-file count segment cannot
@@ -48,7 +374,266 @@ test('TASK-013/TEST-022: valid later scripts are not skipped by earlier segment 
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TASK-013/REQ-022/TEST-022: exhausted segment retries preserve successful sibling AST previews',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-per-script-recovery-'));
+ try{
+  const files:string[]=[];
+  const sources:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'script-'+i+'.user.js');
+   const source='// ==UserScript==\n// @name per-script-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#per-script-'+i+'");';
+   await writeFile(file,source);
+   files.push(file);sources.push(source);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    if(Buffer.from(args[0][0].bytes).toString('utf8').includes('#per-script-1'))
+     return {previews:[unavailableImportPreview(
+      'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:true} as unknown as
+       Awaited<ReturnType<typeof actual>>;
+    return actual(...args);
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','ISOLATED_ANALYSIS_FAILED','STATIC_ANALYSIS_ONLY'
+   ],'each file should keep its own fresh result after one exhausted segment retry');
+   assert.equal(calls,5,'two segment attempts then one bounded attempt per script');
+   assert.ok(previews.every(row=>!row.automaticPatchAllowed&&
+    !row.tampermonkeyVerified&&!row.businessVerified));
+  }finally{patch.mock.restore();}
+  for(let index=0;index<files.length;index++)
+   assert.equal(await readFile(files[index],'utf8'),sources[index],
+    'per-file AST recovery must never modify the selected source');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: cancellation during per-script recovery preserves earlier evidence and stops later workers',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-per-script-cancel-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'cancel-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name cancel-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#cancel-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  const controller=new AbortController();
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    const result=await actual(...args);
+    controller.abort();
+    return result;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts,
+    controller.signal);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','SKIPPED_CANCELLED','SKIPPED_CANCELLED'
+   ],'cancellation must retain only completed fresh fallback evidence');
+   assert.equal(calls,3,'cancellation must prevent later per-file Worker launches');
+  }finally{patch.mock.restore();}
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/NFR-009: global deadline bounds per-script recovery',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-fallback-deadline-'));
+ const originalSetTimeout=globalThis.setTimeout;
+ let expireDeadline:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay!==undefined&&delay>100000){
+   expireDeadline=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'deadline-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name deadline-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#deadline-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    const result=await actual(...args);
+    expireDeadline?.();
+    expireDeadline=undefined;
+    return result;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'STATIC_ANALYSIS_ONLY','SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'
+   ]);
+   assert.equal(calls,3,'global deadline must prevent later per-file worker launches');
+  }finally{patch.mock.restore();}
+ }finally{
+  globalThis.setTimeout=originalSetTimeout;
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: delayed deadline timer cannot permit post-budget Worker dispatch',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-late-global-deadline-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ try{
+  const files:string[]=[];
+  for(let index=0;index<2;index++){
+   const file=join(root,`late-deadline-${index}.user.js`);
+   await writeFile(file,'// ==UserScript==\n// @name late-deadline-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#late-${index}");`);
+   files.push(file);
+  }
+  const scripts=(await importApprovedPaths(files)).scripts;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',async(...args:Parameters<typeof actual>)=>{
+   calls++;
+   assert.equal(args[5],120000,
+    'the child Worker must share the queue’s absolute monotonic deadline');
+   now=120001; // Advance monotonic time while the real deadline timer is delayed.
+   return {previews:args[0].map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+  });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(scripts);
+   assert.equal(calls,1,'the delayed timer must not allow a retry or fallback Worker');
+   assert.deepEqual(previews.map(row=>row.status),[
+    'SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'
+   ]);
+  }finally{patch.mock.restore();}
+ }finally{
+  clock.mock.restore();
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: late per-file retirement cannot publish an over-budget preview',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-late-retirement-budget-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<2;index++){
+   const path=join(root,`retirement-budget-${index}.user.js`);
+   await writeFile(path,'// ==UserScript==\n// @name retirement-budget-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#retirement-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[5]!==120000)throw Error('ABSOLUTE_DEADLINE_NOT_PROPAGATED');
+    if(args[0].length>1){
+     if(calls===2)now=119995;
+     return {previews:args[0].map(()=>unavailableImportPreview(
+      'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+      safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    }
+    now=120001; // The Worker retired after the global deadline.
+    return {previews:[previewImportedScriptAnalysis(scripts[0])],
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(scripts);
+   assert.equal(calls,3);
+   assert.deepEqual(previews.map(row=>row.status),[
+    'SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'
+   ],'late lifecycle proof is retained, but its AST result is outside budget');
+  }finally{patch.mock.restore();}
+ }finally{
+  clock.mock.restore();
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: unretired single-file fallback stops remaining file retries',async()=>{
+ if(isolateQueuePoisoningTest(
+  'unretired single-file fallback stops remaining file retries','single-unretired'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-fallback-unretired-'));
+ try{
+  const files:string[]=[];
+  for(let i=0;i<3;i++){
+   const file=join(root,'unretired-fallback-'+i+'.user.js');
+   await writeFile(file,'// ==UserScript==\n// @name unretired-fallback-'+i+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    'document.querySelector("#unretired-fallback-'+i+'");');
+   files.push(file);
+  }
+  const imported=await importApprovedPaths(files);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(args[0].length>1)return {previews:args[0].map(()=>
+     unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+    return {previews:[unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')],safeToContinue:false} as unknown as
+      Awaited<ReturnType<typeof actual>>;
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(imported.scripts);
+   assert.equal(calls,3,'an unretired first fallback worker prevents every later launch');
+   assert.deepEqual(previews.map(row=>row.status),
+    Array(3).fill('ISOLATED_ANALYSIS_FAILED'));
+  }finally{patch.mock.restore();}
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022/026: unretired Worker stops retries and every later segment',async()=>{
+ if(isolateQueuePoisoningTest(
+  'unretired Worker stops retries and every later segment','batch-unretired'))return;
  const root=await mkdtemp(join(tmpdir(),'uah-ast-unretired-worker-'));
  try{
   const files:string[]=[];
@@ -133,4 +718,37 @@ test('TASK-013/TEST-026: native batch boundary refuses shared mutable byte backi
   textEncoding:'utf-8'}] as unknown as ImportedScript[];
  assert.equal(snapshotNativeScripts(input),null,
   'a cross-thread mutable shared buffer must never enter the native AST queue');
+});
+
+test('TASK-013/TEST-022/026: synchronous Worker adapter failure stops later segments',async()=>{
+ if(isolateQueuePoisoningTest(
+  'synchronous Worker adapter failure stops later segments','sync-adapter'))return;
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-sync-dispatch-failure-'));
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(root,`sync-failure-${index}.user.js`);
+   await writeFile(path,'// ==UserScript==\n// @name sync-failure-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
+    `document.querySelector("#sync-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   (...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(calls===1)throw Error('SYNC_ADAPTER_FAILURE');
+    return actual(...args);
+   });
+  try{
+   const previews=await runImportedReadOnlyAnalysisQueue(scripts);
+   assert.equal(calls,1,'a synchronous throw has no retirement proof for later dispatch');
+   assert.deepEqual(previews.map(row=>row.status),
+    Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
+  }finally{patch.mock.restore();}
+ }finally{await rm(root,{recursive:true,force:true});}
 });

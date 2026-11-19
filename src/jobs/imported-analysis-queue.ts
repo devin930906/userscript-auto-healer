@@ -11,10 +11,13 @@ import {MAX_SCRIPT_BYTES,MAX_TOTAL_IMPORTED_BYTES,MAX_SELECTED_FILES,
 import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
-import {previewImportedBatchOffMain,type IsolatedBatchPreviewResult} from '../analyze/isolated-batch-preview';
+import {acquireNativeAstWorkerLease,previewImportedBatchOffMain,
+ releaseNativeAstWorkerLease,validateIsolatedBatchPreviewResult,
+ MAX_TOTAL_PREVIEW_MS,
+ type IsolatedBatchPreviewResult,
+ type NativeAstWorkerLease} from '../analyze/isolated-batch-preview';
 import {ReadOnlyBatchCoordinator} from './batch-coordinator';
 
-const GLOBAL_ANALYSIS_DEADLINE_MS=120000;
 const SEGMENT_TIMEOUT_MS=12000;
 const SHA256=/^[0-9a-f]{64}$/;
 const ENCODINGS=new Set<ImportedScript['textEncoding']>([
@@ -110,22 +113,30 @@ export function snapshotNativeScripts(scripts:readonly ImportedScript[]):BoundSc
 /** A worker lifecycle receipt is required before dispatching another worker.
  * A legacy array-only result has no retirement evidence and therefore fails
  * closed; the opt-in structured API supplies the required boolean. */
-function readWorkerResult(value:unknown):IsolatedBatchPreviewResult|null{
- try{
-  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||Array.isArray(value))
-   return null;
-  const fields=Object.getOwnPropertyDescriptors(value);
-  const names=Reflect.ownKeys(fields);
-  if(names.length!==2||
-     !Object.prototype.hasOwnProperty.call(fields,'previews')||
-     !Object.prototype.hasOwnProperty.call(fields,'safeToContinue')||
-     !Object.prototype.hasOwnProperty.call(fields.previews,'value')||
-     !Object.prototype.hasOwnProperty.call(fields.safeToContinue,'value')||
-     !Array.isArray(fields.previews.value)||
-     typeof fields.safeToContinue.value!=='boolean')return null;
-  return {previews:fields.previews.value as ImportAnalysisPreview[],
-   safeToContinue:fields.safeToContinue.value};
- }catch{return null;}
+function readWorkerResult(value:unknown,count:number):IsolatedBatchPreviewResult|null{
+ return validateIsolatedBatchPreviewResult(value,count);
+}
+type WorkerTaskOutcome<T>=
+ |Readonly<{status:'FULFILLED';value:T;settledAt:number}>
+ |Readonly<{status:'REJECTED'}>
+ |Readonly<{status:'TIMED_OUT'}>;
+/** Adapter Promises are expected to settle when their AbortSignal is aborted,
+ * but the scheduler must stay bounded if a broken adapter ignores it. The
+ * worker lease is poisoned when this limit expires, so a late task can never
+ * authorize a replacement Worker. */
+async function waitForWorkerTask<T>(task:Promise<T>,deadlineAt:number):Promise<WorkerTaskOutcome<T>>{
+ const settled=task.then(
+  value=>({status:'FULFILLED' as const,value,settledAt:performance.now()}),
+  ()=>({status:'REJECTED' as const})
+ );
+ const remaining=Math.min(10000,Math.max(0,deadlineAt-performance.now()));
+ let timer:NodeJS.Timeout|undefined;
+ const timedOut=new Promise<Readonly<{status:'TIMED_OUT'}>>(resolve=>{
+  if(remaining<=0)queueMicrotask(()=>resolve({status:'TIMED_OUT'}));
+  else timer=setTimeout(()=>resolve({status:'TIMED_OUT'}),remaining);
+ });
+ try{return await Promise.race([settled,timedOut]);}
+ finally{if(timer)clearTimeout(timer);}
 }
 
 /** Only explicitly native-imported byte identities can enter this worker.
@@ -182,51 +193,107 @@ export async function runImportedReadOnlyAnalysisQueue(
  // A transient isolated Worker failure is retryable once, but neither
  // retries nor a malformed reply may double-count completed script slots.
  const attempts:number[]=Array(segmentCount).fill(0);
+ const needsRecovery:boolean[]=Array(segmentCount).fill(false);
+  const deadlineAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
  // A Worker that did not retire within its original deadline may still be
  // alive. Stop this whole batch before retrying it or starting later segments.
  let safeToLaunchWorkers=true;
- const parent=new AbortController();
- const cancel=()=>parent.abort();
- signal?.addEventListener('abort',cancel,{once:true});
- // A global analysis budget expiry is not a user cancellation. Keep
- // the source explicit so all unprocessed segments retain the right status.
- let deadlineExpired=false;
- const deadline=setTimeout(()=>{
-  deadlineExpired=true;
-  cancel();
- },GLOBAL_ANALYSIS_DEADLINE_MS);
- if(signal?.aborted)cancel();
- let processed=0;
+ const stopWorkers=()=>{
+  safeToLaunchWorkers=false;
+ };
+  const parent=new AbortController();
+  let stopReason:'CANCELLED'|'BUDGET'|null=null;
+  let deadlineExpired=false;
+  const cancel=()=>{
+   if(stopReason===null){
+    if(performance.now()>=deadlineAt){
+     stopReason='BUDGET';
+     deadlineExpired=true;
+    }else stopReason='CANCELLED';
+   }
+   parent.abort();
+  };
+  const cancelForBudget=()=>{
+   if(stopReason===null)stopReason='BUDGET';
+   deadlineExpired=true;
+   parent.abort();
+  };
+  // A global analysis budget expiry is not a user cancellation. Keep
+  // the source explicit so all unprocessed segments retain the right status.
+ const expireDeadlineIfNeeded=()=>{
+   if(!deadlineExpired&&!signal?.aborted&&performance.now()>=deadlineAt){
+    cancelForBudget();
+  }
+  return deadlineExpired;
+ };
+ let deadline:NodeJS.Timeout|undefined;
+  let processed=0;
+ const inFlightWorkers=new Set<Promise<unknown>>();
+  let unretiredTasksDetected=false;
+  let allowSingleFileRecovery=true;
+  // Acquire only after all synchronous hashing/allocation, and enter the
+  // release-protected region immediately so setup failures cannot strand it.
+  const acquisition=acquireNativeAstWorkerLease();
+  if(acquisition.status!=='ACQUIRED')
+   return Array.from({length:count},()=>unavailable('ISOLATED_ANALYSIS_FAILED'));
+  const lease:NativeAstWorkerLease=acquisition.lease;
  try{
+  signal?.addEventListener('abort',cancel,{once:true});
+  deadline=setTimeout(()=>{
+   if(!signal?.aborted)cancelForBudget();
+  },Math.max(0,deadlineAt-performance.now()));
+  if(signal?.aborted)cancel();
+  expireDeadlineIfNeeded();
   const coordinator=new ReadOnlyBatchCoordinator({
    count:segmentCount,concurrency:1,maxAttempts:2,
    timeoutMs:SEGMENT_TIMEOUT_MS,jobHashes:groups.map(group=>group.hash)
   },async (ordinal,workerSignal)=>{
-   if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
+   if(expireDeadlineIfNeeded()||workerSignal.aborted||!safeToLaunchWorkers)
+    return 'PERMANENT_FAILURE';
    const group=groups[ordinal];
    const attempt=++attempts[ordinal];
    let previews:ImportAnalysisPreview[]=[];
+   let task:Promise<unknown>|undefined;
+    let taskSettled=false;
    try{
-    const value=await previewImportedBatchOffMain(group.list,workerSignal,
-     undefined,true);
-    const evidence=readWorkerResult(value);
-    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE';}
+    task=previewImportedBatchOffMain(group.list,workerSignal,
+     undefined,true,lease,deadlineAt);
+    inFlightWorkers.add(task);
+     const awaited=await waitForWorkerTask(task,deadlineAt);
+     if(awaited.status==='TIMED_OUT'){
+      if(!signal?.aborted&&performance.now()>=deadlineAt)
+       expireDeadlineIfNeeded();
+      stopWorkers();
+      unretiredTasksDetected=true;
+      return 'PERMANENT_FAILURE';
+     }
+     taskSettled=true;
+     if(awaited.status==='REJECTED'){
+      stopWorkers();
+      return 'PERMANENT_FAILURE';
+     }
+     const value=awaited.value;
+    const evidence=readWorkerResult(value,group.list.length);
+    if(!evidence){stopWorkers();return 'PERMANENT_FAILURE';}
     previews=evidence.previews;
-    if(!evidence.safeToContinue)safeToLaunchWorkers=false;
+    if(!evidence.safeToContinue)stopWorkers();
+    if(expireDeadlineIfNeeded())return 'PERMANENT_FAILURE';
    }catch{
     // A thrown call has no retirement receipt. Do not risk overlapping a
     // replacement Worker with one that may still be running.
-    safeToLaunchWorkers=false;
+    stopWorkers();
+   }finally{
+     if(task&&taskSettled)inFlightWorkers.delete(task);
    }
    // Cancellation and timeouts never start a replacement Worker.
    if(workerSignal.aborted)return 'PERMANENT_FAILURE';
-  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
+   if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE';
    const failed=previews.length!==group.list.length||
     previews.some(x=>x.status==='ISOLATED_ANALYSIS_FAILED');
    const exhausted=previews.some(x=>
     x.status==='SKIPPED_CANCELLED'||x.status==='SKIPPED_BATCH_BUDGET');
-  if(failed&&!exhausted&&safeToLaunchWorkers&&attempt<2)
-   return 'RETRYABLE_FAILURE';
+   if(failed&&!exhausted&&attempt<2)return 'RETRYABLE_FAILURE';
+   if(failed&&!exhausted&&attempt>=2)needsRecovery[ordinal]=true;
    // Reject the entire malformed/failed segment, not just its supplied
    // prefix. A later segment can still produce independent AST evidence.
    if(!failed){
@@ -241,12 +308,94 @@ export async function runImportedReadOnlyAnalysisQueue(
   parent.signal.addEventListener('abort',onAbort,{once:true});
   try{await coordinator.run();}
   finally{parent.signal.removeEventListener('abort',onAbort);}
+  // The coordinator may return on its own timeout while an adapter Promise
+  // still owns an unretired Worker. Never enter single-file recovery then.
+  if(inFlightWorkers.size>0){
+    allowSingleFileRecovery=false;
+  }
+  // A failed multi-file segment may hide independently analyzable scripts.
+  // Re-import each already-snapshotted byte record through a fresh one-file
+  // Worker, within the same global signal/deadline and original Worker limit.
+  // The checkpointed scheduler is not involved and no source is written.
+  for(let ordinal=0;ordinal<groups.length&&safeToLaunchWorkers&&allowSingleFileRecovery&&
+      !parent.signal.aborted;ordinal++){
+   if(expireDeadlineIfNeeded())break;
+   const group=groups[ordinal];
+   if(!needsRecovery[ordinal]||group.list.length<2)continue;
+   for(let index=0;index<group.list.length;index++){
+    if(parent.signal.aborted||expireDeadlineIfNeeded())break;
+    let task:Promise<unknown>|undefined;
+    let taskSettled=false;
+    try{
+     task=previewImportedBatchOffMain([group.list[index]],
+      parent.signal,undefined,true,lease,deadlineAt);
+     inFlightWorkers.add(task);
+     const awaited=await waitForWorkerTask(task,deadlineAt);
+     if(awaited.status==='TIMED_OUT'){
+       if(!signal?.aborted&&performance.now()>=deadlineAt)
+        expireDeadlineIfNeeded();
+      stopWorkers();
+      unretiredTasksDetected=true;
+       results[group.offset+index]=unavailable(
+        stopReason==='BUDGET'?'SKIPPED_BATCH_BUDGET':
+        stopReason==='CANCELLED'?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED');
+       break;
+     }
+     taskSettled=true;
+     if(awaited.status==='REJECTED'){
+      stopWorkers();
+       break;
+     }
+     const value=awaited.value;
+     const evidence=readWorkerResult(value,1);
+     if(!evidence||!evidence.safeToContinue){
+      stopWorkers();
+      break;
+     }
+     if(evidence.previews.length!==1){
+      results[group.offset+index]=unavailable('ISOLATED_ANALYSIS_FAILED');
+      continue;
+     }
+     let report=evidence.previews[0];
+      if(awaited.settledAt>=deadlineAt){
+       if(stopReason===null&&!signal?.aborted)expireDeadlineIfNeeded();
+       if(stopReason==='BUDGET')
+        report=unavailable('SKIPPED_BATCH_BUDGET');
+      }
+      if(stopReason==='BUDGET'&&report.status==='SKIPPED_CANCELLED')
+      report=unavailable('SKIPPED_BATCH_BUDGET');
+     results[group.offset+index]=report;
+     if(report.status==='SKIPPED_CANCELLED'||
+        report.status==='SKIPPED_BATCH_BUDGET')break;
+    }catch{
+     // A thrown call carries no retirement proof; stop the fallback chain.
+     stopWorkers();
+     break;
+    }finally{
+     if(task&&taskSettled)inFlightWorkers.delete(task);
+    }
+   }
+  }
  }finally{
-  clearTimeout(deadline);
+  if(deadline)clearTimeout(deadline);
   signal?.removeEventListener('abort',cancel);
+   let allWorkersRetired=inFlightWorkers.size===0&&!unretiredTasksDetected;
+   if(inFlightWorkers.size>0&&!unretiredTasksDetected){
+    const pending=Promise.allSettled(Array.from(inFlightWorkers)).then(()=>true);
+    const remaining=Math.min(10000,Math.max(0,deadlineAt-performance.now()));
+    if(remaining>0){
+     let cleanupTimer:NodeJS.Timeout|undefined;
+     const deadlineWait=new Promise<false>(resolve=>{
+      cleanupTimer=setTimeout(()=>resolve(false),remaining);
+     });
+     allWorkersRetired=await Promise.race([pending,deadlineWait]);
+     if(cleanupTimer)clearTimeout(cleanupTimer);
+    }
+  }
+   releaseNativeAstWorkerLease(lease,safeToLaunchWorkers&&allWorkersRetired);
  }
- return results.map(value=>value??unavailable(
-  signal?.aborted?'SKIPPED_CANCELLED':
-  deadlineExpired?'SKIPPED_BATCH_BUDGET':'ISOLATED_ANALYSIS_FAILED'
- ));
+  return results.map(value=>value??unavailable(
+   stopReason==='BUDGET'?'SKIPPED_BATCH_BUDGET':
+   stopReason==='CANCELLED'?'SKIPPED_CANCELLED':'ISOLATED_ANALYSIS_FAILED'
+  ));
 }

@@ -43,7 +43,7 @@ function reportWorkerFailure(
 }
 const WORKER_DEADLINE_MS=10000;
 // A pathological 1000-file batch must not consume up to 63 * 10 seconds.
-const MAX_TOTAL_PREVIEW_MS=120000;
+export const MAX_TOTAL_PREVIEW_MS=120000;
 // Authenticate the native importer's scalar fields before Worker structured
 // cloning (which can invoke getters on untrusted nested objects). Copy eligible
 // AST source bytes once, before the first await or advisory progress callback;
@@ -164,6 +164,30 @@ function replyArray(value:unknown,count:number):unknown[]|null{
  }
  return items;
 }
+/** Read a native array envelope without invoking accessors or trusting Proxy
+ * traps. Unlike replyArray, this permits a structurally valid but wrong-sized
+ * scheduler reply so its rows can be replaced with bounded failures while the
+ * independent Worker lifecycle receipt remains available. */
+function replyDataArray(value:unknown):unknown[]|null{
+ try{
+  if(nodeTypes.isProxy(value)||!Array.isArray(value)||
+     Object.getPrototypeOf(value)!==Array.prototype)return null;
+  const descriptors=Object.getOwnPropertyDescriptors(value) as
+   Record<string,PropertyDescriptor>;
+  const lengthField=descriptors['length'];
+  const length:unknown=lengthField?.value;
+  if(!Number.isSafeInteger(length)||(length as number)<0||
+     (length as number)>MAX_SELECTED_FILES||
+     Reflect.ownKeys(descriptors).length!==(length as number)+1)return null;
+  const items:unknown[]=[];
+  for(let i=0;i<(length as number);i++){
+   const slot=descriptors[String(i)];
+   if(!slot||!Object.prototype.hasOwnProperty.call(slot,'value'))return null;
+   items.push(slot.value);
+  }
+  return items;
+ }catch{return null;}
+}
 
 /** Internal reply-wire contract, exported for hostile-payload regression tests.
  * It never authenticates an extension or gives repair/write permission.
@@ -258,7 +282,7 @@ export function validateIsolatedPreviewReply(
 type WorkerChunkOutcome={previews:ImportAnalysisPreview[];safeToContinue:boolean};
 async function previewImportedChunkOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
- workerDeadlineMs=WORKER_DEADLINE_MS
+ workerDeadlineMs=WORKER_DEADLINE_MS,stopAt=Number.POSITIVE_INFINITY
 ):Promise<WorkerChunkOutcome>{
  const selected:Script[]=[];
  const slots:(number|null)[]=[];
@@ -289,11 +313,27 @@ async function previewImportedChunkOffMain(
   return {previews:output.map((x,i)=>slots[i]===null?x:
     unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED')),
    safeToContinue:true};
+ const skipBeforeStart=(status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET')=>({
+  previews:output.map((original,index)=>slots[index]===null?original:
+   unavailableImportPreview(status,'NOT_CHECKED')),
+  safeToContinue:true
+ });
+ if(performance.now()>=stopAt)return skipBeforeStart('SKIPPED_BATCH_BUDGET');
  // Instrument constructor+online time without changing the existing
  // per-segment 10-second or overall 120-second fail-closed deadline.
- const startedAt=performance.now();
+ let startedAt=performance.now();
+ const remainingBeforeStart=Math.min(workerDeadlineMs,stopAt-startedAt);
+ if(signal?.aborted)return skipBeforeStart('SKIPPED_CANCELLED');
+ if(remainingBeforeStart<=0)return skipBeforeStart('SKIPPED_BATCH_BUDGET');
  let worker:Worker;
  try{
+  // Re-read the monotonic clock at the last possible point. Do not turn an
+  // elapsed deadline into a one-millisecond Worker allowance.
+  startedAt=performance.now();
+  if(signal?.aborted)return skipBeforeStart('SKIPPED_CANCELLED');
+  const finalRemaining=Math.min(workerDeadlineMs,stopAt-startedAt);
+  if(finalRemaining<=0)return skipBeforeStart('SKIPPED_BATCH_BUDGET');
+  workerDeadlineMs=finalRemaining;
   worker=new Worker(join(__dirname,'import-preview-worker.js'),{
    workerData:selected,
    resourceLimits:{maxOldGenerationSizeMb:96,maxYoungGenerationSizeMb:16}
@@ -303,7 +343,7 @@ async function previewImportedChunkOffMain(
   return {previews:output,safeToContinue:true};
  }
  const result=await new Promise<{
-  answer:ImportAnalysisPreview[]|null;retired:boolean
+  answer:ImportAnalysisPreview[]|null;retired:boolean;budgetExceeded:boolean
  }>(resolve=>{
   let finished=false;
   let timer:NodeJS.Timeout|undefined;
@@ -316,7 +356,7 @@ async function previewImportedChunkOffMain(
    if(reason)reportWorkerFailure(reason,selected.length,startedAt,onlineAt,readyAt);
    if(timer)clearTimeout(timer);
    signal?.removeEventListener('abort',cancel);
-   if(!stopWorker){resolve({answer,retired:true});return;}
+   if(!stopWorker){resolve({answer,retired:true,budgetExceeded:false});return;}
    // A failed/malformed Worker may still be alive after terminate() starts.
    // Do not launch another segment before the old thread has retired.
    // Keep termination within the ORIGINAL segment deadline, rather than
@@ -325,25 +365,32 @@ async function previewImportedChunkOffMain(
    try{termination=worker.terminate();}
    catch{
     reportWorkerFailure('RETIREMENT_FAILED',selected.length,startedAt,onlineAt,readyAt);
-    resolve({answer,retired:false});return;
+    resolve({answer:null,retired:false,
+     budgetExceeded:performance.now()>=stopAt});return;
    }
-   const remaining=Math.max(1,workerDeadlineMs-(performance.now()-startedAt));
+   const remaining=Math.min(workerDeadlineMs-(performance.now()-startedAt),
+    stopAt-performance.now());
    let retirementTimer:NodeJS.Timeout|undefined;
    // Resolve to a fixed code instead of logging an untrusted termination
    // exception. A late rejection after the deadline must not double-log.
-   const retirementDeadline=new Promise<'DEADLINE'>(settle=>{
-    retirementTimer=setTimeout(()=>settle('DEADLINE'),remaining);
+   let expireRetirement!:(reason:'DEADLINE')=>void;
+   const retirementDeadline=new Promise<'DEADLINE'>(resolve=>{
+    expireRetirement=resolve;
    });
-   void Promise.race([
-    Promise.resolve(termination).then(
-     ()=>'RETIRED' as const,()=>'FAILED' as const),
-    retirementDeadline
-   ]).then(outcome=>{
+   const retirement=Promise.resolve(termination).then(
+    ()=>'RETIRED' as const,()=>'FAILED' as const);
+   if(remaining<=0)queueMicrotask(()=>expireRetirement('DEADLINE'));
+   else retirementTimer=setTimeout(()=>expireRetirement('DEADLINE'),remaining);
+   void Promise.race([retirement,retirementDeadline]).then(outcome=>{
     if(retirementTimer)clearTimeout(retirementTimer);
-    if(outcome!=='RETIRED')
+    const globalDeadlineExceeded=performance.now()>=stopAt;
+    const segmentDeadlineExceeded=performance.now()-startedAt>=workerDeadlineMs;
+    const missedDeadline=globalDeadlineExceeded||segmentDeadlineExceeded;
+    if((outcome!=='RETIRED'||missedDeadline)&&!reason)
      reportWorkerFailure(outcome==='FAILED'?'RETIREMENT_FAILED':
       'RETIREMENT_DEADLINE',selected.length,startedAt,onlineAt,readyAt);
-    resolve({answer,retired:outcome==='RETIRED'});
+    resolve({answer:missedDeadline?null:answer,
+     retired:outcome==='RETIRED',budgetExceeded:globalDeadlineExceeded});
    });
   };
   const cancel=()=>finish(null,true);
@@ -381,6 +428,8 @@ async function previewImportedChunkOffMain(
   if(slot===null)return original;
   if(signal?.aborted)
    return unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED');
+  if(result.budgetExceeded)
+   return unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
   // An otherwise valid reply is not a completed isolated segment while its
   // Worker remains live. Refuse success if retirement threw or timed out;
   // the caller already stops all subsequent segments in this condition.
@@ -417,40 +466,212 @@ function isNativeWorkerAbortSignal(value:unknown):value is AbortSignal{
  * this receipt and must require safeToContinue before doing so. */
 export interface IsolatedBatchPreviewResult{
  readonly previews:ImportAnalysisPreview[];
- /** False means a prior Worker may still be alive; callers must stop all
-  * retries and later Worker dispatches for this batch. */
+ /** False means this call cannot authorize another dispatch. A caller refused
+  * while another lifecycle owner is active has not itself dispatched work. */
  readonly safeToContinue:boolean;
+}
+/** Validate the structured scheduler boundary after a Worker call. The Worker
+ * wire format is validated independently; this additional check protects the
+ * queues if a local adapter returns a forged or malformed preview object. */
+export function validateIsolatedBatchPreviewResult(
+ value:unknown,count:number
+):IsolatedBatchPreviewResult|null{
+ try{
+  if(!Number.isSafeInteger(count)||count<0||count>MAX_BATCH_PREVIEW_FILES)
+   return null;
+  const wrapper=replyRecord(value,['previews','safeToContinue']);
+  if(!wrapper||typeof wrapper.safeToContinue!=='boolean')return null;
+  const rows=replyDataArray(wrapper.previews);
+  if(!rows)return null;
+  const previews:ImportAnalysisPreview[]=[];
+  if(rows.length!==count){
+   for(let index=0;index<count;index++)
+    previews.push(unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+   return {previews,safeToContinue:wrapper.safeToContinue};
+  }
+  for(const row of rows){
+   const validated=validateIsolatedPreviewReply([row],1);
+   if(validated){previews.push(validated[0]);continue;}
+   const unavailable=replyRecord(row,PREVIEW_KEYS);
+   if(unavailable&&
+      (unavailable.status==='ISOLATED_ANALYSIS_FAILED'||
+       unavailable.status==='SKIPPED_CANCELLED')&&
+      unavailable.metadataStatus==='NOT_CHECKED'&&
+      unavailable.totalSites===0&&unavailable.literalSites===0&&
+      unavailable.runtimeConfirmationSites===0&&
+      unavailable.tampermonkeyVerified===false&&
+      unavailable.businessVerified===false&&
+      unavailable.automaticPatchAllowed===false&&
+      replyArray(unavailable.sites,0)){
+    previews.push(unavailableImportPreview(
+     unavailable.status as 'ISOLATED_ANALYSIS_FAILED'|'SKIPPED_CANCELLED',
+     'NOT_CHECKED'));
+    continue;
+   }
+   if(!unavailable||
+      (unavailable.status!=='ISOLATED_ANALYSIS_FAILED'&&
+       unavailable.status!=='SKIPPED_CANCELLED')){
+    previews.push(unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+    continue;
+   }
+   // A structurally valid but otherwise malformed preview cannot be shown to
+   // callers. Preserve the independent lifecycle receipt while replacing its
+   // untrusted row with a bounded failure so a retired segment may be retried.
+   previews.push(unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+  }
+  return {previews,safeToContinue:wrapper.safeToContinue};
+ }catch{return null;}
+}
+/** Capability issued only to the trusted native checkpoint scheduler. The
+ * runtime identity is held in process-local shared state; caller-created
+ * objects never grant access to the native lease path. */
+export type NativeAstWorkerLease=object;
+interface SharedAstWorkerGate{
+ readonly version:1;
+ active:boolean;
+ blocked:boolean;
+ lease:NativeAstWorkerLease|null;
+}
+const SHARED_AST_WORKER_GATE_KEY='__uah_isolated_ast_worker_gate_v1__';
+/** The process object is shared by independently loaded copies of this
+ * module. A malformed or inaccessible gate is a refusal, never permission. */
+function getSharedAstWorkerGate():SharedAstWorkerGate|null{
+ try{
+  const state=process as unknown as Record<string,unknown>;
+  const descriptor=Object.getOwnPropertyDescriptor(state,SHARED_AST_WORKER_GATE_KEY);
+  if(!descriptor){
+   const created=Object.seal({version:1 as const,active:false,blocked:false,
+    lease:null as NativeAstWorkerLease|null});
+   Object.defineProperty(state,SHARED_AST_WORKER_GATE_KEY,{value:created,
+    enumerable:false,configurable:false,writable:false});
+   return created;
+  }
+  if(!Object.prototype.hasOwnProperty.call(descriptor,'value'))return null;
+  const value:unknown=descriptor.value;
+  if(!value||typeof value!=='object'||nodeTypes.isProxy(value))return null;
+  const fields=Object.getOwnPropertyDescriptors(value);
+  const names=Reflect.ownKeys(fields);
+  if(names.length!==4||
+     !Object.prototype.hasOwnProperty.call(fields,'version')||
+     !Object.prototype.hasOwnProperty.call(fields,'active')||
+     !Object.prototype.hasOwnProperty.call(fields,'blocked')||
+     !Object.prototype.hasOwnProperty.call(fields,'lease')||
+     !Object.prototype.hasOwnProperty.call(fields.version,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.active,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.blocked,'value')||
+     !Object.prototype.hasOwnProperty.call(fields.lease,'value')||
+     fields.version.value!==1||typeof fields.active.value!=='boolean'||
+     typeof fields.blocked.value!=='boolean'||
+     (fields.lease.value!==null&&
+      (typeof fields.lease.value!=='object'||nodeTypes.isProxy(fields.lease.value))))
+   return null;
+  return value as SharedAstWorkerGate;
+ }catch{return null;}
+}
+type GateAcquireResult=
+ |{readonly status:'ACQUIRED';readonly gate:SharedAstWorkerGate}
+ |{readonly status:'BUSY'|'BLOCKED'};
+function acquireSharedAstWorkerGate(lease?:NativeAstWorkerLease):GateAcquireResult{
+ const gate=getSharedAstWorkerGate();
+ if(!gate)return {status:'BLOCKED'};
+ if(gate.blocked)return {status:'BLOCKED'};
+ if(lease===undefined){
+  if(gate.active||gate.lease!==null)return {status:'BUSY'};
+ }else if(gate.lease!==lease||gate.active){
+  return {status:'BUSY'};
+ }
+ gate.active=true;
+ return {status:'ACQUIRED',gate};
+}
+function noDispatchCanContinue(lease?:NativeAstWorkerLease):boolean{
+ const gate=getSharedAstWorkerGate();
+ return Boolean(gate&&!gate.active&&!gate.blocked&&
+  (lease===undefined?gate.lease===null:gate.lease===lease));
+}
+function releaseSharedAstWorkerGate(gate:SharedAstWorkerGate,safeToContinue:boolean):void{
+ try{
+  if(!safeToContinue)gate.blocked=true;
+  gate.active=false;
+ }catch{/* A damaged gate remains fail-closed for future calls. */}
+}
+/** Reserve the process-wide Worker lifecycle before native checkpoint I/O.
+ * The synchronous acquisition has no wait or timeout extension. Renderer
+ * input cannot provide the returned object capability. */
+export function acquireNativeAstWorkerLease():
+ {readonly status:'ACQUIRED';readonly lease:NativeAstWorkerLease}|{readonly status:'BUSY'|'BLOCKED'}{
+ const gate=getSharedAstWorkerGate();
+ if(!gate)return {status:'BLOCKED'};
+ if(gate.blocked)return {status:'BLOCKED'};
+ if(gate.active||gate.lease!==null)return {status:'BUSY'};
+ const lease=Object.freeze(Object.create(null)) as NativeAstWorkerLease;
+ gate.lease=lease;
+ return Object.freeze({status:'ACQUIRED' as const,lease});
+}
+/** Release only the exact capability acquired by the trusted native caller.
+ * Unsafe evidence or an unexpected active Worker permanently poisons the
+ * process gate; a clean release merely permits the next caller. */
+export function releaseNativeAstWorkerLease(
+ lease:NativeAstWorkerLease,safeToContinue:boolean
+):void{
+ const gate=getSharedAstWorkerGate();
+ if(!gate||gate.lease!==lease)return;
+ try{
+  if(!safeToContinue||gate.active)gate.blocked=true;
+  gate.lease=null;
+ }catch{/* A damaged capability holder leaves the process gate fail-closed. */}
 }
 export function previewImportedBatchOffMain(
  scripts:readonly Script[],signal:AbortSignal|undefined,
  onProgress:((processed:number,total:number)=>void)|undefined,
- includeSafetyEvidence:true
+ includeSafetyEvidence:true,lease?:NativeAstWorkerLease,deadlineAt?:number
 ):Promise<IsolatedBatchPreviewResult>;
 export function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
- onProgress?:(processed:number,total:number)=>void
+ onProgress?:(processed:number,total:number)=>void,
+ includeSafetyEvidence?:undefined,lease?:NativeAstWorkerLease,deadlineAt?:number
 ):Promise<ImportAnalysisPreview[]>;
 export async function previewImportedBatchOffMain(
  scripts:readonly Script[],signal?:AbortSignal,
  onProgress?:(processed:number,total:number)=>void,
- includeSafetyEvidence?:true
+ includeSafetyEvidence?:true,lease?:NativeAstWorkerLease,deadlineAt?:number
 ):Promise<ImportAnalysisPreview[]|IsolatedBatchPreviewResult>{
  const result=(previews:ImportAnalysisPreview[],safeToContinue:boolean)=>
   includeSafetyEvidence?Object.freeze({previews,safeToContinue}):previews;
  // This exported boundary accepts only trusted native cancellation handles.
  // [] is the fail-closed refusal for an invalid direct native-batch request,
  // matching the existing over-capacity direct-caller rejection below.
- if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))return result([],true);
+ if(signal!==undefined&&!isNativeWorkerAbortSignal(signal))
+  return result([],noDispatchCanContinue(lease));
  // Validate and snapshot direct native records before reading .length, .slice,
  // any element/bytes properties or letting an advisory callback run.
  // Eligible bytes have an independent bounded copy before asynchronous work.
  const nativeScripts=snapshotNativeAstBatch(scripts);
- if(nativeScripts===null)return result([],true);
+ if(nativeScripts===null)return result([],noDispatchCanContinue(lease));
+ if(nativeScripts.length===0)return result([],noDispatchCanContinue(lease));
+ const acquisition=acquireSharedAstWorkerGate(lease);
+ if(acquisition.status!=='ACQUIRED'){
+  const refused:ImportAnalysisPreview[]=[];
+  for(const script of nativeScripts){
+   const bytes=script?.bytes;
+   const size=bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH
+    ?NATIVE_BYTE_LENGTH.call(bytes) as number:Infinity;
+   refused.push(size>MAX_ISOLATED_ANALYSIS_BYTES
+    ?unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED')
+    :unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED'));
+  }
+  // A concurrent or permanently blocked caller has no dispatch authority.
+  return result(refused,false);
+ }
+ const gate=acquisition.gate;
  const results:ImportAnalysisPreview[]=[];
  let safeToContinue=true;
+ let completed=false;
+ try{
  // Use monotonic elapsed time: wall-clock synchronization must not shorten
  // or silently extend the 120-second native AST batch budget.
- const stopAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
+ const startedAt=performance.now();
+ const stopAt=Math.min(startedAt+MAX_TOTAL_PREVIEW_MS,
+  deadlineAt??Number.POSITIVE_INFINITY);
  for(let offset=0;offset<nativeScripts.length;offset+=MAX_BATCH_PREVIEW_FILES){
   const segment=nativeScripts.slice(offset,offset+MAX_BATCH_PREVIEW_FILES);
   if(signal?.aborted||performance.now()>=stopAt||!safeToContinue){
@@ -474,9 +695,21 @@ export async function previewImportedBatchOffMain(
   // No overlapping failed workers, hidden unbounded queue or source execution:
   // every segment has at most 10s, with a 120s total batch deadline.
   // The 16-file/1MiB copied-byte limit remains unchanged.
-  const remainingMs=Math.max(1,stopAt-performance.now());
+   const remainingMs=stopAt-performance.now();
+   if(remainingMs<=0){
+    for(const script of segment){
+     const bytes=script?.bytes;
+     results.push(bytes instanceof Uint8Array&&NATIVE_BYTE_LENGTH&&
+       (NATIVE_BYTE_LENGTH.call(bytes) as number)<=MAX_ISOLATED_ANALYSIS_BYTES
+        ?unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED')
+        :unavailableImportPreview('SKIPPED_TOO_LARGE','NOT_CHECKED'));
+    }
+    try{onProgress?.(results.length,nativeScripts.length);}
+    catch{/* advisory progress only */}
+    continue;
+   }
   const chunk=await previewImportedChunkOffMain(segment,signal,
-   Math.min(WORKER_DEADLINE_MS,remainingMs));
+    Math.min(WORKER_DEADLINE_MS,remainingMs),stopAt);
   results.push(...chunk.previews);
   // A non-retired Worker must not overlap with the next segment. All
   // unstarted entries remain explicit unverified failures, not AST evidence.
@@ -486,5 +719,10 @@ export async function previewImportedBatchOffMain(
   try{onProgress?.(results.length,nativeScripts.length);}
   catch{/* progress is advisory; it cannot affect isolated parsing */}
  }
- return result(results,safeToContinue);
+  const completedResult=result(results,safeToContinue);
+  completed=true;
+  return completedResult;
+ }finally{
+  releaseSharedAstWorkerGate(gate,completed&&safeToContinue);
+ }
 }

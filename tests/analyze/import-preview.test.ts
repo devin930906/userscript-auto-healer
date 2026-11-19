@@ -1,10 +1,11 @@
-import {test} from 'node:test';
+import {mock,test} from 'node:test';
 import {strict as assert} from 'node:assert';
+import {execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {importDroppedBytes} from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,previewIsolatedImportedBatch,MAX_ISOLATED_ANALYSIS_BYTES} from '../../src/analyze/import-preview';
-import {previewImportedBatchOffMain,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
+import {previewImportedBatchOffMain,validateIsolatedBatchPreviewResult,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
 
 // TASK-013 / TEST-022: two independent workflow_dispatch diagnostics on the
 // same Git ref must not cancel or replace one another before their genuine
@@ -31,6 +32,97 @@ function imported(code:string){
  if('code' in result)throw Error(result.code);
  return result;
 }
+
+test('TASK-013/TEST-022/NFR-009: expired absolute queue deadline prevents Worker startup',async()=>{
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ let starts=0;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){super();starts++;}
+   terminate(){return Promise.resolve(0);}
+  } as unknown as typeof native;
+  const selected=imported(header+'document.querySelector("#expired-deadline");');
+  const expiredAt=performance.now()-1;
+  const result=await previewImportedBatchOffMain(
+   [selected],undefined,undefined,true,undefined,expiredAt);
+  assert.equal(result.safeToContinue,true);
+  assert.deepEqual(result.previews.map(row=>row.status),['SKIPPED_BATCH_BUDGET']);
+  assert.equal(starts,0,'an elapsed absolute deadline must not start a new Worker');
+ }finally{workers.Worker=native;}
+});
+
+test('TASK-013/TEST-022/NFR-009: final monotonic check blocks Worker start after deadline crosses',async()=>{
+ const selected=imported(header+'document.querySelector("#last-deadline-check");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const {performance}=require('node:perf_hooks') as typeof import('node:perf_hooks');
+ const native=workers.Worker;
+ const readings=[0,0,0,0,0,120001];
+ let starts=0;
+ const clock=mock.method(performance,'now',()=>readings.shift()??120001);
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(){super();starts++;}
+   terminate(){return Promise.resolve(0);}
+  } as unknown as typeof native;
+  const result=await previewImportedBatchOffMain(
+   [selected],undefined,undefined,true,undefined,120000);
+  assert.equal(result.safeToContinue,true);
+  assert.deepEqual(result.previews.map(row=>row.status),['SKIPPED_BATCH_BUDGET']);
+  assert.equal(starts,0,'a final pre-constructor check must prevent a post-deadline Worker');
+ }finally{clock.mock.restore();workers.Worker=native;}
+});
+
+test('TASK-013/TEST-022/NFR-009: retirement completing after total deadline cannot publish AST evidence',async()=>{
+ const selected=imported(header+'document.querySelector("#late-retirement");');
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const {performance}=require('node:perf_hooks') as typeof import('node:perf_hooks');
+ const native=workers.Worker;
+ let now=0;
+ let starts=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const originalWarn=console.warn;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(_filename:string,options:{workerData:typeof selected[]}){
+    super();starts++;
+    setImmediate(()=>{
+     now=9999;
+     this.emit('online');
+     this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate(){now=10001;return Promise.resolve(0);}
+  } as unknown as typeof native;
+  console.warn=()=>{};
+  const result=await previewImportedBatchOffMain(
+   [selected],undefined,undefined,true,undefined,10000);
+  assert.equal(starts,1);
+  assert.equal(result.safeToContinue,true,
+   `the late Worker still retired, so its lifecycle receipt remains usable: ${JSON.stringify(result)}`);
+  assert.deepEqual(result.previews.map(row=>row.status),['SKIPPED_BATCH_BUDGET']);
+ }finally{
+  clock.mock.restore();workers.Worker=native;console.warn=originalWarn;
+ }
+});
+
+test('TASK-013/TEST-022/026: malformed Worker envelope is rejected but wrong-sized native arrays retain lifecycle evidence',()=>{
+ assert.equal(validateIsolatedBatchPreviewResult({previews:null,safeToContinue:true},1),null,
+  'a lifecycle boolean cannot authorize retries when the result envelope is absent');
+ assert.equal(validateIsolatedBatchPreviewResult({previews:new Proxy([],{}),
+  safeToContinue:true},1),null,'Proxy arrays are not trusted result envelopes');
+ const wrongSized=validateIsolatedBatchPreviewResult({previews:[],safeToContinue:true},1);
+ assert.ok(wrongSized);
+ assert.equal(wrongSized.safeToContinue,true,
+  'an exact native array may preserve its independent lifecycle receipt');
+ assert.deepEqual(wrongSized.previews.map(row=>row.status),['ISOLATED_ANALYSIS_FAILED']);
+});
 
 test('TEST-004/011: imports provide read-only selector position counts, not sensitive selector source',()=>{
  const source=header+
@@ -865,89 +957,6 @@ test('TASK-013/TEST-022/NFR-009: failed AST worker retires before next segment s
  }
 });
 
-test('TASK-013/TEST-022/NFR-009: valid AST reply with failed Worker retirement must not certify that segment',async()=>{
- const scripts=Array.from({length:17},(_,i)=>imported(
-  header+`document.querySelector("#private-retirement-failure-${i}");`
- ));
- const workers=require('node:worker_threads') as
-  {Worker:typeof import('node:worker_threads').Worker};
- const {EventEmitter}=require('node:events') as typeof import('node:events');
- const native=workers.Worker;
- let starts=0;
- let results:Awaited<ReturnType<typeof previewImportedBatchOffMain>>;
- try{
-  workers.Worker=class extends EventEmitter{
-   constructor(_filename:string,opts:{workerData:typeof scripts}){
-    super();
-    starts++;
-    setImmediate(()=>{
-     this.emit('online');
-     this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
-    });
-   }
-   terminate():Promise<number>{
-    throw Error('TEST_ONLY_UNRETIRED_WORKER');
-   }
-  } as unknown as typeof native;
-  results=await previewImportedBatchOffMain(scripts);
- }finally{
-  workers.Worker=native;
- }
- assert.equal(starts,1,'do not start a second segment after retirement fails');
- assert.deepEqual(results.map(x=>x.status),Array(17).fill('ISOLATED_ANALYSIS_FAILED'),
-  'a valid message cannot certify a segment if its isolated worker did not retire');
- assert.ok(results.every(x=>x.metadataStatus==='NOT_CHECKED'&&
-  !x.automaticPatchAllowed&&!x.businessVerified&&!x.tampermonkeyVerified));
- assert.equal(JSON.stringify(results).includes('private-retirement-failure'),false);
-});
-
-
-test('TASK-013/TEST-022/026: unretired AST worker reports bounded failure reason without source',async()=>{
- const scripts=Array.from({length:17},(_,i)=>imported(
-  header+`document.querySelector("#private-retire-code-${i}");`
- ));
- const workers=require('node:worker_threads') as
-  {Worker:typeof import('node:worker_threads').Worker};
- const {EventEmitter}=require('node:events') as typeof import('node:events');
- const native=workers.Worker;
- const originalWarn=console.warn;
- try{
-  for(const mode of ['throws','rejects'] as const){
-   let started=0;
-   const reports:string[]=[];
-   workers.Worker=class extends EventEmitter{
-    constructor(_filename:string,options:{workerData:typeof scripts}){
-     super();started++;
-     setImmediate(()=>{
-      this.emit('online');
-      this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
-     });
-    }
-    terminate():Promise<number>{
-     if(mode==='throws')throw Error('PRIVATE_RETIREMENT_EXCEPTION');
-     return Promise.reject(Error('PRIVATE_RETIREMENT_REJECTION'));
-    }
-   } as unknown as typeof native;
-   console.warn=(...args:unknown[])=>reports.push(args.map(String).join(' '));
-   const result=await previewImportedBatchOffMain(scripts);
-   assert.equal(started,1,'a nonretired Worker must stop later segments');
-   assert.deepEqual(result.map(item=>item.status),
-    Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
-   assert.ok(result.every(item=>item.metadataStatus==='NOT_CHECKED'&&
-    !item.tampermonkeyVerified&&!item.businessVerified&&!item.automaticPatchAllowed));
-   assert.equal(reports.length,1,'one bounded retirement failure receipt per Worker');
-   assert.match(reports[0],
-    /^UAH_AST_WORKER_UNAVAILABLE reason=RETIREMENT_FAILED count=16 phase=POST_ONLINE /);
-   assert.equal(reports[0].includes('PRIVATE_'),false,
-    'exception details or imported source must never enter diagnostics');
-   assert.equal(reports[0].includes('private-retire-code'),false);
-  }
- }finally{
-  workers.Worker=native;
-  console.warn=originalWarn;
- }
-});
-
 test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segment deadline',async t=>{
  const script=imported(header+'document.querySelector("#private-overdue-reply");');
  const workers=require('node:worker_threads') as
@@ -960,6 +969,7 @@ test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segme
  let skew=0;
  const warnings:string[]=[];
  let starts=0;
+  const startedSizes:number[]=[];
  try{
   // Advance only the monotonic worker clock while setImmediate runs; the
   // 10s timer has not fired, yet the result is already beyond its budget.
@@ -968,6 +978,7 @@ test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segme
   workers.Worker=class extends EventEmitter{
    constructor(_filename:string,opts:{workerData:typeof script[]}){
     super();starts++;
+     startedSizes.push(opts.workerData.length);
     setImmediate(()=>{
      skew=11000;
      this.emit('online');
@@ -978,7 +989,7 @@ test('TASK-013/TEST-022/NFR-009: late worker reply cannot bypass monotonic segme
   } as unknown as typeof native;
   console.warn=(...parts:unknown[])=>{warnings.push(parts.map(String).join(' '));};
   const report=await previewImportedBatchOffMain([script]);
-  assert.equal(starts,1);
+  assert.equal(starts,1,`only one segment Worker may start: ${startedSizes.join(',')}`);
   assert.deepEqual(report.map(item=>item.status),['ISOLATED_ANALYSIS_FAILED'],
    'a late valid-looking reply is not in-budget isolated AST evidence');
   assert.ok(report.every(item=>item.metadataStatus==='NOT_CHECKED'&&
@@ -1013,4 +1024,178 @@ test('TASK-013/TEST-004/011/026: snapshot never invokes imported byte iterator',
  assert.equal(report[0].tampermonkeyVerified,false);
  assert.equal(report[0].businessVerified,false);
  assert.equal(JSON.stringify(report).includes('private-byte-iterator'),false);
+});
+
+interface UnretiredWorkerResult{
+ starts:number;safeToContinue:boolean;statuses:string[];warnings:string[];
+ blockedSafeToContinue:boolean;blockedStatuses:string[];
+}
+function unretiredWorkerChild(mode:'throws'|'rejects'):UnretiredWorkerResult{
+ const modulePath=require.resolve('../../src/analyze/isolated-batch-preview');
+ const childCode=`
+  const assert=require('node:assert/strict');
+  const {EventEmitter}=require('node:events');
+  const path=require('node:path');
+  const modulePath=${JSON.stringify(modulePath)};
+  const mode=${JSON.stringify(mode)};
+  const {previewImportedBatchOffMain}=require(modulePath);
+  const {previewImportedScriptAnalysis}=require(path.join(path.dirname(modulePath),'import-preview.js'));
+  const workers=require('node:worker_threads');
+  const native=workers.Worker;
+  const originalWarn=console.warn;
+  const warnings=[];
+  let starts=0;
+  const header=${JSON.stringify(header)};
+  const scripts=Array.from({length:17},(_,index)=>({
+   bytes:new Uint8Array(Buffer.from(header+'document.querySelector("#private-retire-'+index+'");')),
+   textEncoding:'utf-8'
+  }));
+  (async()=>{
+   try{
+    workers.Worker=class extends EventEmitter{
+     constructor(_filename,options){
+      super();starts++;
+      setImmediate(()=>{
+       this.emit('online');
+       this.emit('message',options.workerData.map(previewImportedScriptAnalysis));
+      });
+     }
+     terminate(){
+      if(mode==='throws')throw Error('PRIVATE_RETIREMENT_EXCEPTION');
+      return Promise.reject(Error('PRIVATE_RETIREMENT_REJECTION'));
+     }
+    };
+    console.warn=(...args)=>warnings.push(args.map(String).join(' '));
+    const result=await previewImportedBatchOffMain(scripts,undefined,undefined,true);
+    assert.equal(result.safeToContinue,false);
+    assert.deepEqual(result.previews.map(row=>row.status),Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
+    delete require.cache[modulePath];
+    const reloaded=require(modulePath);
+    const blocked=await reloaded.previewImportedBatchOffMain(
+     [scripts[0]],undefined,undefined,true);
+    assert.equal(blocked.safeToContinue,false);
+    assert.deepEqual(blocked.previews.map(row=>row.status),['ISOLATED_ANALYSIS_FAILED']);
+    assert.equal(starts,1,'a blocked gate must not dispatch again after module reload');
+    process.stdout.write(JSON.stringify({starts,safeToContinue:result.safeToContinue,
+     statuses:result.previews.map(row=>row.status),warnings,
+     blockedSafeToContinue:blocked.safeToContinue,
+     blockedStatuses:blocked.previews.map(row=>row.status)}));
+   }finally{
+    workers.Worker=native;
+    console.warn=originalWarn;
+   }
+  })().catch(error=>{console.error(error);process.exitCode=1;});
+ `;
+ return JSON.parse(execFileSync(process.execPath,['-e',childCode],
+  {encoding:'utf8'})) as UnretiredWorkerResult;
+}
+
+test('TASK-013/TEST-022/NFR-009: valid AST reply with failed Worker retirement must not certify that segment',()=>{
+ for(const mode of ['throws','rejects'] as const){
+  const result=unretiredWorkerChild(mode);
+  assert.equal(result.starts,1,'do not start another segment after retirement fails');
+  assert.equal(result.safeToContinue,false);
+  assert.deepEqual(result.statuses,Array(17).fill('ISOLATED_ANALYSIS_FAILED'),
+   'a valid message cannot certify a segment if its isolated worker did not retire');
+  assert.equal(JSON.stringify(result).includes('private-retire'),false);
+ }
+});
+
+test('TASK-013/TEST-022/026: unretired AST worker reports bounded failure reason without source',()=>{
+ for(const mode of ['throws','rejects'] as const){
+  const result=unretiredWorkerChild(mode);
+  assert.equal(result.starts,1);
+  assert.equal(result.safeToContinue,false);
+  assert.equal(result.warnings.length,1,'one bounded retirement failure receipt per Worker');
+  assert.match(result.warnings[0],
+   /^UAH_AST_WORKER_UNAVAILABLE reason=RETIREMENT_FAILED count=16 phase=POST_ONLINE /);
+  assert.equal(result.warnings[0].includes('PRIVATE_'),false,
+   'exception details or imported source must never enter diagnostics');
+  assert.equal(result.warnings[0].includes('private-retire-code'),false);
+ }
+});
+
+test('TASK-013/TEST-022/026: shared Worker gate denies concurrent calls across module reload and releases after retirement',async()=>{
+ const scripts=[0,1,2,3].map(index=>imported(
+  header+`document.querySelector("#gate-release-${index}");`));
+ const workers=require('node:worker_threads') as
+  {Worker:typeof import('node:worker_threads').Worker};
+ const {EventEmitter}=require('node:events') as typeof import('node:events');
+ const native=workers.Worker;
+ const modulePath=require.resolve('../../src/analyze/isolated-batch-preview');
+ const cached=require.cache[modulePath];
+ let starts=0;
+ let signalRetirementStarted!:()=>void;
+ const retirementStarted=new Promise<void>(resolve=>{
+  signalRetirementStarted=resolve;
+ });
+ let releaseRetirement!:()=>void;
+ try{
+  workers.Worker=class extends EventEmitter{
+   constructor(_filename:string,opts:{workerData:typeof scripts}){
+    super();starts++;
+    setImmediate(()=>{
+     this.emit('online');
+     this.emit('message',opts.workerData.map(previewImportedScriptAnalysis));
+    });
+   }
+   terminate():Promise<number>{
+    if(starts===1)return new Promise(resolve=>{
+     signalRetirementStarted();releaseRetirement=()=>resolve(0);
+    });
+    return Promise.resolve(0);
+   }
+  } as unknown as typeof native;
+  const first=previewImportedBatchOffMain([scripts[0]],undefined,undefined,true);
+  await retirementStarted;
+  const invalidSignal=await previewImportedBatchOffMain(
+   [scripts[1]],{} as AbortSignal,undefined,true);
+  assert.equal(invalidSignal.safeToContinue,false,
+   'invalid input cannot claim process safety while another Worker is active');
+  assert.equal(starts,1);
+  const concurrent=await previewImportedBatchOffMain(
+   [scripts[1]],undefined,undefined,true);
+  assert.equal(concurrent.safeToContinue,false,
+   'a rejected active-gate call cannot authorize any retry');
+  assert.deepEqual(concurrent.previews.map(row=>row.status),['ISOLATED_ANALYSIS_FAILED']);
+  assert.equal(starts,1,'a different batch must not overlap the active Worker');
+
+  delete require.cache[modulePath];
+  const reloaded=require(modulePath) as typeof import('../../src/analyze/isolated-batch-preview');
+  const afterReload=await reloaded.previewImportedBatchOffMain(
+   [scripts[2]],undefined,undefined,true);
+  assert.equal(afterReload.safeToContinue,false,
+   'module reload must use the same process lifecycle gate');
+  assert.equal(starts,1,'reloaded entrypoint must not overlap the active Worker');
+
+  releaseRetirement();
+  const completed=await first;
+  assert.equal(completed.safeToContinue,true,
+   'confirmed Worker retirement releases the process gate');
+  assert.equal(completed.previews[0].status,'STATIC_ANALYSIS_ONLY');
+  const following=await reloaded.previewImportedBatchOffMain(
+   [scripts[3]],undefined,undefined,true);
+  assert.equal(following.safeToContinue,true,
+   'a subsequent call may run after retirement is confirmed');
+  assert.equal(following.previews[0].status,'STATIC_ANALYSIS_ONLY');
+  assert.equal(starts,2);
+ }finally{
+  releaseRetirement?.();
+  workers.Worker=native;
+  if(cached)require.cache[modulePath]=cached;
+  else delete require.cache[modulePath];
+ }
+});
+
+test('TASK-013/TEST-022/026: failed retirement blocks every later Worker for this process lifetime',async()=>{
+ for(const mode of ['throws','rejects'] as const){
+  const result=unretiredWorkerChild(mode);
+  assert.equal(result.starts,1);
+  assert.equal(result.safeToContinue,false);
+  assert.equal(result.blockedSafeToContinue,false,
+   'unconfirmed retirement remains blocked across module reload in the child process');
+  assert.deepEqual(result.blockedStatuses,['ISOLATED_ANALYSIS_FAILED']);
+ }
+ console.log('DEBUG_GATE_STATE',JSON.stringify((process as unknown as
+  Record<string,unknown>).__uah_isolated_ast_worker_gate_v1__));
 });

@@ -504,3 +504,11 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **TASK-019/020/021**：#609/#610 保持 Open；#215 已关闭历史，不代表 TASK-020、GATE-009 或正式 Stable 完成。
 - **候选双包**：PR #901 Windows Candidate run #44030158756 在 PR HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1` 成功；候选工件 ID 14304753363，digest `sha256:2e8e90be2b0999dbbee9e224feeeacc3e226e06cf902de42c0a4babc4f30026f`，截至 2026-11-20T06:25:48Z 有效。它不是正式 Stable Release；最终同源发布构建、GATE 与用户验收仍待完成。
 - **当前推进顺序**：继续解决 #486 的受控浏览器身份/管理器探测不一致与产品级安装、GM、业务恢复证据；再按真实依赖推进 #487/#488/#489/#857/#603/#604，后续完成 #605..#610 和最终集中人工 Stable 验收。
+
+## 2026-11-19 TASK-013 / Issue #857 — read-only AST worker lifecycle 增量
+
+- **范围**：复用 PR [#907](https://github.com/devin930906/userscript-auto-healer/pull/907) 的 `codex/task013-ast-isolation-20261118` Draft 分支。本轮完成分段与逐文件恢复的 Worker 生命周期修复；PR 仍为 Draft/WIP、未合并，Issue #857 保持 Open。改动不等于 TASK-013 全量的无人值守诊断/修复、浏览器验收或 Stable 完成。
+- **实现**：修正 Node 子测试继承 `NODE_TEST_CONTEXT` 后误报通过；恢复时保留当前会话已完成的后续片段 AST 证据；普通队列加入进程级 Worker lease，阻止 progress 回调重入抢占下一段；严格检查 adapter 的 `previews` envelope，并把结构完整但尺寸/行内容错误的响应替换为失败行；把同一个单调全局 deadline 传入 Worker、重试、逐文件恢复及 resumed 展示重算；启动前最后时钟检查、迟到退休结果撤销、挂起 adapter 有界等待、协调器仍有在途任务时禁止恢复/重放、预算和用户取消按首次停止原因分类。
+- **本地验证**：`npm run build` 成功；定向 `node --test --test-concurrency=1 dist/tests/analyze/import-preview.test.js dist/tests/jobs/batch-coordinator.test.js dist/tests/jobs/imported-analysis-queue.test.js dist/tests/jobs/native-checkpointed-import.test.js` 为 149/149 通过。完整 `npm test` 为 1,189 total / 1,135 pass / 42 fail / 12 skipped；42 个失败名称与本轮前的 main 基线及本轮前一完整运行完全相同，属于 TEST-003 symlink 与 TASK-011/TASK-018 restore-path 环境失败集。
+- **整合边界**：本轮复核时 GitHub `main@c5266490f30ce8f262765728886295f4888a70ba`，#857 为 Open，PR #907 为 Draft。当前源代码与测试同步到 #907 的远端 HEAD 后，才检查该新提交的 Required Checks；本地测试不是 Windows Actions 或真实环境验收。
+- **续接**：继续按真实依赖完成 #857/TASK-013 产品级多入口批处理、诊断及授权流程；仍需 TASK-007/#486 的完整真实管理器/业务与失败恢复验收、TASK-009..012 依赖及 TEST/GATE。正式 v1.1.3、同源 EXE/ZIP、所有必要 GATE 和最终集中人工验收仍是独立 Stable 门槛。
