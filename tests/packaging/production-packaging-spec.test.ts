@@ -106,3 +106,41 @@ test('TASK-021/GATE-008: production app metadata isolates identity from candidat
     'Must verify automaticRepairAvailable is false'
   );
 });
+
+
+test('TASK-021/GATE-001..011: production release pipeline strictly enforces all mandatory pre-release gate checks before artifact distribution', () => {
+  const content = readFileSync(WORKFLOW_PATH, 'utf8');
+
+  // Must include git tag verification or workflow_dispatch control
+  assert.match(
+    content,
+    /startsWith\(github\.ref,\s*'refs\/tags\/v'\)|inputs\.publish_release\s*==\s*true/,
+    'Release pipeline must gate official artifact distribution on explicit v* tag or dispatch'
+  );
+
+  // Must verify SHA256 manifest generation
+  assert.match(
+    content,
+    /SHA256SUMS\.txt/,
+    'Release workflow must verify and publish SHA256SUMS.txt'
+  );
+
+  // Must produce both Installer EXE and Portable ZIP from identical source
+  assert.match(
+    content,
+    /setup_exe_name/,
+    'Release workflow must specify Setup installer EXE output'
+  );
+  assert.match(
+    content,
+    /portable_zip_name/,
+    'Release workflow must specify Portable ZIP output'
+  );
+
+  // Must run regression test suite before packaging
+  assert.match(
+    content,
+    /npm test/,
+    'Release workflow must run full registered test suite before packaging'
+  );
+});
