@@ -23,6 +23,9 @@ interface ImportResponse {
   batchCheckpointReason?:string;
   batchResumed?:boolean;
 }
+type DroppedBatchFinishResponse=
+  |{ok:false;code?:string}
+  |({ok:true}&ImportResponse);
 interface NativeImportProgress {
   active:boolean;
   phase?:'PICKING'|'SCANNING'|'IMPORTING'|'ANALYZING';
@@ -45,6 +48,11 @@ interface Window {
     getNativeImportProgress(): Promise<NativeImportProgress>;
     cancelDroppedImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
+    beginDroppedImportBatch():Promise<{ok:boolean;batchId?:string;code?:string}>;
+    addDroppedImportBatch(batchId:string,name:string,bytes:Uint8Array):Promise<{
+      ok:boolean;processed?:number;code?:string
+    }>;
+    finishDroppedImportBatch(batchId:string):Promise<DroppedBatchFinishResponse>;
     registerScenario(input: {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
       replacementSelector?:string;
@@ -250,6 +258,7 @@ let acceptedCount = 0;
 let duplicateCount = 0;
 let failedCount = 0;
 let unprocessedCount = 0;
+let droppedImportProgress:{processed:number;total:number}|null=null;
 
 function updateImportSummary(): void {
   if (importSummary) importSummary.textContent =
@@ -268,7 +277,9 @@ function updateImportSummary(): void {
         '（成功 '+(liveNativeImportProgress.accepted??0)+
         '、重复 '+(liveNativeImportProgress.duplicates??0)+
         '、失败 '+(liveNativeImportProgress.failed??0)+'）'
-      : '');
+      : droppedImportProgress
+        ? ' 文件选择进度：'+droppedImportProgress.processed+'/'+droppedImportProgress.total
+        : '');
 }
 
 function logLine(message: string): void {
@@ -382,6 +393,8 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
 async function importFiles(files: readonly File[]): Promise<void> {
   activeImport = true;
   cancelRequested = false;
+  droppedImportProgress=null;
+  let batchId:string|null=null;
   if (cancelImport) cancelImport.disabled = false;
   updateImportSummary();
   try {
@@ -390,6 +403,16 @@ async function importFiles(files: readonly File[]): Promise<void> {
       logLine('单批最多处理 1000 份文件');
       return;
     }
+    if(files.length===0)return;
+    const started=await window.healer.beginDroppedImportBatch();
+    if(!started.ok||typeof started.batchId!=='string'){
+      failedCount++;
+      logLine('批量导入未能开始：'+(started.code??'BATCH_START_FAILED'));
+      return;
+    }
+    batchId=started.batchId;
+    droppedImportProgress={processed:0,total:files.length};
+    updateImportSummary();
     let readBytes = 0;
     for (let index = 0; index < files.length; index++) {
       if (cancelRequested) {
@@ -401,6 +424,7 @@ async function importFiles(files: readonly File[]): Promise<void> {
       if (file.size > MAX_FILE_BYTES) {
         failedCount++;
         logLine(file.name + ': FILE_TOO_LARGE');
+        if(droppedImportProgress)droppedImportProgress.processed=index+1;
         updateImportSummary();
         continue;
       }
@@ -411,25 +435,40 @@ async function importFiles(files: readonly File[]): Promise<void> {
       }
       readBytes += file.size;
       // A rejected file never discards the rest of the batch.
-      // Byte reading may finish first; native IPC can abort the isolated AST worker.
+      // Byte reading may finish first; native IPC can abort the shared AST worker.
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const answer = await window.healer.importDropped(file.name, bytes);
-        if (answer.ok && answer.script) {
-          show({ canceled: false, scripts: [answer.script], errors: [], duplicates: 0 });
-        } else {
+        const appended=await window.healer.addDroppedImportBatch(batchId,file.name,bytes);
+        if(!appended.ok&&(appended.code==='STALE_BATCH'||appended.code==='BATCH_FINALIZED')){
           failedCount++;
-          logLine(file.name + ': ' + (answer.code ?? 'INVALID_INPUT'));
+          logLine(file.name+': '+appended.code);
+          unprocessedCount+=files.length-index-1;
+          break;
         }
       } catch {
         failedCount++;
         logLine(file.name + ': READ_OR_IMPORT_FAILED');
       }
+      if(droppedImportProgress)droppedImportProgress.processed=index+1;
       updateImportSummary();
     }
   } finally {
+    if(batchId!==null){
+      try{
+        const result=await window.healer.finishDroppedImportBatch(batchId);
+        if(result.ok)show(result);
+        else{
+          failedCount++;
+          logLine('批量导入未能完成：'+(result.code??'BATCH_FINISH_FAILED'));
+        }
+      }catch{
+        failedCount++;
+        logLine('批量导入结果未能确认。');
+      }
+    }
     activeImport = false;
     cancelRequested = false;
+    droppedImportProgress=null;
     if (cancelImport) cancelImport.disabled = true;
     updateImportSummary();
   }

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { importApprovedPaths, importDroppedBytes, MAX_SCRIPT_BYTES, scanApprovedDirectory } from '../../src/import/import-service';
+import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, MAX_SCRIPT_BYTES, scanApprovedDirectory } from '../../src/import/import-service';
 
 async function workspace(t: { after: (cb: () => Promise<void>) => void }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'uah-import-test-'));
@@ -571,4 +571,79 @@ test('TASK-018/TEST-002/026: Windows native imports reject aliases in selected a
    'aliased selected folder must be rejected lexically: '+alias);
  }
  assert.equal(await readFile(source,'utf8'),script,'native boundary is read-only');
+});
+
+test('TASK-013/TEST-022: dropped batch keeps valid neighbors around one invalid file',()=>{
+  const batch=new DroppedImportBatch();
+  const first=batch.add('first.user.js',new TextEncoder().encode(script));
+  const invalid=batch.add('notes.txt',new TextEncoder().encode(script));
+  const last=batch.add('last.user.js',new TextEncoder().encode(script+'\n// second'));
+  assert.equal(first.ok,true);
+  assert.equal(invalid.ok,false);
+  assert.equal(invalid.code,'NOT_USER_SCRIPT');
+  assert.equal(last.ok,true);
+  const result=batch.finish();
+  assert.deepEqual(result?.scripts.map(value=>value.filename),['first.user.js','last.user.js']);
+  assert.deepEqual(result?.errors,[{filename:'notes.txt',code:'NOT_USER_SCRIPT'}]);
+});
+
+test('TASK-013/TEST-022: dropped batch counts duplicate bytes once',()=>{
+  const batch=new DroppedImportBatch();
+  const bytes=new TextEncoder().encode(script);
+  assert.equal(batch.add('first.user.js',bytes).ok,true);
+  assert.equal(batch.add('renamed.user.js',bytes).ok,true);
+  const result=batch.finish();
+  assert.deepEqual(result?.scripts.map(value=>value.filename),['first.user.js']);
+  assert.equal(result?.duplicates,1);
+});
+
+test('TASK-013/TEST-026: dropped batch rejects malformed bytes without invoking a Proxy getter',()=>{
+  let getterCalls=0;
+  const hostile=new Proxy(new Uint8Array([47,47]),{
+    get(){getterCalls++;throw Error('unexpected getter');},
+    getPrototypeOf(){getterCalls++;throw Error('unexpected prototype trap');}
+  });
+  const batch=new DroppedImportBatch();
+  const answer=batch.add('proxy.user.js',hostile);
+  assert.equal(answer.ok,false);
+  assert.equal(answer.code,'INVALID_DRAG_DATA');
+  assert.equal(getterCalls,0);
+  assert.deepEqual(batch.finish()?.errors,[{filename:'proxy.user.js',code:'INVALID_DRAG_DATA'}]);
+});
+
+test('TASK-013/TEST-022: dropped batch enforces the 1000-file limit',()=>{
+  const batch=new DroppedImportBatch();
+  const bytes=new TextEncoder().encode(script);
+  for(let index=0;index<1000;index++)
+    batch.add(`script-${index}.user.js`,bytes);
+  const overflow=batch.add('overflow.user.js',bytes);
+  assert.deepEqual(overflow,{ok:false,processed:1000,code:'SCAN_LIMIT'});
+  const result=batch.finish();
+  assert.equal(result?.scripts.length,1);
+  assert.equal(result?.duplicates,999);
+  assert.deepEqual(result?.errors,[{filename:'overflow.user.js',code:'SCAN_LIMIT'}]);
+});
+
+test('TASK-013/TEST-022: dropped batch enforces the 128 MiB aggregate byte limit',()=>{
+  const batch=new DroppedImportBatch();
+  const bytes=new Uint8Array(8*1024*1024).fill(32);
+  bytes.set(new TextEncoder().encode('// ==UserScript==\n// @name Large\n// ==/UserScript==\n'));
+  for(let index=0;index<16;index++)
+    batch.add(`large-${index}.user.js`,bytes);
+  const overflow=batch.add('large-overflow.user.js',bytes);
+  assert.deepEqual(overflow,{ok:false,processed:17,code:'SCAN_LIMIT'});
+  const result=batch.finish();
+  assert.equal(result?.scripts.length,1);
+  assert.equal(result?.duplicates,15);
+  assert.deepEqual(result?.errors,[{filename:'large-overflow.user.js',code:'SCAN_LIMIT'}]);
+});
+
+test('TASK-013/TEST-022: dropped batch can be finalized once',()=>{
+  const batch=new DroppedImportBatch();
+  const bytes=new TextEncoder().encode(script);
+  batch.add('once.user.js',bytes);
+  assert.equal(batch.finish()?.scripts.length,1);
+  assert.equal(batch.finish(),null);
+  assert.deepEqual(batch.add('late.user.js',bytes),
+    {ok:false,processed:1,code:'BATCH_FINALIZED'});
 });

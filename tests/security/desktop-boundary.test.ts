@@ -13,8 +13,8 @@ const allowed = {
 };
 
 
-/** Exact IPC inventory: cancel-only drag/drop analysis expands the native
- * contract by precisely one channel, not by an arbitrary renderer gateway. */
+/** Exact IPC inventory: dropped-file batches use only three narrow lifecycle
+ * channels, not an arbitrary renderer gateway. */
 const approvedIpcChannels=[
  'ai:discover-native','ai:review-native','app:status','browser:choose-chrome','browser:choose-profile',
  'browser:connect-existing','browser:create-profile','browser:disconnect-existing',
@@ -22,7 +22,8 @@ const approvedIpcChannels=[
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
- 'import:dropped','import:files','import:folder','import:get-progress',
+ 'import:dropped','import:dropped-batch:add','import:dropped-batch:begin',
+ 'import:dropped-batch:finish','import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
  'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
@@ -371,6 +372,28 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
 
   assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-manual',\s*\{/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
+});
+
+test('TASK-013/TEST-026: dropped batch IPC is main-owned, frame-authorized and path-free',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:begin',\s*event\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'batch start must authorize the main frame');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:add',\s*\(event,\s*batchId:\s*unknown,\s*name:\s*unknown,\s*data:\s*unknown\)\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'each byte append must authorize the main frame');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:finish',\s*async\s*\(event,\s*batchId:\s*unknown\)\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'batch finish must authorize the main frame');
+  assert.ok(/batchId\s*=\s*randomUUID\(\)/.test(main),'the main process must create batch IDs');
+  assert.ok(/session\.id\s*!==\s*batchId/.test(main),'append/finalize must reject stale batch IDs');
+  assert.ok(/beginDroppedImportBatch:\s*\(\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:begin'\)/.test(preload));
+  assert.ok(/addDroppedImportBatch:\s*\(batchId: string, name: string, bytes: Uint8Array\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:add', batchId, name, bytes\)/.test(preload));
+  assert.ok(/finishDroppedImportBatch:\s*\(batchId: string\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:finish', batchId\)/.test(preload));
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('import:dropped-batch:(?:begin|add|finish)',[^)]*(?:path|url|sourcePath)/i);
+  assert.ok(/window\.healer\.beginDroppedImportBatch\(\)/.test(ui),'renderer file inputs must start one batch');
+  assert.ok(/window\.healer\.finishDroppedImportBatch\(batchId\)/.test(ui),'renderer file inputs must finalize once');
+  assert.ok(!/window\.healer\.importDropped\(file\.name,\s*bytes\)/.test(ui),
+    'renderer must not launch one IPC analysis job per file');
 });
 
 test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attesting page exception signals',()=>{

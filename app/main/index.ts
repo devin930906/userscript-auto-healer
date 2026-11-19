@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
-import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
+import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
@@ -187,6 +187,12 @@ let nativeImportCounters:NativeImportCounters|null=null;
 // The renderer can cancel its current read-only dropped-file AST preview.
 // Never grant arbitrary-path, manager or script-write authority through this.
 let droppedImportController: AbortController | null = null;
+interface ActiveDroppedImportBatch{
+  readonly id:string;
+  readonly owner:BrowserWindow;
+  readonly batch:DroppedImportBatch;
+}
+let droppedImportBatchSession:ActiveDroppedImportBatch|null=null;
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -1236,6 +1242,49 @@ function registerSafeIpc(): void {
     nativeImportController.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
+  ipcMain.handle('import:dropped-batch:begin',event=>{
+    authorizeSender(event);
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(nativeImportController||droppedImportController||manualExportInProgress||
+        nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
+      return {ok:false,code:'IMPORT_BUSY'};
+    const controller=new AbortController();
+    const batchId=randomUUID();
+    droppedImportController=controller;
+    droppedImportBatchSession={id:batchId,owner:win,batch:new DroppedImportBatch()};
+    return {ok:true,batchId};
+  });
+  ipcMain.handle('import:dropped-batch:add',(event,batchId:unknown,name:unknown,data:unknown)=>{
+    authorizeSender(event);
+    const session=droppedImportBatchSession;
+    const win=mainWindow;
+    if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.owner!==win||!win||win.isDestroyed())
+      return {ok:false,processed:0,code:'STALE_BATCH'};
+    return session.batch.add(name,data);
+  });
+  ipcMain.handle('import:dropped-batch:finish',async(event,batchId:unknown)=>{
+    authorizeSender(event);
+    const session=droppedImportBatchSession;
+    const win=mainWindow;
+    const controller=droppedImportController;
+    if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.owner!==win||!win||win.isDestroyed()||!controller)
+      return {ok:false,code:'STALE_BATCH'};
+    const result=session.batch.finish();
+    if(!result)return {ok:false,code:'BATCH_FINALIZED'};
+    droppedImportBatchSession=null;
+    try{
+      const summary=await summarizeResult(result,controller.signal);
+      if(win!==mainWindow||win.isDestroyed())return {ok:false,code:'WINDOW_CLOSED'};
+      for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
+      return {ok:true,...summary};
+    }catch{return {ok:false,code:'DROPPED_IMPORT_FAILED'};}
+    finally{
+      if(droppedImportController===controller)droppedImportController=null;
+    }
+  });
   ipcMain.handle('import:dropped', async (event, name:unknown, data:unknown) => {
     authorizeSender(event);
     const win=mainWindow;
@@ -1587,6 +1636,10 @@ async function createMainWindow(): Promise<void> {
       nativeAiDiscoveryController?.abort();
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
+      if(droppedImportBatchSession?.owner===win){
+        droppedImportBatchSession.batch.finish();
+        droppedImportBatchSession=null;
+      }
       droppedImportController?.abort();
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
@@ -2035,7 +2088,7 @@ async function createMainWindow(): Promise<void> {
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
     if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_SECURITY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
@@ -2188,6 +2241,8 @@ app.on('before-quit',()=>{
   nativeRestoreController?.abort();
   nativeAiDiscoveryController?.abort();
   nativeImportController?.abort();
+  droppedImportBatchSession?.batch.finish();
+  droppedImportBatchSession=null;
   droppedImportController?.abort();
   stopAllBrowserSessions();
 });
