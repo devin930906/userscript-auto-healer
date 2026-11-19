@@ -1874,11 +1874,20 @@ async function createMainWindow(): Promise<void> {
       "lines.some(x=>x.startsWith('accepted-batch.user.js:')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "const next=new DataTransfer(); next.items.add(new File(['// first'],'cancel-first.user.js')); " +
+      "let releaseFirstRead; const firstReadGate=new Promise(resolve=>{releaseFirstRead=resolve;}); " +
+      "let signalFirstReadStarted; const firstReadStarted=new Promise(resolve=>{signalFirstReadStarted=resolve;}); " +
       "next.items.add(new File(['// second'],'cancel-second.user.js')); " +
       "Object.defineProperty(input,'files',{configurable:true,value:next.files}); " +
+      "const originalFileArrayBuffer=File.prototype.arrayBuffer; " +
+      "File.prototype.arrayBuffer=function(){if(this.name!=='cancel-first.user.js')return originalFileArrayBuffer.call(this); " +
+      "File.prototype.arrayBuffer=originalFileArrayBuffer; signalFirstReadStarted(); " +
+      "return firstReadGate.then(()=>originalFileArrayBuffer.call(this));}; " +
       "input.dispatchEvent(new Event('change',{bubbles:true})); " +
       "const canCancel=!document.getElementById('cancel-import').disabled; " +
+      "const firstReadDidStart=await new Promise(resolve=>{const timer=setTimeout(()=>resolve(false),3000);firstReadStarted.then(()=>{clearTimeout(timer);resolve(true);});}); " +
+      "if(!firstReadDidStart)File.prototype.arrayBuffer=originalFileArrayBuffer; " +
       "document.getElementById('cancel-import').click(); " +
+      "releaseFirstRead(); " +
       "const cancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
@@ -1980,9 +1989,14 @@ async function createMainWindow(): Promise<void> {
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
       "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
-      "a.security.isolated === true, keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
+      "a.security.isolated === true, droppedCancelReadStarted:firstReadDidStart, " +
+      "droppedCancelAcknowledged:cancelled, " +
+      "droppedCancelSummaryCorrect:['成功 5','失败 2','未处理 1','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
+      "keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
       true
-    ) as { ok?: boolean; keys?: string[]; nativeHash?:string };
+    ) as { ok?: boolean; keys?: string[]; nativeHash?:string;
+      droppedCancelReadStarted?:boolean;droppedCancelAcknowledged?:boolean;
+      droppedCancelSummaryCorrect?:boolean };
     // TASK-009/012/017: a later, independently native-picked byte-identical
     // .user.js must become the exact local source for subsequent manual export.
     // Earlier hash-only path affinity silently retained the OLD pathname.
@@ -2110,6 +2124,12 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
+    if(probe?.droppedCancelReadStarted!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_FIRST_READ_NOT_STARTED');
+    if(probe?.droppedCancelAcknowledged!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_CANCEL_FAILED');
+    if(probe?.droppedCancelSummaryCorrect!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_CANCEL_SUMMARY_FAILED');
     if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
     if (probe.keys?.join(',') !==
         'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
