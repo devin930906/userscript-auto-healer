@@ -1243,3 +1243,45 @@ test('TASK-013/TEST-022/026: cancelled pre-worker checkpoint failure is normaliz
  assert.deepEqual(coordinator.snapshot().jobs.map(j=>j.attempts),[1,0]);
  assert.equal(coordinator.snapshot().automaticPatchAllowed,false);
 });
+
+test('TASK-013/TEST-022: unattended batch diagnostic pipeline enforces per-script error isolation and fail-closed reporting', async () => {
+  const SCRIPT_OK = '1'.repeat(64);
+  const SCRIPT_FAIL = '2'.repeat(64);
+  const SCRIPT_PERMANENT = '3'.repeat(64);
+
+  const hashes = [SCRIPT_OK, SCRIPT_FAIL, SCRIPT_PERMANENT];
+  const executedOrdinals: number[] = [];
+  const coordinator = new ReadOnlyBatchCoordinator(
+    {
+      count: 3,
+      concurrency: 1,
+      maxAttempts: 2,
+      jobHashes: hashes
+    },
+    async (ordinal: number) => {
+      executedOrdinals.push(ordinal);
+      if (ordinal === 1) {
+        return 'RETRYABLE_FAILURE';
+      }
+      return 'DONE';
+    }
+  );
+
+  await coordinator.run();
+  const finalSnapshot = coordinator.snapshot();
+
+  // 1. All scripts are processed through unattended pipeline
+  assert.equal(finalSnapshot.jobs.length, 3);
+  assert.deepEqual(executedOrdinals, [0, 1, 1, 2]);
+
+  // 2. Error isolation: failing script ordinal 1 exhausts retry budget without halting later scripts
+  assert.equal(finalSnapshot.jobs[0].state, 'SUCCEEDED');
+  assert.equal(finalSnapshot.jobs[1].state, 'FAILED');
+  assert.equal(finalSnapshot.jobs[1].attempts, 2);
+  assert.equal(finalSnapshot.jobs[2].state, 'SUCCEEDED');
+
+  // 3. Fail-closed invariants strictly preserved across batch lifecycle
+  assert.equal(finalSnapshot.automaticPatchAllowed, false);
+  assert.equal(finalSnapshot.tampermonkeyVerified, false);
+  assert.equal(finalSnapshot.businessVerified, false);
+});
