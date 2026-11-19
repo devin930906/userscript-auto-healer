@@ -14,7 +14,9 @@ import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
 import {acquireNativeAstWorkerLease,previewImportedBatchOffMain,
- releaseNativeAstWorkerLease,type IsolatedBatchPreviewResult,
+ releaseNativeAstWorkerLease,validateIsolatedBatchPreviewResult,
+ MAX_TOTAL_PREVIEW_MS,
+ type IsolatedBatchPreviewResult,
  type NativeAstWorkerLease} from '../analyze/isolated-batch-preview';
 import {hasUnsafePathLink} from '../version/path-boundary';
 import {snapshotNativeScripts} from './imported-analysis-queue';
@@ -38,22 +40,29 @@ const blank=(count:number,status:'SKIPPED_CANCELLED'|'SKIPPED_BATCH_BUDGET'|
 
 /** Only the explicit Worker lifecycle receipt can authorize another dispatch.
  * Old array-only results and malformed receipts have no retirement proof. */
-function readWorkerResult(value:unknown):IsolatedBatchPreviewResult|null{
- try{
-  if(!value||typeof value!=='object'||nodeTypes.isProxy(value)||Array.isArray(value))
-   return null;
-  const fields=Object.getOwnPropertyDescriptors(value);
-  const names=Reflect.ownKeys(fields);
-  if(names.length!==2||
-     !Object.prototype.hasOwnProperty.call(fields,'previews')||
-     !Object.prototype.hasOwnProperty.call(fields,'safeToContinue')||
-     !Object.prototype.hasOwnProperty.call(fields.previews,'value')||
-     !Object.prototype.hasOwnProperty.call(fields.safeToContinue,'value')||
-     !Array.isArray(fields.previews.value)||
-     typeof fields.safeToContinue.value!=='boolean')return null;
-  return {previews:fields.previews.value as ImportAnalysisPreview[],
-   safeToContinue:fields.safeToContinue.value};
- }catch{return null;}
+function readWorkerResult(value:unknown,count:number):IsolatedBatchPreviewResult|null{
+ return validateIsolatedBatchPreviewResult(value,count);
+}
+type WorkerTaskOutcome<T>=
+ |Readonly<{status:'FULFILLED';value:T;settledAt:number}>
+ |Readonly<{status:'REJECTED'}>
+ |Readonly<{status:'TIMED_OUT'}>;
+/** Bound scheduler waits independently from the coordinator so an adapter
+ * that ignores cancellation cannot strand checkpoint cleanup or permit an
+ * overlapping recovery Worker. */
+async function waitForWorkerTask<T>(task:Promise<T>,deadlineAt:number):Promise<WorkerTaskOutcome<T>>{
+ const settled=task.then(
+  value=>({status:'FULFILLED' as const,value,settledAt:performance.now()}),
+  ()=>({status:'REJECTED' as const})
+ );
+ const remaining=Math.min(10000,Math.max(0,deadlineAt-performance.now()));
+ let timer:NodeJS.Timeout|undefined;
+ const timedOut=new Promise<Readonly<{status:'TIMED_OUT'}>>(resolve=>{
+  if(remaining<=0)queueMicrotask(()=>resolve({status:'TIMED_OUT'}));
+  else timer=setTimeout(()=>resolve({status:'TIMED_OUT'}),remaining);
+ });
+ try{return await Promise.race([settled,timedOut]);}
+ finally{if(timer)clearTimeout(timer);}
 }
 
 /** A cancellation claim may come from an untrusted JS boundary even for
@@ -189,30 +198,73 @@ export async function runCheckpointedNativeImportAnalysis(
   }
  };
  const lifetime=new AbortController();
+ const deadlineAt=performance.now()+MAX_TOTAL_PREVIEW_MS;
+ let deadlineExpired=false;
+ const cancel=()=>{
+  if(!deadlineExpired&&performance.now()>=deadlineAt)deadlineExpired=true;
+  lifetime.abort();
+ };
+ const expireDeadlineIfNeeded=()=>{
+   if(!deadlineExpired&&!signal?.aborted&&performance.now()>=deadlineAt){
+   deadlineExpired=true;
+   cancel();
+  }
+  return deadlineExpired;
+ };
  // Keep this process-local stop state after an unconfirmed Worker retirement;
  // journal rows remain ordinary scheduling states, never lifecycle authority.
  const attemptCounts:number[]=Array(groups.length).fill(0);
  const inFlightWorkers=new Set<Promise<unknown>>();
+ let unretiredTasksDetected=false;
+ let allowRecoveryAndReplay=true;
  const recoverIndividually=async(group:typeof groups[number])=>{
   const rows:(ImportAnalysisPreview|undefined)[]=
    Array(group.scripts.length).fill(undefined);
   for(let index=0;index<group.scripts.length;index++){
-   if(lifetime.signal.aborted)break;
-   const task=previewImportedBatchOffMain([group.scripts[index]],
-    lifetime.signal,undefined,true,lease);
-   inFlightWorkers.add(task);
+   if(lifetime.signal.aborted||expireDeadlineIfNeeded())break;
+   let task:Promise<unknown>|undefined;
+    let taskSettled=false;
    try{
-    const value=await task;
-    const evidence=readWorkerResult(value);
+    task=previewImportedBatchOffMain([group.scripts[index]],
+     lifetime.signal,undefined,true,lease,deadlineAt);
+    inFlightWorkers.add(task);
+     const awaited=await waitForWorkerTask(task,deadlineAt);
+     if(awaited.status==='TIMED_OUT'){
+      if(!signal?.aborted&&performance.now()>=deadlineAt)
+       expireDeadlineIfNeeded();
+      safeToLaunchWorkers=false;
+      unretiredTasksDetected=true;
+      const status=deadlineExpired?'SKIPPED_BATCH_BUDGET':
+       signal?.aborted||lifetime.signal.aborted?'SKIPPED_CANCELLED':
+       'ISOLATED_ANALYSIS_FAILED';
+      rows[index]=unavailableImportPreview(status,'NOT_CHECKED');
+      break;
+     }
+     taskSettled=true;
+     if(awaited.status==='REJECTED'){
+      safeToLaunchWorkers=false;
+      break;
+     }
+     const value=awaited.value;
+    const evidence=readWorkerResult(value,1);
     if(!evidence||!evidence.safeToContinue){
      safeToLaunchWorkers=false;
      break;
     }
+     if(awaited.settledAt>=deadlineAt){
+      if(!signal?.aborted)expireDeadlineIfNeeded();
+      if(deadlineExpired){
+       rows[index]=unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
+       break;
+      }
+     }
     if(evidence.previews.length!==1){
      rows[index]=unavailableImportPreview('ISOLATED_ANALYSIS_FAILED','NOT_CHECKED');
      continue;
     }
     rows[index]=evidence.previews[0];
+     if(deadlineExpired&&rows[index]?.status==='SKIPPED_CANCELLED')
+      rows[index]=unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
     if(rows[index]?.status==='SKIPPED_CANCELLED'||
        rows[index]?.status==='SKIPPED_BATCH_BUDGET')break;
    }catch{
@@ -220,31 +272,48 @@ export async function runCheckpointedNativeImportAnalysis(
     safeToLaunchWorkers=false;
     break;
    }finally{
-    inFlightWorkers.delete(task);
+     if(task&&taskSettled)inFlightWorkers.delete(task);
    }
   }
   return rows;
  };
  const worker=async(ordinal:number,abort:AbortSignal)=>{
-  if(!safeToLaunchWorkers)return 'PERMANENT_FAILURE' as const;
+  if(expireDeadlineIfNeeded()||abort.aborted||!safeToLaunchWorkers)
+   return 'PERMANENT_FAILURE' as const;
   const attempt=++attemptCounts[ordinal];
   let previews:ImportAnalysisPreview[];
-  const task=previewImportedBatchOffMain(groups[ordinal].scripts,abort,
-   undefined,true,lease);
-  inFlightWorkers.add(task);
+  let task:Promise<unknown>|undefined;
+  let taskSettled=false;
   try{
-   const value=await task;
-   const evidence=readWorkerResult(value);
+   task=previewImportedBatchOffMain(groups[ordinal].scripts,abort,
+    undefined,true,lease,deadlineAt);
+   inFlightWorkers.add(task);
+   const awaited=await waitForWorkerTask(task,deadlineAt);
+   if(awaited.status==='TIMED_OUT'){
+    if(!signal?.aborted&&performance.now()>=deadlineAt)
+     expireDeadlineIfNeeded();
+    safeToLaunchWorkers=false;
+    unretiredTasksDetected=true;
+    return 'PERMANENT_FAILURE' as const;
+   }
+   taskSettled=true;
+   if(awaited.status==='REJECTED'){
+    safeToLaunchWorkers=false;
+    return 'PERMANENT_FAILURE' as const;
+   }
+   const value=awaited.value;
+   const evidence=readWorkerResult(value,groups[ordinal].scripts.length);
    if(!evidence){safeToLaunchWorkers=false;return 'PERMANENT_FAILURE' as const;}
    previews=evidence.previews;
    if(!evidence.safeToContinue)safeToLaunchWorkers=false;
+   if(expireDeadlineIfNeeded())return 'PERMANENT_FAILURE' as const;
   }catch{
    // No structured retirement receipt means a replacement could overlap a
    // Worker that remains live. Fail closed for this and later segments.
    safeToLaunchWorkers=false;
    return 'PERMANENT_FAILURE' as const;
   }finally{
-   inFlightWorkers.delete(task);
+   if(task&&taskSettled)inFlightWorkers.delete(task);
   }
   if(abort.aborted||signal?.aborted||lifetime.signal.aborted||
      previews.some(row=>row.status==='SKIPPED_CANCELLED'||
@@ -274,6 +343,8 @@ export async function runCheckpointedNativeImportAnalysis(
  if(loaded.status==='BLOCKED'&&loaded.reason!=='NOT_FOUND')
   return fail(count,loaded.reason);
  if(signal?.aborted)return fail(count,'CANCELLED');
+ if(expireDeadlineIfNeeded())return Object.freeze({status:'BLOCKED' as const,
+  reason:'CANCELLED' as const,previews:blank(count,'SKIPPED_BATCH_BUDGET')});
  const resumed=loaded.status==='CHECKPOINT_RESTORED_SCHEDULING_ONLY';
  if(resumed){
   for(const job of loaded.coordinator.snapshot().jobs)
@@ -284,21 +355,38 @@ export async function runCheckpointedNativeImportAnalysis(
  // Preserve the pre-existing 120-second overall AST budget, not merely
  // the per-segment timeout. A 1000-file import must not hold the UI for
  // 63 independent 15-second attempts.
- const cancel=()=>lifetime.abort();
  const onAbort=()=>coordinator.cancel();
- const timeout=setTimeout(cancel,120000);
+ const timeout=setTimeout(()=>{
+   if(!signal?.aborted){
+    deadlineExpired=true;
+    cancel();
+   }
+ },Math.max(0,deadlineAt-performance.now()));
  signal?.addEventListener('abort',cancel,{once:true});
  lifetime.signal.addEventListener('abort',onAbort,{once:true});
  try{
+  expireDeadlineIfNeeded();
   if(signal?.aborted||lifetime.signal.aborted)return fail(count,'CANCELLED');
   const outcome=await runCheckpointedReadOnlyBatch(directory,coordinator,reportSavedProgress);
+   // Coordinator cancellation/timeout may release its lane while an adapter
+   // Promise still owns an unretired Worker. Suppress every recovery/replay.
+   if(inFlightWorkers.size>0){
+    allowRecoveryAndReplay=false;
+   }
+  expireDeadlineIfNeeded();
   if(signal?.aborted||lifetime.signal.aborted){
    // Cancellation revokes the batch receipt but should not erase results
    // from independently completed segments. A durable SUCCEEDED state is
    // insufficient on its own: also require current-session Worker evidence.
    // A checkpoint write failure leaves NO trusted durability evidence.
-   if(outcome.status==='BLOCKED')return fail(count,'CANCELLED');
-   const incompleteStatus=lifetime.signal.aborted&&!signal?.aborted
+   if(outcome.status==='BLOCKED'){
+    const status=deadlineExpired?'SKIPPED_BATCH_BUDGET' as const:
+     'SKIPPED_CANCELLED' as const;
+    return Object.freeze({status:'BLOCKED' as const,reason:'CANCELLED' as const,
+     previews:blank(count,status)});
+   }
+   const incompleteStatus=deadlineExpired||
+    (lifetime.signal.aborted&&!signal?.aborted)
     ?'SKIPPED_BATCH_BUDGET' as const:'SKIPPED_CANCELLED' as const;
    const partial=groups.flatMap((group,ordinal)=>{
     const fresh=observations[ordinal];
@@ -313,6 +401,19 @@ export async function runCheckpointedNativeImportAnalysis(
   const previews:ImportAnalysisPreview[]=[];
   let processed=0;
   for(let ordinal=0;ordinal<groups.length;ordinal++){
+   if(expireDeadlineIfNeeded()){
+    // Keep independently completed current-session AST evidence from later
+    // coordinator jobs, while leaving every unprocessed group explicit.
+    const status='SKIPPED_BATCH_BUDGET' as const;
+    const later=groups.slice(ordinal).flatMap((group,index)=>{
+     const laterOrdinal=ordinal+index;
+     const fresh=observations[laterOrdinal];
+     return fresh?.length===group.scripts.length
+      ?fresh:blank(group.scripts.length,status);
+    });
+    return Object.freeze({status:'BLOCKED' as const,reason:'CANCELLED' as const,
+     previews:[...previews,...later]});
+   }
    const group=groups[ordinal];
    const state=outcome.snapshot.jobs[ordinal].state;
    // A cancelled journal job is terminal, not an AST Worker failure or
@@ -325,22 +426,39 @@ export async function runCheckpointedNativeImportAnalysis(
    // A prior success is an unauthenticated scheduling hint. Always rerun
    // its bounded, isolated AST worker to return fresh, source-matched UI data.
    let reports=observations[ordinal];
-   if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted&&
-      safeToLaunchWorkers){
+    if(!reports&&state==='SUCCEEDED'&&!lifetime.signal.aborted&&
+       safeToLaunchWorkers&&allowRecoveryAndReplay){
     // A persisted success is a scheduling hint, not fresh AST evidence.
     // Resumed display has the same TWO-attempt transient-worker budget as
     // initial read-only analysis. Never rewrite the durable journal, and
     // never retry cancelled or budget-limited requests.
     let exhaustedTransientRetries=false;
     for(let attempt=0;attempt<2;attempt++){
-     if(signal?.aborted||lifetime.signal.aborted)break;
+     if(signal?.aborted||lifetime.signal.aborted||expireDeadlineIfNeeded())break;
+      let task:Promise<unknown>|undefined;
+      let taskSettled=false;
      try{
-      const value=await previewImportedBatchOffMain(group.scripts,lifetime.signal,
-       undefined,true,lease);
-      const evidence=readWorkerResult(value);
+       task=previewImportedBatchOffMain(group.scripts,lifetime.signal,
+        undefined,true,lease,deadlineAt);
+       inFlightWorkers.add(task);
+       const awaited=await waitForWorkerTask(task,deadlineAt);
+       if(awaited.status==='TIMED_OUT'){
+        if(!signal?.aborted&&performance.now()>=deadlineAt)
+         expireDeadlineIfNeeded();
+        safeToLaunchWorkers=false;
+        unretiredTasksDetected=true;
+        break;
+       }
+       taskSettled=true;
+       if(awaited.status==='REJECTED'){
+        safeToLaunchWorkers=false;
+        break;
+       }
+       const evidence=readWorkerResult(awaited.value,group.scripts.length);
       if(!evidence){safeToLaunchWorkers=false;break;}
       const fresh=evidence.previews;
       if(!evidence.safeToContinue)safeToLaunchWorkers=false;
+      if(expireDeadlineIfNeeded())break;
       if(fresh.length===group.scripts.length&&
          evidence.safeToContinue&&
          !fresh.some(row=>row.status==='ISOLATED_ANALYSIS_FAILED'||
@@ -356,6 +474,8 @@ export async function runCheckpointedNativeImportAnalysis(
       // No retirement receipt means a replacement could overlap a live Worker.
       safeToLaunchWorkers=false;
       break;
+      }finally{
+       if(task&&taskSettled)inFlightWorkers.delete(task);
      }
     }
     if(exhaustedTransientRetries&&safeToLaunchWorkers)
@@ -363,23 +483,35 @@ export async function runCheckpointedNativeImportAnalysis(
    }
    let partialRecovery:(ImportAnalysisPreview|undefined)[]|undefined;
    if(!reports&&needsRecovery[ordinal]&&group.scripts.length>1&&
-      safeToLaunchWorkers&&!lifetime.signal.aborted)
+       safeToLaunchWorkers&&allowRecoveryAndReplay&&
+       !lifetime.signal.aborted&&!expireDeadlineIfNeeded())
     partialRecovery=await recoverIndividually(group);
+   expireDeadlineIfNeeded();
    // Resume reanalysis awaits a worker AFTER checkpoint settlement. Any
    // cancellation during that await revokes the display receipt, even when
    // the previously persisted scheduling hint was SUCCEEDED.
    if(signal?.aborted||lifetime.signal.aborted){
-    const incompleteStatus=lifetime.signal.aborted&&!signal?.aborted
+    const incompleteStatus=deadlineExpired||
+     (lifetime.signal.aborted&&!signal?.aborted)
      ?'SKIPPED_BATCH_BUDGET' as const:'SKIPPED_CANCELLED' as const;
-    const recovered=partialRecovery?.map(row=>{
-     if(row?.status==='SKIPPED_CANCELLED'&&incompleteStatus==='SKIPPED_BATCH_BUDGET')
-      return unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
-     return row??unavailableImportPreview(incompleteStatus,'NOT_CHECKED');
-    })??[];
+     const recovered=partialRecovery?.map(row=>{
+      if(row?.status==='SKIPPED_CANCELLED'&&incompleteStatus==='SKIPPED_BATCH_BUDGET')
+       return unavailableImportPreview('SKIPPED_BATCH_BUDGET','NOT_CHECKED');
+      return row??unavailableImportPreview(incompleteStatus,'NOT_CHECKED');
+     })??(observations[ordinal]?.length===group.scripts.length
+      ?observations[ordinal]!:blank(group.scripts.length,incompleteStatus));
+     // The coordinator may already have completed later segments before an
+     // earlier FAILED segment enters per-file recovery. Preserve only fresh
+     // current-session results; a checkpoint's SUCCEEDED hint is not enough.
+     const later=groups.slice(ordinal+1).flatMap((laterGroup,index)=>{
+      const laterOrdinal=ordinal+1+index;
+      const fresh=observations[laterOrdinal];
+      return fresh?.length===laterGroup.scripts.length
+       ?fresh:blank(laterGroup.scripts.length,incompleteStatus);
+     });
     return Object.freeze({status:'BLOCKED' as const,
      reason:'CANCELLED' as const,
-     previews:[...previews,...recovered,
-      ...blank(count-previews.length-recovered.length,incompleteStatus)]});
+      previews:[...previews,...recovered,...later]});
    }
    if(partialRecovery)
     reports=partialRecovery.map(row=>row??
@@ -398,14 +530,26 @@ export async function runCheckpointedNativeImportAnalysis(
     reason:'CANCELLED' as const,previews});
   return Object.freeze({status:'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED' as const,
    resumed,previews});
- }finally{
-  clearTimeout(timeout);
-  signal?.removeEventListener('abort',cancel);
-  lifetime.signal.removeEventListener('abort',onAbort);
-  if(inFlightWorkers.size>0){
-   await Promise.allSettled(Array.from(inFlightWorkers));
+  }finally{
+   clearTimeout(timeout);
+   signal?.removeEventListener('abort',cancel);
+   lifetime.signal.removeEventListener('abort',onAbort);
+   let allWorkersRetired=inFlightWorkers.size===0&&!unretiredTasksDetected;
+   if(inFlightWorkers.size>0&&!unretiredTasksDetected){
+    const pending=Promise.allSettled(Array.from(inFlightWorkers)).then(()=>true);
+    const remaining=Math.min(10000,Math.max(0,deadlineAt-performance.now()));
+    if(remaining>0){
+     let cleanupTimer:NodeJS.Timeout|undefined;
+     const deadlineWait=new Promise<false>(resolve=>{
+      cleanupTimer=setTimeout(()=>resolve(false),remaining);
+     });
+     allWorkersRetired=await Promise.race([pending,deadlineWait]);
+     if(cleanupTimer)clearTimeout(cleanupTimer);
+    }
+   }
+   if(!allWorkersRetired)
+    safeToLaunchWorkers=false;
   }
- }
  }finally{
   releaseNativeAstWorkerLease(lease,safeToLaunchWorkers);
  }

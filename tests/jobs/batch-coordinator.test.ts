@@ -1041,7 +1041,7 @@ test('TEST-022: expired global AST deadline is distinguished from user cancellat
  const nativeTimeout=globalThis.setTimeout;
  globalThis.setTimeout=((
   callback:(...args:unknown[])=>void,delay?:number,...args:unknown[]
- )=>nativeTimeout(callback,delay===120000?0:delay,...args)) as typeof setTimeout;
+ )=>nativeTimeout(callback,delay!==undefined&&delay>100000?0:delay,...args)) as typeof setTimeout;
  try{
   const results=await runImportedReadOnlyAnalysisQueue([script]);
   assert.deepEqual(results.map(item=>item.status),['SKIPPED_BATCH_BUDGET']);

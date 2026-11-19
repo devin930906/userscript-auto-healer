@@ -14,6 +14,27 @@ import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 
+function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
+ const childEnv:NodeJS.ProcessEnv={...process.env,...extraEnv};
+ // Node uses this variable to tell a child that it is already under the test
+ // runner. Remove it when deliberately starting a separate child test runner.
+ delete childEnv.NODE_TEST_CONTEXT;
+ return execFileSync(process.execPath,args,{encoding:'utf8',env:childEnv});
+}
+
+test('TASK-013/TEST-022: nested node test runner executes its selected test body',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-nested-node-test-'));
+ try{
+  const childFile=join(home,'nested-runner.test.cjs');
+  await writeFile(childFile,
+   "const {test}=require('node:test');test('child sentinel',()=>console.log('UAH_CHILD_TEST_BODY_EXECUTED'));\n");
+  const output=runNodeTestChild(['--test','--test-reporter=tap',childFile]);
+  assert.match(output,/UAH_CHILD_TEST_BODY_EXECUTED/);
+  assert.match(output,/(?:^|\r?\n)# tests 1(?:\r?\n|$)/);
+  assert.match(output,/(?:^|\r?\n)# pass 1(?:\r?\n|$)/);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022/026: checkpointed native import must reject an array Proxy without reading properties',async()=>{
  let traps=0;
  const hostile=new Proxy([] as unknown as Parameters<
@@ -38,13 +59,526 @@ test('TASK-013/TEST-022/026: checkpointed native import must reject an array Pro
 });
 
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
+
+test('TASK-013/TEST-022/026: cancellation during early per-file recovery preserves later completed segment evidence',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-recovery-later-segment-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const actual=isolated.previewImportedBatchOffMain;
+ const controller=new AbortController();
+ let recoveryStarted!:()=>void;
+ const started=new Promise<void>(resolve=>{recoveryStarted=resolve;});
+ let finishRecovery!:()=>void;
+ const heldRecovery=new Promise<void>(resolve=>{finishRecovery=resolve;});
+ let firstSegmentAttempts=0;
+ let lastScriptDigest='';
+ let pending:ReturnType<typeof runCheckpointedNativeImportAnalysis>|undefined;
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof actual>)=>{
+   const selected=args[0];
+   if(selected.length===16){
+    firstSegmentAttempts++;
+    return {previews:selected.map(()=>unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+   }
+   if(selected.length===1&&createHash('sha256').update(selected[0].bytes).digest('hex')===lastScriptDigest)
+    return actual(...args);
+   recoveryStarted();
+   await heldRecovery;
+   return {previews:[unavailableImportPreview('SKIPPED_CANCELLED','NOT_CHECKED')],
+    safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`recovery-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#recovery-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  assert.equal(scripts.length,17);
+  lastScriptDigest=createHash('sha256').update(scripts[16].bytes).digest('hex');
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  pending=runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts,controller.signal);
+  await started;
+  controller.abort();
+  finishRecovery();
+  const result=await pending;
+  assert.equal(firstSegmentAttempts,2);
+  assert.equal(result.status,'BLOCKED');
+  if(result.status==='BLOCKED'){
+   assert.equal(result.reason,'CANCELLED');
+   assert.equal(result.previews.length,17);
+   assert.equal(result.previews.slice(0,16).every(row=>
+    row.status==='SKIPPED_CANCELLED'),true);
+   assert.equal(result.previews[16].status,'STATIC_ANALYSIS_ONLY',
+    'a later segment already completed with fresh evidence before recovery was cancelled');
+  }
+ }finally{
+  controller.abort();
+  finishRecovery();
+  await pending?.catch(()=>{});
+  patch.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: native queue rejects a malformed single preview',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-malformed-preview-'));
+ try{
+  const file=join(home,'malformed.user.js');
+  await writeFile(file,header+'document.querySelector("#malformed");');
+  const scripts=(await importApprovedPaths([file])).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',async()=>({
+   previews:[{status:'UNRECOGNIZED_PREVIEW'}],safeToContinue:true
+  } as unknown as Awaited<ReturnType<typeof actual>>));
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(
+    join(userData,'readonly-journals'),scripts);
+   assert.equal(outcome.previews.length,1);
+   assert.equal(outcome.previews[0].status,'ISOLATED_ANALYSIS_FAILED');
+   assert.equal(outcome.previews[0].automaticPatchAllowed,false);
+   assert.equal(outcome.previews[0].tampermonkeyVerified,false);
+   assert.equal(outcome.previews[0].businessVerified,false);
+  }finally{patch.mock.restore();}
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: native synchronous adapter failure stops later segments',async()=>{
+ if(isolateNativePoisoningTest(
+  'native synchronous adapter failure stops later segments','native-sync-adapter'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-sync-adapter-failure-'));
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`native-sync-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#native-sync-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   (...args:Parameters<typeof actual>)=>{
+    calls++;
+    if(calls===1)throw Error('SYNC_ADAPTER_FAILURE');
+    return actual(...args);
+   });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(
+    join(userData,'readonly-journals'),scripts);
+   assert.equal(calls,1,'an untrusted synchronous throw carries no retirement receipt');
+   assert.equal(outcome.previews.length,17);
+   assert.equal(outcome.previews.every(row=>
+    row.status==='ISOLATED_ANALYSIS_FAILED'),true);
+  }finally{patch.mock.restore();}
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/NFR-009: delayed native deadline timer prevents post-budget Worker retry',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-late-deadline-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<2;index++){
+   const path=join(home,`native-late-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#native-late-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const actual=isolated.previewImportedBatchOffMain;
+  let calls=0;
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',
+   async(...args:Parameters<typeof actual>)=>{
+    calls++;
+    assert.equal(args[5],120000,
+     'the Worker must receive the same absolute deadline as the native batch');
+    now=120001; // Simulate monotonic deadline expiry before timer delivery.
+    return {previews:args[0].map(()=>unavailableImportPreview(
+     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+   });
+  try{
+   const outcome=await runCheckpointedNativeImportAnalysis(
+    join(userData,'readonly-journals'),scripts);
+   assert.equal(calls,1,'a delayed timer must not permit a retry Worker');
+   assert.equal(outcome.previews.length,2);
+   assert.deepEqual(outcome.previews.map(row=>row.status),[
+    'SKIPPED_BATCH_BUDGET','SKIPPED_BATCH_BUDGET'
+   ]);
+  }finally{patch.mock.restore();}
+ }finally{
+  clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: budget stop preserves fresh later native segment observations',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-budget-later-observation-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ let deadlineClockArmed=false;
+ let readsAfterArm=0;
+ const clock=mock.method(performance,'now',()=>{
+  if(!deadlineClockArmed)return 0;
+  if(readsAfterArm++===0)return 0;
+  deadlineClockArmed=false;
+  return 120001;
+ });
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>({
+   previews:args[0].map(previewImportedScriptAnalysis),safeToContinue:true
+  } as unknown as Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>));
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`budget-observation-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#budget-observation-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const result=await runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts,undefined,(done,total)=>{
+    if(done===total){deadlineClockArmed=true;readsAfterArm=0;}
+   });
+  assert.equal(result.status,'BLOCKED');
+  if(result.status==='BLOCKED'){
+   assert.equal(result.reason,'CANCELLED');
+   assert.equal(result.previews.length,17);
+   assert.deepEqual(result.previews.map(row=>row.status),
+    Array(17).fill('STATIC_ANALYSIS_ONLY'),
+    'budget completion must retain fresh AST evidence already returned by later jobs');
+  }
+ }finally{
+  patch.mock.restore();clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 function isolateNativePoisoningTest(pattern:string,childKey:string):boolean{
  if(process.env.UAH_TASK013_NATIVE_CHILD===childKey)return false;
- execFileSync(process.execPath,['--test','--test-name-pattern',pattern,__filename],{
-  encoding:'utf8',env:{...process.env,UAH_TASK013_NATIVE_CHILD:childKey}
- });
+ const output=runNodeTestChild([
+  '--test','--test-reporter=tap','--test-name-pattern',pattern,__filename
+ ],{UAH_TASK013_NATIVE_CHILD:childKey});
+ assert.match(output,/(?:^|\r?\n)# tests 1(?:\r?\n|$)/,
+  'the isolated child process must execute exactly one selected test');
+ assert.match(output,/(?:^|\r?\n)# pass 1(?:\r?\n|$)/,
+  'the isolated child test must pass rather than silently skip');
+ assert.match(output,/(?:^|\r?\n)# fail 0(?:\r?\n|$)/);
+ const targetLine=output.split(/\r?\n/).find(line=>
+  /^ok \d+ - /.test(line)&&line.includes(pattern)&&!line.includes('# SKIP'));
+ assert.ok(targetLine,'the named target test itself must have an executed TAP success line');
  return true;
 }
+
+test('TASK-013/TEST-022/026: native cleanup bounds an adapter promise that ignores cancellation',async()=>{
+ if(isolateNativePoisoningTest(
+  'native cleanup bounds an adapter promise that ignores cancellation',
+  'hung-adapter-cleanup'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-hung-adapter-cleanup-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ let notifyCall!:()=>void;
+ const called=new Promise<void>(resolve=>{notifyCall=resolve;});
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',()=>{
+  controller.abort();
+  now=120001;
+  notifyCall();
+  return never;
+ });
+ try{
+  const selected=join(home,'hung-native.user.js');
+  await writeFile(selected,header+'document.querySelector("#hung-native");');
+  const scripts=(await importApprovedPaths([selected])).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const pending=runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts,controller.signal);
+  await called;
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   setTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','native cleanup must not hang on an unresponsive adapter');
+  const outcome=result as Awaited<typeof pending>;
+  assert.equal(outcome.status,'BLOCKED');
+  if(outcome.status==='BLOCKED'){
+   assert.equal(outcome.reason,'CANCELLED');
+   assert.deepEqual(outcome.previews.map(row=>row.status),
+    ['SKIPPED_CANCELLED']);
+  }
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: unretired native coordinator timeout suppresses recovery dispatch',async()=>{
+ if(isolateNativePoisoningTest(
+  'unretired native coordinator timeout suppresses recovery dispatch',
+  'unretired-native-no-overlap'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-unretired-coordinator-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const originalSetTimeout=globalThis.setTimeout;
+ let triggerLifecycleTimeout:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay===10000){
+   triggerLifecycleTimeout=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay,...args);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+ let calls=0;
+ let notifyPending!:()=>void;
+ const pendingStarted=new Promise<void>(resolve=>{notifyPending=resolve;});
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>{
+   calls++;
+   if(args[0].length>1)return {previews:args[0].map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<
+      ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+   notifyPending();
+   return never;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`native-unretired-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#native-unretired-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const pending=runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts);
+  await pendingStarted;
+  assert.ok(triggerLifecycleTimeout,'the hanging adapter must have a bounded lifecycle timer');
+  triggerLifecycleTimeout();
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   originalSetTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','native scheduler must return after adapter timeout');
+  assert.equal(calls,3,'no per-file recovery may start behind an unretired segment');
+  assert.deepEqual((result as Awaited<typeof pending>).previews.map(row=>row.status),
+   Array(17).fill('ISOLATED_ANALYSIS_FAILED'));
+ }finally{
+  patch.mock.restore();globalThis.setTimeout=originalSetTimeout;clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: native single-file recovery bounds a hung adapter and preserves later evidence',async()=>{
+ if(isolateNativePoisoningTest(
+  'native single-file recovery bounds a hung adapter and preserves later evidence',
+  'native-hung-recovery'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-hung-recovery-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const actual=isolated.previewImportedBatchOffMain;
+ const performance=require('node:perf_hooks').performance as Performance;
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ let lastDigest='';
+ let calls=0;
+ const never=new Promise<never>(()=>{});
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof actual>)=>{
+   calls++;
+   const selected=args[0];
+   if(selected.length>1)return {previews:selected.map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+   if(createHash('sha256').update(selected[0].bytes).digest('hex')===lastDigest)
+    return actual(...args);
+   controller.abort();
+   now=120001;
+   return never;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`native-recovery-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#native-recovery-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  lastDigest=createHash('sha256').update(scripts[16].bytes).digest('hex');
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const pending=runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts,controller.signal);
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   setTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','single-file recovery must remain bounded');
+  const outcome=result as Awaited<typeof pending>;
+  assert.equal(outcome.status,'BLOCKED');
+  assert.equal(calls,4,'two failed segment attempts, one later success, then one bounded recovery');
+  assert.deepEqual(outcome.previews.slice(0,16).map(row=>row.status),
+   Array(16).fill('SKIPPED_CANCELLED'));
+  assert.equal(outcome.previews[16].status,'STATIC_ANALYSIS_ONLY',
+   'completed fresh evidence from a later segment must survive recovery cancellation');
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: first native budget stop survives a later user cancel during recovery',async()=>{
+ if(isolateNativePoisoningTest(
+  'first native budget stop survives a later user cancel during recovery',
+  'native-budget-before-user-cancel'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-budget-stop-order-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const actual=isolated.previewImportedBatchOffMain;
+ const performance=require('node:perf_hooks').performance as Performance;
+ const controller=new AbortController();
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const originalSetTimeout=globalThis.setTimeout;
+ let fireBudgetTimer:(()=>void)|undefined;
+ globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
+  ...args:unknown[])=>{
+  if(delay!==undefined&&delay>100000){
+   fireBudgetTimer=()=>callback(...args);
+   return originalSetTimeout(()=>undefined,delay,...args);
+  }
+  return originalSetTimeout(callback,delay,...args);
+ }) as typeof setTimeout;
+ let lastDigest='';
+ let calls=0;
+ let notifyRecovery!:()=>void;
+ const recoveryStarted=new Promise<void>(resolve=>{notifyRecovery=resolve;});
+ let finishRecovery!:(value:unknown)=>void;
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof actual>)=>{
+   calls++;
+   const selected=args[0];
+   if(selected.length>1)return {previews:selected.map(()=>unavailableImportPreview(
+    'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
+    safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
+   if(createHash('sha256').update(selected[0].bytes).digest('hex')===lastDigest)
+    return actual(...args);
+   notifyRecovery();
+    const held=new Promise<unknown>(resolve=>{finishRecovery=resolve;});
+    return await held as unknown as Awaited<ReturnType<typeof actual>>;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`native-stop-order-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#native-stop-order-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  lastDigest=createHash('sha256').update(scripts[16].bytes).digest('hex');
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const pending=runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts,controller.signal);
+  await recoveryStarted;
+  assert.ok(fireBudgetTimer);
+  now=120001;
+  fireBudgetTimer();
+  controller.abort();
+  finishRecovery({previews:[unavailableImportPreview(
+   'SKIPPED_CANCELLED','NOT_CHECKED')],safeToContinue:true});
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   originalSetTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','recovery must settle after the first budget stop');
+  const outcome=result as Awaited<typeof pending>;
+  assert.equal(outcome.status,'BLOCKED');
+  if(outcome.status==='BLOCKED'){
+   assert.deepEqual(outcome.previews.slice(0,16).map(row=>row.status),
+    Array(16).fill('SKIPPED_BATCH_BUDGET'));
+   assert.equal(outcome.previews[16].status,'STATIC_ANALYSIS_ONLY');
+  }
+  assert.equal(calls,4);
+ }finally{
+  controller.abort();patch.mock.restore();clock.mock.restore();
+  globalThis.setTimeout=originalSetTimeout;
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/026: resumed native display bounds a hung adapter after cancellation',async()=>{
+ if(isolateNativePoisoningTest(
+  'resumed native display bounds a hung adapter after cancellation',
+  'native-hung-resumed-display'))return;
+ const home=await mkdtemp(join(tmpdir(),'uah-native-hung-resumed-display-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const controller=new AbortController();
+ let notifyCall!:()=>void;
+ const called=new Promise<void>(resolve=>{notifyCall=resolve;});
+ const never=new Promise<never>(()=>{});
+ let restoreMocks=()=>{};
+ try{
+  const selected=join(home,'resumed-hung.user.js');
+  await writeFile(selected,header+'document.querySelector("#resumed-hung");');
+  const scripts=(await importApprovedPaths([selected])).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const root=join(userData,'readonly-journals');
+  const initial=await runCheckpointedNativeImportAnalysis(root,scripts);
+  assert.equal(initial.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  const clock=mock.method(performance,'now',()=>now);
+  const patch=mock.method(isolated,'previewImportedBatchOffMain',()=>{
+   controller.abort();
+   now=120001;
+   notifyCall();
+   return never;
+  });
+  restoreMocks=()=>{patch.mock.restore();clock.mock.restore();};
+  const pending=runCheckpointedNativeImportAnalysis(root,scripts,controller.signal);
+  await called;
+  const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
+   setTimeout(()=>resolve('PENDING'),1000))]);
+  assert.notEqual(result,'PENDING','resumed display must bound its direct adapter wait');
+  const outcome=result as Awaited<typeof pending>;
+  assert.equal(outcome.status,'BLOCKED');
+  if(outcome.status==='BLOCKED')assert.deepEqual(outcome.previews.map(row=>row.status),
+   ['SKIPPED_CANCELLED']);
+ }finally{
+  controller.abort();restoreMocks();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/TEST-022/026: forged native cancellation never executes getters or creates a journal',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-signal-boundary-'));
  try{
