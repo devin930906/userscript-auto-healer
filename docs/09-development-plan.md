@@ -512,3 +512,15 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地验证**：`npm run build` 成功；定向 `node --test --test-concurrency=1 dist/tests/analyze/import-preview.test.js dist/tests/jobs/batch-coordinator.test.js dist/tests/jobs/imported-analysis-queue.test.js dist/tests/jobs/native-checkpointed-import.test.js` 为 149/149 通过。完整 `npm test` 为 1,189 total / 1,135 pass / 42 fail / 12 skipped；42 个失败名称与本轮前的 main 基线及本轮前一完整运行完全相同，属于 TEST-003 symlink 与 TASK-011/TASK-018 restore-path 环境失败集。
 - **整合边界**：本轮复核时 GitHub `main@c5266490f30ce8f262765728886295f4888a70ba`，#857 为 Open，PR #907 为 Draft。当前源代码与测试同步到 #907 的远端 HEAD 后，才检查该新提交的 Required Checks；本地测试不是 Windows Actions 或真实环境验收。
 - **续接**：继续按真实依赖完成 #857/TASK-013 产品级多入口批处理、诊断及授权流程；仍需 TASK-007/#486 的完整真实管理器/业务与失败恢复验收、TASK-009..012 依赖及 TEST/GATE。正式 v1.1.3、同源 EXE/ZIP、所有必要 GATE 和最终集中人工验收仍是独立 Stable 门槛。
+
+## 2026-11-19 TASK-007 / Issue #486 — Tampermonkey native install entrance & localized name support 增量
+
+- **范围**：针对 Issue #486 的原始需求校准（自动检测选定自启 Chrome 的 Tampermonkey 安装与版本；缺失时提供一键安装入口，按 Chrome 正式支持的路径发起并保留其原生确认）以及用户真实 Windows Chrome 扩展管理页与探测状态之间的冲突开展工程增量修复。Issue #486 保持 Open。
+- **实现**：
+  1. 在 `src/manager/tampermonkey-installation.ts` 中引入官方扩展商店安装入口 `TAMPERMONKEY_WEBSTORE_URL`（基于权威 Extension ID `dhdgffkkebhmkfjojejmpbldmpobfkfo`）。
+  2. `NOT_INSTALLED` 状态增加结构化 `installUrl` 字段，使上层调用方/界面在探测未安装时能向用户呈现标准官方商店安装通道。
+  3. 扩充扩展名称匹配正则 `TAMPERMONKEY_NAME_PATTERN`，全面支持官方中英文及变体（`Tampermonkey`、`Tampermonkey (篡改猴)`、`篡改猴`、`Tampermonkey®` 等），解决真实中文环境下因本地化名称被硬编码严格拦截的问题；对伪造/非目标扩展名称（`Not Tampermonkey`、`Violentmonkey` 等）继续严格 fail-closed。
+  4. 新增 `launchApprovedTampermonkeyInstallation` API，严格验证用户显式授权、受控自启 Chrome 实例、回环端口及 PID 归属，通过受控 CDP 发起官方 Web Store 安装页创建；明确保留 Chrome 原生安装弹窗与人工确认机制（`nativeConfirmationRequired: true`），严禁自动静默代点安装。
+- **本地验证**：`npm run typecheck` 成功；`npm run build` 成功；`python .github/scripts/verify-predevelopment.py` 成功通过（28 REQ/TEST, 21 TASK, 11 GATE）；定向执行 `dist/tests/manager/tampermonkey-installation.test.js`（14/14 pass）、`dist/tests/manager/tampermonkey-adapter.test.js`、`dist/tests/manager/tampermonkey-preflight.test.js`、`dist/tests/manager/tampermonkey-diagnostic.test.js`、`dist/tests/manager/tampermonkey-gm-probe.test.js`、`dist/tests/manager/gm-report.test.js`，全部通过（157 项测试通过，0 失败，3 项 Actions 专用跳过）。
+- **整合边界**：基线分支为最新 `main`（`66bf7e5`），创建独立开发分支 `feat/task007-tampermonkey-native-install-20261119`；修改范围严格限定于 `src/manager/tampermonkey-installation.ts`、`tests/manager/tampermonkey-installation.test.ts` 及 `docs/09-development-plan.md`，与开放中的 Draft PR #904 无任何文件重叠，符合 issue-merge-fence 协调隔离要求。
+- **续接**：继续按依赖推进 TASK-012/Issue #603（批量导入脚本安装与版本确认）及 TASK-009..013、#857、#604..#610，为最终 Windows 真实环境集中人工验收创造充分前置条件。
