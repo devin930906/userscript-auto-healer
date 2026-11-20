@@ -401,9 +401,16 @@ test('TASK-013/TEST-022/026: Windows shell drop smoke targets the rendered drop 
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  assert.match(html,/<div id="drop-area">/,
   'the application must keep an identifiable file drop area');
- assert.match(main,/const zone=document\.getElementById\('drop-area'\)/,
+ const smokeStart=main.indexOf('const droppedCheckpointVisible=');
+ assert.notEqual(smokeStart,-1,'the package smoke must exercise a dropped batch');
+ const smokeEnd=main.indexOf(') as boolean;',smokeStart);
+ assert.ok(smokeEnd>smokeStart,'the package drop assertion must stay bounded');
+ const smoke=main.slice(smokeStart,smokeEnd+13);
+ assert.match(smoke,/const zone=document\.getElementById\('drop-area'\)/,
   'the shell smoke must dispatch through the same drop area used by the renderer');
- assert.doesNotMatch(main,/const zone=document\.getElementById\('drop-zone'\)/,
+ assert.match(smoke,/\n\s*true\s*\n\s*\) as boolean;/,
+  'the synthetic native drop must run with the browser user-gesture flag');
+ assert.doesNotMatch(smoke,/const zone=document\.getElementById\('drop-zone'\)/,
   'a stale test-only selector must not silently skip the real drop event');
 });
 

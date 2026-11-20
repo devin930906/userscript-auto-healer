@@ -2135,7 +2135,8 @@ async function createMainWindow(): Promise<void> {
       "const start=Date.now();while(Date.now()-start<10000){"+
       "if(Array.from(document.querySelectorAll('#import-list li')).some(row=>"+
       "row.textContent.includes('只读 AST 批处理检查点已保存')))return true;"+
-      "await new Promise(resolve=>setTimeout(resolve,30));}return false;})()"
+      "await new Promise(resolve=>setTimeout(resolve,30));}return false;})()",
+      true
     ) as boolean;
     if(!droppedCheckpointVisible)
       throw new Error('SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE');
