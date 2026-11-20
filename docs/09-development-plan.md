@@ -569,3 +569,13 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **定位与修正**：实际渲染器 drop probe 以 `executeJavaScript(..., true)` 执行；后续独立 checkpoint smoke 漏传 Electron 的 user-gesture 参数。新增回归断言先 RED，要求烟测传入 `true` 后，本地变为 GREEN。该根因判断仍待 Windows 新 HEAD 复核，不能把关联推断当成 CI 已通过。
 - **提交与本地验证**：修正提交本地 `d45556acc8c4d948dbbf2d6df6a47e34d1b61856`，同步后 GitHub PR head 为 `a77e1a9991929e2ff33880f364004b0de0c0a107`。`npm run build`、`npm run typecheck`、`.github/scripts/verify-predevelopment.py`、`git diff --check` 均通过；desktop-boundary 为 76/76 通过。
 - **最新远端状态**：head `a77e1a9991929e2ff33880f364004b0de0c0a107` 的 Candidate run [#44753751388](https://github.com/devin930906/userscript-auto-healer/actions/runs/44753751388)、Application Skeleton [#44753751412](https://github.com/devin930906/userscript-auto-healer/actions/runs/44753751412)、Documentation Integrity [#44753751559](https://github.com/devin930906/userscript-auto-healer/actions/runs/44753751559) 与隔离 Tampermonkey run [#44753751463](https://github.com/devin930906/userscript-auto-healer/actions/runs/44753751463) 已启动；本记录更新时仍在运行，须以各 run 最终状态为准。PR #925 保持 Open、未合并，Stable 未完成。
+
+## 2026-11-20 TASK-013 / Issue #857 — 普通导入批次只读 DOM 观察入口（部分完成）
+
+- **范围**：将导入批次的有限 AST 选择器提示接入普通诊断工作区，按用户输入目标网址逐脚本规划只读 DOM 观察。此增量仅填补 AST 到页面 DOM 信号之间的产品调用链，不代表 #857 全部完成。
+- **主进程边界**：隔离 AST Worker 只提取最多 8 个静态字面 `querySelector` / `querySelectorAll` 选择器及最多 16 个 `@match` 提示；main 进程再次校验并通过对象身份 `WeakMap` 侧车保存，不进入公开预览对象或 renderer IPC。checkpoint 二次校验显式复制已验证侧车，防止普通/恢复路径丢失该证据。目标网址需通过严格 URL 规范化与精确来源规则匹配；未知或不支持的 `@include` / `@exclude` 规则逐项受阻。
+- **用户流程与安全**：新增普通工作区“批量只读 DOM 观察”入口，无手动选择器输入；仍需 app 自有 Chrome 与系统原生确认，只读取 AST 声明的选择器 DOM 信号。脚本不执行，业务、登录、Tampermonkey/GM 和自动修复标志始终为 false，整体仍标记 UNKNOWN。请求支持现有场景取消通道和超时上限。
+- **本地验证**：`npm run build`、`npm run typecheck`、`git diff --check` 与 `.github/scripts/verify-predevelopment.py` 通过（28 REQ/TEST、21 TASK、11 GATE）；desktop-boundary 为 77/77，AST 预览、索引与 checkpoint 定向测试为 89/89。完整 `npm test` 未在本轮重跑。一次本机 `--uahtest-shell-only` Electron 进程以 Windows `0xC0000005` 退出且未生成回执，因此不记为 smoke 通过。
+- **当前 PR 远端基线证据**：上传本轮改动前，PR #925 HEAD `2aa3cc54f9d3f3c00f138e1ab7ccb1b726b5378d` 的 Documentation Integrity 成功；Application Skeleton `windows-shell-smoke` 报 `DROPPED_BATCH_RELOAD_SETUP_FAILED`，Candidate Windows packaging 报 `SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE`，Tampermonkey `document-idle / product-candidate` 失败为 `CDP_TIMEOUT`。这些结果来自旧 HEAD，不代表本轮新 HEAD；本轮推送后须重新核对 Actions。
+- **仍未完成**：#857 的真实 Tampermonkey/GM/业务正反断言、授权诊断到保守修复候选、候选应用与失败恢复仍未贯通；TEST-022/GATE-007 与其余 Stable GATE、同源 EXE+ZIP 及最终人工验收未通过。PR #925 与 Issue #857 保持 Open，不能宣称 Stable 完成。
+

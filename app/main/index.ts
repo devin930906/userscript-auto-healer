@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportOutcome, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
+import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
+import {ImportedDomDiagnosticIndex} from '../../src/diagnostics/imported-dom-diagnostic-index';
 import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -135,6 +137,9 @@ let nativeAiDiscoveryController:AbortController|null=null;
 let nativeAiReviewEvidence=new NativeAiEvidenceStore();
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+// Only bounded Worker-derived AST sites and parsed @match hints are retained;
+// original bytes, paths and URLs are never stored in this per-window index.
+let importedDomDiagnosticIndex=new ImportedDomDiagnosticIndex();
 // No disk persistence, no manager or business authority, fresh per window.
 let limitedScenarioHistory=new LimitedHealthRegistry();
 // Native-picked paths stay strictly in the privileged process. A renderer
@@ -301,13 +306,18 @@ async function summarizeResult(result:ImportOutcome,
     join(app.getPath('userData'),'readonly-import-journals'),result,signal,onProgress);
   const checkpoint=analyzed.checkpoint;
   const previews=checkpoint?.previews??[];
+  const scripts=result.scripts.map((script,i)=>{
+    importedDomDiagnosticIndex.recordImported(script.sha256,
+      readMainOnlyDiagnosticHints(previews[i]),script.filename);
+    return summarize(script,previews[i]);
+  });
   return {batchCheckpoint:checkpoint?.status,
     batchCheckpointReason:checkpoint?.status==='BLOCKED'?checkpoint.reason:undefined,
     batchResumed:checkpoint?.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'
       ?checkpoint.resumed:false,
     canceled:analyzed.canceled,
     unprocessed:analyzed.unprocessed,
-    scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
+    scripts,
     errors:result.errors, duplicates:result.duplicates};
 }
 
@@ -1371,6 +1381,136 @@ function registerSafeIpc(): void {
     }catch{return markLimitedSessionArchiveUnavailable(current);}
   });
 
+  // Ordinary batch path: selector sites are resolved exclusively from the
+  // main-only AST sidecar. The renderer submits only the configured URL; it
+  // cannot choose a script hash, selector, source path, endpoint or consent.
+  ipcMain.handle('scenario:diagnose-imported-batch',async(event,targetInput:unknown)=>{
+    authorizeSender(event);
+    nativeAiDiscoveryController?.abort();
+    if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress||
+       manualExportInProgress||nativeImportController||droppedImportController||
+       nativeSelectionInProgress)
+      return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    const plan=importedDomDiagnosticIndex.plan(targetInput);
+    if(!plan.targetUrl)return {ok:false,code:'INVALID_TARGET_URL',...unverified};
+    type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
+      domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
+      checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
+      evidenceCount?:number;reason?:string;automaticPatchAllowed:false;
+      tampermonkeyVerified:false;businessVerified:false};
+    const blockedItem=(item:typeof plan.items[number],code?:string)=>({
+      ordinal:item.ordinal,filename:item.filename??('脚本 '+(item.ordinal+1)),
+      status:'UNKNOWN' as const,domStatus:'NOT_OBSERVED' as const,
+      code:code??('code' in item?item.code:undefined),checkedSelectorCount:0,
+      ...unverified
+    });
+    const ready=plan.items.filter((item)=>item.status==='READY_FOR_INSPECTION');
+    const blocked=plan.items.filter((item)=>item.status==='BLOCKED');
+    const results:ImportedDomResultItem[]=blocked.map(item=>blockedItem(item));
+    if(ready.length===0){
+      return {ok:true,status:'UNKNOWN' as const,reason:'NO_ELIGIBLE_SCRIPT',
+        targetMatchedCount:0,truncatedScripts:plan.truncatedScripts,
+        items:results,...unverified};
+    }
+    const owned=readOwnedBrowser();
+    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    const controller=new AbortController();
+    const epoch=scenarioObserveEpoch;
+    scenarioObserveController=controller;
+    scenarioObserveInProgress=true;
+    let deadlineExpired=false;
+    const deadline=setTimeout(()=>{
+      deadlineExpired=true;
+      controller.abort();
+    },120000);
+    const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
+      win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
+    try{
+      const selectorCount=ready.reduce((sum,item)=>sum+
+        (item.status==='READY_FOR_INSPECTION'?item.selectorSites.length:0),0);
+      const consent=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许批量只读 DOM 观测','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'允许在受控 Chrome 对匹配的导入脚本执行批量只读 DOM 计数？',
+        detail:plan.targetUrl+'\n将检查 '+ready.length+' 份脚本中的最多 '+
+          selectorCount+' 个 AST 字面选择器，最多观测 120 秒。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
+          '\n结果只代表限定 DOM 计数；登录状态和真实业务断言仍需另行配置与验证。'
+      });
+      if(consent.response!==0||revoked())
+        return {ok:false,code:controller.signal.aborted?'CANCELLED':'NOT_AUTHORIZED',...unverified};
+      const opened=await openApprovedTarget(owned,plan.targetUrl,true,controller.signal);
+      if(revoked())return {ok:false,code:'CANCELLED',...unverified};
+      if(!opened.ok)return {ok:false,code:opened.code,...unverified};
+      for(const item of plan.items){
+        if(item.status!=='READY_FOR_INSPECTION')continue;
+        if(revoked()){
+          results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
+          continue;
+        }
+        try{
+          const scenario={
+            id:'auto_dom_'+item.ordinal,
+            scriptSha256:item.scriptSha256,
+            targetUrl:plan.targetUrl,
+            userApproved:true,
+            requiresLogin:false,
+            loginReady:false,
+            steps:[],
+            assertions:item.selectorSites.map(site=>({
+              kind:'selector-present' as const,selector:site.selector
+            }))
+          };
+          const observation=await inspectApprovedScenarioDomSeries(
+            owned,opened,scenario,true,3,250,controller.signal);
+          if(revoked()){
+            results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
+            continue;
+          }
+          if(observation.status!=='LIMITED_DOM_SIGNAL_ONLY'||observation.code!=='NONE'){
+            results.push(blockedItem(item,observation.code||'OBSERVATION_BLOCKED'));
+            continue;
+          }
+          results.push({ordinal:item.ordinal,
+            filename:item.filename??('脚本 '+(item.ordinal+1)),
+            status:'UNKNOWN' as const,domStatus:'LIMITED_DOM_SIGNAL_ONLY' as const,
+            checkedSelectorCount:observation.checkedAssertions,
+            triageStatus:observation.triage.status,
+            faultCategory:observation.triage.category,
+            evidenceCount:observation.triage.evidenceIds.length,
+            reason:'BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED' as const,
+            automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
+            businessVerified:false as const});
+        }catch{
+          results.push(blockedItem(item,'OBSERVATION_FAILED'));
+        }
+      }
+      if(revoked()&&results.length<plan.items.length){
+        for(const item of plan.items){
+          if(results.some(row=>row.ordinal===item.ordinal))continue;
+          results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
+        }
+      }
+      results.sort((a,b)=>a.ordinal-b.ordinal);
+      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
+      return {ok:true,status:'UNKNOWN' as const,
+        reason:'DOM_SIGNAL_DOES_NOT_VERIFY_SCRIPT_OR_BUSINESS',
+        targetMatchedCount:ready.length,truncatedScripts:plan.truncatedScripts,
+        items:results,...unverified};
+    }catch{
+      return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED',...unverified};
+    }finally{
+      clearTimeout(deadline);
+      if(scenarioObserveController===controller)scenarioObserveController=null;
+      scenarioObserveInProgress=false;
+      diagnosticGate.release(lease);
+    }
+  });
+
   // Fresh native consent, verified owned Chrome process and a scenario ID from
   // this window are all required. The renderer cannot supply navigation URL,
   // CSS selector, browser endpoint, script source or approval for this action.
@@ -1671,6 +1811,7 @@ async function createMainWindow(): Promise<void> {
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
       scenarioSession=new DesktopScenarioSession();
+      importedDomDiagnosticIndex=new ImportedDomDiagnosticIndex();
       limitedScenarioHistory=new LimitedHealthRegistry();
       nativeImportedPaths.clear();
     }
@@ -1778,6 +1919,7 @@ async function createMainWindow(): Promise<void> {
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const noInventory=await a.inspectRestoreInventory(); const bad = await a.validateConfig({}); " +
+      "const blockedAutoDomInput=await a.diagnoseImportedBatch({targetUrl:'https://example.test/app',selector:'#unsafe',scriptSha256:'a'.repeat(64)}); " +
        "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
        "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
        "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
@@ -1975,6 +2117,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
+      "blockedAutoDomInput.ok === false && blockedAutoDomInput.code === 'INVALID_TARGET_URL' && " +
       "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && idleNativeProgress.active === false && " +
       "pickingProgress.active === true && pickingProgress.phase === 'PICKING' && " +
       "pickingProgress.processed === 0 && pickingProgress.total === 0 && " +
@@ -2150,7 +2293,7 @@ async function createMainWindow(): Promise<void> {
       throw new Error('SHELL_SMOKE_DROPPED_CANCEL_SUMMARY_FAILED');
     if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
     if (probe.keys?.join(',') !==
-        'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
@@ -2331,3 +2474,4 @@ app.on('window-all-closed', () => {
   stopAllBrowserSessions();
   if (process.platform !== 'darwin') app.quit();
 });
+

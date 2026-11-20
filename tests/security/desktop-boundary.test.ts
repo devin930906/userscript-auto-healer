@@ -25,7 +25,7 @@ const approvedIpcChannels=[
  'import:dropped','import:dropped-batch:add','import:dropped-batch:begin',
  'import:dropped-batch:finish','import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
- 'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
+ 'scenario:diagnose-imported-batch','scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
 
@@ -2131,6 +2131,54 @@ test('TASK-017/TEST-002/022: manual scenario registration stays optional advance
  assert.ok(section.includes('id="scenario-list"'));
 });
 
+test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in main',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const sectionStart=html.indexOf('<section id="diagnosis-workspace"');
+ const sectionEnd=html.indexOf('</section>',sectionStart);
+ assert.ok(sectionStart>=0&&sectionEnd>sectionStart,
+  'the ordinary diagnosis workspace must exist');
+ if(sectionStart<0||sectionEnd<=sectionStart)return;
+ const diagnosis=html.slice(sectionStart,sectionEnd+'</section>'.length);
+ const panelStart=diagnosis.indexOf('<div id="imported-dom-diagnosis"');
+ const panelEnd=diagnosis.indexOf('<div data-scenario-context-slot>',panelStart);
+ assert.ok(panelStart>=0&&panelEnd>panelStart,
+  'the ordinary workflow must expose a batch DOM observation action');
+ const panel=panelStart>=0&&panelEnd>panelStart?
+  diagnosis.slice(panelStart,panelEnd):'';
+ assert.match(panel,/id="imported-dom-target"/,
+  'the batch target URL is explicit configuration');
+ assert.match(panel,/id="imported-dom-run"/,
+  'the user can start the ordinary read-only DOM batch');
+ assert.match(panel,/id="imported-dom-result"/,
+  'the ordinary flow must display UNKNOWN and per-script blocking results');
+ assert.doesNotMatch(panel,/<input[^>]*(?:selector|选择器|CSS)/i,
+  'the ordinary batch path must not ask the user to type CSS selectors');
+ assert.match(panel,/不会执行脚本/);
+ assert.match(panel,/不证明.*Tampermonkey.*GM.*业务/);
+ assert.match(ui,/diagnoseImportedBatch\(targetUrl\)/,
+  'the renderer may send only the configured target URL');
+ assert.match(preload,/diagnoseImportedBatch:\s*\(targetUrl: string\): Promise<unknown> =>\s*ipcRenderer\.invoke\('scenario:diagnose-imported-batch',targetUrl\)/);
+ assert.match(main,/ipcMain\.handle\('scenario:diagnose-imported-batch'/,
+  'the main process owns the imported-script diagnostic batch');
+ assert.match(main,/importedDomDiagnosticIndex\.plan\(/);
+ const handlerStart=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const handlerEnd=main.indexOf("ipcMain.handle('scenario:inspect'",handlerStart);
+ assert.ok(handlerStart>=0&&handlerEnd>handlerStart,
+  'the new IPC handler must be bounded before the existing manual scenario path');
+ const handler=handlerStart>=0&&handlerEnd>handlerStart?
+  main.slice(handlerStart,handlerEnd):'';
+ assert.match(handler,/dialog\.showMessageBox/,
+  'each real navigation requires native consent');
+ assert.match(handler,/readOwnedBrowser\(\)/,
+  'ordinary DOM observations require the application-owned Chrome');
+ assert.match(handler,/openApprovedTarget/);
+ assert.match(handler,/inspectApprovedScenarioDomSeries/);
+ assert.doesNotMatch(handler,/tampermonkeyVerified:\s*true|businessVerified:\s*true|automaticPatchAllowed:\s*true/);
+});
+
 test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not optional manual scenarios',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  const workspace=html.match(/<section id="import-workspace"[\s\S]*?<\/section>/)?.[0];
@@ -2193,3 +2241,4 @@ test('TASK-017/TEST-002/022: desktop ordinary user journey enforces unforced sel
   assert.ok(html.includes('UNKNOWN / 受阻'));
   assert.ok(ui.includes('无法判断是否已安装'));
 });
+

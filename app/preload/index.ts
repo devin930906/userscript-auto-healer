@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
   inspectScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:inspect',id),
+  // Ordinary batch DOM observations accept only one user-configured target URL.
+  // Main resolves the imported script identities and all selectors internally.
+  diagnoseImportedBatch: (targetUrl: string): Promise<unknown> =>
+    ipcRenderer.invoke('scenario:diagnose-imported-batch',targetUrl),
   readScenarioHistory: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:history',id),
   exportManualScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-manual',id),
   // No renderer-supplied path, file bytes, hashes, consent or restore options.
@@ -55,3 +59,4 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   observeGmFixture: (mode: 'broken' | 'fixed'): Promise<unknown> => ipcRenderer.invoke('gm-probe:observe',mode),
   stopGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:stop')
 }));
+

@@ -43,7 +43,7 @@ export interface RegisteredScenario {
 function validSelector(input:unknown):input is string {
   return typeof input==='string' && input.trim().length>0 && input.length<=512;
 }
-function normalizeUrl(input:unknown):string|null {
+export function normalizeScenarioTargetUrl(input:unknown):string|null {
   // WHATWG URL() may trim C0 controls/whitespace and reinterpret special-scheme
   // backslashes as path delimiters. Consent must never be normalized from
   // a different raw address into an apparently approved navigation target.
@@ -195,7 +195,7 @@ export function preflightScenario(input:ScenarioInput,metadata?:MetadataResult):
       typeof data.loginReady!=='boolean'))
     invalid.push('INVALID_FLAGS');
   const hasTarget=typeof data?.targetUrl==='string'&&data.targetUrl.trim().length>0;
-  const url=hasTarget?normalizeUrl(data!.targetUrl):null;
+  const url=hasTarget?normalizeScenarioTargetUrl(data!.targetUrl):null;
   if(hasTarget&&!url)invalid.push('INVALID_URL');
   if(!steps||!steps.every(step=>
       (step.kind==='click'||step.kind==='wait-for')&&validSelector(step.selector)))
@@ -257,3 +257,4 @@ export class ScenarioRegistry {
     return [...this.scenarios.values()].map(value=>structuredClone(value));
   }
 }
+

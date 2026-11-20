@@ -13,6 +13,7 @@ import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpo
 import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
+import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 
 function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
@@ -107,6 +108,9 @@ test('TASK-013/TEST-022/026: renderer-dropped outcomes use the shared checkpoint
    assert.equal(first.checkpoint?.resumed,false);
    assert.deepEqual(first.checkpoint?.previews.map(row=>row.status),
     ['STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY']);
+   assert.deepEqual(readMainOnlyDiagnosticHints(first.checkpoint?.previews[0])?.selectorSites,
+    [{offset:header.length,method:'querySelector',selector:'#alpha-v1'}],
+    'the checkpointed native pipeline must preserve only the exact Worker sidecar object for main');
    const firstDispatches=workerStarts;
    assert.ok(firstDispatches>0,'the fresh dropped batch must run the real isolated AST worker');
 
@@ -1913,3 +1917,4 @@ test('TASK-013 / TEST-022: checkpointed native AST partitions by byte budget and
    assert.equal((await readFile(path,'utf8')).includes('document.querySelector'),true);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+

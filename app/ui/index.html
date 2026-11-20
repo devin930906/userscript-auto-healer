@@ -152,6 +152,18 @@
     </section>
     <section id="diagnosis-workspace" role="tabpanel" tabindex="0" aria-labelledby="tab-diagnosis-workspace" hidden>
       <header class="page-heading"><h2>诊断与记录</h2><p>发起只读 DOM 检查，管理定时复检和观察历史。</p></header>
+      <div id="imported-dom-diagnosis" class="panel">
+        <h3>批量只读 DOM 观察</h3>
+        <p>输入一个目标网址后，程序会从已导入脚本的隔离 AST 结果中自动取出有界的字面选择器；只有静态 @match 明确覆盖此网址的脚本才会访问。每次访问前都会显示系统确认。此操作不会执行脚本、收集页面内容或改动文件。</p>
+        <p>结果只反映限定的页面元素计数，不证明登录状态、脚本注入、Tampermonkey、GM API 或业务恢复；缺少可靠条件的脚本会逐项显示为未知或受阻。</p>
+        <label for="imported-dom-target">本批目标网址（HTTP/HTTPS）</label>
+        <input id="imported-dom-target" type="url" maxlength="4096" placeholder="https://example.com/page">
+        <div class="actions">
+          <button id="imported-dom-run" type="button" class="primary" disabled>原生授权后检查匹配脚本</button>
+        </div>
+        <p id="imported-dom-result" role="status" aria-live="polite">导入脚本后，输入目标网址并启动受控 Chrome，即可查看有限 DOM 观测结果。整体状态仍为 UNKNOWN，直到后续真实脚本和业务验收完成。</p>
+        <ol id="imported-dom-items" aria-labelledby="imported-dom-result"></ol>
+      </div>
       <div data-scenario-context-slot>
         <div id="scenario-context" class="scenario-context">
           <div class="context-field">
@@ -247,3 +259,4 @@
   <script src="./index.js"></script>
 </body>
 </html>
+

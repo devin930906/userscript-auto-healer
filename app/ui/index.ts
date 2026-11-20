@@ -79,6 +79,15 @@ interface Window {
       localArchiveStatus?:'SAVED_UNVERIFIED'|'UNAVAILABLE';
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
+    diagnoseImportedBatch(targetUrl:string):Promise<{ok:boolean;code?:string;
+      status?:'UNKNOWN';reason?:string;targetMatchedCount?:number;
+      truncatedScripts?:boolean;
+      items?:readonly {ordinal:number;filename:string;status:'UNKNOWN';
+        domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
+        checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
+        evidenceCount?:number;reason?:string;
+        automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}[];
+      automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
     readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
       currentStatus?:'UNTESTED'|'ELEMENT_FOUND_ONLY'|'INDETERMINATE';
       archiveRetained?:boolean;
@@ -212,6 +221,10 @@ let scenarioHistoryGeneration=0;
 const scenarioExportButton = document.getElementById('scenario-export-manual') as HTMLButtonElement | null;
 const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
+const importedDomTarget=document.getElementById('imported-dom-target') as HTMLInputElement|null;
+const importedDomRunButton=document.getElementById('imported-dom-run') as HTMLButtonElement|null;
+const importedDomResult=document.getElementById('imported-dom-result');
+const importedDomItems=document.getElementById('imported-dom-items');
 let scenarioBusy=false;
 function updateScenarioControls():void{
  if(scenarioScript)scenarioScript.disabled=seenScripts.size===0;
@@ -326,6 +339,7 @@ function show(result: ImportResponse): void {
       :'只读 AST 批处理检查点已保存；仅记录有限调度状态。');
   if(result.batchCheckpoint)
     logLine('检查点仅支持重新导入后恢复调度，不保存源码，也不代表网页、GM API、业务验证或修复已完成。');
+  if(typeof importedDomRunButton!=='undefined')updateImportedDomControls();
   updateImportSummary();
 }
 
@@ -727,6 +741,9 @@ function selectedCdpPort():number|null{
  return /^\d{4,5}$/.test(value)&&Number.isInteger(port)&&port>=1024&&port<=65535?port:null;
 }
 let scenarioInspectionBusy=false;
+let importedDomBusy=false;
+let importedDomGeneration=0;
+let importedDomRequestId=0;
 let manualExportBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
@@ -761,6 +778,11 @@ const gmObserveButtons={
 };
 const gmLinks=document.getElementById('gm-probe-links');
 const gmResult=document.getElementById('gm-probe-result');
+function updateImportedDomControls():void{
+ if(importedDomRunButton)importedDomRunButton.disabled=importedDomBusy||
+  scenarioInspectionBusy||!browserConnected||seenScripts.size===0||
+  !(importedDomTarget?.value.trim());
+}
 function clearGmDisplay(message:string):void{
  gmProbeActive=false;
  if(gmLinks)gmLinks.textContent='';
@@ -813,6 +835,7 @@ function browserControls():void{
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioRecheckStopButton)scenarioRecheckStopButton.disabled=!recheckRunning;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
+ if(typeof importedDomRunButton!=='undefined')updateImportedDomControls();
  if(scenarioHistoryButton)scenarioHistoryButton.disabled=scenarioHistoryBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
@@ -1158,6 +1181,11 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
  if(!scenarioInspectionBusy&&!manualExportBusy)return;
+ if(typeof importedDomBusy!=='undefined'&&importedDomBusy){
+  importedDomGeneration++;
+  if(importedDomResult)importedDomResult.textContent=
+   '已请求取消批量 DOM 观察；当前进行中的页面读取正在撤销，未完成项保持 UNKNOWN。';
+ }
  // Native cancellation remains scoped to the original request. Retire
  // earlier inspection/export presentation immediately, so late success
  // cannot repaint a cancellation receipt or imply renewed authority.
@@ -1638,4 +1666,73 @@ if (workspaceTablist) {
   updateWorkspaceOrientation();
   selectWorkspace(0, 'none');
 }
+
+function importedDomBlockReason(code:string|undefined):string{
+ const reasons:Record<string,string>={
+  INVALID_TARGET_URL:'目标网址格式不安全或无法确认',
+  NO_LITERAL_SELECTORS:'没有可用的字面 querySelector AST 证据',
+  UNSUPPORTED_MATCH_RULES:'脚本含暂不支持的 @include、@exclude 或未知元数据',
+  NO_MATCH_METADATA:'脚本没有可核对的 @match',
+  TARGET_NOT_MATCHED:'该脚本的精确来源规则不覆盖目标网址',
+  SELECTOR_LIMIT_EXCEEDED:'选择器数量超过本轮只读观测上限',
+  BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED:'业务、登录状态和管理器运行仍未知',
+  BROWSER_NOT_RUNNING:'请先启动本程序管理的独立 Chrome',
+  TIME_BUDGET_EXHAUSTED:'本轮达到 120 秒上限，未观测项目保持未知',
+  CANCELLED:'本次观测已取消',
+  OBSERVATION_FAILED:'只读 DOM 观测失败，没有生成验证结论'
+ };
+ return code?reasons[code]??'状态未知：'+code:'状态未知';
+}
+importedDomTarget?.addEventListener('input',updateImportedDomControls);
+importedDomRunButton?.addEventListener('click',()=>{
+ if(importedDomBusy||scenarioInspectionBusy)return;
+ const targetUrl=importedDomTarget?.value.trim()??'';
+ const requestId=++importedDomRequestId;
+ const generation=++importedDomGeneration;
+ importedDomBusy=true;
+ scenarioInspectionBusy=true;
+ browserControls();
+ importedDomItems?.replaceChildren();
+ if(importedDomResult)importedDomResult.textContent=
+  '等待系统原生确认；脚本不会执行，本次只读取声明的页面选择器数量。';
+ void window.healer.diagnoseImportedBatch(targetUrl).then(result=>{
+  if(generation!==importedDomGeneration)return;
+  if(!result.ok){
+   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+   if(importedDomResult)importedDomResult.textContent=
+    '批量 DOM 观察未完成：'+importedDomBlockReason(result.code)+
+    '；没有报告脚本或业务验证成功。';
+   return;
+  }
+  const items=Array.isArray(result.items)?result.items.slice(0,1000):[];
+  const observed=items.filter(item=>item.domStatus==='LIMITED_DOM_SIGNAL_ONLY').length;
+  const blocked=items.length-observed;
+  if(importedDomResult)importedDomResult.textContent=
+   items.length===0
+    ?'没有已导入脚本具备本次目标网址的静态观测条件；整体状态为 UNKNOWN。'
+    :'本轮完成：有限 DOM 观测 '+observed+' 项，未知／受阻 '+blocked+
+     ' 项。整体仍为 UNKNOWN；这不证明脚本注入、登录、Tampermonkey、GM API 或业务恢复。'+
+     (result.truncatedScripts?' 已达会话脚本索引上限，未收录项未处理。':'');
+  for(const item of items){
+   if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
+   const row=document.createElement('li');
+   row.textContent=item.filename+': '+(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'
+    ?'只读观察 '+item.checkedSelectorCount+' 个 AST 选择器；'+
+     (item.triageStatus??'UNKNOWN')+' / '+(item.faultCategory??'UNKNOWN')+
+     '。'+importedDomBlockReason(item.reason)
+    :importedDomBlockReason(item.code));
+   importedDomItems?.append(row);
+  }
+ }).catch(()=>{
+  if(generation!==importedDomGeneration)return;
+  if(importedDomResult)importedDomResult.textContent=
+   '批量 DOM 观察失败；没有验证结论。请确认受控 Chrome 状态后再试。';
+ }).finally(()=>{
+  if(requestId!==importedDomRequestId)return;
+  importedDomBusy=false;
+  scenarioInspectionBusy=false;
+  browserControls();
+ });
+});
+
 
