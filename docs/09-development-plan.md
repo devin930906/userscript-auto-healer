@@ -555,3 +555,10 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地验证**：`npm run build`、`npm run typecheck`、`git diff --check` 与 `.github/scripts/verify-predevelopment.py` 均通过（28 REQ/TEST、21 TASK、11 GATE）；`dist/tests/jobs/native-checkpointed-import.test.js` 为 40/40 通过。完整 `npm test` 为 1,229 项：1,174 pass / 43 fail / 12 skipped。43 个失败按类别为 TASK-011/TEST-020 恢复路径 41 项、TEST-003 symlink 1 项、TASK-018/TEST-018 端到端 1 项；不得将本轮全量套件标为通过。新改动对应的检查点测试通过，其他失败需独立调查。
 - **远端状态**：本轮 PR #925 新 HEAD 的 Windows shell smoke、Application Skeleton、Candidate 与文档/Issue checks 尚待复核；旧 HEAD 的绿色结果不替代本轮 CI。#857 保持 Open。
 - **后续与 Stable 边界**：这一增量只统一批次导入与只读 AST 调度，不包含逐脚本动态诊断、修复候选、AI、真实 Tampermonkey/GM/业务正反断言与失败恢复。TEST-022/GATE-007 和 Stable 的其他必要 GATE、最终同源 EXE+ZIP、集中人工验收均未完成。
+
+## 2026-11-20 TASK-013 / #857 — Windows shell smoke drop target 回归修正
+
+- **Windows 证据**：PR #925 head `70f022855fd38df81aa4b2fbd0aca46fc6d84937` 的 Candidate Node suite 为 1,229 total / 1,226 pass / 0 fail / 3 skipped；随后其 Electron smoke 失败并报告 `SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE`。实际 UI 容器是 `#drop-area`，新 smoke 查询了不存在的 `#drop-zone`，因此没有真正派发 drop 事件。
+- **并行独立失败**：同一 HEAD 的 Application Skeleton boundary run [#44749647406](https://github.com/devin930906/userscript-auto-healer/actions/runs/44749647406) 为 1,229 total / 1,225 pass / 1 fail / 3 skipped；唯一失败是既有 `TEST-006/008/009` owned-Chrome 测试收到 `CDP_TIMEOUT`。诊断报告首次启动重试、61 次拒绝连接、3 次 fetch timeout、进程仍运行且监听 PID 匹配；不得归因于本次拖放烟测或将此 Windows 环境超时改写为通过。该失败后 `windows-shell-smoke` job 被跳过。
+- **修正与验证**：`app/main/index.ts` smoke 选择器已改为 `#drop-area`；`tests/security/desktop-boundary.test.ts` 新增回归检查，保证 smoke 查询必须与 `app/ui/index.html` 实际容器一致。新增用例 RED 后修复为 GREEN；本地 build 成功，desktop-boundary 76/76 通过。
+- **远端状态**：上述 smoke 与 boundary 失败属于精确 PR HEAD `70f022...`。修正提交推送后须检查新 HEAD 的 Application Skeleton shell smoke、Candidate packaging、Documentation Integrity、Issue Coordination 及 Tampermonkey matrix；旧 HEAD 结果不能作为该修正的验证。PR #925 与 Issue #857 均保持 Open，Stable 未完成。

@@ -2126,7 +2126,7 @@ async function createMainWindow(): Promise<void> {
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
     const droppedCheckpointVisible=await win.webContents.executeJavaScript(
-      "(async()=>{const zone=document.getElementById('drop-zone');"+
+      "(async()=>{const zone=document.getElementById('drop-area');"+
       "if(!zone||typeof DataTransfer!=='function')return false;"+
       "const transfer=new DataTransfer();"+
       "transfer.items.add(new File(['// ==UserScript==\\n// @name checkpoint smoke\\n// ==/UserScript==\\ndocument.querySelector(\\\"#checkpoint-smoke\\\");\\n'],"+

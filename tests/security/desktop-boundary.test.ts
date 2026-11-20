@@ -396,6 +396,17 @@ test('TASK-013/TEST-026: dropped batch IPC is main-owned, frame-authorized and p
     'renderer must not launch one IPC analysis job per file');
 });
 
+test('TASK-013/TEST-022/026: Windows shell drop smoke targets the rendered drop area',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(html,/<div id="drop-area">/,
+  'the application must keep an identifiable file drop area');
+ assert.match(main,/const zone=document\.getElementById\('drop-area'\)/,
+  'the shell smoke must dispatch through the same drop area used by the renderer');
+ assert.doesNotMatch(main,/const zone=document\.getElementById\('drop-zone'\)/,
+  'a stale test-only selector must not silently skip the real drop event');
+});
+
 test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped batch',()=>{
   const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
   const cleanup=main.match(/function abortDroppedImportForWindow\(win:BrowserWindow\):void\{[\s\S]*?\n\}/)?.[0]??'';
