@@ -1,8 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
-import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
+import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportOutcome, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
-import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
+import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -294,23 +293,20 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     sha256:script.sha256, textEncoding:script.textEncoding,
     analysis};
 }
-async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
-  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void,
-  nativeJournalRoot?:string) {
-  // Only the native OS picker may opt into persistence. Dropped bytes still
-  // use the existing ephemeral, read-only worker; no renderer path is trusted.
-  const checkpoint=nativeJournalRoot&&result.scripts.length>0
-    ?await runCheckpointedNativeImportAnalysis(nativeJournalRoot,
-      result.scripts,signal,onProgress)
-    :undefined;
-  const previews=checkpoint?.previews??
-    await runImportedReadOnlyAnalysisQueue(result.scripts,signal,onProgress);
+async function summarizeResult(result:ImportOutcome,
+  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
+  // Every validated source shares the same durable read-only scheduler. The
+  // root is selected here in Electron main; renderer input cannot choose it.
+  const analyzed=await analyzeImportedOutcomeWithCheckpoint(
+    join(app.getPath('userData'),'readonly-import-journals'),result,signal,onProgress);
+  const checkpoint=analyzed.checkpoint;
+  const previews=checkpoint?.previews??[];
   return {batchCheckpoint:checkpoint?.status,
     batchCheckpointReason:checkpoint?.status==='BLOCKED'?checkpoint.reason:undefined,
     batchResumed:checkpoint?.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'
       ?checkpoint.resumed:false,
-    canceled:result.canceled===true||signal?.aborted===true,
-    unprocessed:result.unprocessed??0,
+    canceled:analyzed.canceled,
+    unprocessed:analyzed.unprocessed,
     scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
     errors:result.errors, duplicates:result.duplicates};
 }
@@ -1235,7 +1231,7 @@ function registerSafeIpc(): void {
         nativeImportCounters={phase:'ANALYZING',processed,total,
           accepted:result.scripts.length,duplicates:result.duplicates,
           failed:result.errors.length};
-      },join(app.getPath('userData'),'readonly-import-journals'));
+      });
     } finally {
       if(nativeImportController===controller){
         nativeImportController=null;
@@ -1298,10 +1294,12 @@ function registerSafeIpc(): void {
     if(!result)return {ok:false,code:'BATCH_FINALIZED'};
     droppedImportBatchSession=null;
     try{
+      // Record only validated byte hashes before potentially long AST work,
+      // matching the native import ordering and retaining canceled imports.
+      for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
       const summary=await summarizeResult(result,controller.signal);
       if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch)
         return {ok:false,code:'STALE_BATCH'};
-      for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
       return {ok:true,...summary};
     }catch{return {ok:false,code:'DROPPED_IMPORT_FAILED'};}
     finally{
@@ -1321,15 +1319,20 @@ function registerSafeIpc(): void {
     droppedImportController=controller;
     try{
       // A dragged .user.js is untrusted even after successful byte import.
-      // AST parsing must not block the privileged Electron event loop.
-      // No script is executed, applied or sent to the browser/manager.
-      const [analysis]=await runImportedReadOnlyAnalysisQueue([result],controller.signal);
+      // It shares the main-owned durable, read-only checkpointed AST path;
+      // no script is executed, applied or sent to a browser/manager.
+      const summary=await summarizeResult({scripts:[result],errors:[],duplicates:0},
+        controller.signal);
       if(win!==mainWindow||win.isDestroyed())
         return {ok:false,code:'WINDOW_CLOSED'};
       // Cancellation only stops optional AST work. Validated imported bytes
       // were already read, so retain the SHA for this window's staged history.
       scenarioSession.recordImported(result.sha256);
-      return {ok:true,script:summarize(result,analysis)};
+      return {ok:true,script:summary.scripts[0],
+        batchCheckpoint:summary.batchCheckpoint,
+        batchCheckpointReason:summary.batchCheckpointReason,
+        batchResumed:summary.batchResumed,
+        canceled:summary.canceled,unprocessed:summary.unprocessed};
     }catch{
       return {ok:false,code:'DROPPED_IMPORT_FAILED'};
     }finally{
@@ -2122,6 +2125,20 @@ async function createMainWindow(): Promise<void> {
 
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
+    const droppedCheckpointVisible=await win.webContents.executeJavaScript(
+      "(async()=>{const zone=document.getElementById('drop-zone');"+
+      "if(!zone||typeof DataTransfer!=='function')return false;"+
+      "const transfer=new DataTransfer();"+
+      "transfer.items.add(new File(['// ==UserScript==\\n// @name checkpoint smoke\\n// ==/UserScript==\\ndocument.querySelector(\\\"#checkpoint-smoke\\\");\\n'],"+
+      "'checkpoint-smoke.user.js',{type:'text/plain'}));"+
+      "zone.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));"+
+      "const start=Date.now();while(Date.now()-start<10000){"+
+      "if(Array.from(document.querySelectorAll('#import-list li')).some(row=>"+
+      "row.textContent.includes('只读 AST 批处理检查点已保存')))return true;"+
+      "await new Promise(resolve=>setTimeout(resolve,30));}return false;})()"
+    ) as boolean;
+    if(!droppedCheckpointVisible)
+      throw new Error('SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE');
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
     if(probe?.droppedCancelReadStarted!==true)

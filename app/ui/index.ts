@@ -317,6 +317,15 @@ function show(result: ImportResponse): void {
   for (const error of result.errors) { failedCount++; logLine(error.filename + ': ' + error.code); }
   duplicateCount += duplicates;
   if (duplicates) logLine('忽略重复脚本：' + duplicates);
+  if(result.batchCheckpoint==='BLOCKED')
+    logLine('持久只读 AST 检查点受阻：'+(result.batchCheckpointReason??'UNKNOWN')+
+      '；原始脚本未被修改，本次未完成静态预览。');
+  else if(result.batchCheckpoint==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    logLine(result.batchResumed
+      ?'已匹配同批只读调度记录；本次仍重新分析新导入字节。'
+      :'只读 AST 批处理检查点已保存；仅记录有限调度状态。');
+  if(result.batchCheckpoint)
+    logLine('检查点仅支持重新导入后恢复调度，不保存源码，也不代表网页、GM API、业务验证或修复已完成。');
   updateImportSummary();
 }
 
@@ -368,12 +377,6 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       ? await window.healer.chooseFiles()
       : await window.healer.chooseFolder();
     show(result);
-    if (result.batchCheckpoint==='BLOCKED')
-      logLine('批处理检查点未保存：'+(result.batchCheckpointReason??'UNKNOWN')+
-        '；已导入的原始文件未被修改，静态分析不能据此视为已完成。');
-    else if(result.batchCheckpoint==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
-      logLine(result.batchResumed?'已重新核对同批脚本的只读持久调度记录；仍重新分析源码，不代表修复完成。':
-        '只读 AST 批处理检查点已保存；仅记录有限调度状态，不授权修复脚本。');
     if (result.canceled) {
       unprocessedCount += result.unprocessed ?? 0;
       logLine('原生选择导入已取消；已经完成的只读结果仍保留。');

@@ -7,7 +7,8 @@ import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {importApprovedPaths} from '../../src/import/import-service';
+import {DroppedImportBatch,importApprovedPaths,type ImportOutcome} from '../../src/import/import-service';
+import * as checkpointedImportModule from '../../src/jobs/native-checkpointed-import';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
@@ -59,6 +60,98 @@ test('TASK-013/TEST-022/026: checkpointed native import must reject an array Pro
 });
 
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
+
+test('TASK-013/TEST-022/026: renderer-dropped outcomes use the shared checkpoint and fresh AST on reimport',async()=>{
+ type CheckpointedOutcome=Awaited<ReturnType<typeof runCheckpointedNativeImportAnalysis>>;
+ type Analyzer=(journalRoot:string,outcome:ImportOutcome,signal?:AbortSignal,
+  onProgress?:(processed:number,total:number)=>void)=>Promise<{
+   checkpoint:CheckpointedOutcome|null;canceled:boolean;unprocessed:number
+  }>;
+ const candidate=(checkpointedImportModule as unknown as Record<string,unknown>)
+  .analyzeImportedOutcomeWithCheckpoint;
+ assert.equal(typeof candidate,'function',
+  'all validated import outcomes need one main-process checkpointed AST entrypoint');
+ if(typeof candidate!=='function')return;
+ const analyze=candidate as Analyzer;
+ const home=await mkdtemp(join(tmpdir(),'uah-dropped-checkpoint-entry-'));
+ try{
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const journalRoot=join(userData,'readonly-import-journals');
+  const makeOutcome=(names:readonly string[],revision='v1')=>{
+   const batch=new DroppedImportBatch();
+   for(const name of names){
+    const source=header+'document.querySelector("#'+name+'-'+revision+'");\n';
+    const added=batch.add(name+'.user.js',Buffer.from(source));
+    assert.equal(added.ok,true);
+   }
+   const finished=batch.finish();
+   assert.ok(finished);
+   return finished!;
+  };
+  const firstOutcome=makeOutcome(['alpha','beta']);
+  assert.equal(firstOutcome.scripts.every(script=>'sourcePath' in script),false,
+   'renderer bytes must remain path-free while entering the shared pipeline');
+
+  let workerStarts=0;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const runWorker=isolated.previewImportedBatchOffMain;
+  const workerSpy=mock.method(isolated,'previewImportedBatchOffMain',(...args:Parameters<typeof runWorker>)=>{
+   workerStarts++;
+   return runWorker(...args);
+  });
+  try{
+   const first=await analyze(journalRoot,firstOutcome);
+   assert.equal(first.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(first.checkpoint?.resumed,false);
+   assert.deepEqual(first.checkpoint?.previews.map(row=>row.status),
+    ['STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY']);
+   const firstDispatches=workerStarts;
+   assert.ok(firstDispatches>0,'the fresh dropped batch must run the real isolated AST worker');
+
+   const second=await analyze(journalRoot,firstOutcome);
+   assert.equal(second.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(second.checkpoint?.resumed,true,
+    'same ordered byte identities should find only the matching scheduling hint');
+   assert.deepEqual(second.checkpoint?.previews.map(row=>row.status),
+    ['STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY']);
+   assert.ok(workerStarts>firstDispatches,
+    'a resumed scheduling hint must still rerun the AST worker on newly imported bytes');
+
+   const reordered=await analyze(journalRoot,makeOutcome(['beta','alpha']));
+   assert.equal(reordered.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(reordered.checkpoint?.resumed,false,
+    'reordering scripts must not reuse the prior batch identity');
+   const changed=await analyze(journalRoot,makeOutcome(['alpha','beta'],'v2'));
+   assert.equal(changed.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(changed.checkpoint?.resumed,false,
+    'changed script bytes must create a separate scheduling identity');
+
+   const journalDirectories=await readdir(journalRoot);
+   assert.equal(journalDirectories.length,3);
+   for(const directory of journalDirectories){
+    const journal=await readFile(join(journalRoot,directory,BATCH_JOURNAL_FILENAME),'utf8');
+    assert.equal(journal.includes('alpha.user.js'),false);
+    assert.equal(journal.includes('https://example.org'),false);
+    assert.equal(journal.includes('document.querySelector'),false);
+   }
+  }finally{workerSpy.mock.restore();}
+
+  const cancelledController=new AbortController();
+  cancelledController.abort();
+  const cancelled=await analyze(journalRoot,makeOutcome(['cancelled']),
+   cancelledController.signal);
+  assert.equal(cancelled.checkpoint?.status,'BLOCKED');
+  assert.equal(cancelled.checkpoint?.reason,'CANCELLED');
+  assert.equal(cancelled.canceled,true);
+  assert.equal(cancelled.unprocessed,0);
+  assert.deepEqual(cancelled.checkpoint?.previews.map(row=>row.status),
+   ['SKIPPED_CANCELLED']);
+  assert.equal((await readdir(journalRoot)).length,3,
+   'a pre-cancelled imported batch must not write a new checkpoint');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
 
 test('TASK-013/TEST-022/026: cancellation during early per-file recovery preserves later completed segment evidence',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-recovery-later-segment-'));

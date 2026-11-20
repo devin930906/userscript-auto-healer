@@ -546,3 +546,12 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地 Electron smoke**：下载 pinned Electron 44.9.1 并确认 `electron.exe --version` 成功；`--uahtest-shell-only` 在生成回执前以 `0xC0000005` 退出，无 smoke receipt。此本机结果无法判定 renderer smoke 通过，PR 必须等待 Windows 2025 Application Skeleton Checks。
 - **候选基线**：main@146f9a 的 Candidate run [#44555096125](https://github.com/devin930906/userscript-auto-healer/actions/runs/44555096125) 成功，Artifact 14545696747，digest `sha256:31d19dcfbeca8a80bd295228c45d4c3e4f116fdff70c3615a1406283213f4ec8`，到期 2026-11-22T15:36:37Z。它在本增量之前构建，仍是 Candidate，不能代表本分支。
 - **仍需完成**：#857 的可恢复持久批处理、逐脚本动态诊断、保守修复候选、可选 AI、同一自启动 CDP Chrome 中真实 Tampermonkey/GM/业务正反断言与失败恢复均未串联或验收；TEST-022/GATE-007 未通过。等待当前 PR head 的 Windows checks 完成后复核，并持续推进 Issue 其余范围。Stable 仍未完成。
+
+## 2026-11-20 TASK-013 / Issue #857 — 所有导入入口共用持久只读 AST 检查点
+
+- **增量范围**：在 PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 的 renderer 文件选择/拖放批次上，接通与原生多选/文件夹相同的主进程只读 AST 检查点流程；原生选择、文件夹、renderer file picker、拖放批次及保留的单文件入口均由主进程以 `app.getPath('userData')` 选择 journal root。renderer 不可传入 journal 路径。
+- **安全与恢复边界**：检查点绑定有序脚本字节哈希和编码，只保存有限调度/任务状态，不保存源码、文件名、来源路径、URL 或 AST 正文。重复导入只命中调度提示；仍会对本次导入字节重新运行 Worker AST。journal 失败、非法或取消时保持 `BLOCKED`，不退回无检查点的内存队列，也不改写原始脚本。界面说明检查点不构成网页、GM API、业务验证或修复完成。
+- **回归覆盖**：新增 `TASK-013/TEST-022/026`，验证 renderer 导入的新鲜解析、同一有序批次重导入仍重跑 Worker、顺序或字节变化不复用批次身份、journal 不含文件名/URL/源码，以及预先取消不写新检查点。扩展 Windows shell-only smoke，实际拖入合成文件并确认界面显示检查点状态。
+- **本地验证**：`npm run build`、`npm run typecheck`、`git diff --check` 与 `.github/scripts/verify-predevelopment.py` 均通过（28 REQ/TEST、21 TASK、11 GATE）；`dist/tests/jobs/native-checkpointed-import.test.js` 为 40/40 通过。完整 `npm test` 为 1,229 项：1,174 pass / 43 fail / 12 skipped。43 个失败按类别为 TASK-011/TEST-020 恢复路径 41 项、TEST-003 symlink 1 项、TASK-018/TEST-018 端到端 1 项；不得将本轮全量套件标为通过。新改动对应的检查点测试通过，其他失败需独立调查。
+- **远端状态**：本轮 PR #925 新 HEAD 的 Windows shell smoke、Application Skeleton、Candidate 与文档/Issue checks 尚待复核；旧 HEAD 的绿色结果不替代本轮 CI。#857 保持 Open。
+- **后续与 Stable 边界**：这一增量只统一批次导入与只读 AST 调度，不包含逐脚本动态诊断、修复候选、AI、真实 Tampermonkey/GM/业务正反断言与失败恢复。TEST-022/GATE-007 和 Stable 的其他必要 GATE、最终同源 EXE+ZIP、集中人工验收均未完成。
