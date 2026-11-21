@@ -606,3 +606,10 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **TASK-005 Windows 诊断**：在远端基线 SHA `de09c313efe0c354e6a6e9a92a29238d664d31d0` 的手动运行 [#44763006479](https://github.com/devin930906/userscript-auto-healer/actions/runs/44763006479) 中，冷 Profile 与无 CDP 预初始化 Profile 均在原 20 秒限制内得到 `OWNED_CDP_BROWSER_VERIFIED`；两者均完成 PID 与 WebSocket 归属验证，单一拒绝连接后即解析 CDP 版本。这个有限对照未复现此前 `CDP_TIMEOUT`，不能据此认定根因或修改超时/重试策略。
 - **推送前远端基线**：PR #925 head `de09c313efe0c354e6a6e9a92a29238d664d31d0` 的 Documentation Integrity、Issue Coordination 和 TASK-007 隔离 Tampermonkey 实验通过；Application Skeleton boundary 因 `TEST-006/008/009` 的 `CDP_TIMEOUT` 失败，shell smoke 随后跳过；Candidate Windows 注册回归失败，打包/上传步骤跳过。本地候选实现同步后，必须以新精确 HEAD 复查 Actions。
 - **仍未完成**：#857 的候选备份/版本、用户确认导出、可选 AI、同一自启动 Chrome 中的 Tampermonkey 安装与注入、GM round-trip、业务正反断言及失败恢复仍未贯通。TEST-022/GATE-007、其他 Stable gate、同源 EXE/ZIP、最终集中人工验收均未完成；Issue #857 与 PR #925 继续保持 Open，Stable 仍未完成。
+
+## 2026-11-21 TASK-013 / Issue #857 — Windows smoke preload inventory ordering fix
+
+- **远端失败证据**：PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 的 HEAD `0e152ef180ef5354b522e52c19aa9c9ed176ea00` 仍为 Open、未合并。Application Skeleton `windows-shell-smoke`（run [#44903243817](https://github.com/devin930906/userscript-auto-healer/actions/runs/44903243817)）与 Candidate `candidate-windows-packaging`（run [#44903243773](https://github.com/devin930906/userscript-auto-healer/actions/runs/44903243773)）都在同一 preload inventory 断言失败：`SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED`。Candidate 在 Electron smoke 前的测试为 1,251 total / 1,248 pass / 0 fail / 3 skipped；测试通过不抵销后续 smoke 失败。
+- **根因与本地修正**：实际 preload keys 已完整包含两个 batch recovery 方法，但 smoke 期望清单把 `registerScenario` 排在 `recoverDroppedImportBatch` 前，和 `Object.keys(...).sort()` 的运行时顺序不一致。修正顺序，并让 desktop-boundary 测试直接解析 preload 暴露键、对照 smoke 清单的有序全量集合。
+- **本地验证**：`npm run build` 成功；desktop-boundary 81/81；`git diff --check` 通过。没有在本机运行 Electron smoke；先前 `0xC0000005` 的限制仍适用。当前远端 checks 仍对应旧 HEAD，修正后的 Windows 行为待同步到 PR 后验证。
+- **范围状态**：不新增 REQ、TASK、TEST 或 GATE；TEST-022/GATE-007、#857 其余产品流程与 Stable 验收仍未完成。

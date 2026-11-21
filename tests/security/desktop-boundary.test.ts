@@ -488,8 +488,18 @@ test('TASK-013/TEST-022/026: reload recovers an accepted dropped batch instead o
   assert.match(preload,/acknowledgeDroppedImportRecovery:\s*\(recoveryId: string\): Promise<unknown> =>\s*ipcRenderer\.invoke\('import:dropped-batch:acknowledge', recoveryId\)/,
    'acknowledgement may only return the main-issued recovery receipt');
   assert.match(main,/acknowledgeDroppedImportRecovery,addDroppedImportBatch/);
-  assert.match(main,/registerScenario,recoverDroppedImportBatch,requestNativeAiReview/,
+  assert.match(main,/recoverDroppedImportBatch,registerScenario,requestNativeAiReview/,
    'the package smoke preload-key inventory must include both bounded recovery methods');
+ const preloadStart=preload.indexOf("contextBridge.exposeInMainWorld('healer', Object.freeze({");
+ const preloadEnd=preload.indexOf('\n}));',preloadStart);
+ assert.ok(preloadStart>=0&&preloadEnd>preloadStart,
+  'inspect only the actual exposed healer bridge');
+ const exportedKeys=[...preload.slice(preloadStart,preloadEnd).matchAll(/^  ([A-Za-z_]\w*):/gm)]
+  .map(match=>match[1]).sort();
+ const smokeInventory=main.match(/if \(probe\.keys\?\.join\(','\) !==\s*'([^']+)'\)/);
+ assert.ok(smokeInventory,'the Windows shell smoke must retain its runtime preload inventory check');
+ assert.deepEqual(smokeInventory[1].split(','),exportedKeys,
+  'the smoke allowlist must exactly match the sorted runtime preload exports');
  assert.match(ui,/recoverDroppedImportBatch\(\)[\s\S]*?show\(recovered\.result\)/,
   'the reloaded renderer must render the previously accepted import result');
   assert.match(ui,/acknowledgeDroppedImportRecovery\(recovered\.recoveryId\)/,

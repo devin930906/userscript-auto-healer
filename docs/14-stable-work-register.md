@@ -590,3 +590,9 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **当前机器验证**：build/typecheck 通过；desktop-boundary 81/81；checkpointed import 与 imported-analysis queue 59/59；import-service 36/37，唯一失败是 TEST-003 symlink `EPERM`；predevelopment traceability 28/21/11 通过。完整 `npm test` 1,251 total / 1,196 pass / 43 fail / 12 skipped；43 项为 TASK-011 restore 41、TEST-003 symlink 1、TASK-018 E2E 1。未本机启动 Electron smoke。
 - **GitHub**：PR #925 在本轮同步前仍为 Open、未合并，远端 head `5a0480055bb515f587176fece14ac54cc2f61a50`。本地变更待同步，Windows smoke/Candidate 新 SHA 证据待取得；#857 保持 Open，TASK-013/GATE-007 不能判完成。
 - **Stable**：其余 TASK/Issues、全部必要 GATE、同源 EXE+ZIP、最终集中人工验收与正式 Release 仍未通过。
+
+## 2026-11-21 TASK-013 / #857 — Windows smoke inventory order correction
+
+- PR #925 HEAD `0e152ef180ef5354b522e52c19aa9c9ed176ea00` 的 `windows-shell-smoke` 与 Candidate packaging 均失败在 `SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED`；远端该 SHA 的 Boundary 和 Portable Chrome checks 成功，不能替代两项实际 Electron smoke。
+- 本地已修正 smoke 的 preload 键名顺序，并增加静态断言确保烟测清单与 preload 的排序后导出完全一致。`npm run build` 与 desktop-boundary 81/81 通过，`git diff --check` 通过；本机 Electron smoke 未运行。
+- 新精确 PR SHA 的 Windows checks 尚未执行；TASK-013/#857、TEST-022/GATE-007 与 Stable 发布验收仍未完成。

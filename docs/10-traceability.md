@@ -156,3 +156,10 @@ Chrome/CDP 和独立 Profile、限定真实 Violentmonkey .user.js 注入/GM_get
 - **代码范围**：候选 smoke 使用每次唯一的文件名和字节，并把 checkpoint 结果限制在本批新增日志行；reload fixture 同样逐轮生成唯一字节。renderer reload 时 main 保存单个同窗口摘要，trusted renderer 在文档加载后无参数读取、展示后以 main-issued、按 frame epoch 绑定的 receipt 确认；确认后 smoke 实测下一批可启动。分析未 settle 前取消仍有效；fragment-only 导航不交接；路径/控制符/超长拒绝文件名不会进入跨 frame 摘要。结果只在当前应用进程内存中存在，窗口关闭/应用退出清理，不能视为崩溃重启恢复。
 - **当前验证**：desktop-boundary 81/81、checkpoint/import-queue 定向测试 59/59、import-service 36/37（唯一 TEST-003 symlink 因 sandbox `EPERM`）、build、typecheck 与 admission traceability 28/21/11 均通过。完整本地 `npm test` 为 1,251/1,196/43/12；43 项仍为 TASK-011 restore 41、TEST-003 symlink 1、TASK-018 E2E 1。未运行本地 Electron smoke。
 - **远端状态**：上述实现尚待同步及精确新 SHA 的 Windows `windows-shell-smoke`、Candidate packaging、Documentation Integrity、Issue Coordination 与相关矩阵验证；此前 5a048... 的失败记录不代表新代码。TEST-022/GATE-007、真实 Tampermonkey/GM/业务验收及 Stable 发布仍未通过。
+
+## 2026-11-21 TASK-013 / Issue #857 — Windows smoke preload inventory ordering fix
+
+- **追踪范围**：REQ-022 / NFR-009 → TASK-013 → TEST-022/026 → Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) → PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925)。不新增 REQ、TASK、TEST、GATE 或 Issue。
+- **失败归属**：PR HEAD `0e152ef180ef5354b522e52c19aa9c9ed176ea00` 的 `windows-shell-smoke` 与 Candidate packaging 均以 `SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED` 结束。preload export 集合本身完整；烟测静态预期顺序与排序后的 Electron bridge keys 不同。
+- **本地变更与证据**：将 `recoverDroppedImportBatch` / `registerScenario` 调整为与实际排序一致，并新增 desktop-boundary 全量键名对照。`npm run build` 与 desktop-boundary 81/81 通过，`git diff --check` 通过。上述远端失败仍是旧 HEAD 的证据，不能代表此本地修正；新 SHA 的 Windows checks 尚待执行。
+- **剩余**：PR #925 仍 Open、未合并；TASK-013/#857、TEST-022/GATE-007、真实 Tampermonkey/GM/业务验收和 Stable gate 均未完成。
