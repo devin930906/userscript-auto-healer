@@ -587,6 +587,20 @@ test('TASK-013/TEST-022: dropped batch keeps valid neighbors around one invalid 
   assert.deepEqual(result?.errors,[{filename:'notes.txt',code:'NOT_USER_SCRIPT'}]);
 });
 
+test('TASK-013/TEST-026: dropped batch failure summaries bound hostile filenames',()=>{
+  const batch=new DroppedImportBatch();
+  const bytes=new TextEncoder().encode(script);
+  const unsafeNames=[
+    'C:\\private\\source.user.js',
+    'line\u0001break.user.js',
+    'x'.repeat(4096)+'.user.js'
+  ];
+  for(const name of unsafeNames)batch.add(name,bytes);
+  const result=batch.finish();
+  assert.deepEqual(result?.errors.map(error=>error.filename),
+    unsafeNames.map(()=>'[invalid filename]'));
+});
+
 test('TASK-013/TEST-022: dropped batch counts duplicate bytes once',()=>{
   const batch=new DroppedImportBatch();
   const bytes=new TextEncoder().encode(script);

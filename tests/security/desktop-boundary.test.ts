@@ -21,9 +21,10 @@ const approvedIpcChannels=[
  'browser:open-tampermonkey-store','browser:start','browser:stop',
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
- 'gm-probe:visit','import:cancel-dropped','import:cancel-native',
- 'import:dropped','import:dropped-batch:add','import:dropped-batch:begin',
- 'import:dropped-batch:finish','import:files','import:folder','import:get-progress',
+  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
+  'import:dropped','import:dropped-batch:acknowledge','import:dropped-batch:add',
+  'import:dropped-batch:begin','import:dropped-batch:finish','import:dropped-batch:recover',
+  'import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
  'scenario:diagnose-imported-batch','scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
 ] as const;
@@ -219,7 +220,11 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   const handles=[...main.matchAll(/ipcMain\.handle\('([^']+)'/g)].map(m=>m[1]).sort();
   assert.deepEqual(handles,approvedIpcChannels);
   assert.match(main, /ipcMain\.handle\('import:cancel-dropped',event=>/);
-  assert.match(main, /authorizeSender\(event\);\s*if\(!droppedImportController\)/);
+  assert.match(main,/authorizeSender\(event\);\s*const controller=droppedImportController;\s*const pending=pendingDroppedImportRecovery;\s*if\(!controller\|\|\(pending\?\.controller===controller&&pending\.settled\)\)/);
+  assert.match(main,/pending\?\.controller===controller&&pending\.settled/,
+    'an in-flight read-only analysis remains cancelable until its summary settles');
+  assert.match(main, /ipcMain\.handle\('import:dropped-batch:recover',async event=>\{\s*authorizeSender\(event\)/);
+  assert.match(main, /ipcMain\.handle\('import:dropped-batch:acknowledge',\(event,recoveryId:unknown\)=>\{\s*authorizeSender\(event\)/);
   assert.match(main, /ipcMain\.handle\('import:cancel-native', event=>/);
   assert.match(main, /ipcMain\.handle\('import:get-progress',event=>/);
   assert.match(main, /authorizeSender\(event\);\s*\/\/ No user data/);
@@ -401,17 +406,52 @@ test('TASK-013/TEST-022/026: Windows shell drop smoke targets the rendered drop 
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  assert.match(html,/<div id="drop-area">/,
   'the application must keep an identifiable file drop area');
- const smokeStart=main.indexOf('const droppedCheckpointVisible=');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
  assert.notEqual(smokeStart,-1,'the package smoke must exercise a dropped batch');
- const smokeEnd=main.indexOf(') as boolean;',smokeStart);
+ const smokeEnd=main.indexOf(') as string;',smokeStart);
  assert.ok(smokeEnd>smokeStart,'the package drop assertion must stay bounded');
- const smoke=main.slice(smokeStart,smokeEnd+13);
+ const smoke=main.slice(smokeStart,smokeEnd+12);
  assert.match(smoke,/const zone=document\.getElementById\('drop-area'\)/,
   'the shell smoke must dispatch through the same drop area used by the renderer');
- assert.match(smoke,/\n\s*true\s*\n\s*\) as boolean;/,
+ assert.match(smoke,/\n\s*true\s*\n\s*\) as string;/,
   'the synthetic native drop must run with the browser user-gesture flag');
  assert.doesNotMatch(smoke,/const zone=document\.getElementById\('drop-zone'\)/,
   'a stale test-only selector must not silently skip the real drop event');
+});
+
+test('TASK-013/TEST-022/026: checkpoint smoke waits for its own completed dropped batch',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
+ const smokeEnd=main.indexOf('rmSync(fixtureDir',smokeStart);
+ assert.ok(smokeStart>=0&&smokeEnd>smokeStart,
+  'the checkpoint smoke must remain a bounded, independently inspectable block');
+ const smoke=main.slice(smokeStart,smokeEnd);
+  assert.match(smoke,/text\.startsWith\(fileName\+': '\)/,
+  'checkpoint visibility must belong to the unique file sent by this drop');
+ assert.match(smoke,/text\.includes\('只读 AST 批处理检查点已保存'\)/,
+  'the unique dropped file must finish the checkpointed import before the smoke passes');
+ assert.match(smoke,/document\.getElementById\('choose-files'\)\?\.disabled===false/,
+  'the smoke must wait for the renderer import lock to be released');
+ assert.match(smoke,/document\.getElementById\('cancel-import'\)\?\.disabled===true/,
+  'the smoke must wait until its current batch has fully settled');
+ assert.match(main,/SHELL_SMOKE_DROPPED_BATCH_/,
+  'Windows failures must expose the bounded drop-smoke diagnostic stage');
+});
+
+test('TASK-013/TEST-022/026: checkpoint smoke correlates its status with new file-specific rows',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
+ const smokeEnd=main.indexOf('rmSync(fixtureDir',smokeStart);
+ assert.ok(smokeStart>=0&&smokeEnd>smokeStart);
+ const smoke=main.slice(smokeStart,smokeEnd);
+ assert.match(smoke,/const priorCount=document\.querySelectorAll\('#import-list li'\)\.length/,
+  'the smoke must ignore historical import log rows');
+ assert.match(smoke,/\.slice\(priorCount\)/,
+  'the checkpoint result must be read only from rows appended by this batch');
+ assert.match(smoke,/const nonce=Date\.now\(\)\.toString\(36\)\+Math\.random\(\)\.toString\(36\)\.slice\(2\)/,
+  'the fixture bytes and name must not match a checkpoint from an earlier run');
+ assert.match(smoke,/text\.startsWith\(fileName\+': '\)/,
+  'the unique fixture name must be the one reported as imported');
 });
 
 test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped batch',()=>{
@@ -425,8 +465,52 @@ test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped 
     'teardown must cancel analysis and release the busy lock');
   assert.ok(/win\.webContents\.on\('render-process-gone',[^;]*abortDroppedImportForWindow\(win\)/.test(main),
     'renderer process loss must clean up its batch');
-  assert.ok(/win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame\)[\s\S]*?abortDroppedImportForWindow\(win\)/.test(main),
+  assert.ok(/win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)[\s\S]*?abortDroppedImportForWindow\(win\)/.test(main),
     'main-frame reload must clean up its batch');
+  assert.match(main,/if\(isMainFrame&&!isInPlace\)abortDroppedImportForWindow\(win\)/,
+    'fragment-only navigation must not orphan the live renderer batch');
+  assert.match(main,/win\.webContents\.on\('did-finish-load',[\s\S]*?pending\.ready=true/,
+    'a pending result becomes recoverable only after the replacement document loads');
+  assert.match(main,/pending\.frameEpoch!==mainFrameNavigationEpoch/,
+    'recovery and acknowledgement receipts must belong to the current document epoch');
+});
+
+test('TASK-013/TEST-022/026: reload recovers an accepted dropped batch instead of losing it',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(main,/ipcMain\.handle\('import:dropped-batch:recover'/,
+  'the next main frame must be able to recover the completed main-owned batch summary');
+ assert.match(main,/pendingDroppedImportRecovery/,
+  'teardown must retain a bounded summary until the renderer acknowledges it');
+ assert.match(preload,/recoverDroppedImportBatch:\s*\(\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:recover'\)/,
+  'recovery bridge must take no renderer-supplied ID, path, bytes or hash');
+  assert.match(preload,/acknowledgeDroppedImportRecovery:\s*\(recoveryId: string\): Promise<unknown> =>\s*ipcRenderer\.invoke\('import:dropped-batch:acknowledge', recoveryId\)/,
+   'acknowledgement may only return the main-issued recovery receipt');
+  assert.match(main,/acknowledgeDroppedImportRecovery,addDroppedImportBatch/);
+  assert.match(main,/registerScenario,recoverDroppedImportBatch,requestNativeAiReview/,
+   'the package smoke preload-key inventory must include both bounded recovery methods');
+ assert.match(ui,/recoverDroppedImportBatch\(\)[\s\S]*?show\(recovered\.result\)/,
+  'the reloaded renderer must render the previously accepted import result');
+  assert.match(ui,/acknowledgeDroppedImportRecovery\(recovered\.recoveryId\)/,
+   'the renderer must acknowledge the displayed recovery before the main process releases it');
+ const reloadSmokeStart=main.indexOf('const abandonedDroppedBatch=');
+ const reloadSmokeEnd=main.indexOf('const receipt = process.env.UAH_SMOKE_RECEIPT',reloadSmokeStart);
+ assert.ok(reloadSmokeStart>=0&&reloadSmokeEnd>reloadSmokeStart,
+  'the reload smoke must retain a bounded batch recovery scenario');
+ const smoke=main.slice(reloadSmokeStart,reloadSmokeEnd);
+ assert.match(smoke,/abandoned\.user\.js:/,
+  'reload smoke must verify the accepted file is present in the new renderer');
+  assert.match(smoke,/const recoveryNonce=Date\.now\(\)\.toString\(36\)\+Math\.random\(\)\.toString\(36\)\.slice\(2\)/,
+   'the reload fixture must have a fresh byte identity across packaging runs');
+ assert.match(smoke,/只读 AST 批处理检查点已保存/,
+  'reload smoke must verify the recovered batch reached its read-only checkpoint');
+  assert.match(smoke,/acknowledgeDroppedImportRecovery/,
+   'reload smoke must acknowledge the recovered receipt');
+  assert.match(smoke,/IMPORT_RECOVERY_PENDING/,
+   'reload smoke must confirm that the receipt acknowledgement releases the next batch');
+ assert.doesNotMatch(smoke,/finished\.scripts\.length===0/,
+  'reload smoke must not pass by starting an unrelated empty batch');
 });
 
 test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attesting page exception signals',()=>{

@@ -97,7 +97,10 @@ export interface ImportOutcome {
 }
 
 function failure(name: string, code: ImportFailureCode): ImportFailure {
-  return { filename: name, code };
+  const safeDisplayName=name.length>0&&name.length<=128&&
+    !/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(name)
+    ?name:'[invalid filename]';
+  return { filename: safeDisplayName, code };
 }
 
 function validName(name: unknown): name is string {

@@ -560,3 +560,33 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - **机器验证**：本轮 `npm run build`、`npm run typecheck`、desktop-boundary 75/75、predevelopment 28/21/11 与 `git diff --check` 通过。组合 desktop-boundary/import-service 为 111 项中 110 通过、1 失败；唯一失败是本地 sandbox 不允许创建测试 symlink（TEST-003 `EPERM`）。PR source head `0f1a2cdc5e29d612d82e996d88058359fa9c39c9` 的 Application Skeleton [#44576767661](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576767661) 与 Candidate Windows [#44576767432](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576767432) 成功；Candidate Node suite 为 1,228 total / 1,225 pass / 0 fail / 3 skipped，临时候选 Artifact 14556773161 的 digest 为 `sha256:f18619e66f41dfe91b5965f0bfc1f6065335154ef90ee5968aa4df80140b59f5`（278,093,770 bytes，expires 2026-11-22T17:33:22Z）。Documentation Integrity #44576768274、Issue Coordination #44576960099 及隔离 Tampermonkey experiment #44576767709 也成功。Artifact 不是 Stable 发布，isolated experiment 不代表真实用户验收。此前全量本地 npm test 1,228 项（1,215 pass / 1 fail / 12 skipped）有同一 symlink 限制，不是本轮 smoke 修复后的完整本地套件结果。
 - **远端/发布边界**：PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 保持 Open、未合并；已验证 source head `0f1a2cdc5e29d612d82e996d88058359fa9c39c9` 的 code tree 与本地 `23c9e806f0cc024cdefe86771183a7f84abee797` tree `69a1d8306950da0dcc44e2ae2d921e75f1529f5c` 完全相同，base 为 `main@146f9a987e7e633496d723e7f517c68282e1fe07`。最终 Actions 结果记录正在通过 docs-only 更新同步。#857 保持 Open，TEST-022、GATE-007 未完成。
 - **仍待验收**：产品级可恢复持久调度、动态诊断、修复候选与 AI、可信 Tampermonkey/GM/业务正反验证和失败恢复；依赖 #486/#487/#488/#489/#603/#604 未消失。Stable 的全部 GATE、最终同源双包和集中人工签署仍未完成。
+
+## 2026-11-20 TASK-013 / #857 — renderer batch 接入统一持久只读 AST 调度
+
+- **产品连接**：PR #925 当前本地增量让原生多选、文件夹、renderer file picker、拖放批次和旧单文件入口统一经过主进程 `analyzeImportedOutcomeWithCheckpoint()`。journal root 由 main 基于 Electron `app.getPath('userData')` 选择，不接受 renderer 路径。检查点记录按顺序绑定的 SHA-256/编码和有界 job state；不写脚本源码、文件名、源路径、URL 或 AST 正文。
+- **重导入语义**：命中旧检查点仅代表找到同一有序字节批次的调度记录。每次新导入仍重新验证字节并重跑 AST Worker；日志清楚标明它不是网页/GM/业务验证，也不是修复通过。持久记录失败、非法输入或取消均保留 `BLOCKED`，不会静默回退到内存分析队列。源脚本未被修改。
+- **本地验证**：`npm run build`、`npm run typecheck`、`git diff --check`、predevelopment（28 REQ/TEST、21 TASK、11 GATE）通过；定向 `dist/tests/jobs/native-checkpointed-import.test.js` 为 40/40 通过。全套 `npm test` 为 1,229 total / 1,174 pass / 43 fail / 12 skip。失败分布为 TASK-011/TEST-020 恢复路径 41 项、TEST-003 symlink 1 项、TASK-018/TEST-018 端到端 1 项；本地报告不作全绿声明，需继续独立排查。
+- **CI 与发布界限**：本轮新增 renderer 拖放后界面检查点烟测，需由同步后的精确 PR head Windows Application Skeleton 复核；候选打包及文档/Issue checks 也需看新 head。此前 head `93c9c4589d802db0c0cd939446295c1d65317215` 的成功 Actions 不验证本次新代码。PR #925 仍 Open、未合并，#857 继续 Open；TEST-022/GATE-007 及动态诊断、保守候选、AI、真实 manager/GM/业务失败恢复仍未完成，不能判 Stable。
+
+## 2026-11-20 TASK-013 / #857 — shell smoke target 回归修正与 Windows 失败分流
+
+- **PR head 70f0228**：Candidate Node suite 1,229 total / 1,226 pass / 0 fail / 3 skipped；Candidate packaging 后续 Electron smoke 失败码为 `SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE`。原因是 smoke 查询 `#drop-zone`，而 renderer HTML 实际 drop 容器是 `#drop-area`，没有派发导入事件。
+- **修正**：本地 smoke 改用 `#drop-area`；desktop-boundary 新增断言将 smoke 目标与真实 HTML ID 绑定，防止测试空跑。TDD 新断言先红后绿，build 通过，desktop-boundary 76/76。
+- **独立 boundary failure**：同一 HEAD Application Skeleton [#44749647406](https://github.com/devin930906/userscript-auto-healer/actions/runs/44749647406) 的 1,229 测试为 1,225 pass / 1 fail / 3 skip；单一失败为既有 owned-Chrome `TEST-006/008/009` 的 `CDP_TIMEOUT`。日志显示 61 次 `FETCH_REFUSED`、3 次 `FETCH_TIMEOUT`、随后 Chrome 进程仍存活且监听 PID 匹配；Windows `windows-shell-smoke` 因 boundary job 失败被跳过。此运行不能证明本次 shell smoke。
+- **后续门槛**：修正提交需在新精确 PR head 重新跑 Windows Application Skeleton（含 shell smoke）、Candidate packaging、Documentation Integrity、Issue Coordination 和 Tampermonkey matrix；独立 CDP timeout 需要按实际 runner 证据排查，不把重跑绿色视为根因修复。PR #925/#857 保持 Open，TASK-013、TEST-022、GATE-007 与 Stable 均未完成。
+
+## 2026-11-21 TASK-013 / #857 — checkpoint smoke 状态归属与 Electron 崩溃
+
+- **PR #925 精确 HEAD**：`5a0480055bb515f587176fece14ac54cc2f61a50`（Open、未合并）。该 HEAD 的 `windows-shell-smoke` 以 `DROPPED_BATCH_RELOAD_SETUP_FAILED` 失败（Application Skeleton [#44878587959](https://github.com/devin930906/userscript-auto-healer/actions/runs/44878587959)）；Candidate Windows packaging 在 `SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE` 失败 [#44878587931](https://github.com/devin930906/userscript-auto-healer/actions/runs/44878587931)。同批 boundary、Portable Chrome、Documentation Integrity、Issue Coordination 与已列出的隔离 Tampermonkey matrix job 成功。Candidate 测试与应用编译步骤成功后才到打包 smoke 失败；成功 job 不抵销两个 shell smoke 失败。
+- **本地 smoke 更新**：checkpoint smoke 原来只观察通用检查点文案，不能确认属于当前合成文件，也未证明 renderer 锁已释放。新增桌面边界测试先 RED；实现现等待导入 UI idle、要求本次唯一 `checkpoint-smoke.user.js` 行与检查点文案同时出现，且失败返回受限阶段码。该更改仅在 `--uahtest-shell-only` 路径，不改变普通 UI 流程，仍待新精确 Windows HEAD 验证。
+- **本地测试**：`npm run build` 成功，desktop-boundary 79/79，`git diff --check` 成功。完整 `npm test` 为 1,248 total / 1,193 pass / 43 fail / 12 skipped；43 项仍为 TASK-011 restore-path 41 项、TEST-003 symlink 1 项与 TASK-018 E2E 1 项，不报告全套通过。
+- **Electron native crash**：一次使用临时 `APPDATA/LOCALAPPDATA/TEMP` 的本地 Electron 44.9.1 shell-only smoke 返回 `-1073741819`（`0xC0000005`），没有成功或失败回执。用户截图同类 `electron.exe` Application Error 显示访问地址 `0x8`，用户报告此前多次发生。当前 Codex 沙盒帐户的最近 48 小时 Application Event ID 1000 查询无匹配 Electron 记录，无法据此定位模块或归因用户交互式环境；此 smoke 不算通过，后续不再本地启动 Electron 复跑。
+- **状态**：#857、TEST-022/GATE-007、真实 Tampermonkey/GM/业务验收、失败恢复和 Stable 全部 GATE 仍未完成；待将修正同步到 PR #925 并核验新 HEAD 的 Windows checks。
+
+## 2026-11-21 TASK-013 / #857 — 文件级 smoke 与 reload 批次恢复（本地增量）
+
+- **结果**：候选 smoke 为当前合成文件创建唯一 nonce 名称和源码字节，只读取本轮追加的 log 行；reload fixture 也有每轮唯一的字节身份。要求对应文件行先于本批 checkpoint 行，UI idle，并且 reload 展示后确认回执确实解锁下一批。main-frame reload 不再丢弃已接受批次；main 进程 finalize 并分析后只保留同一窗口的内存摘要，新文档加载后才能读取并以当轮 `recoveryId` 确认。分析未 settle 时可取消，fragment-only 导航不会触发交接；旧 frame receipt 会在实际主文档导航时失效。
+- **边界**：只恢复同一进程中的 renderer reload，不表示进程崩溃/应用重启后恢复；摘要不含源码或路径，错误名路径形状、控制字符和超长输入改为固定占位。窗口关闭或退出会清理。实际 Tampermonkey、GM、业务结果、候选应用与回滚均未覆盖。
+- **当前机器验证**：build/typecheck 通过；desktop-boundary 81/81；checkpointed import 与 imported-analysis queue 59/59；import-service 36/37，唯一失败是 TEST-003 symlink `EPERM`；predevelopment traceability 28/21/11 通过。完整 `npm test` 1,251 total / 1,196 pass / 43 fail / 12 skipped；43 项为 TASK-011 restore 41、TEST-003 symlink 1、TASK-018 E2E 1。未本机启动 Electron smoke。
+- **GitHub**：PR #925 在本轮同步前仍为 Open、未合并，远端 head `5a0480055bb515f587176fece14ac54cc2f61a50`。本地变更待同步，Windows smoke/Candidate 新 SHA 证据待取得；#857 保持 Open，TASK-013/GATE-007 不能判完成。
+- **Stable**：其余 TASK/Issues、全部必要 GATE、同源 EXE+ZIP、最终集中人工验收与正式 Release 仍未通过。

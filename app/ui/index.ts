@@ -24,8 +24,11 @@ interface ImportResponse {
   batchResumed?:boolean;
 }
 type DroppedBatchFinishResponse=
-  |{ok:false;code?:string}
-  |({ok:true}&ImportResponse);
+  |{ok:false;code?:string;recoveryId?:string}
+  |({ok:true;recoveryId:string}&ImportResponse);
+type DroppedBatchRecoveryResponse=
+  |{ok:false;code?:string;recoveryId?:string}
+  |{ok:true;recoveryId:string;result:ImportResponse};
 interface NativeImportProgress {
   active:boolean;
   phase?:'PICKING'|'SCANNING'|'IMPORTING'|'ANALYZING';
@@ -53,6 +56,8 @@ interface Window {
       ok:boolean;processed?:number;code?:string
     }>;
     finishDroppedImportBatch(batchId:string):Promise<DroppedBatchFinishResponse>;
+    recoverDroppedImportBatch():Promise<DroppedBatchRecoveryResponse>;
+    acknowledgeDroppedImportRecovery(recoveryId:string):Promise<{ok:boolean;code?:string}>;
     registerScenario(input: {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
       replacementSelector?:string;
@@ -346,6 +351,43 @@ function show(result: ImportResponse): void {
   updateImportSummary();
 }
 
+async function acknowledgeDroppedImportRecovery(recoveryId:string):Promise<void>{
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const acknowledged=await window.healer.acknowledgeDroppedImportRecovery(recoveryId);
+      if(acknowledged.ok||acknowledged.code==='STALE_RECOVERY')return;
+    }catch{
+      // A lost IPC receipt is safe to retry: the main-issued ID is idempotent.
+    }
+    if(attempt<2)await new Promise(resolve=>window.setTimeout(resolve,50));
+  }
+  logLine('批量导入恢复回执未确认。');
+}
+
+async function recoverDroppedImportBatch():Promise<void>{
+  let recovered:DroppedBatchRecoveryResponse|null=null;
+  const deadline=Date.now()+5000;
+  do{
+    try{recovered=await window.healer.recoverDroppedImportBatch();}
+    catch{return;}
+    if(recovered.ok||recovered.code!=='RECOVERY_NOT_READY')break;
+    await new Promise(resolve=>window.setTimeout(resolve,30));
+  }while(Date.now()<deadline);
+  if(!recovered)return;
+  if(recovered.ok){
+    show(recovered.result);
+    await acknowledgeDroppedImportRecovery(recovered.recoveryId);
+    return;
+  }
+  if(recovered.code!=='NO_PENDING_RECOVERY'){
+    failedCount++;
+    logLine('上次批量导入结果未能恢复：'+(recovered.code??'RECOVERY_FAILED'));
+    updateImportSummary();
+  }
+  if(recovered.recoveryId)
+    await acknowledgeDroppedImportRecovery(recovered.recoveryId);
+}
+
 async function locked(task: () => Promise<void>): Promise<void> {
   if (busy) return;
   busy = true;
@@ -476,10 +518,15 @@ async function importFiles(files: readonly File[]): Promise<void> {
     if(batchId!==null){
       try{
         const result=await window.healer.finishDroppedImportBatch(batchId);
-        if(result.ok)show(result);
+        if(result.ok){
+          show(result);
+          await acknowledgeDroppedImportRecovery(result.recoveryId);
+        }
         else{
           failedCount++;
           logLine('批量导入未能完成：'+(result.code??'BATCH_FINISH_FAILED'));
+          if(result.recoveryId)
+            await acknowledgeDroppedImportRecovery(result.recoveryId);
         }
       }catch{
         failedCount++;
@@ -599,12 +646,18 @@ cancelImport?.addEventListener('click', () => {
     // A drag/drop/file-input import already reading bytes keeps its valid
     // result; only in-flight static analysis is canceled by native IPC.
     // Scanning a dropped directory can be canceled locally before IPC exists.
-    void window.healer.cancelDroppedImport().catch(() => {
+    void window.healer.cancelDroppedImport().then(result=>{
+      if(!result.ok)
+        logLine(result.code==='NO_ACTIVE_DROPPED_IMPORT'
+          ?'本次静态分析已结束，批次结果正在确认。'
+          :'当前静态分析的取消请求未确认；需等待本次导入结束。');
+    }).catch(() => {
       logLine('当前静态分析的取消请求未确认；需等待本次导入结束。');
     });
   }
 });
 updateImportSummary();
+void recoverDroppedImportBatch();
 
 chooseFile?.addEventListener('click', () => { void locked(async () => importNativeSelection('files')); });
 chooseFolder?.addEventListener('click', () => { void locked(async () => importNativeSelection('folder')); });

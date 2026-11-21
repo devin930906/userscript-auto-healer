@@ -199,15 +199,62 @@ interface ActiveDroppedImportBatch{
   readonly frameEpoch:number;
   readonly batch:DroppedImportBatch;
 }
+type DroppedBatchSummary=Awaited<ReturnType<typeof summarizeResult>>;
+type DroppedImportRecoveryOutcome=
+  |{readonly ok:true;readonly result:DroppedBatchSummary}
+  |{readonly ok:false;readonly code:'DROPPED_IMPORT_FAILED'};
+interface PendingDroppedImportRecovery{
+  id:string;
+  frameEpoch:number;
+  ready:boolean;
+  settled:boolean;
+  readonly owner:BrowserWindow;
+  readonly controller:AbortController;
+  result:Promise<DroppedImportRecoveryOutcome>;
+}
 let droppedImportBatchSession:ActiveDroppedImportBatch|null=null;
+let pendingDroppedImportRecovery:PendingDroppedImportRecovery|null=null;
 let mainFrameNavigationEpoch=0;
 function abortDroppedImportForWindow(win:BrowserWindow):void{
   if(mainWindow!==win)return;
   mainFrameNavigationEpoch++;
   const session=droppedImportBatchSession;
   if(session?.owner===win){
+    const result=session.batch.finish();
+    droppedImportBatchSession=null;
+    if(result){
+      const controller=droppedImportController??new AbortController();
+      droppedImportController=controller;
+      createPendingDroppedImportRecovery(win,result,controller,false);
+    }
+  }else{
+    const previous=pendingDroppedImportRecovery;
+    if(previous?.owner===win){
+      previous.id=randomUUID();
+      previous.frameEpoch=mainFrameNavigationEpoch;
+      previous.ready=false;
+    }
+  }
+  const pending=pendingDroppedImportRecovery;
+  if(pending?.owner===win)return;
+  const controller=droppedImportController;
+  if(controller){
+    controller.abort();
+    if(droppedImportController===controller)droppedImportController=null;
+  }
+}
+function discardDroppedImportForWindow(win:BrowserWindow):void{
+  if(mainWindow!==win)return;
+  mainFrameNavigationEpoch++;
+  const session=droppedImportBatchSession;
+  if(session?.owner===win){
     session.batch.finish();
     droppedImportBatchSession=null;
+  }
+  const pending=pendingDroppedImportRecovery;
+  if(pending?.owner===win){
+    pendingDroppedImportRecovery=null;
+    pending.controller.abort();
   }
   const controller=droppedImportController;
   if(controller){
@@ -331,6 +378,22 @@ async function summarizeResult(result:ImportOutcome,owner:ImportedDomImportOwner
     unprocessed:analyzed.unprocessed,
     scripts,
     errors:result.errors, duplicates:result.duplicates};
+}
+
+function createPendingDroppedImportRecovery(win:BrowserWindow,result:ImportOutcome,
+  controller:AbortController,ready=true):PendingDroppedImportRecovery{
+  for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
+  const pending:PendingDroppedImportRecovery={
+    id:randomUUID(),frameEpoch:mainFrameNavigationEpoch,ready,settled:false,
+    owner:win,controller,
+    result:Promise.resolve({ok:false as const,code:'DROPPED_IMPORT_FAILED' as const})
+  };
+  pending.result=summarizeResult(result,{window:win,index:importedDomDiagnosticIndex},
+    controller.signal).then(summary=>({ok:true as const,result:summary}))
+    .catch(()=>({ok:false as const,code:'DROPPED_IMPORT_FAILED' as const}))
+    .finally(()=>{pending.settled=true;});
+  pendingDroppedImportRecovery=pending;
+  return pending;
 }
 
 function createNativeAiDesktopSelection(
@@ -1281,6 +1344,8 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(pendingDroppedImportRecovery?.owner===win)
+      return {ok:false,code:'IMPORT_RECOVERY_PENDING'};
     if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
@@ -1316,19 +1381,42 @@ function registerSafeIpc(): void {
     const result=session.batch.finish();
     if(!result)return {ok:false,code:'BATCH_FINALIZED'};
     droppedImportBatchSession=null;
-    try{
-      // Record only validated byte hashes before potentially long AST work,
-      // matching the native import ordering and retaining canceled imports.
-      for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
-      const summary=await summarizeResult(result,{window:win,index:importedDomDiagnosticIndex},
-        controller.signal);
-      if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch)
-        return {ok:false,code:'STALE_BATCH'};
-      return {ok:true,...summary};
-    }catch{return {ok:false,code:'DROPPED_IMPORT_FAILED'};}
-    finally{
-      if(droppedImportController===controller)droppedImportController=null;
-    }
+    const pending=createPendingDroppedImportRecovery(win,result,controller);
+    const summary=await pending.result;
+    if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch||
+        pendingDroppedImportRecovery!==pending||pending.frameEpoch!==frameEpoch||!pending.ready)
+      return {ok:false,code:'STALE_BATCH'};
+    if(!summary.ok)return {ok:false,code:summary.code,recoveryId:pending.id};
+    return {ok:true,recoveryId:pending.id,...summary.result};
+  });
+  ipcMain.handle('import:dropped-batch:recover',async event=>{
+    authorizeSender(event);
+    const pending=pendingDroppedImportRecovery;
+    const win=mainWindow;
+    if(!pending)return {ok:false,code:'NO_PENDING_RECOVERY'};
+    if(!win||win.isDestroyed()||pending.owner!==win)
+      return {ok:false,code:'STALE_RECOVERY'};
+    const frameEpoch=mainFrameNavigationEpoch;
+    if(!pending.ready||pending.frameEpoch!==frameEpoch)
+      return {ok:false,code:'RECOVERY_NOT_READY'};
+    const summary=await pending.result;
+    if(pendingDroppedImportRecovery!==pending||win!==mainWindow||win.isDestroyed()||
+        frameEpoch!==mainFrameNavigationEpoch||pending.frameEpoch!==frameEpoch||!pending.ready)
+      return {ok:false,code:'STALE_RECOVERY'};
+    if(!summary.ok)return {ok:false,code:summary.code,recoveryId:pending.id};
+    return {ok:true,recoveryId:pending.id,result:summary.result};
+  });
+  ipcMain.handle('import:dropped-batch:acknowledge',(event,recoveryId:unknown)=>{
+    authorizeSender(event);
+    const pending=pendingDroppedImportRecovery;
+    const win=mainWindow;
+    if(typeof recoveryId!=='string'||!pending||pending.id!==recoveryId||
+        pending.owner!==win||!win||win.isDestroyed()||!pending.ready||
+        pending.frameEpoch!==mainFrameNavigationEpoch)
+      return {ok:false,code:'STALE_RECOVERY'};
+    pendingDroppedImportRecovery=null;
+    if(droppedImportController===pending.controller)droppedImportController=null;
+    return {ok:true};
   });
   ipcMain.handle('import:dropped', async (event, name:unknown, data:unknown) => {
     authorizeSender(event);
@@ -1365,9 +1453,13 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('import:cancel-dropped',event=>{
     authorizeSender(event);
-    if(!droppedImportController)
+    const controller=droppedImportController;
+    const pending=pendingDroppedImportRecovery;
+    if(!controller||(pending?.controller===controller&&pending.settled))
       return {ok:false,code:'NO_ACTIVE_DROPPED_IMPORT'};
-    droppedImportController.abort();
+    if(controller.signal.aborted)
+      return {ok:false,code:'CANCELLATION_ALREADY_REQUESTED'};
+    controller.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
   // Stage one bounded, read-only scenario only for a script imported by this
@@ -1853,8 +1945,15 @@ async function createMainWindow(): Promise<void> {
   if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
   win.webContents.on('render-process-gone',()=>abortDroppedImportForWindow(win));
-  win.webContents.on('did-start-navigation',(_event,_url,_isInPlace,isMainFrame)=>{
-    if(isMainFrame)abortDroppedImportForWindow(win);
+  win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{
+    if(isMainFrame&&!isInPlace)abortDroppedImportForWindow(win);
+  });
+  win.webContents.on('did-finish-load',()=>{
+    const pending=pendingDroppedImportRecovery;
+    if(pending?.owner===win){
+      pending.frameEpoch=mainFrameNavigationEpoch;
+      pending.ready=true;
+    }
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -1864,7 +1963,7 @@ async function createMainWindow(): Promise<void> {
       nativeAiDiscoveryController?.abort();
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
-      abortDroppedImportForWindow(win);
+      discardDroppedImportForWindow(win);
       importedDomDiagnosticIndex.clearCandidateSources();
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
@@ -2327,21 +2426,41 @@ async function createMainWindow(): Promise<void> {
 
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
-    const droppedCheckpointVisible=await win.webContents.executeJavaScript(
+    const droppedCheckpointSmokeState=await win.webContents.executeJavaScript(
       "(async()=>{const zone=document.getElementById('drop-area');"+
-      "if(!zone||typeof DataTransfer!=='function')return false;"+
+      "const idle=()=>document.getElementById('cancel-import')?.disabled===true&&"+
+      "document.getElementById('choose-files')?.disabled===false&&"+
+      "document.getElementById('choose-folder')?.disabled===false&&"+
+      "document.getElementById('select-files')?.disabled===false&&"+
+      "!document.getElementById('import-summary')?.textContent.includes('正在导入');"+
+      "const readyAt=Date.now();while(Date.now()-readyAt<3000&&!idle())"+
+      "await new Promise(resolve=>setTimeout(resolve,30));"+
+      "if(!idle())return 'UI_BUSY_BEFORE_DROP';"+
+      "if(!zone||typeof DataTransfer!=='function')return 'DROP_API_UNAVAILABLE';"+
       "const transfer=new DataTransfer();"+
       "transfer.items.add(new File(['// ==UserScript==\\n// @name checkpoint smoke\\n// ==/UserScript==\\ndocument.querySelector(\\\"#checkpoint-smoke\\\");\\n'],"+
       "'checkpoint-smoke.user.js',{type:'text/plain'}));"+
+      "const nonce=Date.now().toString(36)+Math.random().toString(36).slice(2);"+
+      "const fileName='checkpoint-smoke-'+nonce+'.user.js';"+
+      "const source=(await transfer.files[0].text())+'\\n// '+nonce;"+
+      "transfer.items.clear();"+
+      "transfer.items.add(new File([source],fileName,{type:'text/plain'}));"+
+      "const priorCount=document.querySelectorAll('#import-list li').length;"+
       "zone.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));"+
-      "const start=Date.now();while(Date.now()-start<10000){"+
-      "if(Array.from(document.querySelectorAll('#import-list li')).some(row=>"+
-      "row.textContent.includes('只读 AST 批处理检查点已保存')))return true;"+
-      "await new Promise(resolve=>setTimeout(resolve,30));}return false;})()",
+      "let fileRow=-1,checkpointRow=-1;const start=Date.now();"+
+      "while(Date.now()-start<10000){"+
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).slice(priorCount).map(row=>row.textContent||'');"+
+      "fileRow=lines.findIndex(text=>text.startsWith(fileName+': '));"+
+      "checkpointRow=lines.findIndex(text=>text.includes('只读 AST 批处理检查点已保存'));"+
+      "if(fileRow>=0&&checkpointRow>fileRow&&idle())return 'CHECKPOINT_SAVED';"+
+      "await new Promise(resolve=>setTimeout(resolve,30));}"+
+      "if(fileRow<0)return 'DROPPED_FILE_NOT_REPORTED';"+
+      "if(checkpointRow<=fileRow)return 'CHECKPOINT_NOT_REPORTED';"+
+      "if(!idle())return 'UI_BUSY_AFTER_DROP';return 'INCOMPLETE_RESULT';})()",
       true
-    ) as boolean;
-    if(!droppedCheckpointVisible)
-      throw new Error('SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE');
+    ) as string;
+    if(droppedCheckpointSmokeState!=='CHECKPOINT_SAVED')
+      throw new Error('SHELL_SMOKE_DROPPED_BATCH_'+droppedCheckpointSmokeState);
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
     if(probe?.droppedCancelReadStarted!==true)
@@ -2352,7 +2471,7 @@ async function createMainWindow(): Promise<void> {
       throw new Error('SHELL_SMOKE_DROPPED_CANCEL_SUMMARY_FAILED');
     if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
     if (probe.keys?.join(',') !==
-        'addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'acknowledgeDroppedImportRecovery,addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,recoverDroppedImportBatch,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
@@ -2462,19 +2581,30 @@ async function createMainWindow(): Promise<void> {
     const abandonedDroppedBatch=await win.webContents.executeJavaScript(
       "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
       "if(!started.ok||typeof started.batchId!=='string')return false;"+
-      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned\\n// ==/UserScript==\\n');"+
+      "const recoveryNonce=Date.now().toString(36)+Math.random().toString(36).slice(2);"+
+      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned '+recoveryNonce+'\\n// ==/UserScript==\\n// '+recoveryNonce+'\\n');"+
       "const appended=await a.addDroppedImportBatch(started.batchId,'abandoned.user.js',bytes);"+
       "return appended.ok===true;})()"
     ) as boolean;
     if(!abandonedDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_SETUP_FAILED');
     await win.webContents.loadFile(uiFile);
     const recoveredDroppedBatch=await win.webContents.executeJavaScript(
-      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
-      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "(async()=>{const a=window.healer;const start=Date.now();let started=null;"+
+      "while(Date.now()-start<10000){"+
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(row=>row.textContent||'');"+
+      "if(lines.some(text=>text.startsWith('abandoned.user.js:'))&&"+
+      "lines.some(text=>text.includes('只读 AST 批处理检查点已保存'))){"+
+      "const attempt=await a.beginDroppedImportBatch();"+
+      "if(attempt.ok&&typeof attempt.batchId==='string'){started=attempt;break;}"+
+      "if(attempt.code!=='IMPORT_RECOVERY_PENDING')return false;}"+
+      "await new Promise(resolve=>setTimeout(resolve,30));}"+
+      "if(!started)return false;"+
       "const finished=await a.finishDroppedImportBatch(started.batchId);"+
-      "return finished.ok===true&&finished.scripts.length===0&&finished.errors.length===0;})()"
+      "if(!finished.ok||typeof finished.recoveryId!=='string')return false;"+
+      "const acknowledged=await a.acknowledgeDroppedImportRecovery(finished.recoveryId);"+
+      "return acknowledged.ok===true;})()"
     ) as boolean;
-    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_CLEANUP_FAILED');
+    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_RECOVERY_OR_ACK_FAILED');
     const receipt = process.env.UAH_SMOKE_RECEIPT;
     if (!receipt) throw new Error('SHELL_SMOKE_RECEIPT_NOT_CONFIGURED');
     writeFileSync(receipt, JSON.stringify({
@@ -2524,9 +2654,12 @@ app.on('before-quit',()=>{
   nativeRestoreController?.abort();
   nativeAiDiscoveryController?.abort();
   nativeImportController?.abort();
+  pendingDroppedImportRecovery?.controller.abort();
+  pendingDroppedImportRecovery=null;
   droppedImportBatchSession?.batch.finish();
   droppedImportBatchSession=null;
   droppedImportController?.abort();
+  droppedImportController=null;
   stopAllBrowserSessions();
 });
 app.on('window-all-closed', () => {

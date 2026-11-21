@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   beginDroppedImportBatch: (): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:begin'),
   addDroppedImportBatch: (batchId: string, name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:add', batchId, name, bytes),
   finishDroppedImportBatch: (batchId: string): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:finish', batchId),
+  recoverDroppedImportBatch: (): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:recover'),
+  acknowledgeDroppedImportRecovery: (recoveryId: string): Promise<unknown> =>
+    ipcRenderer.invoke('import:dropped-batch:acknowledge', recoveryId),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
   inspectScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:inspect',id),
