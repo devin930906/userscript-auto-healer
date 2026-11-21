@@ -2157,6 +2157,8 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
  assert.doesNotMatch(panel,/<input[^>]*(?:selector|选择器|CSS)/i,
   'the ordinary batch path must not ask the user to type CSS selectors');
  assert.match(panel,/不会执行脚本/);
+ assert.match(panel,/候选源码仅短暂保留在主进程内存/,
+  'the ordinary UI must disclose the temporary in-memory candidate preview');
  assert.match(panel,/不证明.*Tampermonkey.*GM.*业务/);
  assert.match(ui,/diagnoseImportedBatch\(targetUrl\)/,
   'the renderer may send only the configured target URL');
@@ -2175,8 +2177,44 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
  assert.match(handler,/readOwnedBrowser\(\)/,
   'ordinary DOM observations require the application-owned Chrome');
  assert.match(handler,/openApprovedTarget/);
- assert.match(handler,/inspectApprovedScenarioDomSeries/);
+ assert.match(handler,/observeApprovedDomSeries/,
+  'the same consented DOM series must feed triage and candidate generation');
+ assert.match(handler,/proposeImportedDomCandidate/);
+ assert.match(handler,/readUtf8CandidateSource/);
+ assert.match(handler,/clearCandidateSources/,
+  'retained source must be cleared when the batch settles');
+ assert.match(handler,/if\(!plan\.targetUrl\)\{\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);/,
+  'an invalid-target attempt must release retained source before returning');
+ assert.match(handler,/if\(!owned\)\{\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);/,
+  'a no-browser attempt must release retained source before returning');
+ assert.match(handler,/if\(lease===null\)return \{ok:false,code:'OBSERVATION_BUSY'/,
+  'a busy operation must not clear another active operation’s source cache');
+ assert.match(handler,/candidateStatus/);
+ assert.doesNotMatch(handler,/candidateSource\s*:/,
+  'full candidate source must never be returned over IPC');
+ assert.match(handler,/candidateFields:Pick<ImportedDomResultItem/,
+  'the IPC response must be narrowed to explicit candidate summary fields');
+ assert.doesNotMatch(handler,/\.\.\.proposal/,
+  'the internal proposal object must not be spread into an IPC response');
+ assert.doesNotMatch(ui,/candidateSource/,
+  'the renderer contract must contain only bounded candidate summaries');
+ assert.match(ui,/候选预览（仅内存，未保存、未应用、未验证）/);
  assert.doesNotMatch(handler,/tampermonkeyVerified:\s*true|businessVerified:\s*true|automaticPatchAllowed:\s*true/);
+
+ const importHandlers=main.slice(main.indexOf('const runNativeImport = async'),
+  main.indexOf("ipcMain.handle('import:get-progress'"));
+ assert.match(importHandlers,/scenarioObserveInProgress/,
+  'a new native import cannot repopulate the source cache during DOM observation');
+ const droppedBegin=main.slice(main.indexOf("ipcMain.handle('import:dropped-batch:begin'"),
+  main.indexOf("ipcMain.handle('import:dropped-batch:add'"));
+ assert.match(droppedBegin,/scenarioObserveInProgress/,
+  'a new dropped batch cannot start during DOM observation');
+ const singleDrop=main.slice(main.indexOf("ipcMain.handle('import:dropped',"),
+  main.indexOf("ipcMain.handle('import:cancel-dropped'"));
+ assert.match(singleDrop,/scenarioObserveInProgress/,
+  'single dropped imports cannot start during DOM observation');
+ assert.match(main,/recordImportedDomForCurrentOwner/,
+  'an async import result must not write into a replacement window index');
 });
 
 test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not optional manual scenarios',()=>{
@@ -2188,6 +2226,16 @@ test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not 
   'the ordinary next step after import must lead to controlled Chrome setup');
  assert.doesNotMatch(workspace,/data-open-workspace="scenario-workspace"/,
   'optional manual scenario registration must not be presented as the ordinary next step');
+});
+
+test('TASK-013/TEST-022/026: full test command registers candidate planner and source-lifecycle regressions',()=>{
+ const manifest=JSON.parse(readFileSync(join(process.cwd(),'package.json'),'utf8')) as
+  {scripts?:{test?:string}};
+ const command=manifest.scripts?.test??'';
+ assert.match(command,/dist\/tests\/diagnostics\/imported-dom-diagnostic-index\.test\.js/,
+  'CI and npm test must execute the source expiry/ownership regression tests');
+ assert.match(command,/dist\/tests\/repair\/imported-dom-candidate\.test\.js/,
+  'CI and npm test must execute candidate eligibility regressions');
 });
 
 
@@ -2241,4 +2289,3 @@ test('TASK-017/TEST-002/022: desktop ordinary user journey enforces unforced sel
   assert.ok(html.includes('UNKNOWN / 受阻'));
   assert.ok(ui.includes('无法判断是否已安装'));
 });
-

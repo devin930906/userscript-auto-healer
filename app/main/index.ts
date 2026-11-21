@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
 import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportOutcome, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
-import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
+import {MAX_ANALYSIS_BYTES,previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
 import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
-import {ImportedDomDiagnosticIndex} from '../../src/diagnostics/imported-dom-diagnostic-index';
+import {ImportedDomDiagnosticIndex,recordImportedDomForCurrentOwner}
+  from '../../src/diagnostics/imported-dom-diagnostic-index';
 import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -108,6 +109,7 @@ import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 import {observeApprovedDomSeries} from '../../src/observe/dom-observer';
+import {proposeImportedDomCandidate} from '../../src/repair/imported-dom-candidate';
 import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
@@ -298,7 +300,11 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     sha256:script.sha256, textEncoding:script.textEncoding,
     analysis};
 }
-async function summarizeResult(result:ImportOutcome,
+interface ImportedDomImportOwner{
+  readonly window:BrowserWindow;
+  readonly index:ImportedDomDiagnosticIndex;
+}
+async function summarizeResult(result:ImportOutcome,owner:ImportedDomImportOwner,
   signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
   // Every validated source shares the same durable read-only scheduler. The
   // root is selected here in Electron main; renderer input cannot choose it.
@@ -307,8 +313,14 @@ async function summarizeResult(result:ImportOutcome,
   const checkpoint=analyzed.checkpoint;
   const previews=checkpoint?.previews??[];
   const scripts=result.scripts.map((script,i)=>{
-    importedDomDiagnosticIndex.recordImported(script.sha256,
-      readMainOnlyDiagnosticHints(previews[i]),script.filename);
+    let candidateSource:string|undefined;
+    if(script.textEncoding==='utf-8'&&script.byteLength<=MAX_ANALYSIS_BYTES){
+      try{candidateSource=new TextDecoder('utf-8',{fatal:true}).decode(script.bytes);}
+      catch{candidateSource=undefined;}
+    }
+    recordImportedDomForCurrentOwner(owner.index,importedDomDiagnosticIndex,
+      owner.window,mainWindow,owner.window.isDestroyed(),script.sha256,
+      readMainOnlyDiagnosticHints(previews[i]),script.filename,candidateSource);
     return summarize(script,previews[i]);
   });
   return {batchCheckpoint:checkpoint?.status,
@@ -1187,12 +1199,13 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController||droppedImportController||manualExportInProgress||
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
     if(!win||win.isDestroyed()) throw new Error('NO_WINDOW');
+    const importOwner:ImportedDomImportOwner={window:win,index:importedDomDiagnosticIndex};
     const controller=new AbortController();
     nativeImportController=controller;
     nativeImportCounters={phase:'PICKING',processed:0,total:0,accepted:0,duplicates:0,failed:0};
@@ -1236,7 +1249,7 @@ function registerSafeIpc(): void {
         nativeImportCounters={phase:'ANALYZING',processed:0,total:result.scripts.length,
           accepted:result.scripts.length,duplicates:result.duplicates,failed:result.errors.length};
       }
-      return await summarizeResult(result,controller.signal,(processed,total)=>{
+      return await summarizeResult(result,importOwner,controller.signal,(processed,total)=>{
         if(nativeImportController!==controller||controller.signal.aborted)return;
         nativeImportCounters={phase:'ANALYZING',processed,total,
           accepted:result.scripts.length,duplicates:result.duplicates,
@@ -1268,7 +1281,7 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
-    if(nativeImportController||droppedImportController||manualExportInProgress||
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
     const controller=new AbortController();
@@ -1307,7 +1320,8 @@ function registerSafeIpc(): void {
       // Record only validated byte hashes before potentially long AST work,
       // matching the native import ordering and retaining canceled imports.
       for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
-      const summary=await summarizeResult(result,controller.signal);
+      const summary=await summarizeResult(result,{window:win,index:importedDomDiagnosticIndex},
+        controller.signal);
       if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch)
         return {ok:false,code:'STALE_BATCH'};
       return {ok:true,...summary};
@@ -1320,7 +1334,7 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
-    if(nativeImportController||droppedImportController||manualExportInProgress||
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
     const result=importDroppedBytes(name,data);
@@ -1332,7 +1346,7 @@ function registerSafeIpc(): void {
       // It shares the main-owned durable, read-only checkpointed AST path;
       // no script is executed, applied or sent to a browser/manager.
       const summary=await summarizeResult({scripts:[result],errors:[],duplicates:0},
-        controller.signal);
+        {window:win,index:importedDomDiagnosticIndex},controller.signal);
       if(win!==mainWindow||win.isDestroyed())
         return {ok:false,code:'WINDOW_CLOSED'};
       // Cancellation only stops optional AST work. Validated imported bytes
@@ -1392,11 +1406,17 @@ function registerSafeIpc(): void {
        nativeSelectionInProgress)
       return {ok:false,code:'OBSERVATION_BUSY',...unverified};
     const plan=importedDomDiagnosticIndex.plan(targetInput);
-    if(!plan.targetUrl)return {ok:false,code:'INVALID_TARGET_URL',...unverified};
+    if(!plan.targetUrl){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'INVALID_TARGET_URL',...unverified};
+    }
     type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
       domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
       checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;reason?:string;automaticPatchAllowed:false;
+      candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+      candidateOriginalSha256?:string;candidateSha256?:string;
+      candidateBefore?:string;candidateAfter?:string;
       tampermonkeyVerified:false;businessVerified:false};
     const blockedItem=(item:typeof plan.items[number],code?:string)=>({
       ordinal:item.ordinal,filename:item.filename??('脚本 '+(item.ordinal+1)),
@@ -1408,14 +1428,21 @@ function registerSafeIpc(): void {
     const blocked=plan.items.filter((item)=>item.status==='BLOCKED');
     const results:ImportedDomResultItem[]=blocked.map(item=>blockedItem(item));
     if(ready.length===0){
+      importedDomDiagnosticIndex.clearCandidateSources();
       return {ok:true,status:'UNKNOWN' as const,reason:'NO_ELIGIBLE_SCRIPT',
         targetMatchedCount:0,truncatedScripts:plan.truncatedScripts,
         items:results,...unverified};
     }
     const owned=readOwnedBrowser();
-    if(!owned)return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    if(!owned){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'BROWSER_NOT_RUNNING',...unverified};
+    }
     const win=mainWindow;
-    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    if(!win||win.isDestroyed()){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'NO_WINDOW',...unverified};
+    }
     const lease=diagnosticGate.reserve();
     if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',...unverified};
     const controller=new AbortController();
@@ -1427,6 +1454,7 @@ function registerSafeIpc(): void {
       deadlineExpired=true;
       controller.abort();
     },120000);
+    let candidatePreviewCount=0;
     const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
       win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
     try{
@@ -1435,10 +1463,11 @@ function registerSafeIpc(): void {
       const consent=await dialog.showMessageBox(win,{
         type:'question',buttons:['允许批量只读 DOM 观测','取消'],
         defaultId:1,cancelId:1,noLink:true,
-        message:'允许在受控 Chrome 对匹配的导入脚本执行批量只读 DOM 计数？',
+        message:'允许在受控 Chrome 执行批量只读 DOM 计数，并在严格符合条件时生成最多 16 项仅内存候选预览？',
         detail:plan.targetUrl+'\n将检查 '+ready.length+' 份脚本中的最多 '+
           selectorCount+' 个 AST 字面选择器，最多观测 120 秒。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
-          '\n结果只代表限定 DOM 计数；登录状态和真实业务断言仍需另行配置与验证。'
+          '\n候选源码只在主进程内存短暂保留，整个批次最多 16 MiB，观测结束或窗口关闭后清除；候选不会保存、导出、应用或执行。'+
+          '\n结果只代表限定 DOM 计数或一条待审阅字面选择器差异；登录状态和真实业务断言仍需另行配置与验证。'
       });
       if(consent.response!==0||revoked())
         return {ok:false,code:controller.signal.aborted?'CANCELLED':'NOT_AUTHORIZED',...unverified};
@@ -1464,24 +1493,52 @@ function registerSafeIpc(): void {
               kind:'selector-present' as const,selector:site.selector
             }))
           };
-          const observation=await inspectApprovedScenarioDomSeries(
-            owned,opened,scenario,true,3,250,controller.signal);
+          const observation=await observeApprovedDomSeries(
+            owned,opened,plan.targetUrl,true,
+            item.selectorSites.map(site=>site.selector),3,250,controller.signal);
           if(revoked()){
             results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
             continue;
           }
-          if(observation.status!=='LIMITED_DOM_SIGNAL_ONLY'||observation.code!=='NONE'){
-            results.push(blockedItem(item,observation.code||'OBSERVATION_BLOCKED'));
+          const triage=summarizeReadOnlyScenarioDomSeries(scenario,observation,true);
+          if(triage.status!=='LIMITED_DOM_SIGNAL_ONLY'||triage.code!=='NONE'){
+            results.push(blockedItem(item,triage.code||'OBSERVATION_BLOCKED'));
             continue;
           }
+          let candidateFields:Pick<ImportedDomResultItem,
+            'candidateStatus'|'candidateReason'|'candidateOriginalSha256'|
+            'candidateSha256'|'candidateBefore'|'candidateAfter'>={
+              candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_NOT_ATTEMPTED'
+            };
+          if(candidatePreviewCount<16){
+            candidatePreviewCount++;
+            const source=importedDomDiagnosticIndex.readUtf8CandidateSource(item.scriptSha256);
+            if(source===null){
+              candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'SOURCE_UNAVAILABLE'};
+            }else{
+              const proposal=proposeImportedDomCandidate({source,
+                expectedSourceSha256:item.scriptSha256,targetUrl:plan.targetUrl,
+                observation,nativeConsent:true});
+              if(proposal.status==='CANDIDATE_ONLY'&&
+                 proposal.change.before.length<=1024&&proposal.change.after.length<=1024){
+                candidateFields={candidateStatus:'CANDIDATE_ONLY',
+                  candidateOriginalSha256:proposal.originalSha256,
+                  candidateSha256:proposal.candidateSha256,
+                  candidateBefore:proposal.change.before,candidateAfter:proposal.change.after};
+              }else candidateFields={candidateStatus:'NOT_PROPOSED',
+                candidateReason:proposal.status==='BLOCKED'?proposal.reason:'SUMMARY_LIMIT_EXCEEDED'};
+            }
+          }else candidateFields={candidateStatus:'NOT_PROPOSED',
+            candidateReason:'BATCH_PREVIEW_LIMIT'};
           results.push({ordinal:item.ordinal,
             filename:item.filename??('脚本 '+(item.ordinal+1)),
             status:'UNKNOWN' as const,domStatus:'LIMITED_DOM_SIGNAL_ONLY' as const,
-            checkedSelectorCount:observation.checkedAssertions,
-            triageStatus:observation.triage.status,
-            faultCategory:observation.triage.category,
-            evidenceCount:observation.triage.evidenceIds.length,
+            checkedSelectorCount:triage.checkedAssertions,
+            triageStatus:triage.triage.status,
+            faultCategory:triage.triage.category,
+            evidenceCount:triage.triage.evidenceIds.length,
             reason:'BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED' as const,
+            ...candidateFields,
             automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
             businessVerified:false as const});
         }catch{
@@ -1505,6 +1562,7 @@ function registerSafeIpc(): void {
       return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED',...unverified};
     }finally{
       clearTimeout(deadline);
+      importedDomDiagnosticIndex.clearCandidateSources();
       if(scenarioObserveController===controller)scenarioObserveController=null;
       scenarioObserveInProgress=false;
       diagnosticGate.release(lease);
@@ -1807,6 +1865,7 @@ async function createMainWindow(): Promise<void> {
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
       abortDroppedImportForWindow(win);
+      importedDomDiagnosticIndex.clearCandidateSources();
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -2474,4 +2533,3 @@ app.on('window-all-closed', () => {
   stopAllBrowserSessions();
   if (process.platform !== 'darwin') app.quit();
 });
-

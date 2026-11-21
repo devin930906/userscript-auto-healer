@@ -2,6 +2,7 @@
  * This index contains neither source bytes nor file paths and grants no browser
  * or userscript authority by itself. */
 import {types as nodeTypes} from 'node:util';
+import {createHash} from 'node:crypto';
 import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
 import {normalizeScenarioTargetUrl} from '../scenarios/scenario-registry';
 import type {ImportedDomDiagnosticHints} from '../analyze/import-preview';
@@ -11,6 +12,9 @@ const MAX_IMPORTED_SCRIPTS=1000;
 const MAX_MATCH_PATTERNS=16;
 const MAX_SELECTOR_SITES=8;
 const MAX_SELECTOR_LENGTH=256;
+const MAX_CANDIDATE_SOURCE_BYTES=256*1024;
+const MAX_CANDIDATE_SOURCE_BYTES_PER_WINDOW=16*1024*1024;
+const CANDIDATE_SOURCE_TTL_MS=5*60*1000;
 export type ImportedDomPlanCode=
  'INVALID_TARGET_URL'|'NO_LITERAL_SELECTORS'|'UNSUPPORTED_MATCH_RULES'|
  'NO_MATCH_METADATA'|'TARGET_NOT_MATCHED'|'SELECTOR_LIMIT_EXCEEDED';
@@ -27,6 +31,24 @@ export interface ImportedDomPlan{
 }
 interface Profile{readonly hash:string;readonly filename:string|null;
  readonly hints:ImportedDomDiagnosticHints|null}
+interface CandidateSource{readonly source:string;readonly bytes:number;
+ readonly expiresAt:number}
+interface CandidateSourceLifecycleOptions{
+ readonly candidateSourceTtlMs?:number;
+ readonly setTimeout?:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
+ readonly clearTimeout?:(timer:ReturnType<typeof setTimeout>)=>void;
+}
+
+function safeCandidateSource(value:unknown,hash:string):Omit<CandidateSource,'expiresAt'>|null{
+ if(typeof value!=='string'||value.length===0||value.charCodeAt(0)===0xfeff)return null;
+ if(Buffer.byteLength(value,'utf8')>MAX_CANDIDATE_SOURCE_BYTES)return null;
+ const bytes=Buffer.from(value,'utf8');
+ try{
+  const decoded=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  if(decoded!==value||createHash('sha256').update(bytes).digest('hex')!==hash)return null;
+ }catch{return null;}
+ return {source:value,bytes:bytes.length};
+}
 
 function ownData(value:unknown,keys:readonly string[]):Record<string,unknown>|null{
  try{
@@ -100,9 +122,84 @@ function snapshotHints(value:unknown):ImportedDomDiagnosticHints|null{
  * Renderer IPC has no route to this method or to this main-owned index. */
 export class ImportedDomDiagnosticIndex{
  private readonly profiles=new Map<string,Profile>();
+ private readonly candidateSources=new Map<string,CandidateSource>();
+ private candidateSourceBytes=0;
+ private candidateSourceExpiryTimer:ReturnType<typeof setTimeout>|null=null;
+ private readonly candidateSourceTtlMs:number;
+ private readonly scheduleTimer:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
+ private readonly cancelTimer:(timer:ReturnType<typeof setTimeout>)=>void;
  private truncatedScripts=false;
- recordImported(hash:unknown,hints:unknown,filename:unknown=null):void{
+ constructor(private readonly now:()=>number=()=>performance.now(),
+  lifecycle:CandidateSourceLifecycleOptions={}){
+  this.candidateSourceTtlMs=typeof lifecycle.candidateSourceTtlMs==='number'&&
+    Number.isFinite(lifecycle.candidateSourceTtlMs)&&lifecycle.candidateSourceTtlMs>0
+      ?lifecycle.candidateSourceTtlMs:CANDIDATE_SOURCE_TTL_MS;
+  this.scheduleTimer=lifecycle.setTimeout??setTimeout;
+  this.cancelTimer=lifecycle.clearTimeout??clearTimeout;
+ }
+ private scheduleCandidateSourceExpiry():void{
+  if(this.candidateSourceExpiryTimer!==null){
+   this.cancelTimer(this.candidateSourceExpiryTimer);
+   this.candidateSourceExpiryTimer=null;
+  }
+  let nextExpiry=Infinity;
+  for(const entry of this.candidateSources.values())
+   nextExpiry=Math.min(nextExpiry,entry.expiresAt);
+  if(!Number.isFinite(nextExpiry))return;
+  const delay=Math.max(0,nextExpiry-this.now());
+  const timer=this.scheduleTimer(()=>{
+   this.candidateSourceExpiryTimer=null;
+   this.pruneCandidateSources();
+  },delay);
+  this.candidateSourceExpiryTimer=timer;
+  timer.unref?.();
+ }
+ private pruneCandidateSources():void{
+  const now=this.now();
+  for(const [hash,entry] of this.candidateSources){
+   if(entry.expiresAt<=now){
+    this.candidateSources.delete(hash);
+    this.candidateSourceBytes-=entry.bytes;
+   }
+  }
+  this.scheduleCandidateSourceExpiry();
+ }
+ private retainCandidateSource(hash:string,source:unknown):void{
+  const safe=safeCandidateSource(source,hash);
+  if(!safe)return;
+  this.pruneCandidateSources();
+  const previous=this.candidateSources.get(hash);
+  const currentBytes=this.candidateSourceBytes-(previous?.bytes??0);
+  if(currentBytes+safe.bytes>MAX_CANDIDATE_SOURCE_BYTES_PER_WINDOW)return;
+  this.candidateSources.set(hash,Object.freeze({source:safe.source,
+   bytes:safe.bytes,expiresAt:this.now()+this.candidateSourceTtlMs}));
+  this.candidateSourceBytes=currentBytes+safe.bytes;
+  this.scheduleCandidateSourceExpiry();
+ }
+ /** Source text stays in this main-only sidecar and never enters plan output. */
+ readUtf8CandidateSource(hash:unknown,expectedFilename?:unknown):string|null{
+  if(typeof hash!=='string'||!HASH.test(hash))return null;
+  this.pruneCandidateSources();
+  const entry=this.candidateSources.get(hash);
+  if(!entry)return null;
+  if(expectedFilename!==undefined){
+   const profile=this.profiles.get(hash);
+   if(typeof expectedFilename!=='string'||!profile||profile.filename!==expectedFilename)
+    return null;
+  }
+  return entry.source;
+ }
+ clearCandidateSources():void{
+  if(this.candidateSourceExpiryTimer!==null){
+   this.cancelTimer(this.candidateSourceExpiryTimer);
+   this.candidateSourceExpiryTimer=null;
+  }
+  this.candidateSources.clear();
+  this.candidateSourceBytes=0;
+ }
+ recordImported(hash:unknown,hints:unknown,filename:unknown=null,source?:unknown):void{
   if(typeof hash!=='string'||!HASH.test(hash))return;
+  if(source!==undefined)this.retainCandidateSource(hash,source);
   const label=typeof filename==='string'&&filename.length>0&&filename.length<=255&&
    !/[\u0000-\u001f\u007f/\\:]/.test(filename)?filename:null;
   const safeHints=hints===null||hints===undefined?null:snapshotHints(hints);
@@ -151,3 +248,19 @@ export class ImportedDomDiagnosticIndex{
  }
 }
 
+/** A long-running import may finish after its BrowserWindow has closed and a
+ * new window has installed a fresh index. Never let the stale owner populate
+ * that replacement index with delayed source text or AST hints. */
+export function recordImportedDomForCurrentOwner(
+ ownerIndex:ImportedDomDiagnosticIndex,
+ activeIndex:ImportedDomDiagnosticIndex,
+ ownerWindow:object,
+ activeWindow:object|null,
+ ownerWindowDestroyed:boolean,
+ hash:unknown,hints:unknown,filename:unknown=null,source?:unknown
+):boolean{
+ if(ownerIndex!==activeIndex||ownerWindow!==activeWindow||ownerWindowDestroyed)
+  return false;
+ ownerIndex.recordImported(hash,hints,filename,source);
+ return true;
+}

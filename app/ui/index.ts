@@ -86,6 +86,9 @@ interface Window {
         domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
         checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
         evidenceCount?:number;reason?:string;
+        candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+        candidateOriginalSha256?:string;candidateSha256?:string;
+        candidateBefore?:string;candidateAfter?:string;
         automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}[];
       automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
     readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
@@ -1683,6 +1686,25 @@ function importedDomBlockReason(code:string|undefined):string{
  };
  return code?reasons[code]??'状态未知：'+code:'状态未知';
 }
+function importedDomCandidateReason(code:string|undefined):string{
+ const reasons:Record<string,string>={
+  SOURCE_UNAVAILABLE:'主进程没有可用的严格 UTF-8 源码',
+  BATCH_PREVIEW_LIMIT:'本批候选预览达到 16 项上限',
+  PREVIEW_NOT_ATTEMPTED:'本项未尝试生成候选预览',
+  INVALID_INPUT:'候选输入无效',NOT_AUTHORIZED:'缺少原生授权',
+  SOURCE_IDENTITY_MISMATCH:'源码身份与导入哈希不一致',
+  SOURCE_TOO_LARGE:'源码超过 256 KiB 限制',
+  INVALID_UTF8_SOURCE:'源码不是无 BOM 的严格 UTF-8',
+  UNSUPPORTED_AST:'AST 结构不受支持',
+  AMBIGUOUS_SELECTOR_SET:'选择器数量或关系不明确',
+  NO_UNIQUE_SELECTOR_FAILURE:'没有唯一失效选择器',
+  DOM_EVIDENCE_UNSTABLE:'重复 DOM 观测不稳定',
+  DOM_COVERAGE_INCOMPLETE:'iframe 或 Shadow DOM 覆盖不完整',
+  CANDIDATE_RULES_REJECTED:'现有候选规则拒绝该修复',
+  SUMMARY_LIMIT_EXCEEDED:'候选差异摘要超过显示上限'
+ };
+ return code?reasons[code]??'未生成候选：'+code:'未生成候选';
+}
 importedDomTarget?.addEventListener('input',updateImportedDomControls);
 importedDomRunButton?.addEventListener('click',()=>{
  if(importedDomBusy||scenarioInspectionBusy)return;
@@ -1707,10 +1729,11 @@ importedDomRunButton?.addEventListener('click',()=>{
   const items=Array.isArray(result.items)?result.items.slice(0,1000):[];
   const observed=items.filter(item=>item.domStatus==='LIMITED_DOM_SIGNAL_ONLY').length;
   const blocked=items.length-observed;
+  const previews=items.filter(item=>item.candidateStatus==='CANDIDATE_ONLY').length;
   if(importedDomResult)importedDomResult.textContent=
    items.length===0
     ?'没有已导入脚本具备本次目标网址的静态观测条件；整体状态为 UNKNOWN。'
-    :'本轮完成：有限 DOM 观测 '+observed+' 项，未知／受阻 '+blocked+
+    :'本轮完成：有限 DOM 观测 '+observed+' 项，其中仅内存候选预览 '+previews+' 项；未知／受阻 '+blocked+
      ' 项。整体仍为 UNKNOWN；这不证明脚本注入、登录、Tampermonkey、GM API 或业务恢复。'+
      (result.truncatedScripts?' 已达会话脚本索引上限，未收录项未处理。':'');
   for(const item of items){
@@ -1719,7 +1742,12 @@ importedDomRunButton?.addEventListener('click',()=>{
    row.textContent=item.filename+': '+(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'
     ?'只读观察 '+item.checkedSelectorCount+' 个 AST 选择器；'+
      (item.triageStatus??'UNKNOWN')+' / '+(item.faultCategory??'UNKNOWN')+
-     '。'+importedDomBlockReason(item.reason)
+     '。'+importedDomBlockReason(item.reason)+
+     (item.candidateStatus==='CANDIDATE_ONLY'
+       ?'；候选预览（仅内存，未保存、未应用、未验证）：'+
+        (item.candidateBefore??'')+' → '+(item.candidateAfter??'')
+       :item.candidateStatus==='NOT_PROPOSED'
+        ?'；'+importedDomCandidateReason(item.candidateReason):'')
     :importedDomBlockReason(item.code));
    importedDomItems?.append(row);
   }
@@ -1734,5 +1762,4 @@ importedDomRunButton?.addEventListener('click',()=>{
   browserControls();
  });
 });
-
 
