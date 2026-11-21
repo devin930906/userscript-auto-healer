@@ -23,6 +23,12 @@ interface ImportResponse {
   batchCheckpointReason?:string;
   batchResumed?:boolean;
 }
+type DroppedBatchFinishResponse=
+  |{ok:false;code?:string;recoveryId?:string}
+  |({ok:true;recoveryId:string}&ImportResponse);
+type DroppedBatchRecoveryResponse=
+  |{ok:false;code?:string;recoveryId?:string}
+  |{ok:true;recoveryId:string;result:ImportResponse};
 interface NativeImportProgress {
   active:boolean;
   phase?:'PICKING'|'SCANNING'|'IMPORTING'|'ANALYZING';
@@ -45,6 +51,13 @@ interface Window {
     getNativeImportProgress(): Promise<NativeImportProgress>;
     cancelDroppedImport(): Promise<{ok:boolean;code?:string;status?:string}>;
     importDropped(name: string, bytes: Uint8Array): Promise<{ ok: boolean; script?: Imported; code?: string }>;
+    beginDroppedImportBatch():Promise<{ok:boolean;batchId?:string;code?:string}>;
+    addDroppedImportBatch(batchId:string,name:string,bytes:Uint8Array):Promise<{
+      ok:boolean;processed?:number;code?:string
+    }>;
+    finishDroppedImportBatch(batchId:string):Promise<DroppedBatchFinishResponse>;
+    recoverDroppedImportBatch():Promise<DroppedBatchRecoveryResponse>;
+    acknowledgeDroppedImportRecovery(recoveryId:string):Promise<{ok:boolean;code?:string}>;
     registerScenario(input: {
       id:string;scriptSha256:string;targetUrl:string;selector:string;
       replacementSelector?:string;
@@ -71,6 +84,18 @@ interface Window {
       localArchiveStatus?:'SAVED_UNVERIFIED'|'UNAVAILABLE';
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
+    diagnoseImportedBatch(targetUrl:string):Promise<{ok:boolean;code?:string;
+      status?:'UNKNOWN';reason?:string;targetMatchedCount?:number;
+      truncatedScripts?:boolean;
+      items?:readonly {ordinal:number;filename:string;status:'UNKNOWN';
+        domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
+        checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
+        evidenceCount?:number;reason?:string;
+        candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+        candidateOriginalSha256?:string;candidateSha256?:string;
+        candidateBefore?:string;candidateAfter?:string;
+        automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}[];
+      automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>;
     readScenarioHistory(id:string):Promise<{ok:boolean;code?:string;status?:string;
       currentStatus?:'UNTESTED'|'ELEMENT_FOUND_ONLY'|'INDETERMINATE';
       archiveRetained?:boolean;
@@ -204,6 +229,10 @@ let scenarioHistoryGeneration=0;
 const scenarioExportButton = document.getElementById('scenario-export-manual') as HTMLButtonElement | null;
 const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLButtonElement | null;
 const scenarioList = document.getElementById('scenario-list');
+const importedDomTarget=document.getElementById('imported-dom-target') as HTMLInputElement|null;
+const importedDomRunButton=document.getElementById('imported-dom-run') as HTMLButtonElement|null;
+const importedDomResult=document.getElementById('imported-dom-result');
+const importedDomItems=document.getElementById('imported-dom-items');
 let scenarioBusy=false;
 function updateScenarioControls():void{
  if(scenarioScript)scenarioScript.disabled=seenScripts.size===0;
@@ -250,6 +279,7 @@ let acceptedCount = 0;
 let duplicateCount = 0;
 let failedCount = 0;
 let unprocessedCount = 0;
+let droppedImportProgress:{processed:number;total:number}|null=null;
 
 function updateImportSummary(): void {
   if (importSummary) importSummary.textContent =
@@ -268,7 +298,9 @@ function updateImportSummary(): void {
         '（成功 '+(liveNativeImportProgress.accepted??0)+
         '、重复 '+(liveNativeImportProgress.duplicates??0)+
         '、失败 '+(liveNativeImportProgress.failed??0)+'）'
-      : '');
+      : droppedImportProgress
+        ? ' 文件选择进度：'+droppedImportProgress.processed+'/'+droppedImportProgress.total
+        : '');
 }
 
 function logLine(message: string): void {
@@ -306,7 +338,54 @@ function show(result: ImportResponse): void {
   for (const error of result.errors) { failedCount++; logLine(error.filename + ': ' + error.code); }
   duplicateCount += duplicates;
   if (duplicates) logLine('忽略重复脚本：' + duplicates);
+  if(result.batchCheckpoint==='BLOCKED')
+    logLine('持久只读 AST 检查点受阻：'+(result.batchCheckpointReason??'UNKNOWN')+
+      '；原始脚本未被修改，本次未完成静态预览。');
+  else if(result.batchCheckpoint==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
+    logLine(result.batchResumed
+      ?'已匹配同批只读调度记录；本次仍重新分析新导入字节。'
+      :'只读 AST 批处理检查点已保存；仅记录有限调度状态。');
+  if(result.batchCheckpoint)
+    logLine('检查点仅支持重新导入后恢复调度，不保存源码，也不代表网页、GM API、业务验证或修复已完成。');
+  if(typeof importedDomRunButton!=='undefined')updateImportedDomControls();
   updateImportSummary();
+}
+
+async function acknowledgeDroppedImportRecovery(recoveryId:string):Promise<void>{
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const acknowledged=await window.healer.acknowledgeDroppedImportRecovery(recoveryId);
+      if(acknowledged.ok||acknowledged.code==='STALE_RECOVERY')return;
+    }catch{
+      // A lost IPC receipt is safe to retry: the main-issued ID is idempotent.
+    }
+    if(attempt<2)await new Promise(resolve=>window.setTimeout(resolve,50));
+  }
+  logLine('批量导入恢复回执未确认。');
+}
+
+async function recoverDroppedImportBatch():Promise<void>{
+  let recovered:DroppedBatchRecoveryResponse|null=null;
+  const deadline=Date.now()+5000;
+  do{
+    try{recovered=await window.healer.recoverDroppedImportBatch();}
+    catch{return;}
+    if(recovered.ok||recovered.code!=='RECOVERY_NOT_READY')break;
+    await new Promise(resolve=>window.setTimeout(resolve,30));
+  }while(Date.now()<deadline);
+  if(!recovered)return;
+  if(recovered.ok){
+    show(recovered.result);
+    await acknowledgeDroppedImportRecovery(recovered.recoveryId);
+    return;
+  }
+  if(recovered.code!=='NO_PENDING_RECOVERY'){
+    failedCount++;
+    logLine('上次批量导入结果未能恢复：'+(recovered.code??'RECOVERY_FAILED'));
+    updateImportSummary();
+  }
+  if(recovered.recoveryId)
+    await acknowledgeDroppedImportRecovery(recovered.recoveryId);
 }
 
 async function locked(task: () => Promise<void>): Promise<void> {
@@ -357,12 +436,6 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       ? await window.healer.chooseFiles()
       : await window.healer.chooseFolder();
     show(result);
-    if (result.batchCheckpoint==='BLOCKED')
-      logLine('批处理检查点未保存：'+(result.batchCheckpointReason??'UNKNOWN')+
-        '；已导入的原始文件未被修改，静态分析不能据此视为已完成。');
-    else if(result.batchCheckpoint==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED')
-      logLine(result.batchResumed?'已重新核对同批脚本的只读持久调度记录；仍重新分析源码，不代表修复完成。':
-        '只读 AST 批处理检查点已保存；仅记录有限调度状态，不授权修复脚本。');
     if (result.canceled) {
       unprocessedCount += result.unprocessed ?? 0;
       logLine('原生选择导入已取消；已经完成的只读结果仍保留。');
@@ -382,6 +455,8 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
 async function importFiles(files: readonly File[]): Promise<void> {
   activeImport = true;
   cancelRequested = false;
+  droppedImportProgress=null;
+  let batchId:string|null=null;
   if (cancelImport) cancelImport.disabled = false;
   updateImportSummary();
   try {
@@ -390,6 +465,16 @@ async function importFiles(files: readonly File[]): Promise<void> {
       logLine('单批最多处理 1000 份文件');
       return;
     }
+    if(files.length===0)return;
+    const started=await window.healer.beginDroppedImportBatch();
+    if(!started.ok||typeof started.batchId!=='string'){
+      failedCount++;
+      logLine('批量导入未能开始：'+(started.code??'BATCH_START_FAILED'));
+      return;
+    }
+    batchId=started.batchId;
+    droppedImportProgress={processed:0,total:files.length};
+    updateImportSummary();
     let readBytes = 0;
     for (let index = 0; index < files.length; index++) {
       if (cancelRequested) {
@@ -401,6 +486,7 @@ async function importFiles(files: readonly File[]): Promise<void> {
       if (file.size > MAX_FILE_BYTES) {
         failedCount++;
         logLine(file.name + ': FILE_TOO_LARGE');
+        if(droppedImportProgress)droppedImportProgress.processed=index+1;
         updateImportSummary();
         continue;
       }
@@ -411,25 +497,45 @@ async function importFiles(files: readonly File[]): Promise<void> {
       }
       readBytes += file.size;
       // A rejected file never discards the rest of the batch.
-      // Byte reading may finish first; native IPC can abort the isolated AST worker.
+      // Byte reading may finish first; native IPC can abort the shared AST worker.
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const answer = await window.healer.importDropped(file.name, bytes);
-        if (answer.ok && answer.script) {
-          show({ canceled: false, scripts: [answer.script], errors: [], duplicates: 0 });
-        } else {
+        const appended=await window.healer.addDroppedImportBatch(batchId,file.name,bytes);
+        if(!appended.ok&&(appended.code==='STALE_BATCH'||appended.code==='BATCH_FINALIZED')){
           failedCount++;
-          logLine(file.name + ': ' + (answer.code ?? 'INVALID_INPUT'));
+          logLine(file.name+': '+appended.code);
+          unprocessedCount+=files.length-index-1;
+          break;
         }
       } catch {
         failedCount++;
         logLine(file.name + ': READ_OR_IMPORT_FAILED');
       }
+      if(droppedImportProgress)droppedImportProgress.processed=index+1;
       updateImportSummary();
     }
   } finally {
+    if(batchId!==null){
+      try{
+        const result=await window.healer.finishDroppedImportBatch(batchId);
+        if(result.ok){
+          show(result);
+          await acknowledgeDroppedImportRecovery(result.recoveryId);
+        }
+        else{
+          failedCount++;
+          logLine('批量导入未能完成：'+(result.code??'BATCH_FINISH_FAILED'));
+          if(result.recoveryId)
+            await acknowledgeDroppedImportRecovery(result.recoveryId);
+        }
+      }catch{
+        failedCount++;
+        logLine('批量导入结果未能确认。');
+      }
+    }
     activeImport = false;
     cancelRequested = false;
+    droppedImportProgress=null;
     if (cancelImport) cancelImport.disabled = true;
     updateImportSummary();
   }
@@ -540,12 +646,18 @@ cancelImport?.addEventListener('click', () => {
     // A drag/drop/file-input import already reading bytes keeps its valid
     // result; only in-flight static analysis is canceled by native IPC.
     // Scanning a dropped directory can be canceled locally before IPC exists.
-    void window.healer.cancelDroppedImport().catch(() => {
+    void window.healer.cancelDroppedImport().then(result=>{
+      if(!result.ok)
+        logLine(result.code==='NO_ACTIVE_DROPPED_IMPORT'
+          ?'本次静态分析已结束，批次结果正在确认。'
+          :'当前静态分析的取消请求未确认；需等待本次导入结束。');
+    }).catch(() => {
       logLine('当前静态分析的取消请求未确认；需等待本次导入结束。');
     });
   }
 });
 updateImportSummary();
+void recoverDroppedImportBatch();
 
 chooseFile?.addEventListener('click', () => { void locked(async () => importNativeSelection('files')); });
 chooseFolder?.addEventListener('click', () => { void locked(async () => importNativeSelection('folder')); });
@@ -685,6 +797,9 @@ function selectedCdpPort():number|null{
  return /^\d{4,5}$/.test(value)&&Number.isInteger(port)&&port>=1024&&port<=65535?port:null;
 }
 let scenarioInspectionBusy=false;
+let importedDomBusy=false;
+let importedDomGeneration=0;
+let importedDomRequestId=0;
 let manualExportBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
@@ -719,6 +834,11 @@ const gmObserveButtons={
 };
 const gmLinks=document.getElementById('gm-probe-links');
 const gmResult=document.getElementById('gm-probe-result');
+function updateImportedDomControls():void{
+ if(importedDomRunButton)importedDomRunButton.disabled=importedDomBusy||
+  scenarioInspectionBusy||!browserConnected||seenScripts.size===0||
+  !(importedDomTarget?.value.trim());
+}
 function clearGmDisplay(message:string):void{
  gmProbeActive=false;
  if(gmLinks)gmLinks.textContent='';
@@ -771,6 +891,7 @@ function browserControls():void{
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioRecheckStopButton)scenarioRecheckStopButton.disabled=!recheckRunning;
  if(scenarioCancelButton)scenarioCancelButton.disabled=!(scenarioInspectionBusy||manualExportBusy);
+ if(typeof importedDomRunButton!=='undefined')updateImportedDomControls();
  if(scenarioHistoryButton)scenarioHistoryButton.disabled=scenarioHistoryBusy||
    (scenarioInspectId?.options.length??0)<=1;
  if(scenarioExportButton)scenarioExportButton.disabled=!browserConnected||controlsBusy||
@@ -1116,6 +1237,11 @@ scenarioExportButton?.addEventListener('click',()=>void browserAction(async()=>{
 }));
 scenarioCancelButton?.addEventListener('click',()=>{
  if(!scenarioInspectionBusy&&!manualExportBusy)return;
+ if(typeof importedDomBusy!=='undefined'&&importedDomBusy){
+  importedDomGeneration++;
+  if(importedDomResult)importedDomResult.textContent=
+   '已请求取消批量 DOM 观察；当前进行中的页面读取正在撤销，未完成项保持 UNKNOWN。';
+ }
  // Native cancellation remains scoped to the original request. Retire
  // earlier inspection/export presentation immediately, so late success
  // cannot repaint a cancellation receipt or imply renewed authority.
@@ -1596,4 +1722,97 @@ if (workspaceTablist) {
   updateWorkspaceOrientation();
   selectWorkspace(0, 'none');
 }
+
+function importedDomBlockReason(code:string|undefined):string{
+ const reasons:Record<string,string>={
+  INVALID_TARGET_URL:'目标网址格式不安全或无法确认',
+  NO_LITERAL_SELECTORS:'没有可用的字面 querySelector AST 证据',
+  UNSUPPORTED_MATCH_RULES:'脚本含暂不支持的 @include、@exclude 或未知元数据',
+  NO_MATCH_METADATA:'脚本没有可核对的 @match',
+  TARGET_NOT_MATCHED:'该脚本的精确来源规则不覆盖目标网址',
+  SELECTOR_LIMIT_EXCEEDED:'选择器数量超过本轮只读观测上限',
+  BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED:'业务、登录状态和管理器运行仍未知',
+  BROWSER_NOT_RUNNING:'请先启动本程序管理的独立 Chrome',
+  TIME_BUDGET_EXHAUSTED:'本轮达到 120 秒上限，未观测项目保持未知',
+  CANCELLED:'本次观测已取消',
+  OBSERVATION_FAILED:'只读 DOM 观测失败，没有生成验证结论'
+ };
+ return code?reasons[code]??'状态未知：'+code:'状态未知';
+}
+function importedDomCandidateReason(code:string|undefined):string{
+ const reasons:Record<string,string>={
+  SOURCE_UNAVAILABLE:'主进程没有可用的严格 UTF-8 源码',
+  BATCH_PREVIEW_LIMIT:'本批候选预览达到 16 项上限',
+  PREVIEW_NOT_ATTEMPTED:'本项未尝试生成候选预览',
+  INVALID_INPUT:'候选输入无效',NOT_AUTHORIZED:'缺少原生授权',
+  SOURCE_IDENTITY_MISMATCH:'源码身份与导入哈希不一致',
+  SOURCE_TOO_LARGE:'源码超过 256 KiB 限制',
+  INVALID_UTF8_SOURCE:'源码不是无 BOM 的严格 UTF-8',
+  UNSUPPORTED_AST:'AST 结构不受支持',
+  AMBIGUOUS_SELECTOR_SET:'选择器数量或关系不明确',
+  NO_UNIQUE_SELECTOR_FAILURE:'没有唯一失效选择器',
+  DOM_EVIDENCE_UNSTABLE:'重复 DOM 观测不稳定',
+  DOM_COVERAGE_INCOMPLETE:'iframe 或 Shadow DOM 覆盖不完整',
+  CANDIDATE_RULES_REJECTED:'现有候选规则拒绝该修复',
+  SUMMARY_LIMIT_EXCEEDED:'候选差异摘要超过显示上限'
+ };
+ return code?reasons[code]??'未生成候选：'+code:'未生成候选';
+}
+importedDomTarget?.addEventListener('input',updateImportedDomControls);
+importedDomRunButton?.addEventListener('click',()=>{
+ if(importedDomBusy||scenarioInspectionBusy)return;
+ const targetUrl=importedDomTarget?.value.trim()??'';
+ const requestId=++importedDomRequestId;
+ const generation=++importedDomGeneration;
+ importedDomBusy=true;
+ scenarioInspectionBusy=true;
+ browserControls();
+ importedDomItems?.replaceChildren();
+ if(importedDomResult)importedDomResult.textContent=
+  '等待系统原生确认；脚本不会执行，本次只读取声明的页面选择器数量。';
+ void window.healer.diagnoseImportedBatch(targetUrl).then(result=>{
+  if(generation!==importedDomGeneration)return;
+  if(!result.ok){
+   if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+   if(importedDomResult)importedDomResult.textContent=
+    '批量 DOM 观察未完成：'+importedDomBlockReason(result.code)+
+    '；没有报告脚本或业务验证成功。';
+   return;
+  }
+  const items=Array.isArray(result.items)?result.items.slice(0,1000):[];
+  const observed=items.filter(item=>item.domStatus==='LIMITED_DOM_SIGNAL_ONLY').length;
+  const blocked=items.length-observed;
+  const previews=items.filter(item=>item.candidateStatus==='CANDIDATE_ONLY').length;
+  if(importedDomResult)importedDomResult.textContent=
+   items.length===0
+    ?'没有已导入脚本具备本次目标网址的静态观测条件；整体状态为 UNKNOWN。'
+    :'本轮完成：有限 DOM 观测 '+observed+' 项，其中仅内存候选预览 '+previews+' 项；未知／受阻 '+blocked+
+     ' 项。整体仍为 UNKNOWN；这不证明脚本注入、登录、Tampermonkey、GM API 或业务恢复。'+
+     (result.truncatedScripts?' 已达会话脚本索引上限，未收录项未处理。':'');
+  for(const item of items){
+   if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
+   const row=document.createElement('li');
+   row.textContent=item.filename+': '+(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'
+    ?'只读观察 '+item.checkedSelectorCount+' 个 AST 选择器；'+
+     (item.triageStatus??'UNKNOWN')+' / '+(item.faultCategory??'UNKNOWN')+
+     '。'+importedDomBlockReason(item.reason)+
+     (item.candidateStatus==='CANDIDATE_ONLY'
+       ?'；候选预览（仅内存，未保存、未应用、未验证）：'+
+        (item.candidateBefore??'')+' → '+(item.candidateAfter??'')
+       :item.candidateStatus==='NOT_PROPOSED'
+        ?'；'+importedDomCandidateReason(item.candidateReason):'')
+    :importedDomBlockReason(item.code));
+   importedDomItems?.append(row);
+  }
+ }).catch(()=>{
+  if(generation!==importedDomGeneration)return;
+  if(importedDomResult)importedDomResult.textContent=
+   '批量 DOM 观察失败；没有验证结论。请确认受控 Chrome 状态后再试。';
+ }).finally(()=>{
+  if(requestId!==importedDomRequestId)return;
+  importedDomBusy=false;
+  scenarioInspectionBusy=false;
+  browserControls();
+ });
+});
 

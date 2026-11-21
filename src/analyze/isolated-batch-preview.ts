@@ -15,8 +15,19 @@ import {MAX_SELECTED_FILES,MAX_TOTAL_IMPORTED_BYTES,type ImportedScript} from '.
 import {
  MAX_ISOLATED_ANALYSIS_BYTES,MAX_BATCH_PREVIEW_BYTES,MAX_BATCH_PREVIEW_FILES,
  unavailableImportPreview,
- type ImportAnalysisPreview
+ type ImportAnalysisPreview,type ImportedDomDiagnosticHints
 } from './import-preview';
+
+const mainOnlyDiagnosticHints=new WeakMap<object,ImportedDomDiagnosticHints>();
+/** Read the Worker-validated sidecar only while its exact sanitized preview
+ * object remains in the trusted main process. Copies and IPC serialization do
+ * not carry this data. */
+export function readMainOnlyDiagnosticHints(input:unknown):ImportedDomDiagnosticHints|null{
+ try{
+  if(!input||typeof input!=='object'||nodeTypes.isProxy(input))return null;
+  return mainOnlyDiagnosticHints.get(input)??null;
+ }catch{return null;}
+}
 
 type Script=Pick<ImportedScript,'bytes'|'textEncoding'>;
 type WorkerFailureReason='START_FAILED'|'REPLY_REJECTED'|
@@ -115,9 +126,9 @@ function snapshotNativeAstBatch(input:unknown):Script[]|null{
 
 
 /** Treat worker messages as untrusted, even though today's worker is ours.
- * No unexpected field (in particular source, paths or selector text) may
- * cross this boundary. Copy only whitelisted scalar evidence into fresh
- * objects; a message is all-or-nothing to avoid partial forged progress.
+ * Only a bounded main-process-only selector sidecar may contain selector
+ * strings. Source, paths, and arbitrary worker fields remain forbidden.
+ * Copy every accepted value into fresh objects before it reaches native code.
  */
 const PREVIEW_KEYS=[
  'status','metadataStatus','totalSites','literalSites',
@@ -202,7 +213,8 @@ export function validateIsolatedPreviewReply(
   if(!rows)return null;
   const safe:ImportAnalysisPreview[]=[];
   for(const row of rows){
-   const x=replyRecord(row,PREVIEW_KEYS);
+   const x=replyRecord(row,PREVIEW_KEYS)??
+    replyRecord(row,[...PREVIEW_KEYS,'diagnosticHints']);
    if(!x||typeof x.status!=='string'||!PREVIEW_STATUSES.has(x.status)||
       typeof x.metadataStatus!=='string'||!METADATA_STATUSES.has(x.metadataStatus)||
       x.automaticPatchAllowed!==false||x.tampermonkeyVerified!==false||
@@ -214,6 +226,11 @@ export function validateIsolatedPreviewReply(
       !(x.runtimeConfirmationSites as number>=0)||
       (x.literalSites as number)+(x.runtimeConfirmationSites as number)!==x.totalSites)
     return null;
+   const hasDiagnosticHints=Object.prototype.hasOwnProperty.call(x,'diagnosticHints');
+   const hints=hasDiagnosticHints&&x.diagnosticHints!==null
+    ?validateDiagnosticHints(x.diagnosticHints):null;
+   if(hasDiagnosticHints&&x.diagnosticHints!==null&&!hints)return null;
+   if(x.status!=='STATIC_ANALYSIS_ONLY'&&hints!==null)return null;
    const sitesRaw=replyArray(x.sites,Math.min(8,x.totalSites as number));
    if(!sitesRaw)return null;
    if(x.status==='STATIC_ANALYSIS_ONLY'){
@@ -259,20 +276,60 @@ export function validateIsolatedPreviewReply(
        (visibleLiteral!==x.literalSites||
         visibleRuntime!==x.runtimeConfirmationSites)))
     return null;
-   safe.push(Object.freeze({
+   const accepted=Object.freeze({
     status:x.status as ImportAnalysisPreview['status'],
     metadataStatus:x.metadataStatus as ImportAnalysisPreview['metadataStatus'],
     totalSites:x.totalSites as number,literalSites:x.literalSites as number,
     runtimeConfirmationSites:x.runtimeConfirmationSites as number,
     sites:Object.freeze(sites),tampermonkeyVerified:false as const,
-    businessVerified:false as const,automaticPatchAllowed:false as const
-   }));
+    businessVerified:false as const,automaticPatchAllowed:false as const,
+   });
+   if(hints)mainOnlyDiagnosticHints.set(accepted,hints);
+   safe.push(accepted);
   }
   return Object.freeze(safe) as unknown as ImportAnalysisPreview[];
  }catch{
   // Malicious Proxy traps and accessor-backed arrays cannot inject errors or data.
   return null;
  }
+}
+
+const DIAGNOSTIC_HINT_KEYS=['matchPatterns','unsupportedScope',
+ 'selectorSites','selectorSitesTruncated'] as const;
+const DIAGNOSTIC_SITE_KEYS=['offset','method','selector'] as const;
+function validateDiagnosticHints(input:unknown):ImportedDomDiagnosticHints|null{
+ const data=replyRecord(input,DIAGNOSTIC_HINT_KEYS);
+ if(!data||typeof data.unsupportedScope!=='boolean'||
+    typeof data.selectorSitesTruncated!=='boolean')return null;
+ const patterns=replyDataArray(data.matchPatterns);
+ const rawSites=replyDataArray(data.selectorSites);
+ if(!patterns||patterns.length>16||!rawSites||rawSites.length>8)return null;
+ const matchPatterns:string[]=[];
+ const patternSet=new Set<string>();
+ for(const value of patterns){
+  if(typeof value!=='string'||value.length===0||value.length>1024||
+     /[\u0000-\u001f\u007f]/.test(value)||patternSet.has(value))return null;
+  patternSet.add(value);matchPatterns.push(value);
+ }
+ const selectorSites:ImportedDomDiagnosticHints['selectorSites'][number][]=[];
+ const selectorSet=new Set<string>();
+ for(const value of rawSites){
+  const site=replyRecord(value,DIAGNOSTIC_SITE_KEYS);
+  if(!site||!Number.isSafeInteger(site.offset)||
+     (site.offset as number)<0||
+     (site.offset as number)>MAX_ISOLATED_ANALYSIS_BYTES||
+     (site.method!=='querySelector'&&site.method!=='querySelectorAll')||
+     typeof site.selector!=='string'||site.selector.length===0||
+     site.selector.length>256||/[\u0000-\u001f\u007f]/.test(site.selector)||
+     selectorSet.has(site.selector))return null;
+  selectorSet.add(site.selector);
+  selectorSites.push(Object.freeze({offset:site.offset as number,
+   method:site.method,selector:site.selector}));
+ }
+ return Object.freeze({matchPatterns:Object.freeze(matchPatterns),
+  unsupportedScope:data.unsupportedScope,
+  selectorSites:Object.freeze(selectorSites),
+  selectorSitesTruncated:data.selectorSitesTruncated});
 }
 
 /** No paths, original file names or authenticated state are passed to the
@@ -490,8 +547,16 @@ export function validateIsolatedBatchPreviewResult(
    return {previews,safeToContinue:wrapper.safeToContinue};
   }
   for(const row of rows){
+   // The Worker wire validator already attached any selector sidecar to this
+   // exact sanitized preview in the main-process WeakMap. This scheduler
+   // boundary revalidates the public fields into a fresh object, so explicitly
+   // carry only that previously validated sidecar across the trusted copy.
+   const priorHints=readMainOnlyDiagnosticHints(row);
    const validated=validateIsolatedPreviewReply([row],1);
-   if(validated){previews.push(validated[0]);continue;}
+   if(validated){
+    if(priorHints)mainOnlyDiagnosticHints.set(validated[0],priorHints);
+    previews.push(validated[0]);continue;
+   }
    const unavailable=replyRecord(row,PREVIEW_KEYS);
    if(unavailable&&
       (unavailable.status==='ISOLATED_ANALYSIS_FAILED'||
@@ -726,3 +791,4 @@ export async function previewImportedBatchOffMain(
   releaseSharedAstWorkerGate(gate,completed&&safeToContinue);
  }
 }
+

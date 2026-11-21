@@ -2,13 +2,11 @@
 
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
-> **当前最新续接（2026-11-19，PR #909..#922 全量任务代码整合、1220 项测试全绿与 main@19b7391 Windows Candidate 双包交付实测）**：
-> 产品代码基线为 PR [#921](https://github.com/devin930906/userscript-auto-healer/pull/921) 合并 SHA `953468cb7c86c34ef8e1fbb280c94051551cc3fd` 与文档对账 PR [#922](https://github.com/devin930906/userscript-auto-healer/pull/922) 合并 SHA `19b7391caa29991c3ded9750e78b2fc1e19b5e30`。
-> 今日已顺利完成 TASK-007 至 TASK-021 的全量代码实现与工程整合（PR #909..#922 全部合并）。
-> 本地 `npm run typecheck` 成功；全量 `npm test` 共 1,220 项测试 100% 绿灯（1,208 pass, 0 fail, 12 conditional skips）；`.github/scripts/verify-predevelopment.py` 严格校验通过。
-> 云端 main@953468c Application Skeleton Checks（Run ID [#44516360575](https://github.com/devin930906/userscript-auto-healer/actions/runs/44516360575)）成功通过。
-> 云端基于 main@19b7391 的 Windows Candidate 打包工作流（Run ID [#44534729223](https://github.com/devin930906/userscript-auto-healer/actions/runs/44534729223)，工件 ID `14536381364`）成功生成同源 Candidate 双包（Setup.exe: `b81ec3e790a648cec9d980a71172a65fa8cbd9e5c256c455bb2f8ba39190462f`，Portable.zip: `6c42187bb061909905da1f91c0045dca304b2d71dd216c0f6219d06a831737c2`），本地已下载、校验 SHA-256 并实测解压运行成功（烟测退出码 0，preload IPC、沙箱及独立 userData 隔离全部验证通过）。
-> GATE-001..011 机器验证已全量就绪通过，进入最终集中人工验证阶段。
+> **当前最新续接（2026-11-20）**：当前 GitHub 基线为 `main@146f9a987e7e633496d723e7f517c68282e1fe07`。复核发现 PR #920 只加入合成批处理协调器测试，没有接通产品流程；Issue #857 已重新打开。不得沿用上一快照中“TASK-013 已完成”及“GATE-001..011 全部就绪”的判断。
+> TASK-013 当前本地产品增量 commit 为 `9156b96e2c9070eadbfef1fd87b3089da8e58453`（branch `feat/task013-dropped-batch-20261119`），文件选择/拖放入口已改为主进程受限批次并复用只读 AST 队列；本地分支尚未同步 GitHub，远端 PR/Windows checks 待完成。
+> 本地 `npm run typecheck`、相关 focused tests 与 `verify-predevelopment.py` 通过；完整 `npm test` 为 1,227 total / 1,214 pass / 1 fail / 12 skipped，唯一失败是 Windows sandbox 禁止 TEST-003 创建 symlink（EPERM）。本机 Electron 44.9.1 shell-only 在生成回执前以 `0xC0000005` 退出，故 renderer smoke 未确认，须等待 PR 的 Windows 2025 Checks。
+> Windows Candidate run [#44555096125](https://github.com/devin930906/userscript-auto-healer/actions/runs/44555096125) 在改动前的 `main@146f9a987e7e633496d723e7f517c68282e1fe07` 成功，Artifact 14545696747 / digest `sha256:31d19dcfbeca8a80bd295228c45d4c3e4f116fdff70c3615a1406283213f4ec8`，到期时间为 2026-11-22T15:36:37Z；它是旧源候选，不代表新分支或 Stable。
+> 完整 #857 的动态诊断、候选修复、可选 AI、可信 Tampermonkey/GM/业务正反证据、失败恢复和持久批处理仍未接通；TEST-022/GATE-007 与 Stable 未通过。最新正式 Release 与 GATE 状态须在后续续接时用 GitHub 实况复核。
 
 > 历史快照（2026-11-16，PR #897 合并及 #510 对照后）：产品代码基线为 PR [#897](https://github.com/devin930906/userscript-auto-healer/pull/897) 合并 SHA `36a8760ade24b7249cead0d369f9e4deb300339a`，tree `5d48b548c8be9b6c34cf3a6a27c253896ff84585`。PR #897 只增加 TASK-005 手动 cold/preinitialized Profile 诊断；没有修改产品启动实现。Windows run [#43885592542](https://github.com/devin930906/userscript-auto-healer/actions/runs/43885592542) 在同一 SHA 上成功，两个 Profile 启动都通过现有所有权校验。Issue #510 仍 Open，根因未确认。
 >
@@ -444,3 +442,35 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - PR #901 Windows Candidate run [#44030158756](https://github.com/devin930906/userscript-auto-healer/actions/runs/44030158756) 成功，HEAD `408d55c18edb4245e7797bcbc57ed919d00286f1`；候选包与当前 main 的产品代码树一致但来自 PR HEAD。该产物为临时 Candidate，不是 Stable Release；artifact 14304753363 于 2026-11-20T06:25:48Z 过期。
 - 当前 Open Issues 14 个：#486/#487/#488/#489/#510/#603..#610/#857。#856/#480/#440/#215 已关闭历史；#857 是 TASK-013 当前 Issue，#610 是最终 TASK-021/GATE 跟踪。
 - 最新正式 Release 仍是 v1.1.3。TASK-007、TEST-017/018、GATE-004/005 以及所有最终 Stable GATE 与人工验收仍未完成。继续保持不操作用户桌面；如需补充实机步骤，由用户自己操作并提供结果。
+
+## 2026-11-20 TASK-013 / #857 持续开发交接
+
+- **当前正式基线**：GitHub `main@146f9a987e7e633496d723e7f517c68282e1fe07`。本地 smoke fix commit `23c9e806f0cc024cdefe86771183a7f84abee797` 对应远端 `ce62dc41b33e417328581ec2e3fef992d8e1f813`，tree `69a1d8306950da0dcc44e2ae2d921e75f1529f5c`。此前 docs commit `0162420a7a8f5902688a6ce20abfbb18f7b5624a` 对应 PR head `0f1a2cdc5e29d612d82e996d88058359fa9c39c9`，tree `7a06f0a39634e451b8b8564608d6f626f5e07ace`。最终 Actions 证据已收集，当前这次文档修正待同步。
+- **本地已完成增量**：main-owned bounded dropped-file batch、renderer file-picker/drop 共用 session、main/preload begin/add/finish IPC、错误隔离/去重/上限及只读 AST 一次分析。补入 main-frame reload、renderer-process loss 和窗口关闭时的统一批次清理；reload smoke 已移到现有 renderer 断言之后，且行为 probe 与 preload key inventory 失败码分开。旧单文件入口保留；renderer 无路径或写入/修复权。
+- **验证与 CI**：本轮 `npm run build`、`npm run typecheck`、desktop-boundary 75/75、predevelopment 28/21/11 与 `git diff --check` 通过。组合 desktop-boundary/import-service 为 111 项中 110 通过、1 失败；唯一失败为本地 Windows sandbox 创建 symlink 返回 TEST-003 `EPERM`。PR source head `0f1a2cdc5e29d612d82e996d88058359fa9c39c9` 的 Application Skeleton [#44576767661](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576767661)（含 windows-shell-smoke 与 boundary）及 Candidate Windows [#44576767432](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576767432) 均成功；Candidate 全套 Node tests 1,228 总计、1,225 通过、0 失败、3 跳过。Documentation Integrity [#44576768274](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576768274)、Issue Coordination [#44576960099](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576960099) 和隔离 Tampermonkey experiment [#44576767709](https://github.com/devin930906/userscript-auto-healer/actions/runs/44576767709) 成功。Artifact 14556773161 的 SHA-256 为 `f18619e66f41dfe91b5965f0bfc1f6065335154ef90ee5968aa4df80140b59f5`，这是临时候选，不是 Stable。此前本机 Electron 仍在回执前以 `0xC0000005` 退出；Windows shell smoke 已独立通过。
+- **根因与修正**：smoke 原本在首个 `File.arrayBuffer()` 开始前就触发取消；renderer 取消监听先设置 `cancelRequested`，批次循环因此跳过两份文件。当前本地 commit `23c9e80` 为首读加入可控门闩，等读取开始后发取消，再释放首读，并只返回首读、取消和计数的布尔诊断；source head 的 Windows shell smoke 已通过。
+- **远端状态与下一动作**：PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 已开、未合并，PR source head `0f1a2cdc5e29d612d82e996d88058359fa9c39c9` 的 code tree 与本地 source commit 相同；本轮最终 Actions 记录将随文档更新同步。#857/#610 保持 Open；不要据此关闭。
+- **完整 #857 未完成范围**：持久/崩溃恢复、普通流程动态诊断、保守候选、可选 AI、可信 Tampermonkey/GM/业务证据及失败恢复；按 #486/#487/#488/#489/#603/#604 真实依赖继续。
+- **Stable**：最新正式 Release 仍需以 GitHub 状态复核；当前没有由本分支构建的候选包，更没有同一最终 SHA 的正式 EXE+ZIP、完整 GATE 与最终集中人工验收。本轮不发布 Stable。
+
+## 2026-11-21 TASK-013 / #857 续接检查点
+
+- GitHub PR #925 当前 HEAD `5a0480055bb515f587176fece14ac54cc2f61a50`、Open 且未合并。精确该 HEAD 的 Application Skeleton `windows-shell-smoke` 失败 `DROPPED_BATCH_RELOAD_SETUP_FAILED`，Candidate Windows packaging 失败 `SHELL_SMOKE_DROPPED_BATCH_CHECKPOINT_NOT_VISIBLE`；对应 run 为 [#44878587959](https://github.com/devin930906/userscript-auto-healer/actions/runs/44878587959) 与 [#44878587931](https://github.com/devin930906/userscript-auto-healer/actions/runs/44878587931)。Boundary、Portable Chrome、Documentation Integrity、Issue Coordination 与隔离 Tampermonkey matrix 的列出 job 成功，但不构成完整 Stable 或用户 Profile 验收。
+- 本地 smoke 检查已改为等待渲染器导入控件 idle、匹配本次唯一合成文件的检查点结果，并返回有限阶段码。Build、desktop-boundary 79/79、diff check 通过；本地完整 `npm test` 为 1,248/1,193/43/12，43 个失败仍在 TASK-011、TEST-003、TASK-018 既有类别。
+- 同一轮本机隔离 `electron@44.9.1 --uahtest-shell-only` 发生 native `0xC0000005` 退出、无回执；用户截图显示 `electron.exe` 访问 `0x8` 后崩溃，并说明先前也有多次故障。当前沙盒帐户的 Application Event ID 1000 查询没有匹配记录，故障模块与用户交互式帐户中的实际事件仍未确认。不得据此宣称本机 smoke 成功；新 smoke 修改仅待 GitHub 新 HEAD 验证。
+- **恢复顺序**：将本地提交安全同步到 PR #925；读取新 HEAD 的 Windows shell smoke、Candidate packaging、Documentation Integrity、Issue Coordination 及 Tampermonkey matrix 最终状态；按失败码继续排查。#857/#610 保持 Open，TEST-022/GATE-007、剩余真实管理器/GM/业务验收、同源 EXE+ZIP 与最终集中人工签署继续未完成。
+
+## 2026-11-21 TASK-013 / #857 — 唯一 smoke fixture 与 renderer reload recovery
+
+- **远端基线**：本轮同步前 GitHub PR #925 仍 Open、未合并，HEAD `5a0480055bb515f587176fece14ac54cc2f61a50`，目标 `main`。该 SHA 的两个 Windows shell smoke 失败已记录在上方；不得把它们当作当前本地改动的验证。
+- **本地增量**：drop smoke 用 nonce 同时唯一化文件名和源码字节，只接受本轮新追加的对应文件行与后续 checkpoint 行。main-frame reload 时 main finalize 已接受批次并完成有界只读摘要；仅 `did-finish-load` 后的可信新文档可领取；按 `mainFrameNavigationEpoch` 轮换 recovery receipt，旧文档无法 ack 新结果。分析未 settle 时仍允许用户取消，fragment-only 导航不结束批次；reload smoke 还确认展示后 ack 解锁下一批。摘要只在同一进程/同一 `BrowserWindow` 内存存在，不含源码或路径，关闭/退出清理，不覆盖进程崩溃后的持久恢复。错误名显示有长度限制并拒绝路径/控制字符。
+- **机器证据**：`npm run build` / `npm run typecheck` 通过；desktop-boundary 81/81；native checkpoint 与 imported analysis queue 59/59；`.github/scripts/verify-predevelopment.py` 通过 28 REQ/TEST、21 TASK、11 GATE。import-service 36/37，唯一失败是本机 TEST-003 symlink `EPERM`。完整 `npm test` 为 1,251 total / 1,196 pass / 43 fail / 12 skipped，43 项是 TASK-011 restore 41、TEST-003 symlink 1、TASK-018 E2E 1，不报告全套通过。未在本机重跑 Electron smoke。
+- **Git 现场**：项目分支 `feat/task013-smoke-stability-20261121` 复用本地 smoke 修正，并包含当前源码、测试与此交接更新。原生 git fetch 通过命令级空 credential helper + OpenSSL 成功刷新远端；PR #925 远端 head 仍为 `5a0480055bb515f587176fece14ac54cc2f61a50`。当前提交/同步正在按 compare-and-swap 方式准备，尚未记录新 PR head 或 Actions 结果。
+- **下一步**：将完整验证后的这组改动同步至现有 PR #925 分支；核对精确新 SHA 的 Windows shell smoke、Candidate packaging、Documentation Integrity、Issue Coordination 和隔离 Tampermonkey matrix，按新 run 阶段码继续处理。#857/#610、TEST-022/GATE-007、其他 Stable GATE、同源 EXE+ZIP 和最终人工验收继续未完成。
+
+## 2026-11-21 TASK-013 / #857 — preload inventory smoke 顺序修正续接
+
+- PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 当前远端 HEAD 为 `0e152ef180ef5354b522e52c19aa9c9ed176ea00`，Open、未合并。该 SHA 的 Application Skeleton `windows-shell-smoke` run [#44903243817](https://github.com/devin930906/userscript-auto-healer/actions/runs/44903243817) 与 Candidate packaging run [#44903243773](https://github.com/devin930906/userscript-auto-healer/actions/runs/44903243773) 均因 `SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED` 失败。
+- 根因是 smoke 的静态键名清单排序与真实 preload `Object.keys(...).sort()` 次序不同。当前本地改动已改正 `recoverDroppedImportBatch` 与 `registerScenario` 的顺序，并新增测试从 preload 源码导出键生成排序清单后做全量等值断言。
+- 本地 `npm run build`、desktop-boundary 81/81、`git diff --check` 通过。没有本机重跑 Electron smoke；远端失败仍属于旧 HEAD，修正需在新的 PR HEAD 验证。最新检查快照中 PR 的 30 个 check runs 均已结束：26 success、2 failure、2 skipped；两项失败正是上述 Windows smoke 和 Candidate packaging。成功 checks 不能替代这两项 smoke，也不能证明完整 Stable 通过。
+- 后续按授权将此本地修正同步至现有 PR，不创建新 Issue/PR；随后以精确新 HEAD 核对 `windows-shell-smoke`、Candidate packaging、Documentation Integrity、Issue coordination 与全部 Tampermonkey matrix。#857、TEST-022/GATE-007、真实 manager/GM/业务和 Stable gate 继续保持未完成。
