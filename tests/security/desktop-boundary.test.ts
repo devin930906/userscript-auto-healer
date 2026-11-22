@@ -2515,3 +2515,30 @@ test('TASK-013/TEST-023/026: native candidate export verifies original before di
   assert.match(ui,/请重新导入原始脚本，再重新进行 DOM 观察/,
    'expired and consumed candidate receipts need explicit recovery instructions');
 });
+
+test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import state before consecutive file changes',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const begin=main.indexOf('const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype');
+ const end=main.indexOf('const uiScenarioSelect=',begin);
+ assert.ok(begin>=0&&end>begin);
+ const smoke=main.slice(begin,end);
+ const firstDispatch=smoke.indexOf("input.dispatchEvent(new Event('change',{bubbles:true}))");
+ const secondDispatch=smoke.indexOf("input.dispatchEvent(new Event('change',{bubbles:true}))",
+  firstDispatch+1);
+ const helper=smoke.indexOf('const waitForImportReady=async');
+ const scanIdle=smoke.indexOf('const scanIdle=await waitForImportReady()');
+ const batchIdle=smoke.indexOf('const batchIdle=await waitForImportReady()');
+ assert.ok(helper>=0&&scanIdle>helper&&scanIdle<firstDispatch,
+  'cancelled directory-scan recovery must settle before a new file-change event');
+ assert.ok(firstDispatch>=0&&batchIdle>firstDispatch&&batchIdle<secondDispatch,
+  'the previous file-input batch must fully settle before the next change event');
+ assert.match(smoke,/NO_PENDING_RECOVERY/,
+  'a rendered import row is not proof that main acknowledged its recovery receipt');
+ assert.match(smoke,/select-files.*?disabled/,
+  'the real file-input control must be checked for idle state');
+ assert.match(smoke,/choose-files.*?disabled/);
+ assert.match(smoke,/choose-folder.*?disabled/);
+ assert.match(smoke,/cancel-import.*?disabled/);
+ assert.match(smoke,/if\(!scanIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+ assert.match(smoke,/if\(!batchIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+});
