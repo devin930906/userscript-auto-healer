@@ -493,6 +493,16 @@ async function importFiles(files: readonly File[]): Promise<void> {
         break;
       }
       const file = files[index];
+      // Only potential userscripts charge the renderer read budget.
+      // Main still independently validates the full filename and bytes;
+      // an unrelated dropped file must not starve a later valid script.
+      if (!/\.user\.js$/i.test(file.name)) {
+        failedCount++;
+        logLine(file.name + ': NOT_USER_SCRIPT');
+        if(droppedImportProgress)droppedImportProgress.processed=index+1;
+        updateImportSummary();
+        continue;
+      }
       if (file.size > MAX_FILE_BYTES) {
         failedCount++;
         logLine(file.name + ': FILE_TOO_LARGE');
