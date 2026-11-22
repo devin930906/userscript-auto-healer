@@ -2291,6 +2291,17 @@ async function createMainWindow(): Promise<void> {
       "const requestedFolderCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFolder=await pendingNativeFolder; " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
+      // Wait for the main-owned recovery receipt AND enabled picker controls.
+      // Seeing a rendered row alone can precede the recovery acknowledgement.
+      "const waitForImportReady=async()=>{const until=Date.now()+6000; " +
+      "while(Date.now()<until){ " +
+      "const recovery=await a.recoverDroppedImportBatch().catch(()=>({code:'RECOVERY_STATUS_UNAVAILABLE'})); " +
+      "const idle=document.getElementById('cancel-import')?.disabled===true && " +
+      "document.getElementById('choose-files')?.disabled===false && " +
+      "document.getElementById('choose-folder')?.disabled===false && " +
+      "document.getElementById('select-files')?.disabled===false; " +
+      "if(idle&&recovery.code==='NO_PENDING_RECOVERY')return true; " +
+      "await new Promise(resolve=>setTimeout(resolve,40));}return false;}; " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -2305,24 +2316,19 @@ async function createMainWindow(): Promise<void> {
       "list.filter(x=>x.startsWith('drop-renamed.user.js:')).length===0 && " +
       "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      // A rendered row may precede native finish/recovery acknowledgement.
+      // Deliver the next drag only after the first accepted batch is idle.
+      "const firstDropIdle=await waitForImportReady(); " +
+      "if(!firstDropIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const badDrop=new DataTransfer();badDrop.items.add(new File(['ignored'],'bad-drop.txt')); " +
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:badDrop})); " +
       "const badDropReported=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.startsWith('bad-drop.txt: NOT_USER_SCRIPT')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const badDropIdle=await waitForImportReady(); " +
+      "if(!badDropIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype,'webkitGetAsEntry'); " +
-      // Wait for the main-owned recovery receipt AND enabled picker controls.
-      // Seeing a rendered row alone can precede the recovery acknowledgement.
-      "const waitForImportReady=async()=>{const until=Date.now()+6000; " +
-      "while(Date.now()<until){ " +
-      "const recovery=await a.recoverDroppedImportBatch().catch(()=>({code:'RECOVERY_STATUS_UNAVAILABLE'})); " +
-      "const idle=document.getElementById('cancel-import')?.disabled===true && " +
-      "document.getElementById('choose-files')?.disabled===false && " +
-      "document.getElementById('choose-folder')?.disabled===false && " +
-      "document.getElementById('select-files')?.disabled===false; " +
-      "if(idle&&recovery.code==='NO_PENDING_RECOVERY')return true; " +
-      "await new Promise(resolve=>setTimeout(resolve,40));}return false;}; " +
       "let releaseScan=null;Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',{ " +
       "configurable:true,writable:true,value:function(){const file=this.getAsFile(); " +
       "if(file&&file.name==='scan-fixture.user.js')return {isFile:false,isDirectory:true,name:'scan-root', " +
