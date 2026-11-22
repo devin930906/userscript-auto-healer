@@ -10,6 +10,7 @@ type CandidateStoreApi<T>={
  reserve(owner:object,id:unknown):T|null;
  release(owner:object,id:unknown):boolean;
  consume(owner:object,id:unknown):T|null;
+ isReserved(owner:object,id:unknown):boolean;
  clearOwner(owner:object):void;
 };
 type CandidateStoreLifecycle={
@@ -255,4 +256,25 @@ test('TASK-013/TEST-023/026: candidate export capabilities expire eagerly and ca
  store.clearOwner(owner);
  assert.ok(store.put(owner,{label:'after-close'},now+60_000),
   'closing a window must release its bounded in-memory candidate records');
+});
+
+test('TASK-013/TEST-023/026: reserved candidate expiry is observable without consuming or extending authority',()=>{
+ const Store=candidateStoreConstructor();
+ assert.ok(Store);
+ if(!Store)return;
+ let now=500;
+ const timer={unref(){}} as unknown as ReturnType<typeof setTimeout>;
+ const store=new Store<{label:string}>(()=>now,{setTimeout:()=>timer,clearTimeout:()=>{}});
+ const owner={};
+ const foreignOwner={};
+ const token=store.put(owner,{label:'short-lived'},now+100);
+ assert.ok(token);
+ if(!token)return;
+ assert.equal(store.isReserved(owner,token),false,'unreserved handle cannot be staged');
+ assert.ok(store.reserve(owner,token));
+ assert.equal(store.isReserved(owner,token),true);
+ assert.equal(store.isReserved(foreignOwner,token),false);
+ now+=101;
+ assert.equal(store.isReserved(owner,token),false,'native dialog delays must not extend expiry');
+ assert.equal(store.consume(owner,token),null,'expired reserved handle cannot stage files');
 });
