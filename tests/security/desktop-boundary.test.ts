@@ -2559,3 +2559,20 @@ test('TASK-013/TEST-022: ordinary batch DOM observation has a scoped in-panel ca
  assert.match(ui,/importedDomCancelRequested=false/);
  assert.match(ui,/没有可靠取消回执|取消请求未确认/);
 });
+
+test('TASK-013/TEST-002/022: renderer skips unrelated file names before charging batch bytes',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('async function importFiles(files: readonly File[])');
+ const end=ui.indexOf('/** Read only the files of a folder',start);
+ assert.ok(start>=0&&end>start,'ordinary importFiles implementation must exist');
+ const body=ui.slice(start,end);
+ const filenameCheck=body.indexOf("if (!/\\.user\\.js$/i.test(file.name))");
+ const byteCheck=body.indexOf('if (readBytes + file.size > MAX_BATCH_BYTES)');
+ const byteCharge=body.indexOf('readBytes += file.size');
+ assert.ok(filenameCheck>=0&&filenameCheck<byteCheck&&filenameCheck<byteCharge,
+  'an unrelated file must never consume the 128 MiB renderer budget before a valid userscript');
+ assert.match(body,/file.name \+ ': NOT_USER_SCRIPT'/,
+  'non-userscript selections must remain visible as independent failures');
+ assert.match(body,/droppedImportProgress\.processed=index\+1/,
+  'skipping an unrelated file must not stall batch progress reporting');
+});
