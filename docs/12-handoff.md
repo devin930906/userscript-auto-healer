@@ -1,16 +1,5 @@
 # 项目开发交接
 
-## 2026-11-22 当前状态指引（优先于历史快照）
-
-> 本节仅校准交接入口，不改变下面历史记录、正式需求、TASK 编号或产品实现。所有 SHA、PR、Issue 与工作流结论均为 2026-11-22 查询时的快照；开始下一个开发会话、写入或合并前必须重新查询 GitHub。
-
-- 当前正式代码及工程依据以 GitHub `main` 最新提交为准；本轮已核验准备审计 PR [#926](https://github.com/devin930906/userscript-auto-healer/pull/926) 已合并，合并提交 `28efdb591969b30ac4d963f0fbe6b634dee863f3`，其 Documentation Integrity 工作流 [#45022561485](https://github.com/devin930906/userscript-auto-healer/actions/runs/45022561485) 成功。该检查只证明对应提交的文档工作流成功，不证明产品功能或 Stable 全面验收。
-- 本轮开放 Issues：[#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013 批量导入到无人值守诊断、修复及浏览器验收）、[#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021 Stable GATE/正式 EXE+ZIP）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（TASK-005 CDP 启动异常）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（TASK-007 真实 Tampermonkey 验收）。
-- 本轮开放产品 PR 为 [#925](https://github.com/devin930906/userscript-auto-healer/pull/925)，对应 TASK-013/#857，HEAD `4babea4f1e49cc799beb72b9013d4e158d185962`；**尚未合并**。未合并差异不得写成 `main` 已实现功能；自动化绿色结果也不得冒充用户 Chrome/Profile/Tampermonkey 的完整业务验收。
-- 历史小节中以“当前最新”“TASK-007 至 TASK-021 全部完成”“GATE 机器验证全量通过”表述的 2026-11-19 等历史进度，**只在对应日期、提交和验证范围内成立**。不能覆盖目前仍开放的真实任务、产品验收缺口及最终集中 Windows 人工验收要求；不能把 Candidate EXE/ZIP 直接当作正式 Stable。
-- 权威入口：需求 `docs/02-requirements.md`、架构 `docs/04-architecture.md`、桌面交互设计 `docs/05-experience.md`、实施任务 `docs/09-development-plan.md`、可追溯性 `docs/10-traceability.md`、准备准入 `docs/11-readiness.md`、Stable 工作登记 `docs/14-stable-work-register.md`。下一开发起点优先续接已有 **TASK-013 / Issue #857 / PR #925** 的剩余工作，而非重新建 Issue 或重做前期规划。
-- 并行对话不使用 Issue 独占认领、历史锁或释放机制。先核验目标分支基准、关联 PR 的差异与 CI，再进行有边界的独立更改；重叠修改必须先解决冲突，不强制覆盖。开发期机器验证持续执行，真实 EXE 安装、ZIP 解压、桌面界面和 Chrome/Tampermonkey 业务验收集中安排至 Stable 发布前，必要安全授权不得后移。
-
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
 > **当前最新续接（2026-11-19，PR #909..#922 全量任务代码整合、1220 项测试全绿与 main@19b7391 Windows Candidate 双包交付实测）**：
