@@ -159,6 +159,23 @@ test('TASK-013/TEST-022/026: candidate source retention is capped per window',()
   'source text above the 16 MiB per-window budget must be rejected');
 });
 
+test('TASK-013/TEST-022/026: an over-cap imported script never retains untracked source bytes',()=>{
+ const index=new ImportedDomDiagnosticIndex();
+ for(let i=0;i<1000;i++){
+  const hash=createHash('sha256').update('record-'+i).digest('hex');
+  index.recordImported(hash,null);
+ }
+ const source='source of rejected script';
+ const rejectedHash=createHash('sha256').update(source).digest('hex');
+ index.recordImported(rejectedHash,null,'rejected.user.js',source);
+ const plan=index.plan('https://example.org/app');
+ assert.equal(plan.items.length,1000);
+ assert.equal(plan.truncatedScripts,true);
+ assert.equal(index.readUtf8CandidateSource(rejectedHash),null,
+  'a script refused from the index must not retain its sensitive source text');
+ index.clearCandidateSources();
+});
+
 test('TASK-013/TEST-022/026: idle candidate source is eagerly dropped at its expiry deadline',()=>{
  let now=100;
  const scheduled:Array<{callback:()=>void;delay:number}>=[];
