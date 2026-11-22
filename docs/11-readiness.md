@@ -101,3 +101,29 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 - 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
 - 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
+
+## 2026-11-22 增量准备审计（不替换历史准入记录）
+
+> 证据基准：本轮远端 `main@146f9a987e7e633496d723e7f517c68282e1fe07`；该时间点的仓库树、GitHub Issues/PR 与既有正式文档。以下是开发前工程依据及当前续接可用性审计，不是新一轮功能开发、全量代码审查或当前 SHA 的产品测试通过声明。
+
+### 仓库与路线
+
+- 项目身份：`devin930906/userscript-auto-healer`，公开非归档，默认 `main`。已读取已有 `README.md`、`AGENTS.md` 和 `docs/00-intake.md` 至 `docs/12-handoff.md`，以及 `docs/14-stable-work-register.md`。既有 REQ-001..028、TASK-001..021、TEST-001..028、GATE-001..011 继续作为唯一编号体系；不重新编号、重复建立 Issues 或更改产品范围。
+- 当前 Open Issues（GitHub Issues 列表，2026-11-22）：[#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013 批量端到端闭环）、[#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021 Stable 准入/双发行）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（Chrome CDP 偶发启动故障）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（真实 Tampermonkey 业务验证），共 4 项。旧交接文件中“14 个 Open Issues”只可视作当时快照，不是本轮实时数量。
+- 当前开放 PR：[#925](https://github.com/devin930906/userscript-auto-healer/pull/925)（TASK-013，`feat/task013-dropped-batch-20261119`，核验 head `4babea4f1e49cc799beb72b9013d4e158d185962`），尚未合并；其测试/修复证据只对精确 SHA 有效。不得将 #925 的导入、只读 DOM 观察和候选导出视为完整自动修复、Tampermonkey 真实安装注入及业务验收已通过。
+- 已存在 Electron/TypeScript 桌面源码、GitHub Actions、Windows Candidate 构建工作流、界面设计及测试/发布规格，属于增量审计对象，而非重新从零初始化的空仓库。本轮未触发 Actions、未运行 Windows、未执行 GUI、未取得最终用户验收。
+
+### 工程设计和准入差距
+
+- 产品必须按原始需求支持：指定 Chrome/Chrome++ EXE 与授权 Data/Profile、可配置回环 CDP 端口（默认 9896）、真实 Tampermonkey/脚本安装和验证、AST+动态诊断、逐脚本自动化修复与可信验收、备份回滚、监控、兼容层、可选 AI 双协议、Windows EXE 安装版与真正可直接使用的 ZIP 便携版。尚不具备证据将这些整条链路认定为 Stable 已完成。
+- 官方技术约束：Chrome 136 起常规 Chrome 的远程调试须遵循非默认用户数据目录要求（https://developer.chrome.com/blog/remote-debugging-port）；Chrome 138 起用户脚本功能由扩展级 Allow User Scripts 开关管理（https://developer.chrome.com/blog/chrome-userscript）。必须使用对应实际 Chrome/Chrome++ 版本和获授权 Profile 测试，不得绕过用户或浏览器权限。
+- 开放 Issue #857 与 PR #925 是当前首要的在制产品链路；继续前先核对 PR 实际 diff、精确 head SHA、最新 checks、依赖与已经合并的子范围，不重复开发同一功能。#486 与 #510 的真实环境不确定性及 #610 的全部 Stable 门槛是保留的准入限制。
+- 当前仓库仍有历史 Issue claim/round coordination 文件及工作流。应以 `AGENTS.md` 和 `docs/19-stable-v7-migration.md` 的已批准无独占认领政策为目标，另行核实旧工作流是否实质阻断合法 PR；不要仅凭文件存在判定其正在阻断，也不得未检验即删除历史治理配置。
+- UI 以 `docs/05-experience.md` 和现有 Electron renderer/preload/main 为依据，准备阶段只允许静态设计检查；自动化脚本端到端、真实渲染、Windows 安装与最终人工体验不得混作已通过证据。
+- Stable 仍须通过当前源提交的持续机器测试、可信真实 Tampermonkey/Chrome 验收、原件保护/可恢复回滚、同源 EXE+ZIP 构建验证以及最后一次集中 Windows 人工验收，不得以历史 Candidate 或先前某个 SHA 的 CI 结果替代。
+
+### 本次准备阶段结果
+
+- **有条件准入（继续既有正式开发，而非重启准备）**：工程文件体系和 Issues 实施入口已经存在，现阶段可以在已确认的模块边界内继续 #857 的未完成工作；任何与真实管理器授权、产品自动应用、外部 Chrome 状态或发布直接相关的步骤仍由对应安全门槛限制。
+- 本次仅开展远端只读仓库审计、当前 Issues/PR 对账及文档校正；**未进行**新的依赖安装、真实测试、产品代码提交、PR 合并、Issue 关闭、工作流运行或 Stable 发布。
+- 建议下一开发入口为 **TASK-013 / Issue #857**，先完整审阅尚开放的 PR #925 并独立核对其当前检查结果和未满足验收条件；再执行有边界的续接。最终 Stable 发布仍由 TASK-021 / Issue #610 把关。
