@@ -2542,3 +2542,20 @@ test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import sta
  assert.match(smoke,/if\(!scanIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
  assert.match(smoke,/if\(!batchIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
 });
+
+test('TASK-013/TEST-022: ordinary batch DOM observation has a scoped in-panel cancel action',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const panelStart=html.indexOf('<div id="imported-dom-diagnosis"');
+ const panelEnd=html.indexOf('<div data-scenario-context-slot>',panelStart);
+ assert.ok(panelStart>=0&&panelEnd>panelStart);
+ const panel=html.slice(panelStart,panelEnd);
+ assert.match(panel,/<button id="imported-dom-cancel" type="button"[^>]*disabled/);
+ assert.match(ui,/const importedDomCancelButton=document\.getElementById\('imported-dom-cancel'\)/);
+ assert.match(ui,/importedDomCancelButton\.disabled=!importedDomBusy\|\|importedDomCancelRequested/);
+ assert.match(ui,/importedDomCancelButton\?\.addEventListener\('click'/);
+ assert.match(ui,/void window\.healer\.cancelScenarioInspection\(\)/);
+ assert.match(ui,/importedDomCancelRequested=true/);
+ assert.match(ui,/importedDomCancelRequested=false/);
+ assert.match(ui,/没有可靠取消回执|取消请求未确认/);
+});
