@@ -625,9 +625,19 @@ async function filesFromDrop(transfer: DataTransfer,signal:AbortSignal): Promise
       // Nested directory entries are filtered, but explicitly dropped root
       // files reach the native validator so invalid filenames are reported.
       if (depth > 0 && !entry.name.toLowerCase().endsWith('.user.js')) return;
-      const file = await readDropEntry<File>(
-        (ok,fail)=>(entry as FileSystemFileEntry).file(ok,fail),signal);
-      if (file&&!cancelRequested&&!signal.aborted) found.push(file);
+      try {
+        const file = await readDropEntry<File>(
+          (ok,fail)=>(entry as FileSystemFileEntry).file(ok,fail),signal);
+        if (file&&!cancelRequested&&!signal.aborted) found.push(file);
+      } catch {
+        // One denied/unreadable file must not discard valid siblings or roots.
+        // Avoid counting an entry again if cancellation ended its callback.
+        if(!cancelRequested&&!signal.aborted){
+          failedCount++;
+          logLine(entry.name + ': READ_OR_IMPORT_FAILED');
+          updateImportSummary();
+        }
+      }
       return;
     }
     if (!entry.isDirectory || cancelRequested) return;
@@ -635,10 +645,31 @@ async function filesFromDrop(transfer: DataTransfer,signal:AbortSignal): Promise
       logLine(entry.name + ': SCAN_LIMIT');
       return;
     }
-    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    let reader:FileSystemDirectoryReader;
+    try { reader=(entry as FileSystemDirectoryEntry).createReader(); }
+    catch {
+      if(!cancelRequested&&!signal.aborted){
+        failedCount++;
+        logLine(entry.name + ': DIRECTORY_READ_FAILED');
+        updateImportSummary();
+      }
+      return;
+    }
     while (!cancelRequested&&!signal.aborted&&!scanLimitReached) {
-      const batch = await readDropEntry<FileSystemEntry[]>(
-        (ok,fail)=>reader.readEntries(ok,fail),signal);
+      let batch:FileSystemEntry[]|null;
+      try {
+        batch=await readDropEntry<FileSystemEntry[]>(
+          (ok,fail)=>reader.readEntries(ok,fail),signal);
+      } catch {
+        // A directory whose enumeration fails cannot be continued safely;
+        // retain all files already found and visit independent siblings.
+        if(!cancelRequested&&!signal.aborted){
+          failedCount++;
+          logLine(entry.name + ': DIRECTORY_READ_FAILED');
+          updateImportSummary();
+        }
+        break;
+      }
       if (cancelRequested||signal.aborted||!batch||!batch.length) break;
       for (const child of batch) {
         if (cancelRequested||signal.aborted||scanLimitReached) break;
