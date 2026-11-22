@@ -127,3 +127,12 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 - **有条件准入（继续既有正式开发，而非重启准备）**：工程文件体系和 Issues 实施入口已经存在，现阶段可以在已确认的模块边界内继续 #857 的未完成工作；任何与真实管理器授权、产品自动应用、外部 Chrome 状态或发布直接相关的步骤仍由对应安全门槛限制。
 - 本次仅开展远端只读仓库审计、当前 Issues/PR 对账及文档校正；**未进行**新的依赖安装、真实测试、产品代码提交、PR 合并、Issue 关闭、工作流运行或 Stable 发布。
 - 建议下一开发入口为 **TASK-013 / Issue #857**，先完整审阅尚开放的 PR #925 并独立核对其当前检查结果和未满足验收条件；再执行有边界的续接。最终 Stable 发布仍由 TASK-021 / Issue #610 把关。
+
+### 2026-11-22 同一准备分支的二次核验补充
+
+- 再次读取 `main@146f9a987e7e633496d723e7f517c68282e1fe07`、开放 Issues 和 PR，确认当前开放 Issues 仍为 #857/#610/#510/#486；本次准备 PR #926 与原产品 PR #925 都是开放未合并。该结论仅为本次快照，后续需按服务器重新读取。
+- 准备 PR #926 的 Documentation Integrity `45020613844`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45020613844）与 Issue Coordination PR Fence `45020613829`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45020613829）均为成功，匹配准备提交 `e1eaaf3ffc9ac177a43e0e5a2fb5b0d8076b71a5`。该证据仅证明该次文档提交的相关检查，不证明全部产品级 TEST/GATE。
+- 旧名 `Issue coordination / stale round fence` 依旧作为 required-context 兼容，`.github/workflows/governance-issue-merge-fence.yml` 的现行注释和 checkout/调用路径明确表述：只针对可信 base 的真实 PR 集成安全检查，不执行旧 Issue 独占认领。现行权威为 `AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；旧文档、分支和诊断脚本无需为了此轮准备而删除。该审计为工作流源码静态核对及 PR 检查运行结果观察，并非形式化证明所有合并并发情形无冲突。
+- `docs/05-experience.md` 已保留经确认的 TASK-017 深色控制台设计：七标签、深靛霓虹令牌、键盘标签导航、原生授权与危险恢复交互。此轮不替换品牌或新建设计体系。由于没有取得真实桌面渲染截图与实际操作结果，窗口缩放、视觉对比、完整键盘旅程和无障碍测试均保持待验证。
+- 原产品 PR #925 的最新 head `4babea4f1e49cc799beb72b9013d4e158d185962` 已在 GitHub Actions 取得部分相关成功结果（Application Skeleton、Windows Candidate、Portable Chrome、Documentation Integrity）；TASK-007 隔离 Tampermonkey 实验在本轮最近查询时仍有运行中记录。必须按 head 完整检查并区分候选/隔离实验和真实用户环境与产品级验收，不能据部分绿色记录关闭 #857/#486/#510/#610。
+- **集成状态**：准备分支有未合并 Draft PR #926；不应直接把此分支视为已纳入 `main` 的正式准入更新。正式开发起点仍为有条件续接 TASK-013 / Issue #857，先核对 PR #925 的实际剩余功能和完整 CI；无须另建 Issue 或从 TASK-001 重做。
