@@ -2594,3 +2594,21 @@ test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate 
  assert.match(body,/BATCH_PREVIEW_LIMIT/,
   'the maximum of sixteen actually attempted proposals must remain enforced');
 });
+
+test('TASK-013/TEST-022: startup dropped-batch recovery owns the renderer import lock',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(ui,/let startupRecoveryPending = true;/,
+  'new renderer must visibly indicate pending recovery until its receipt settles');
+ const summary=ui.slice(ui.indexOf('function updateImportSummary()'),ui.indexOf('function logLine('));
+ assert.match(summary,/startupRecoveryPending\s*\?/,
+  'pending recovery must be shown in the accessible import status');
+ const boot=ui.slice(ui.indexOf('updateImportSummary();\\nvoid locked',ui.indexOf("cancelImport?.addEventListener('click'")),ui.indexOf("chooseFile?.addEventListener('click'",ui.indexOf("cancelImport?.addEventListener('click'")));
+ assert.match(boot,/void locked\(async \(\) => \{/,
+  'recovery must hold the same synchronous lock used by picker and drop handlers');
+ assert.match(boot,/await recoverDroppedImportBatch\(\)/,
+  'startup lock must not release before native recovery finishes');
+ assert.match(boot,/finally \{[\s\S]*startupRecoveryPending = false;[\s\S]*updateImportSummary\(\)/,
+  'status must leave recovery state even after a rejected recovery IPC');
+ assert.doesNotMatch(boot,/void recoverDroppedImportBatch\(\)/,
+  'fire-and-forget bootstrap must not allow overlapping new imports');
+});
