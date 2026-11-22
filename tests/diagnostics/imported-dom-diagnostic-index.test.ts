@@ -196,6 +196,35 @@ test('TASK-013/TEST-022/026: idle candidate source is eagerly dropped at its exp
   'the timer must remove the source even if no later import or lookup occurs');
 });
 
+test('TASK-013/TEST-022/026: stale canceled candidate-source timer cannot reschedule',()=>{
+ let now=100;
+ const scheduled:Array<{callback:()=>void;timer:ReturnType<typeof setTimeout>}>=[];
+ const cancelled:ReturnType<typeof setTimeout>[]=[];
+ const index=new ImportedDomDiagnosticIndex(()=>now,{
+  candidateSourceTtlMs:100,
+  setTimeout:callback=>{
+   const timer={unref(){}} as unknown as ReturnType<typeof setTimeout>;
+   scheduled.push({callback,timer});
+   return timer;
+  },
+  clearTimeout:timer=>{cancelled.push(timer);}
+ });
+ const source='candidate held by live replacement timer';
+ const hash=createHash('sha256').update(source).digest('hex');
+ index.recordImported(hash,null,'candidate.user.js',source);
+ assert.equal(scheduled.length,1);
+ now=101;
+ assert.equal(index.readUtf8CandidateSource(hash),source);
+ assert.equal(scheduled.length,2,'a lookup arms a replacement expiry timer');
+ assert.ok(cancelled.includes(scheduled[0].timer));
+ scheduled[0].callback(); // Model a timer callback already queued when canceled.
+ assert.equal(scheduled.length,2,
+  'a canceled callback must not create an extra timer or disturb the live timer');
+ assert.equal(index.readUtf8CandidateSource(hash),source);
+ index.clearCandidateSources();
+ assert.equal(index.readUtf8CandidateSource(hash),null);
+});
+
 test('TASK-013/TEST-022/026: candidate-source timer failure drops retained source fail-closed',()=>{
  const source='temporary private candidate bytes';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
