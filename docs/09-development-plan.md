@@ -613,3 +613,14 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **根因与本地修正**：实际 preload keys 已完整包含两个 batch recovery 方法，但 smoke 期望清单把 `registerScenario` 排在 `recoverDroppedImportBatch` 前，和 `Object.keys(...).sort()` 的运行时顺序不一致。修正顺序，并让 desktop-boundary 测试直接解析 preload 暴露键、对照 smoke 清单的有序全量集合。
 - **本地验证**：`npm run build` 成功；desktop-boundary 81/81；`git diff --check` 通过。没有在本机运行 Electron smoke；先前 `0xC0000005` 的限制仍适用。当前远端 checks 仍对应旧 HEAD，修正后的 Windows 行为待同步到 PR 后验证。
 - **范围状态**：不新增 REQ、TASK、TEST 或 GATE；TEST-022/GATE-007、#857 其余产品流程与 Stable 验收仍未完成。
+
+## 2026-11-22 TASK-013 / Issue #857 — 原生确认的批量候选独立导出（本地增量）
+
+- **回执精度回归**：复审发现，过期/不可用 capability 在写入开始前返回，但旧 UI 会套用“暂存可能已开始”的确认后失败提示。desktop-boundary 回归先失败，再把真正 `candidateConsumed === true` 与 `CANDIDATE_EXPIRED` / `CANDIDATE_UNAVAILABLE` 分开：前者提示检查可能留下的文件；后两者标明本次未开始写入并要求重新观察。更新后 desktop-boundary **83/83**、四组索引/候选/导出/安全测试 **114/114** 通过。
+
+- **范围**：把严格条件产生的导入批次候选预览接至单项手动另存。主进程保留最多 16 个/窗口、最多 5 分钟的一次性能力，内容只有原生显示文件名、精确场景/DOM 复核上下文；不保留源路径或候选源码。新一轮诊断会撤销旧预览能力，窗口关闭会清空能力。
+- **安全流程**：renderer 只传不透明 ID。主进程重新原生选择 `.user.js`、备份与导出目录，读取后要求文件名和原始 SHA-256 同时吻合，并在独立最终系统确认后才消费能力并进入现有备份/检查点/候选导出。取消、文件身份失配会释放能力供重试；过期、已消费和确认后的失败不能重放。原始源文件不被覆盖，所有修复、管理器、GM、业务和自动应用授权仍为 false。
+- **界面**：每个带有仍有效能力的 `CANDIDATE_ONLY` 项目显示键盘可用的“另存候选与原始恢复版”按钮及礼貌状态播报；锁住并发重复操作，失败回执按预览代次隔离。诊断/导出期间锁定目标网址；目标变化会撤下旧观察与候选，并要求重新运行。最终系统确认展示能力绑定的目标网址、源/候选 SHA 和选择器差异。用户提示要求重新选同一文件、选择目录并最终确认；导出状态不会声称已安装或通过运行时/业务验证。只完成静态源码与边界检查，没有启动 Electron 或完成人工 GUI 验收。
+- **本地验证**：`npm run build`、`npm run typecheck`、`.github/scripts/verify-predevelopment.py`（28 REQ/TEST、21 TASK、11 GATE）、`git diff --check` 通过。定向索引/候选/导出/桌面安全测试 **114/114** 通过。完整 `npm test` 为 **1,258 total / 1,203 pass / 43 fail / 12 skipped**；43 项仍为 TASK-011 restore 41 项、TEST-003 symlink `EPERM` 1 项及 TASK-018/TEST-018 1 项，与本地基线失败类别一致；全套仍不记为通过。
+- **同步前 GitHub 状态**：代码验证后观察到 PR #925 Open、未合并，head `35c70b4cfb712e55130decf38ba30b85004c8571`，base `main@146f9a987e7e633496d723e7f517c68282e1fe07`；该 SHA 尚不包含本轮本地改动。同步后须以新精确 HEAD 复查 Windows smoke、Candidate packaging、Documentation Integrity、Issue Coordination 与 Tampermonkey matrix。
+- **仍未完成**：#857 的授权动态诊断与完整逐脚本协调、候选人工评估后的应用与失败恢复、可选 AI、真实 Tampermonkey/GM/业务正反断言及完整测试仍未贯通。#857 保持 Open；TEST-022/GATE-007、其他 Stable GATE、同源 EXE+ZIP、最终集中人工验收与正式 Release 均未通过。

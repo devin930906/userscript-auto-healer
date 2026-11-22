@@ -4,6 +4,8 @@ import {MAX_ANALYSIS_BYTES,previewImportedScriptAnalysis,type ImportAnalysisPrev
 import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
 import {ImportedDomDiagnosticIndex,recordImportedDomForCurrentOwner}
   from '../../src/diagnostics/imported-dom-diagnostic-index';
+import {ImportedDomCandidateExportStore}
+  from '../../src/diagnostics/imported-dom-diagnostic-index';
 import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -109,8 +111,10 @@ import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 import {observeApprovedDomSeries} from '../../src/observe/dom-observer';
-import {proposeImportedDomCandidate} from '../../src/repair/imported-dom-candidate';
-import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
+import {proposeImportedDomCandidate,
+  type ImportedDomCandidateManualExportContext} from '../../src/repair/imported-dom-candidate';
+import {exportReviewedImportedCandidateOnly,exportReviewedImportedSelectorOnly}
+  from '../../src/repair/imported-manual-export';
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
@@ -142,6 +146,14 @@ let scenarioSession=new DesktopScenarioSession();
 // Only bounded Worker-derived AST sites and parsed @match hints are retained;
 // original bytes, paths and URLs are never stored in this per-window index.
 let importedDomDiagnosticIndex=new ImportedDomDiagnosticIndex();
+interface ImportedDomCandidateExportContext{
+  readonly filename:string;
+  readonly context:ImportedDomCandidateManualExportContext;
+}
+// Only short-lived review context and a safe display name are retained.
+// The source path and candidate source are deliberately never stored here.
+const importedDomCandidateExportStore=
+  new ImportedDomCandidateExportStore<ImportedDomCandidateExportContext>();
 // No disk persistence, no manager or business authority, fresh per window.
 let limitedScenarioHistory=new LimitedHealthRegistry();
 // Native-picked paths stay strictly in the privileged process. A renderer
@@ -1497,6 +1509,7 @@ function registerSafeIpc(): void {
        manualExportInProgress||nativeImportController||droppedImportController||
        nativeSelectionInProgress)
       return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    if(mainWindow)importedDomCandidateExportStore.clearOwner(mainWindow);
     const plan=importedDomDiagnosticIndex.plan(targetInput);
     if(!plan.targetUrl){
       importedDomDiagnosticIndex.clearCandidateSources();
@@ -1507,6 +1520,7 @@ function registerSafeIpc(): void {
       checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;reason?:string;automaticPatchAllowed:false;
       candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+      candidateExportId?:string;
       candidateOriginalSha256?:string;candidateSha256?:string;
       candidateBefore?:string;candidateAfter?:string;
       tampermonkeyVerified:false;businessVerified:false};
@@ -1558,7 +1572,7 @@ function registerSafeIpc(): void {
         message:'允许在受控 Chrome 执行批量只读 DOM 计数，并在严格符合条件时生成最多 16 项仅内存候选预览？',
         detail:plan.targetUrl+'\n将检查 '+ready.length+' 份脚本中的最多 '+
           selectorCount+' 个 AST 字面选择器，最多观测 120 秒。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
-          '\n候选源码只在主进程内存短暂保留，整个批次最多 16 MiB，观测结束或窗口关闭后清除；候选不会保存、导出、应用或执行。'+
+          '\n候选源码只在主进程内存短暂保留，整个批次最多 16 MiB，观测结束或窗口关闭后清除。符合条件的候选可由你另行发起原生文件选择、独立目录选择及最终保存确认，创建备份和人工候选；本次观察本身不会写入或导出任何文件。'+
           '\n结果只代表限定 DOM 计数或一条待审阅字面选择器差异；登录状态和真实业务断言仍需另行配置与验证。'
       });
       if(consent.response!==0||revoked())
@@ -1599,7 +1613,7 @@ function registerSafeIpc(): void {
           }
           let candidateFields:Pick<ImportedDomResultItem,
             'candidateStatus'|'candidateReason'|'candidateOriginalSha256'|
-            'candidateSha256'|'candidateBefore'|'candidateAfter'>={
+            'candidateExportId'|'candidateSha256'|'candidateBefore'|'candidateAfter'>={
               candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_NOT_ATTEMPTED'
             };
           if(candidatePreviewCount<16){
@@ -1613,7 +1627,13 @@ function registerSafeIpc(): void {
                 observation,nativeConsent:true});
               if(proposal.status==='CANDIDATE_ONLY'&&
                  proposal.change.before.length<=1024&&proposal.change.after.length<=1024){
+                const candidateExportId=item.filename
+                  ?importedDomCandidateExportStore.put(win,Object.freeze({
+                    filename:item.filename,context:proposal.manualExportContext
+                  }),performance.now()+5*60*1000)??undefined
+                  :undefined;
                 candidateFields={candidateStatus:'CANDIDATE_ONLY',
+                  ...(candidateExportId?{candidateExportId}:{}),
                   candidateOriginalSha256:proposal.originalSha256,
                   candidateSha256:proposal.candidateSha256,
                   candidateBefore:proposal.change.before,candidateAfter:proposal.change.after};
@@ -1912,6 +1932,130 @@ function registerSafeIpc(): void {
       diagnosticGate.release(lease);
     }
   });
+  // A renderer-held capability is only an opaque handle. The original source
+  // and both destination directories must be freshly chosen by native dialogs;
+  // a final native confirmation is required before any file staging begins.
+  ipcMain.handle('scenario:export-imported-candidate',async(event,id:unknown,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length!==0)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeAiDiscoveryBusy||manualExportInProgress||scenarioObserveInProgress||nativeImportController||
+       droppedImportController||nativeSelectionInProgress||gmActionInProgress||gmStartInProgress)
+      return {ok:false,code:'EXPORT_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const capability=importedDomCandidateExportStore.reserve(win,id);
+    if(!capability)return {ok:false,code:'CANDIDATE_UNAVAILABLE',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null){
+      importedDomCandidateExportStore.release(win,id);
+      return {ok:false,code:'EXPORT_BUSY',...unverified};
+    }
+    const controller=new AbortController();
+    const abortOnWindowClose=()=>controller.abort();
+    win.once('closed',abortOnWindowClose);
+    let consumed=false;
+    const invalidated=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed();
+    manualExportInProgress=true;
+    nativeSelectionInProgress=true;
+    try{
+      const source=await dialog.showOpenDialog(win,{
+        title:'重新选择候选预览中的同一份 .user.js 原始脚本',
+        defaultPath:getInitialDialogPath('scripts'),
+        properties:['openFile'],
+        filters:[{name:'Userscripts (*.user.js)',extensions:['js']}]
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(source.canceled||source.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      const sourcePath=source.filePaths[0];
+
+      const backup=await dialog.showOpenDialog(win,{
+        title:'选择独立备份文件夹（只新建文件，不覆盖已有文件）',
+        defaultPath:getInitialDialogPath('backup'),
+        properties:['openDirectory']
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(backup.canceled||backup.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+
+      const destination=await dialog.showOpenDialog(win,{
+        title:'选择候选及原始恢复版本的独立导出文件夹',
+        defaultPath:getInitialDialogPath('export'),
+        properties:['openDirectory']
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(destination.canceled||destination.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+
+      // Read the newly selected source after directory selection, so the hash
+      // shown in the final confirmation describes the latest native snapshot.
+      const current=await importApprovedPaths([sourcePath],controller.signal);
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(current.errors.length!==0||current.scripts.length!==1||
+         current.scripts[0].filename!==capability.filename||
+         current.scripts[0].sha256!==capability.context.originalSha256)
+        return {ok:false,code:'SOURCE_IDENTITY_MISMATCH',...unverified};
+
+      const approved=await dialog.showMessageBox(win,{
+        type:'question',buttons:['创建独立备份、候选及原始恢复版本','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认把这份候选另存为新文件？',
+        detail:'原始脚本：'+sourcePath+'\n文件名：'+current.scripts[0].filename+
+          '\n候选观测目标：'+capability.context.scenario.targetUrl+
+          '\n原始 SHA-256：'+current.scripts[0].sha256+
+          '\n候选 SHA-256：'+capability.context.candidateSha256+
+          '\n候选选择器差异：'+
+            capability.context.scenario.assertions[0].selector+' → '+
+            capability.context.scenario.assertions[1].selector+
+          '\n备份文件夹：'+backup.filePaths[0]+
+          '\n候选与原始恢复文件夹：'+destination.filePaths[0]+
+          '\n会创建独立的备份、候选、原始恢复脚本及检查点，不会覆盖或修改源文件，也不会安装或执行候选。'+
+          '\n候选只经过静态规则和只读 DOM 证据复核；Tampermonkey、GM、登录状态与业务结果仍未验证。'
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(approved.response!==0)return {ok:false,code:'CANCELLED',...unverified};
+
+      // Expiry is rechecked here, after the dialogs. Consume exactly once and
+      // do not await between final confirmation, consume, and file staging.
+      const reviewed=importedDomCandidateExportStore.consume(win,id);
+      if(!reviewed)return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+      consumed=true;
+      manualExportCommitInProgress=true;
+      saveRememberedPath('backup',backup.filePaths[0]);
+      saveRememberedPath('export',destination.filePaths[0]);
+      const result=await exportReviewedImportedCandidateOnly(
+        current.scripts[0],reviewed.context,{
+          backupDirectory:backup.filePaths[0],
+          exportDirectory:destination.filePaths[0],
+          userApproved:true
+        });
+      if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')
+        return {ok:false,code:result.reason,candidateConsumed:true,...unverified,
+          automaticRollbackAllowed:false,managerInstalled:false};
+      return {ok:true,status:result.status,
+        backupFileName:result.backupFileName,
+        candidateFileName:result.candidateFileName,
+        exportFileName:result.exportFileName,
+        recoveryExportFileName:result.recoveryExportFileName,
+        checkpointFileName:result.checkpointFileName,
+        sourceSha256:result.sourceSha256,
+        candidateSha256:result.candidateSha256,
+        candidateByteLength:result.candidateByteLength,
+        automaticRollbackAllowed:false,
+        managerInstalled:false,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'EXPORT_FAILED',candidateConsumed:consumed,...unverified,
+        automaticRollbackAllowed:false,managerInstalled:false};
+    }finally{
+      if(!consumed)importedDomCandidateExportStore.release(win,id);
+      win.removeListener('closed',abortOnWindowClose);
+      manualExportCommitInProgress=false;
+      manualExportInProgress=false;
+      nativeSelectionInProgress=false;
+      diagnosticGate.release(lease);
+    }
+  });
   ipcMain.handle('scenario:cancel',event=>{
     authorizeSender(event);
     if(!scenarioObserveInProgress)
@@ -1965,6 +2109,7 @@ async function createMainWindow(): Promise<void> {
       nativeImportController?.abort();
       discardDroppedImportForWindow(win);
       importedDomDiagnosticIndex.clearCandidateSources();
+      importedDomCandidateExportStore.clearOwner(win);
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
@@ -2471,7 +2616,7 @@ async function createMainWindow(): Promise<void> {
       throw new Error('SHELL_SMOKE_DROPPED_CANCEL_SUMMARY_FAILED');
     if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
     if (probe.keys?.join(',') !==
-        'acknowledgeDroppedImportRecovery,addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,recoverDroppedImportBatch,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+        'acknowledgeDroppedImportRecovery,addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportImportedDomCandidate,exportManualScenario,finishDroppedImportBatch,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,recoverDroppedImportBatch,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
       throw new Error('SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the

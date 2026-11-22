@@ -474,3 +474,14 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 根因是 smoke 的静态键名清单排序与真实 preload `Object.keys(...).sort()` 次序不同。当前本地改动已改正 `recoverDroppedImportBatch` 与 `registerScenario` 的顺序，并新增测试从 preload 源码导出键生成排序清单后做全量等值断言。
 - 本地 `npm run build`、desktop-boundary 81/81、`git diff --check` 通过。没有本机重跑 Electron smoke；远端失败仍属于旧 HEAD，修正需在新的 PR HEAD 验证。最新检查快照中 PR 的 30 个 check runs 均已结束：26 success、2 failure、2 skipped；两项失败正是上述 Windows smoke 和 Candidate packaging。成功 checks 不能替代这两项 smoke，也不能证明完整 Stable 通过。
 - 后续按授权将此本地修正同步至现有 PR，不创建新 Issue/PR；随后以精确新 HEAD 核对 `windows-shell-smoke`、Candidate packaging、Documentation Integrity、Issue coordination 与全部 Tampermonkey matrix。#857、TEST-022/GATE-007、真实 manager/GM/业务和 Stable gate 继续保持未完成。
+
+## 2026-11-22 TASK-013 / #857 — 批量候选单项原生确认导出续接
+
+- **过期句柄回执修正**：复审发现 `CANDIDATE_EXPIRED` 和 `CANDIDATE_UNAVAILABLE` 在本次请求写文件前返回；旧回执把它们误报为“暂存可能已开始”。新增 desktop-boundary 断言先红，之后将预写入失效状态与 `candidateConsumed === true` 的确认后失败分别提示。修正后 desktop-boundary 83/83、四组定向测试 114/114；完整 `npm test` 为 1,258 total / 1,203 pass / 43 fail / 12 skipped，43 项仍为 TASK-011 restore 41 项、TEST-003 symlink `EPERM` 1 项及 TASK-018 E2E 1 项。
+
+- **本地分支与增量**：在 `feat/task013-dropped-batch-20261119` 的现有 PR #925 代码线上继续，基线 `35c70b4cfb712e55130decf38ba30b85004c8571`、base `main@146f9a987e7e633496d723e7f517c68282e1fe07`。新增短时、窗口归属、每窗最多 16 项的一次性候选能力；renderer 只拿不透明 ID。主进程重新选择同名 `.user.js`、核对 SHA-256、让用户分别选择备份/导出目录，并在最后系统确认后用既有安全导出流程写入候选、恢复副本与检查点。原始文件不覆盖。
+- **失败和界面边界**：取消或文件身份不符会释放能力供重试；能力过期、已消费或最终确认后的写入失败不会重放，若确认后失败，界面提示先检查所选目录中的可能暂存文件。每项 UI 操作有忙碌状态和 `role=status` 回执，旧批次回执不更新新列表；目标输入在诊断/导出期间锁定，目标变化即清除旧结果和候选操作，最终确认展示所绑定的目标网址、源/候选 SHA 与选择器差异。回执明确表示文件另存不等于安装、运行、Tampermonkey/GM 或业务验收。仅完成静态界面源码审查，没有执行 Windows Electron 图形界面人工验收。
+- **本地验证**：build、typecheck、predevelopment 文件/追溯验证（28 REQ/TEST、21 TASK、11 GATE）、diff check 通过；相关索引、候选、导出与 desktop-boundary 测试 114/114 通过。全套 `npm test` 为 1,258/1,203/43/12；43 项与既有 TASK-011 restore 41 项、TEST-003 symlink `EPERM`、TASK-018 E2E 各 1 项相同，不能记作全套通过。Electron smoke 未在本机执行。
+- **测试覆盖限制**：新增 IPC 对话框顺序由 desktop-boundary 源码边界断言核验；候选能力 store 与候选/文件导出服务另有可执行单测。没有用 Electron mock 实际驱动每一个系统对话框取消、等待期过期、窗口关闭或确认后的部分写入回执；也未做真实窗口或屏幕阅读器操作验收。原始文件保护仍由现有 native source lock、验证备份与导出服务承担。
+- **GitHub 同步前状态**：PR #925 在本轮本地验证时仍 Open、未合并，观察 head `35c70b4cfb712e55130decf38ba30b85004c8571`；本轮修改待本地 commit 与 push。推送后必须按新精确 SHA 核验 Application Skeleton `windows-shell-smoke`、Candidate Windows packaging、Documentation Integrity、Issue Coordination 及 Tampermonkey matrix；不合并 PR。
+- **剩余范围**：#857 仍缺完整批量协调、候选后续应用与失败恢复、授权动态诊断/可选 AI、真实 Tampermonkey/GM/业务正反验收及 TEST-022/GATE-007。#857 与 #610 保持 Open；其他 TASK/GATE、同源 EXE+ZIP、最终集中人工验收与正式 Stable Release 未完成。下一步完成本文档检查、保存本地提交并同步 PR #925，再按新 SHA 处理真实 Windows/CI 结果。

@@ -1,8 +1,29 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
+import * as importedDomIndexModule from '../../src/diagnostics/imported-dom-diagnostic-index';
 import {ImportedDomDiagnosticIndex,recordImportedDomForCurrentOwner}
  from '../../src/diagnostics/imported-dom-diagnostic-index';
+
+type CandidateStoreApi<T>={
+ put(owner:object,context:T,expiresAt:number):string|null;
+ reserve(owner:object,id:unknown):T|null;
+ release(owner:object,id:unknown):boolean;
+ consume(owner:object,id:unknown):T|null;
+ clearOwner(owner:object):void;
+};
+type CandidateStoreLifecycle={
+ setTimeout?:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
+ clearTimeout?:(timer:ReturnType<typeof setTimeout>)=>void;
+};
+type CandidateStoreConstructor=new <T>(now?:()=>number,
+ lifecycle?:CandidateStoreLifecycle)=>CandidateStoreApi<T>;
+function candidateStoreConstructor():CandidateStoreConstructor|null{
+ const exported=(importedDomIndexModule as unknown as {
+  ImportedDomCandidateExportStore?:unknown
+ }).ImportedDomCandidateExportStore;
+ return typeof exported==='function'?exported as CandidateStoreConstructor:null;
+}
 
 const shaA='a'.repeat(64);
 const shaB='b'.repeat(64);
@@ -173,4 +194,65 @@ test('TASK-013/TEST-022/026: a closed import owner cannot repopulate the replace
  assert.equal(recordImportedDomForCurrentOwner(activeIndex,activeIndex,
   newWindow,newWindow,false,hash,hints('#old'),'active.user.js',source),true);
  assert.equal(activeIndex.readUtf8CandidateSource(hash),source);
+});
+
+test('TASK-013/TEST-023/026: candidate export capabilities are owner-bound, reserved and one-use',()=>{
+ const Store=candidateStoreConstructor();
+ assert.ok(Store,'main-only imported candidate export store must exist');
+ if(!Store)return;
+ let now=100;
+ const timer={unref(){}} as unknown as ReturnType<typeof setTimeout>;
+ const store=new Store<{label:string}>(()=>now,{
+  setTimeout:()=>timer,clearTimeout:()=>{}
+ });
+ const firstWindow={};
+ const secondWindow={};
+ const context={label:'candidate context'};
+ const token=store.put(firstWindow,context,now+5*60*1000);
+ assert.ok(token);
+ if(!token)return;
+ assert.equal(store.reserve(secondWindow,token),null,
+  'a different BrowserWindow must not claim the candidate context');
+ assert.equal(store.reserve(firstWindow,token),context);
+ assert.equal(store.reserve(firstWindow,token),null,
+  'a reserved export must reject a concurrent request');
+ assert.equal(store.release(firstWindow,token),true,
+  'cancel before the write confirmation must release the reservation');
+ assert.equal(store.reserve(firstWindow,token),context);
+ assert.equal(store.consume(secondWindow,token),null);
+ assert.equal(store.consume(firstWindow,token),context);
+ assert.equal(store.reserve(firstWindow,token),null,
+  'a consumed candidate must not be replayable');
+});
+
+test('TASK-013/TEST-023/026: candidate export capabilities expire eagerly and cap each window',()=>{
+ const Store=candidateStoreConstructor();
+ assert.ok(Store,'main-only imported candidate export store must exist');
+ if(!Store)return;
+ let now=200;
+ const scheduled:Array<{callback:()=>void;delay:number}>=[];
+ const timer={unref(){}} as unknown as ReturnType<typeof setTimeout>;
+ const store=new Store<{label:string}>(()=>now,{
+  setTimeout:(callback,delay)=>{scheduled.push({callback,delay});return timer;},
+  clearTimeout:()=>{}
+ });
+ const owner={};
+ const first=store.put(owner,{label:'expires'},now+10);
+ assert.ok(first);
+ assert.equal(scheduled[0]?.delay,10);
+ now+=10;
+ scheduled[0]?.callback();
+ assert.equal(first?store.reserve(owner,first):null,null,
+  'the expiry timer must clear a candidate without a later lookup');
+ now=300;
+ const live=Array.from({length:16},(_,i)=>store.put(owner,
+  {label:'candidate-'+i},now+60_000));
+ assert.ok(live.every(Boolean),'a window may keep up to 16 live candidate capabilities');
+ assert.equal(store.put(owner,{label:'over-cap'},now+60_000),null,
+  'a seventeenth live candidate must fail closed');
+ assert.ok(store.put({},{label:'other-window'},now+60_000),
+  'one window must not consume another window’s independent quota');
+ store.clearOwner(owner);
+ assert.ok(store.put(owner,{label:'after-close'},now+60_000),
+  'closing a window must release its bounded in-memory candidate records');
 });

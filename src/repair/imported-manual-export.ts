@@ -16,8 +16,8 @@ import {basename,isAbsolute} from 'node:path';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import {MAX_ANALYSIS_BYTES} from '../analyze/import-preview';
 import type {ImportedScript} from '../import/import-service';
-import type {DynamicObservation} from '../observe/dom-observer';
 import {preflightScenario,type ScenarioInput} from '../scenarios/scenario-registry';
+import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
 import {prepareManualRepairExportOnly,type ManualRepairFlowResult}
  from './manual-repair-flow';
 import type {LiteralPatchRequest} from './patch-planner';
@@ -25,7 +25,7 @@ import type {LiteralPatchRequest} from './patch-planner';
 type ImportBlockReason='INVALID_IMPORT'|'UNSUPPORTED_ENCODING'|
  'SOURCE_IDENTITY_MISMATCH'|'INVALID_SCENARIO'|
  'UNSUPPORTED_SELECTOR_SITE'|'AMBIGUOUS_SELECTOR_SITE'|
- 'INVALID_NATIVE_OPTIONS';
+ 'INVALID_NATIVE_OPTIONS'|'CANDIDATE_IDENTITY_MISMATCH'|'DOM_CANDIDATE_BLOCKED';
 const noAuthority={
  automaticPatchAllowed:false as const,
  automaticRollbackAllowed:false as const,
@@ -95,13 +95,25 @@ function captureImportedBytes(input:unknown,claimedLength:number):Uint8Array|nul
   return bytes;
  }catch{return null;}
 }
-/** This only processes paths obtained by a privileged native on-disk import.
- * Dropped bytes have no sourcePath and cannot be silently used as a writable
- * source. The original is NEVER changed, even when export succeeds. */
-export async function exportReviewedImportedSelectorOnly(
+interface PreparedImportedSelectorExport{
+ readonly request:LiteralPatchRequest;
+ readonly scenario:ScenarioInput;
+ readonly sourcePath:string;
+ readonly backupDirectory:string;
+ readonly exportDirectory:string;
+ readonly userApproved:boolean;
+}
+type PreparedImportedSelectorExportResult=
+ |Readonly<{ok:true;value:PreparedImportedSelectorExport}>
+ |Readonly<{ok:false;reason:ImportBlockReason}>;
+
+/** Validate a native reimport and derive its exact literal patch without
+ * writing files. Both ordinary and imported-batch manual exports use this
+ * snapshot before entering the existing backup/checkpoint/export flow. */
+function prepareImportedSelectorExport(
  untrustedImported:unknown,untrustedScenario:unknown,
- domSamples:DynamicObservation,untrustedNativeOptions:unknown
-):Promise<ImportedManualExportResult>{
+ untrustedNativeOptions:unknown
+):PreparedImportedSelectorExportResult{
  try{
   const script=own(untrustedImported,[
    'filename','bytes','byteLength','sha256','textEncoding','sourcePath'
@@ -118,17 +130,18 @@ export async function exportReviewedImportedSelectorOnly(
      typeof script.byteLength!=='number'||
      !Number.isSafeInteger(script.byteLength)||
      script.byteLength<1||script.byteLength>MAX_ANALYSIS_BYTES)
-   return block('INVALID_IMPORT');
+   return Object.freeze({ok:false as const,reason:'INVALID_IMPORT' as const});
   // A non-UTF8 source has a different bytes-hash from the UTF8 AST string.
   // Never substitute the decoded text for the native on-disk fingerprint.
-  if(script.textEncoding!=='utf-8')return block('UNSUPPORTED_ENCODING');
+  if(script.textEncoding!=='utf-8')
+   return Object.freeze({ok:false as const,reason:'UNSUPPORTED_ENCODING' as const});
   const bytes=captureImportedBytes(script.bytes,script.byteLength);
-  if(!bytes)return block('INVALID_IMPORT');
+  if(!bytes)return Object.freeze({ok:false as const,reason:'INVALID_IMPORT' as const});
   if(createHash('sha256').update(bytes).digest('hex')!==script.sha256)
-   return block('SOURCE_IDENTITY_MISMATCH');
+   return Object.freeze({ok:false as const,reason:'SOURCE_IDENTITY_MISMATCH' as const});
   const source=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
   if(Buffer.byteLength(source,'utf8')!==bytes.length)
-   return block('SOURCE_IDENTITY_MISMATCH');
+   return Object.freeze({ok:false as const,reason:'SOURCE_IDENTITY_MISMATCH' as const});
 
   const opts=own(untrustedNativeOptions,[
    'backupDirectory','exportDirectory','userApproved'
@@ -136,7 +149,7 @@ export async function exportReviewedImportedSelectorOnly(
   if(!opts||typeof opts.backupDirectory!=='string'||
      typeof opts.exportDirectory!=='string'||
      typeof opts.userApproved!=='boolean')
-   return block('INVALID_NATIVE_OPTIONS');
+   return Object.freeze({ok:false as const,reason:'INVALID_NATIVE_OPTIONS' as const});
   // Reuse the strict native scenario contract before any property access.
   // A result is a normalized data-only copy; getters, sparse assertion arrays
   // and undeclared capability fields must not reach disk staging.
@@ -152,10 +165,11 @@ export async function exportReviewedImportedSelectorOnly(
      typeof scenario.assertions[0].selector!=='string'||
      typeof scenario.assertions[1].selector!=='string'||
      scenario.assertions[0].selector===scenario.assertions[1].selector)
-   return block('INVALID_SCENARIO');
+   return Object.freeze({ok:false as const,reason:'INVALID_SCENARIO' as const});
 
   const analysis=analyzeSelectors(source);
-  if(analysis.status!=='OK')return block('UNSUPPORTED_SELECTOR_SITE');
+  if(analysis.status!=='OK')
+   return Object.freeze({ok:false as const,reason:'UNSUPPORTED_SELECTOR_SITE' as const});
   const oldSelector=scenario.assertions[0].selector;
   const nextSelector=scenario.assertions[1].selector;
   const exactId=/^#[A-Za-z_][A-Za-z0-9_-]{0,127}$/;
@@ -167,24 +181,71 @@ export async function exportReviewedImportedSelectorOnly(
     (site.method==='getElementById'&&exactId.test(oldSelector)&&
      exactId.test(nextSelector)&&site.selector===oldSelector.slice(1))
    ));
-  if(matches.length!==1)return block(
-   matches.length>1?'AMBIGUOUS_SELECTOR_SITE':'UNSUPPORTED_SELECTOR_SITE'
-  );
+  if(matches.length!==1)return Object.freeze({ok:false as const,reason:
+   matches.length>1?'AMBIGUOUS_SELECTOR_SITE':'UNSUPPORTED_SELECTOR_SITE'});
   const match=matches[0];
   const request:LiteralPatchRequest={
-   source,expectedSourceSha256:script.sha256 as string,
+   source,expectedSourceSha256:script.sha256,
    callOffset:match.offset,
    method:match.method as LiteralPatchRequest['method'],
    originalSelector:scenario.assertions[0].selector,
    replacementSelector:scenario.assertions[1].selector,
    faultEvidenceId:'scenario_assertion_1'
   };
-  return await prepareManualRepairExportOnly(request,scenario,domSamples,{
+  return Object.freeze({ok:true as const,value:Object.freeze({request,scenario,
    sourcePath:script.sourcePath,backupDirectory:opts.backupDirectory,
-   exportDirectory:opts.exportDirectory,userApproved:opts.userApproved
+   exportDirectory:opts.exportDirectory,userApproved:opts.userApproved})});
+ }catch{return Object.freeze({ok:false as const,reason:'INVALID_IMPORT' as const});}
+}
+
+/** This only processes paths obtained by a privileged native on-disk import.
+ * Dropped bytes have no sourcePath and cannot be silently used as a writable
+ * source. The original is NEVER changed, even when export succeeds. */
+export async function exportReviewedImportedSelectorOnly(
+ untrustedImported:unknown,untrustedScenario:unknown,
+ untrustedDomSamples:unknown,untrustedNativeOptions:unknown
+):Promise<ImportedManualExportResult>{
+ const prepared=prepareImportedSelectorExport(
+  untrustedImported,untrustedScenario,untrustedNativeOptions);
+ if(!prepared.ok)return block(prepared.reason);
+ const {request,scenario,sourcePath,backupDirectory,exportDirectory,userApproved}=
+  prepared.value;
+ return await prepareManualRepairExportOnly(request,scenario,untrustedDomSamples,{
+  sourcePath,backupDirectory,exportDirectory,userApproved
+ });
+}
+
+/** Reuse the same strict imported-byte and native path validation, then
+ * compare the manual export's pure DOM/AST candidate hash with the exact hash
+ * shown in the batch preview BEFORE any backup or candidate file is staged. */
+export async function exportReviewedImportedCandidateOnly(
+ untrustedImported:unknown,untrustedContext:unknown,untrustedNativeOptions:unknown
+):Promise<ImportedManualExportResult>{
+ try{
+  const context=own(untrustedContext,[
+   'scenario','domSamples','originalSha256','candidateSha256'
+  ]);
+  if(!context||typeof context.originalSha256!=='string'||
+     !SHA.test(context.originalSha256)||typeof context.candidateSha256!=='string'||
+     !SHA.test(context.candidateSha256))return block('INVALID_SCENARIO');
+  const prepared=prepareImportedSelectorExport(untrustedImported,
+   context.scenario,untrustedNativeOptions);
+  if(!prepared.ok)return block(prepared.reason);
+  const {request,scenario,sourcePath,backupDirectory,exportDirectory,userApproved}=
+   prepared.value;
+  if(request.expectedSourceSha256!==context.originalSha256)
+   return block('SOURCE_IDENTITY_MISMATCH');
+  const reviewed=proposeFromReadOnlyDomDiagnostic(
+   request,scenario,context.domSamples,true);
+  if(reviewed.status!=='CANDIDATE_ONLY')return block('DOM_CANDIDATE_BLOCKED');
+  if(reviewed.originalSha256!==context.originalSha256||
+     reviewed.candidateSha256!==context.candidateSha256)
+   return block('CANDIDATE_IDENTITY_MISMATCH');
+  return await prepareManualRepairExportOnly(request,scenario,context.domSamples,{
+   sourcePath,backupDirectory,exportDirectory,userApproved
   });
  }catch{
   // Never surface source, URL, path, selector, native error details or traces.
-  return block('INVALID_IMPORT');
+  return block('INVALID_SCENARIO');
  }
 }

@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   diagnoseImportedBatch: (targetUrl: string): Promise<unknown> =>
     ipcRenderer.invoke('scenario:diagnose-imported-batch',targetUrl),
   readScenarioHistory: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:history',id),
+  // Only a short-lived opaque ID; all source and destination paths are native-selected.
+  exportImportedDomCandidate: (candidateId: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-imported-candidate',candidateId),
   exportManualScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-manual',id),
   // No renderer-supplied path, file bytes, hashes, consent or restore options.
   inspectRestoreIntent: (): Promise<unknown> => ipcRenderer.invoke('restore:inspect-intent'),

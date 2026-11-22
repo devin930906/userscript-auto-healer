@@ -3,6 +3,7 @@ import {strict as assert} from 'node:assert';
 import {createHash} from 'node:crypto';
 import {proposeImportedDomCandidate} from '../../src/repair/imported-dom-candidate';
 import type {DynamicObservation} from '../../src/observe/dom-observer';
+import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 
 const source=[
  '// ==UserScript==',
@@ -57,6 +58,41 @@ test('TASK-013/TEST-022/026: reversed selector counts still select the unique mi
  if(result.status==='CANDIDATE_ONLY'){
   assert.equal(result.change.before,'"#new-submit"');
   assert.equal(result.change.after,'"#old-submit"');
+ }
+});
+
+test('TASK-013/TEST-022/023: manual export context preserves the exact missing-selector direction',()=>{
+ const cases=[
+  {observation:observation(),selectors:['#old-submit','#new-submit'] as const,
+   missing:[0,0,0] as const,present:[1,1,1] as const},
+  {observation:observation([1,1,1],[0,0,0]),
+   selectors:['#new-submit','#old-submit'] as const,
+   missing:[0,0,0] as const,present:[1,1,1] as const}
+ ];
+ for(const item of cases){
+  const result=proposeImportedDomCandidate(request({observation:item.observation}));
+  assert.equal(result.status,'CANDIDATE_ONLY',JSON.stringify(result));
+  if(result.status!=='CANDIDATE_ONLY')continue;
+  const context=(result as typeof result & {manualExportContext?:{
+   scenario:ScenarioInput;domSamples:DynamicObservation
+  }}).manualExportContext;
+  assert.ok(context,'eligible preview must preserve its main-only export context');
+  if(!context)continue;
+  assert.deepEqual(context.scenario.assertions.map(assertion=>assertion.selector),
+   item.selectors);
+  assert.equal(context.scenario.scriptSha256,sha);
+  assert.equal(context.originalSha256,sha);
+  assert.equal(context.candidateSha256,result.candidateSha256);
+  assert.equal(context.scenario.targetUrl,'https://example.org/app');
+  assert.equal(context.scenario.userApproved,true);
+  assert.equal(context.domSamples.ok,true);
+  if(context.domSamples.ok){
+   assert.equal(context.domSamples.status,'LIMITED_DYNAMIC_OBSERVATION');
+   assert.deepEqual(context.domSamples.samples.map(sample=>
+    sample.selectorCounts[item.selectors[0]]),item.missing);
+   assert.deepEqual(context.domSamples.samples.map(sample=>
+    sample.selectorCounts[item.selectors[1]]),item.present);
+  }else assert.fail('candidate export context must contain the validated DOM evidence');
  }
 });
 

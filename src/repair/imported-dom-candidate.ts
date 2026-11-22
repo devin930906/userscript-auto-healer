@@ -8,7 +8,9 @@ import {types as nodeTypes} from 'node:util';
 import {MAX_ANALYSIS_BYTES} from '../analyze/import-preview';
 import {analyzeSelectors} from '../analyze/selector-analyzer';
 import type {DynamicObservation} from '../observe/dom-observer';
-import {proposeFromReadOnlyDomDiagnostic} from './scenario-candidate';
+import type {ScenarioInput} from '../scenarios/scenario-registry';
+import {captureReadOnlyDynamicObservation,proposeFromReadOnlyDomDiagnostic}
+ from './scenario-candidate';
 import type {LiteralPatchRequest} from './patch-planner';
 
 const HASH=/^[a-f0-9]{64}$/;
@@ -17,6 +19,12 @@ export type ImportedDomCandidateBlockCode=
  'SOURCE_TOO_LARGE'|'INVALID_UTF8_SOURCE'|'UNSUPPORTED_AST'|'AMBIGUOUS_SELECTOR_SET'|
  'NO_UNIQUE_SELECTOR_FAILURE'|'DOM_EVIDENCE_UNSTABLE'|
  'DOM_COVERAGE_INCOMPLETE'|'CANDIDATE_RULES_REJECTED';
+export interface ImportedDomCandidateManualExportContext{
+ readonly scenario:ScenarioInput;
+ readonly domSamples:Extract<DynamicObservation,{readonly ok:true}>;
+ readonly originalSha256:string;
+ readonly candidateSha256:string;
+}
 export type ImportedDomCandidateResult=
  |Readonly<{status:'BLOCKED';reason:ImportedDomCandidateBlockCode;
    automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}>
@@ -24,7 +32,10 @@ export type ImportedDomCandidateResult=
    faultEvidenceId:'scenario_assertion_1';
    change:Readonly<{start:number;end:number;before:string;after:string}>;
    /** Main-process-only source; callers must strip this before IPC/logging. */
-   candidateSource:string;automaticPatchAllowed:false;
+   candidateSource:string;
+   /** Main-only context for a separately consented, rechecked manual export. */
+   manualExportContext:ImportedDomCandidateManualExportContext;
+   automaticPatchAllowed:false;
    tampermonkeyVerified:false;businessVerified:false}>;
 
 const blocked=(reason:ImportedDomCandidateBlockCode):ImportedDomCandidateResult=>
@@ -87,6 +98,8 @@ export function proposeImportedDomCandidate(input:unknown):ImportedDomCandidateR
      analysis.sites[0].selector===analysis.sites[1].selector)
    return blocked(analysis.sites.length<2?'NO_UNIQUE_SELECTOR_FAILURE':
     'AMBIGUOUS_SELECTOR_SET');
+  const domSamples=captureReadOnlyDynamicObservation(data.observation);
+  if(!domSamples)return blocked('DOM_EVIDENCE_UNSTABLE');
 
   const first=analysis.sites[0];
   const second=analysis.sites[1];
@@ -112,23 +125,26 @@ export function proposeImportedDomCandidate(input:unknown):ImportedDomCandidateR
     replacementSelector,
     faultEvidenceId:'scenario_assertion_1'
    };
-   const scenario={
+   const scenario:ScenarioInput=Object.freeze({
     id:'imported_'+sourceSha256.slice(0,48),
     scriptSha256:sourceSha256,targetUrl:data.targetUrl,
     userApproved:true,requiresLogin:false,loginReady:false,
-    steps:[],assertions:[
-     {kind:'selector-present' as const,selector:direction.missing.selector},
-     {kind:'selector-present' as const,selector:direction.alternative.selector}
-    ]
-   };
+    steps:Object.freeze([]),assertions:Object.freeze([
+     Object.freeze({kind:'selector-present' as const,selector:oldSelector}),
+     Object.freeze({kind:'selector-present' as const,selector:replacementSelector})
+    ])
+   });
    const candidate=proposeFromReadOnlyDomDiagnostic(
-    patch,scenario,data.observation,true);
+    patch,scenario,domSamples,true);
    if(candidate.status==='CANDIDATE_ONLY'){
     return Object.freeze({status:'CANDIDATE_ONLY' as const,
      originalSha256:candidate.originalSha256,
      candidateSha256:candidate.candidateSha256,
      faultEvidenceId:'scenario_assertion_1' as const,
      change:candidate.change,candidateSource:candidate.candidateSource,
+     manualExportContext:Object.freeze({scenario,domSamples,
+      originalSha256:candidate.originalSha256,
+      candidateSha256:candidate.candidateSha256}),
      automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
      businessVerified:false as const});
    }

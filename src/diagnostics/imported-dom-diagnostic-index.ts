@@ -2,7 +2,7 @@
  * This index contains neither source bytes nor file paths and grants no browser
  * or userscript authority by itself. */
 import {types as nodeTypes} from 'node:util';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {matchingExactOriginPattern} from '../manager/tampermonkey-preflight';
 import {normalizeScenarioTargetUrl} from '../scenarios/scenario-registry';
 import type {ImportedDomDiagnosticHints} from '../analyze/import-preview';
@@ -15,6 +15,8 @@ const MAX_SELECTOR_LENGTH=256;
 const MAX_CANDIDATE_SOURCE_BYTES=256*1024;
 const MAX_CANDIDATE_SOURCE_BYTES_PER_WINDOW=16*1024*1024;
 const CANDIDATE_SOURCE_TTL_MS=5*60*1000;
+const MAX_CANDIDATE_EXPORT_CONTEXTS_PER_WINDOW=16;
+const MAX_CANDIDATE_EXPORT_CONTEXT_TTL_MS=5*60*1000;
 export type ImportedDomPlanCode=
  'INVALID_TARGET_URL'|'NO_LITERAL_SELECTORS'|'UNSUPPORTED_MATCH_RULES'|
  'NO_MATCH_METADATA'|'TARGET_NOT_MATCHED'|'SELECTOR_LIMIT_EXCEEDED';
@@ -245,6 +247,137 @@ export class ImportedDomDiagnosticIndex{
   }
   return Object.freeze({targetUrl,items:Object.freeze(items),
    truncatedScripts:this.truncatedScripts});
+ }
+}
+
+interface CandidateExportStoreLifecycleOptions{
+ readonly setTimeout?:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
+ readonly clearTimeout?:(timer:ReturnType<typeof setTimeout>)=>void;
+}
+interface CandidateExportEntry<T extends object>{
+ readonly owner:object;
+ readonly context:T;
+ readonly expiresAt:number;
+ reserved:boolean;
+}
+const CANDIDATE_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Main-only, window-owned, short-lived one-use handles for manual candidate
+ * export. The generic context is never serialized or persisted by this store;
+ * callers are responsible for supplying only the bounded review data needed
+ * after a renderer receives the opaque ID. */
+export class ImportedDomCandidateExportStore<T extends object>{
+ private readonly entries=new Map<string,CandidateExportEntry<T>>();
+ private expiryTimer:ReturnType<typeof setTimeout>|null=null;
+ private timerGeneration=0;
+ private readonly scheduleTimer:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
+ private readonly cancelTimer:(timer:ReturnType<typeof setTimeout>)=>void;
+
+ constructor(private readonly now:()=>number=()=>performance.now(),
+  lifecycle:CandidateExportStoreLifecycleOptions={}){
+  this.scheduleTimer=lifecycle.setTimeout??setTimeout;
+  this.cancelTimer=lifecycle.clearTimeout??clearTimeout;
+ }
+
+ private clearTimer():void{
+  this.timerGeneration++;
+  if(this.expiryTimer!==null){
+   this.cancelTimer(this.expiryTimer);
+   this.expiryTimer=null;
+  }
+ }
+
+ private scheduleExpiry():boolean{
+  this.clearTimer();
+  let nextExpiry=Infinity;
+  for(const entry of this.entries.values())
+   nextExpiry=Math.min(nextExpiry,entry.expiresAt);
+  if(!Number.isFinite(nextExpiry))return true;
+  const generation=this.timerGeneration;
+  try{
+   const timer=this.scheduleTimer(()=>{
+    if(generation!==this.timerGeneration)return;
+    this.expiryTimer=null;
+    this.pruneExpired();
+   },Math.max(0,nextExpiry-this.now()));
+   this.expiryTimer=timer;
+   timer.unref?.();
+   return true;
+  }catch{
+   // If eager cleanup cannot be scheduled, fail closed and drop every pending
+   // capability instead of leaving its review context resident indefinitely.
+   this.entries.clear();
+   this.clearTimer();
+   return false;
+  }
+ }
+
+ private pruneExpired():void{
+  const now=this.now();
+  for(const [id,entry] of this.entries){
+   if(entry.expiresAt<=now)this.entries.delete(id);
+  }
+  this.scheduleExpiry();
+ }
+
+ private ownerCount(owner:object):number{
+  let count=0;
+  for(const entry of this.entries.values())if(entry.owner===owner)count++;
+  return count;
+ }
+
+ put(owner:object,context:T,expiresAt:number):string|null{
+  this.pruneExpired();
+  const now=this.now();
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
+     !context||typeof context!=='object'||nodeTypes.isProxy(context)||
+     typeof expiresAt!=='number'||!Number.isFinite(expiresAt)||
+     expiresAt<=now||expiresAt-now>MAX_CANDIDATE_EXPORT_CONTEXT_TTL_MS||
+     this.ownerCount(owner)>=MAX_CANDIDATE_EXPORT_CONTEXTS_PER_WINDOW)
+   return null;
+  const id=randomUUID();
+  this.entries.set(id,{owner,context,expiresAt,reserved:false});
+  if(!this.scheduleExpiry())return null;
+  return id;
+ }
+
+ reserve(owner:object,id:unknown):T|null{
+  this.pruneExpired();
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
+     typeof id!=='string'||!CANDIDATE_ID.test(id))return null;
+  const entry=this.entries.get(id);
+  if(!entry||entry.owner!==owner||entry.reserved)return null;
+  entry.reserved=true;
+  return entry.context;
+ }
+
+ release(owner:object,id:unknown):boolean{
+  this.pruneExpired();
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
+     typeof id!=='string'||!CANDIDATE_ID.test(id))return false;
+  const entry=this.entries.get(id);
+  if(!entry||entry.owner!==owner||!entry.reserved)return false;
+  entry.reserved=false;
+  return true;
+ }
+
+ consume(owner:object,id:unknown):T|null{
+  this.pruneExpired();
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
+     typeof id!=='string'||!CANDIDATE_ID.test(id))return null;
+  const entry=this.entries.get(id);
+  if(!entry||entry.owner!==owner||!entry.reserved)return null;
+  this.entries.delete(id);
+  this.scheduleExpiry();
+  return entry.context;
+ }
+
+ clearOwner(owner:object):void{
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner))return;
+  for(const [id,entry] of this.entries){
+   if(entry.owner===owner)this.entries.delete(id);
+  }
+  this.scheduleExpiry();
  }
 }
 

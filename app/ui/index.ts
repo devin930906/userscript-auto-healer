@@ -71,6 +71,13 @@ interface Window {
       recoveryExportFileName?:string;checkpointFileName?:string;
       candidateSha256?:string;candidateByteLength?:number;
       tampermonkeyVerified:false;businessVerified:false;automaticPatchAllowed:false}>;
+    exportImportedDomCandidate(candidateId:string):Promise<{ok:boolean;code?:string;
+      candidateConsumed?:boolean;status?:string;backupFileName?:string;
+      candidateFileName?:string;exportFileName?:string;recoveryExportFileName?:string;
+      checkpointFileName?:string;sourceSha256?:string;candidateSha256?:string;
+      candidateByteLength?:number;automaticPatchAllowed:false;
+      automaticRollbackAllowed?:false;managerInstalled?:false;
+      tampermonkeyVerified:false;gmApiVerified:false;businessVerified:false}>;
     inspectScenario(id:string):Promise<{ok:boolean;code?:string;status?:string;
       checkedAssertions?:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;
@@ -92,6 +99,7 @@ interface Window {
         checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
         evidenceCount?:number;reason?:string;
         candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+        candidateExportId?:string;
         candidateOriginalSha256?:string;candidateSha256?:string;
         candidateBefore?:string;candidateAfter?:string;
         automaticPatchAllowed:false;tampermonkeyVerified:false;businessVerified:false}[];
@@ -798,8 +806,11 @@ function selectedCdpPort():number|null{
 }
 let scenarioInspectionBusy=false;
 let importedDomBusy=false;
+let importedDomCandidateExportBusy=false;
 let importedDomGeneration=0;
 let importedDomRequestId=0;
+let importedDomActiveTarget:string|null=null;
+let importedDomDisplayedTarget:string|null=null;
 let manualExportBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
@@ -835,8 +846,9 @@ const gmObserveButtons={
 const gmLinks=document.getElementById('gm-probe-links');
 const gmResult=document.getElementById('gm-probe-result');
 function updateImportedDomControls():void{
+ if(importedDomTarget)importedDomTarget.disabled=importedDomBusy||importedDomCandidateExportBusy;
  if(importedDomRunButton)importedDomRunButton.disabled=importedDomBusy||
-  scenarioInspectionBusy||!browserConnected||seenScripts.size===0||
+  importedDomCandidateExportBusy||scenarioInspectionBusy||!browserConnected||seenScripts.size===0||
   !(importedDomTarget?.value.trim());
 }
 function clearGmDisplay(message:string):void{
@@ -1758,12 +1770,43 @@ function importedDomCandidateReason(code:string|undefined):string{
  };
  return code?reasons[code]??'未生成候选：'+code:'未生成候选';
 }
-importedDomTarget?.addEventListener('input',updateImportedDomControls);
+function importedDomCandidateExportReason(code:string|undefined):string{
+ const reasons:Record<string,string>={
+  CANCELLED:'已取消；尚未收到文件导出回执。',
+  EXPORT_BUSY:'另一个系统原生操作仍在进行，请稍后再试。',
+  CANDIDATE_UNAVAILABLE:'该预览句柄已失效或已使用；请重新观察后生成候选。',
+  CANDIDATE_EXPIRED:'该候选预览已过期；请重新观察后生成候选。',
+  SOURCE_IDENTITY_MISMATCH:'重新选择的文件名或 SHA-256 与预览不符；没有开始导出。',
+  INVALID_IMPORT:'所选脚本未通过重新读取验证；没有生成成功回执。',
+  UNSUPPORTED_ENCODING:'所选脚本编码不符合此候选导出路径。',
+  INVALID_NATIVE_OPTIONS:'备份或导出目录无法使用。',
+  BACKUP_DIRECTORY_INVALID:'备份目录无法安全核验。',
+  CANDIDATE_IDENTITY_MISMATCH:'重新计算的候选与预览不一致。',
+  DOM_CANDIDATE_BLOCKED:'候选复核条件已不再满足。',
+  EXPORT_FAILED:'文件导出未完成。'
+ };
+ return code?reasons[code]??'文件导出未完成。':'文件导出未完成。';
+}
+importedDomTarget?.addEventListener('input',()=>{
+ const currentTarget=importedDomTarget?.value.trim()??'';
+ const previousTarget=importedDomActiveTarget??importedDomDisplayedTarget;
+ if(previousTarget!==null&&currentTarget!==previousTarget){
+  importedDomGeneration++;
+  importedDomActiveTarget=null;
+  importedDomDisplayedTarget=null;
+  importedDomItems?.replaceChildren();
+  if(importedDomResult)importedDomResult.textContent=
+   '目标网址已更改；上一轮只读结果和候选操作已撤下，请重新运行。';
+ }
+ updateImportedDomControls();
+});
 importedDomRunButton?.addEventListener('click',()=>{
- if(importedDomBusy||scenarioInspectionBusy)return;
+ if(importedDomBusy||scenarioInspectionBusy||importedDomCandidateExportBusy)return;
  const targetUrl=importedDomTarget?.value.trim()??'';
  const requestId=++importedDomRequestId;
  const generation=++importedDomGeneration;
+ importedDomActiveTarget=targetUrl;
+ importedDomDisplayedTarget=null;
  importedDomBusy=true;
  scenarioInspectionBusy=true;
  browserControls();
@@ -1772,6 +1815,8 @@ importedDomRunButton?.addEventListener('click',()=>{
   '等待系统原生确认；脚本不会执行，本次只读取声明的页面选择器数量。';
  void window.healer.diagnoseImportedBatch(targetUrl).then(result=>{
   if(generation!==importedDomGeneration)return;
+  importedDomActiveTarget=null;
+  importedDomDisplayedTarget=targetUrl;
   if(!result.ok){
    if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
    if(importedDomResult)importedDomResult.textContent=
@@ -1789,6 +1834,7 @@ importedDomRunButton?.addEventListener('click',()=>{
     :'本轮完成：有限 DOM 观测 '+observed+' 项，其中仅内存候选预览 '+previews+' 项；未知／受阻 '+blocked+
      ' 项。整体仍为 UNKNOWN；这不证明脚本注入、登录、Tampermonkey、GM API 或业务恢复。'+
      (result.truncatedScripts?' 已达会话脚本索引上限，未收录项未处理。':'');
+  const candidateExportButtons:HTMLButtonElement[]=[];
   for(const item of items){
    if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
    const row=document.createElement('li');
@@ -1797,19 +1843,95 @@ importedDomRunButton?.addEventListener('click',()=>{
      (item.triageStatus??'UNKNOWN')+' / '+(item.faultCategory??'UNKNOWN')+
      '。'+importedDomBlockReason(item.reason)+
      (item.candidateStatus==='CANDIDATE_ONLY'
-       ?'；候选预览（仅内存，未保存、未应用、未验证）：'+
+       ?'；候选预览（仅内存，尚未保存、应用或验证）：'+
         (item.candidateBefore??'')+' → '+(item.candidateAfter??'')
        :item.candidateStatus==='NOT_PROPOSED'
         ?'；'+importedDomCandidateReason(item.candidateReason):'')
     :importedDomBlockReason(item.code));
+   if(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'&&
+      item.candidateStatus==='CANDIDATE_ONLY'){
+    if(typeof item.candidateExportId==='string'&&item.candidateExportId.length>0){
+     const candidateExportId=item.candidateExportId;
+     const action=document.createElement('button');
+     action.type='button';
+     action.className='secondary';
+     action.textContent='另存候选与原始恢复版';
+     const receipt=document.createElement('p');
+     receipt.id='imported-dom-candidate-export-status-'+item.ordinal;
+     receipt.setAttribute('role','status');
+     receipt.setAttribute('aria-live','polite');
+     action.setAttribute('aria-describedby',
+      'imported-dom-export-risk '+receipt.id);
+     let terminal=false;
+     action.addEventListener('click',()=>{
+      if(importedDomCandidateExportBusy||terminal||
+         generation!==importedDomGeneration||requestId!==importedDomRequestId)return;
+      importedDomCandidateExportBusy=true;
+      for(const candidateButton of candidateExportButtons)candidateButton.disabled=true;
+      action.textContent='等待系统原生选择…';
+      receipt.textContent='请重新选择原脚本、备份目录和导出目录，再核对最终确认中的文件名与 SHA-256。';
+      browserControls();
+      void window.healer.exportImportedDomCandidate(candidateExportId).then(answer=>{
+       if(generation!==importedDomGeneration||requestId!==importedDomRequestId)return;
+       if(answer.ok&&answer.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'){
+        terminal=true;
+        action.dataset.exportTerminal='true';
+        action.textContent='已另存（未经运行时验证）';
+        receipt.textContent='候选：'+(answer.exportFileName??'未提供')+
+         '；原始恢复版：'+(answer.recoveryExportFileName??'未提供')+
+         '；独立备份：'+(answer.backupFileName??'未提供')+
+         '；检查点：'+(answer.checkpointFileName??'未提供')+
+         '。原始脚本未被本程序改写；候选尚未在 Tampermonkey 中安装、运行或完成业务验证。';
+        return;
+       }
+       const consumed=answer.candidateConsumed===true;
+       const candidateExpiredOrUnavailable=answer.code==='CANDIDATE_EXPIRED'||
+        answer.code==='CANDIDATE_UNAVAILABLE';
+       if(consumed||candidateExpiredOrUnavailable){
+        terminal=true;
+        action.dataset.exportTerminal='true';
+        action.textContent='需重新观测后导出';
+       }else action.textContent='重新选择并导出';
+       receipt.textContent=importedDomCandidateExportReason(answer.code)+
+        (consumed
+         ?'最终确认后此候选已结束；文件暂存可能已开始。请先检查所选备份与导出目录中的文件，再重新观测生成候选。'
+         :candidateExpiredOrUnavailable
+          ?'本次请求未开始文件写入；请重新观察后生成候选。'
+          :'若最终确认尚未完成，可重新发起；原始脚本不会由此操作覆盖。');
+      }).catch(()=>{
+       if(generation!==importedDomGeneration||requestId!==importedDomRequestId)return;
+       terminal=true;
+       action.dataset.exportTerminal='true';
+       action.textContent='状态不明，请重新观测';
+       receipt.textContent='未收到可靠文件回执。请检查所选备份与导出目录；不要重复使用此候选。原始脚本未被本程序改写。';
+      }).finally(()=>{
+       importedDomCandidateExportBusy=false;
+       if(generation===importedDomGeneration&&requestId===importedDomRequestId){
+        for(const candidateButton of candidateExportButtons)
+         candidateButton.disabled=candidateButton.dataset.exportTerminal==='true';
+       }
+       browserControls();
+      });
+     });
+     candidateExportButtons.push(action);
+     row.append(document.createElement('br'),action,receipt);
+    }else{
+     const unavailable=document.createElement('p');
+     unavailable.textContent='此预览没有可用的短时导出句柄；请重新观测后再试。';
+     row.append(unavailable);
+    }
+   }
    importedDomItems?.append(row);
   }
  }).catch(()=>{
   if(generation!==importedDomGeneration)return;
+  importedDomActiveTarget=null;
+  importedDomDisplayedTarget=targetUrl;
   if(importedDomResult)importedDomResult.textContent=
    '批量 DOM 观察失败；没有验证结论。请确认受控 Chrome 状态后再试。';
  }).finally(()=>{
   if(requestId!==importedDomRequestId)return;
+  importedDomActiveTarget=null;
   importedDomBusy=false;
   scenarioInspectionBusy=false;
   browserControls();

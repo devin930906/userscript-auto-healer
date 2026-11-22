@@ -26,7 +26,8 @@ const approvedIpcChannels=[
   'import:dropped-batch:begin','import:dropped-batch:finish','import:dropped-batch:recover',
   'import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
- 'scenario:diagnose-imported-batch','scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
+ 'scenario:diagnose-imported-batch','scenario:export-imported-candidate','scenario:export-manual',
+ 'scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
 
@@ -586,6 +587,112 @@ test('TASK-009/012/017 TEST-019/020/023/026: manual export requires true live ow
  assert.match(html,/id="scenario-export-manual"/);
  assert.match(html,/不提供自动安装和回滚/);
  assert.match(ui,/MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED/);
+});
+
+test('TASK-013/TEST-023/026: imported candidate export uses a one-use main-only capability and native file identity',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.ok(preload.includes("exportImportedDomCandidate: (candidateId: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-imported-candidate',candidateId)"),
+  'renderer may pass only the opaque candidate ID');
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-imported-candidate',[^)]*(?:path|source|scenario|url|selector|consent|sha256)/i);
+ assert.match(main,/ImportedDomCandidateExportStore/);
+ assert.match(main,/ImportedDomCandidateManualExportContext/);
+ assert.match(main,/ipcMain\.handle\('scenario:export-imported-candidate',async\(event,id:unknown,\.\.\.args:unknown\[\]\)=>\{\s*authorizeSender\(event\)/);
+ const start=main.indexOf("ipcMain.handle('scenario:export-imported-candidate'");
+ const end=main.indexOf("ipcMain.handle('scenario:cancel'",start);
+ assert.ok(start>=0&&end>start,'the native export handler must remain a separately auditable block');
+ const handler=main.slice(start,end);
+ assert.match(handler,/if\(args\.length!==0\)/,
+  'the handler rejects appended renderer authority arguments');
+ assert.match(handler,/nativeAiDiscoveryBusy/,
+  'candidate native dialogs must not overlap a native AI discovery dialog');
+ assert.match(handler,/importedDomCandidateExportStore\.reserve\(win,id\)/,
+  'the capability is owner-bound and reserved before asynchronous dialogs');
+ assert.match(handler,/dialog\.showOpenDialog\(win,[\s\S]*?properties:\['openFile'\]/,
+  'the main process asks the OS to reselect the source file');
+ assert.match(handler,/importApprovedPaths\(\[sourcePath\],controller\.signal\)/,
+  'the selected file is re-read through the existing import validator');
+ assert.match(handler,/current\.scripts\[0\]\.filename!==capability\.filename/,
+  'the selected filename must match the imported batch identity');
+ assert.match(handler,/current\.scripts\[0\]\.sha256!==capability\.context\.originalSha256/,
+  'the selected bytes must match the reviewed source hash');
+ assert.match(handler,/properties:\['openDirectory'\]/,
+  'backup and export destinations must come from native directory pickers');
+ const confirmation=handler.indexOf('const approved=await dialog.showMessageBox');
+ const consume=handler.indexOf('importedDomCandidateExportStore.consume(win,id)');
+ const write=handler.indexOf('exportReviewedImportedCandidateOnly(');
+ assert.ok(confirmation>=0&&consume>confirmation&&write>consume,
+  'the one-use capability is consumed only after final native confirmation and immediately before file staging');
+ assert.match(handler,/if\(!consumed\)importedDomCandidateExportStore\.release\(win,id\)/,
+  'cancelled or mismatched selections release the reservation for a fresh attempt');
+ assert.match(handler,/candidateSha256:result\.candidateSha256/);
+ assert.match(handler,/automaticRollbackAllowed:false/);
+ assert.match(handler,/managerInstalled:false/);
+ assert.match(handler,/\.\.\.unverified/);
+ const unverifiedStart=main.indexOf('const unverified =');
+ const unverifiedEnd=main.indexOf(';',unverifiedStart);
+ const unverified=main.slice(unverifiedStart,unverifiedEnd);
+ assert.match(unverified,/automaticPatchAllowed:false as const/);
+ assert.match(unverified,/tampermonkeyVerified:false as const/);
+ assert.match(unverified,/businessVerified:false as const/);
+ assert.doesNotMatch(handler,/return \{ok:true,[\s\S]*?sourcePath:/,
+  'renderer receipts must not reveal source paths');
+ assert.match(main,/importedDomCandidateExportStore\.clearOwner\(win\)/,
+  'closing the owning window clears its pending review capabilities');
+});
+
+test('TASK-013/017 TEST-022/023: imported DOM candidate export is per-item, accessible and stale-reply fenced',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(preload,/exportImportedDomCandidate: \(candidateId: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:export-imported-candidate',candidateId\)/);
+ assert.match(ui,/candidateExportId\?:string/);
+ assert.match(ui,/if\(typeof item\.candidateExportId==='string'/,
+  'only an item with a live main-issued capability may render the export action');
+ assert.match(ui,/window\.healer\.exportImportedDomCandidate\(candidateExportId\)/);
+ assert.doesNotMatch(ui,/window\.healer\.exportImportedDomCandidate\([^)]*,/,
+  'the renderer cannot attach source, path, target, selector, or consent data');
+ assert.match(ui,/action\.textContent='另存候选与原始恢复版'/);
+ assert.match(ui,/receipt\.setAttribute\('role','status'\)/);
+ assert.match(ui,/receipt\.setAttribute\('aria-live','polite'\)/);
+ assert.match(ui,/importedDomCandidateExportBusy/,
+  'the action must lock while native dialogs and file staging are pending');
+ assert.match(ui,/if\(importedDomTarget\)importedDomTarget\.disabled=importedDomBusy\|\|importedDomCandidateExportBusy/,
+  'the observed target cannot be changed while diagnosis or export owns the preview');
+ const targetInputStart=ui.indexOf("importedDomTarget?.addEventListener('input'");
+ const targetInputEnd=ui.indexOf("importedDomRunButton?.addEventListener('click'",targetInputStart);
+ assert.ok(targetInputStart>=0&&targetInputEnd>targetInputStart,
+  'the target input lifecycle must remain a bounded block');
+ const targetInputHandler=ui.slice(targetInputStart,targetInputEnd);
+ assert.match(targetInputHandler,/importedDomGeneration\+\+/,
+  'a changed target must retire the previous preview generation');
+ assert.match(targetInputHandler,/importedDomItems\?\.replaceChildren\(\)/,
+  'candidate actions for the previous target must disappear immediately');
+ assert.match(targetInputHandler,/目标网址已更改/);
+ assert.match(ui,/if\(generation!==importedDomGeneration\)return/,
+  'late replies from replaced candidate previews must not repaint the current list');
+ assert.match(ui,/answer\.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'/);
+ assert.match(ui,/仍未验证|未经运行时验证/,
+  'the success status must distinguish file export from runtime or business verification');
+ assert.match(ui,/answer\.candidateConsumed===true/,
+  'a consumed one-time candidate cannot be retried from a stale button');
+ assert.match(ui,/const consumed=answer\.candidateConsumed===true;/,
+  'only a capability already consumed after confirmation may imply that file staging could have started');
+ assert.match(ui,/const candidateExpiredOrUnavailable=answer\.code==='CANDIDATE_EXPIRED'\|\|\s*answer\.code==='CANDIDATE_UNAVAILABLE'/,
+  'pre-write expiry and unavailable responses must have a separate terminal receipt');
+ assert.match(ui,/if\(consumed\|\|candidateExpiredOrUnavailable\)/,
+  'a pre-write terminal result still retires its stale action');
+ assert.match(ui,/candidateExpiredOrUnavailable\s*\?\s*'本次请求未开始文件写入/,
+  'an expired or unavailable capability must not warn that this request may have left staged files');
+ assert.match(ui,/暂存可能已开始/);
+ assert.match(ui,/检查所选备份与导出目录/,
+  'a consumed failed export must tell the user to inspect possible recovery files');
+ assert.match(main,/候选观测目标：'\+capability\.context\.scenario\.targetUrl/,
+  'the final native confirmation must identify the URL bound to the candidate');
+ assert.match(main,/候选 SHA-256：'\+capability\.context\.candidateSha256/,
+  'the final native confirmation must show the reviewed candidate identity');
+ assert.match(html,/<p id="imported-dom-export-risk"[^>]*>[^<]*重新选择[^<]*SHA-256[^<]*最后确认[^<]*不会改写原始脚本[^<]*不会自动安装/s);
 });
 
 test('TASK-015/017 TEST-024/026: native-only archive has no arbitrary renderer path authority',()=>{
@@ -2251,8 +2358,8 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
  assert.doesNotMatch(panel,/<input[^>]*(?:selector|选择器|CSS)/i,
   'the ordinary batch path must not ask the user to type CSS selectors');
  assert.match(panel,/不会执行脚本/);
- assert.match(panel,/候选源码仅短暂保留在主进程内存/,
-  'the ordinary UI must disclose the temporary in-memory candidate preview');
+ assert.match(panel,/候选的短时导出上下文只保存在主进程内存，最长五分钟/,
+  'the ordinary UI must disclose the bounded in-memory candidate export context');
  assert.match(panel,/不证明.*Tampermonkey.*GM.*业务/);
  assert.match(ui,/diagnoseImportedBatch\(targetUrl\)/,
   'the renderer may send only the configured target URL');
@@ -2292,7 +2399,7 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
   'the internal proposal object must not be spread into an IPC response');
  assert.doesNotMatch(ui,/candidateSource/,
   'the renderer contract must contain only bounded candidate summaries');
- assert.match(ui,/候选预览（仅内存，未保存、未应用、未验证）/);
+ assert.match(ui,/候选预览（仅内存，尚未保存、应用或验证）/);
  assert.doesNotMatch(handler,/tampermonkeyVerified:\s*true|businessVerified:\s*true|automaticPatchAllowed:\s*true/);
 
  const importHandlers=main.slice(main.indexOf('const runNativeImport = async'),
