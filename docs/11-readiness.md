@@ -1,5 +1,13 @@
 # 开发前最终准入审查
 
+> **2026-11-22 准备增量再核验（以上一轮已合并修订为起点）**：从 GitHub 重新读取确认当前 `main@3b0556ec76d08a8c8c0dc9377ad0adf605cc88f2`，文档 PR [#932](https://github.com/devin930906/userscript-auto-healer/pull/932) 已合并，`docs/02-requirements.md` 保留连续 28 项 REQ 且依赖图无环，`docs/08-release.md` 的 GATE-001..011 均明确为未完成。该合并意外触发 Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 自动关闭，已按未满足的 TASK-013/TEST-022 验收恢复为 Open 并附原因；产品 PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 仍在 Open，本次不触碰其文件或将其成果视为已合并。旧版必需检查 `Issue coordination / stale round fence` 当前实际由可信基准脚本核对 PR SHA/文件冲突，并**不要求 Issue 独占认领**；具体行为由 `.github/scripts/issue-merge-fence.py` 与规则集 #26307718 提供证据。此次仅校准 `docs/05-experience.md` 对现有 `app/ui/index.css` 的源码事实，未进行真实 UI 渲染、Windows/Chrome/Tampermonkey 实测或新的产品构建；仍按原“有条件准入”与全部 Stable GATE 的阻断条件续接。
+
+> **2026-11-22 准入审查快照（优先于下列更早的历史记录）**：本轮文档修订前的主干基准为 `main@1fcd1480d135a12ef5c766115465999bb444514f`。准备 PR [#926](https://github.com/devin930906/userscript-auto-healer/pull/926) 已合并为 `28efdb591969b30ac4d963f0fbe6b634dee863f3`；PR [#927](https://github.com/devin930906/userscript-auto-healer/pull/927) 也已合并；其合并提交即上述本轮文档修订前的主干基准。文末“#926 仍未合并”是合并前的时间性记录，不是当前阻断。无需重建文档或从 TASK-001 重启。
+>
+> **当前产品实施与依赖**：开放中的 PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) HEAD `4babea4f1e49cc799beb72b9013d4e158d185962` 尚未合并，现有实现包括分批导入、只读诊断及受控的手动候选导出，但不等同自动修复与真实 Tampermonkey/业务功能验收。当前开放的对应 Issue 为 [#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（TASK-007）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（TASK-005）和 [#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021）；按既有依赖和准入条件继续推进。旧版 `docs/12-handoff.md` 顶部的 2026-11-19 “最新”是历史快照，且 PR #925 正在修改该共享文件，必须在合法集成时核对最新内容，不从准备分支覆盖它。
+>
+> **本轮质量证据边界**：PR #925 HEAD 的31项 GitHub PR checks 为29项成功、2项跳过，不能替代其 PR 描述记录的全量 `npm test` 失败情况，也不能替代真实产品级验收。2026-11-22 GitHub 安全接口核验显示 Dependabot alerts 未启用（403）及 Code Scanning 没有分析结果（404）；Secret Scanning 开放告警查询为空不等于已经证明全面无风险。验证范围、启用条件及处理方式已作为既有 TASK-021 的交接证据写在 [#610 评论](https://github.com/devin930906/userscript-auto-healer/issues/610#issuecomment-7080025505)。**本次仍为有条件准入；所有 Stable GATE 与最终真实环境验收须独立签核。**
+
 > **2026-11-02 有效范围校正**：下方历史有条件准入及当时旧 Issue 认领受阻结论均按原发生时间保留；新版（4）/（7）已取消 Issue 独占锁，旧交接不能阻止已授权且满足其他依赖的产品开发。正式 TEST/GATE 仍须独立验证；见 `docs/19-stable-v7-migration.md`。
 
 
@@ -101,3 +109,38 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 - 新建立已批准 TASK 的分类 Issue 映射：TASK-012→#603；TASK-014→#604；TASK-015→#605；TASK-016→#606；TASK-017→#607；TASK-018→#608；TASK-019→#609；TASK-021→#610。原有 #215/#440/#480/#486/#487/#488/#489/#510 保留，不因建立新 Issue 就认为相关功能已通过。
 - 当前仍有真实 Tampermonkey 产品业务、可信自动应用与原子回滚、间歇性 Windows 故障、正式 EXE+ZIP、最终人工验收与全部 GATE 的证据缺口；不得把治理修复当作 Stable 验收。
 - 现行执行依据：`AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；每次均重新读取远端 GitHub 状态。
+
+## 2026-11-22 增量准备审计（不替换历史准入记录）
+
+> 证据基准：本轮远端 `main@146f9a987e7e633496d723e7f517c68282e1fe07`；该时间点的仓库树、GitHub Issues/PR 与既有正式文档。以下是开发前工程依据及当前续接可用性审计，不是新一轮功能开发、全量代码审查或当前 SHA 的产品测试通过声明。
+
+### 仓库与路线
+
+- 项目身份：`devin930906/userscript-auto-healer`，公开非归档，默认 `main`。已读取已有 `README.md`、`AGENTS.md` 和 `docs/00-intake.md` 至 `docs/12-handoff.md`，以及 `docs/14-stable-work-register.md`。既有 REQ-001..028、TASK-001..021、TEST-001..028、GATE-001..011 继续作为唯一编号体系；不重新编号、重复建立 Issues 或更改产品范围。
+- 当前 Open Issues（GitHub Issues 列表，2026-11-22）：[#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013 批量端到端闭环）、[#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021 Stable 准入/双发行）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（Chrome CDP 偶发启动故障）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（真实 Tampermonkey 业务验证），共 4 项。旧交接文件中“14 个 Open Issues”只可视作当时快照，不是本轮实时数量。
+- 当前开放 PR：[#925](https://github.com/devin930906/userscript-auto-healer/pull/925)（TASK-013，`feat/task013-dropped-batch-20261119`，核验 head `4babea4f1e49cc799beb72b9013d4e158d185962`），尚未合并；其测试/修复证据只对精确 SHA 有效。不得将 #925 的导入、只读 DOM 观察和候选导出视为完整自动修复、Tampermonkey 真实安装注入及业务验收已通过。
+- 已存在 Electron/TypeScript 桌面源码、GitHub Actions、Windows Candidate 构建工作流、界面设计及测试/发布规格，属于增量审计对象，而非重新从零初始化的空仓库。本轮未触发 Actions、未运行 Windows、未执行 GUI、未取得最终用户验收。
+
+### 工程设计和准入差距
+
+- 产品必须按原始需求支持：指定 Chrome/Chrome++ EXE 与授权 Data/Profile、可配置回环 CDP 端口（默认 9896）、真实 Tampermonkey/脚本安装和验证、AST+动态诊断、逐脚本自动化修复与可信验收、备份回滚、监控、兼容层、可选 AI 双协议、Windows EXE 安装版与真正可直接使用的 ZIP 便携版。尚不具备证据将这些整条链路认定为 Stable 已完成。
+- 官方技术约束：Chrome 136 起常规 Chrome 的远程调试须遵循非默认用户数据目录要求（https://developer.chrome.com/blog/remote-debugging-port）；Chrome 138 起用户脚本功能由扩展级 Allow User Scripts 开关管理（https://developer.chrome.com/blog/chrome-userscript）。必须使用对应实际 Chrome/Chrome++ 版本和获授权 Profile 测试，不得绕过用户或浏览器权限。
+- 开放 Issue #857 与 PR #925 是当前首要的在制产品链路；继续前先核对 PR 实际 diff、精确 head SHA、最新 checks、依赖与已经合并的子范围，不重复开发同一功能。#486 与 #510 的真实环境不确定性及 #610 的全部 Stable 门槛是保留的准入限制。
+- 当前仓库仍有历史 Issue claim/round coordination 文件及工作流。应以 `AGENTS.md` 和 `docs/19-stable-v7-migration.md` 的已批准无独占认领政策为目标，另行核实旧工作流是否实质阻断合法 PR；不要仅凭文件存在判定其正在阻断，也不得未检验即删除历史治理配置。
+- UI 以 `docs/05-experience.md` 和现有 Electron renderer/preload/main 为依据，准备阶段只允许静态设计检查；自动化脚本端到端、真实渲染、Windows 安装与最终人工体验不得混作已通过证据。
+- Stable 仍须通过当前源提交的持续机器测试、可信真实 Tampermonkey/Chrome 验收、原件保护/可恢复回滚、同源 EXE+ZIP 构建验证以及最后一次集中 Windows 人工验收，不得以历史 Candidate 或先前某个 SHA 的 CI 结果替代。
+
+### 本次准备阶段结果
+
+- **有条件准入（继续既有正式开发，而非重启准备）**：工程文件体系和 Issues 实施入口已经存在，现阶段可以在已确认的模块边界内继续 #857 的未完成工作；任何与真实管理器授权、产品自动应用、外部 Chrome 状态或发布直接相关的步骤仍由对应安全门槛限制。
+- 本次仅开展远端只读仓库审计、当前 Issues/PR 对账及文档校正；**未进行**新的依赖安装、真实测试、产品代码提交、PR 合并、Issue 关闭、工作流运行或 Stable 发布。
+- 建议下一开发入口为 **TASK-013 / Issue #857**，先完整审阅尚开放的 PR #925 并独立核对其当前检查结果和未满足验收条件；再执行有边界的续接。最终 Stable 发布仍由 TASK-021 / Issue #610 把关。
+
+### 2026-11-22 同一准备分支的二次核验补充
+
+- 再次读取 `main@146f9a987e7e633496d723e7f517c68282e1fe07`、开放 Issues 和 PR，确认当前开放 Issues 仍为 #857/#610/#510/#486；本次准备 PR #926 与原产品 PR #925 都是开放未合并。该结论仅为本次快照，后续需按服务器重新读取。
+- 准备 PR #926 的 Documentation Integrity `45020613844`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45020613844）与 Issue Coordination PR Fence `45020613829`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45020613829）均为成功，匹配准备提交 `e1eaaf3ffc9ac177a43e0e5a2fb5b0d8076b71a5`。该证据仅证明该次文档提交的相关检查，不证明全部产品级 TEST/GATE。
+- 旧名 `Issue coordination / stale round fence` 依旧作为 required-context 兼容，`.github/workflows/governance-issue-merge-fence.yml` 的现行注释和 checkout/调用路径明确表述：只针对可信 base 的真实 PR 集成安全检查，不执行旧 Issue 独占认领。现行权威为 `AGENTS.md` 2026-11-02 小节及 `docs/19-stable-v7-migration.md`；旧文档、分支和诊断脚本无需为了此轮准备而删除。该审计为工作流源码静态核对及 PR 检查运行结果观察，并非形式化证明所有合并并发情形无冲突。
+- `docs/05-experience.md` 已保留经确认的 TASK-017 深色控制台设计：七标签、深靛霓虹令牌、键盘标签导航、原生授权与危险恢复交互。此轮不替换品牌或新建设计体系。由于没有取得真实桌面渲染截图与实际操作结果，窗口缩放、视觉对比、完整键盘旅程和无障碍测试均保持待验证。
+- 原产品 PR #925 的最新 head `4babea4f1e49cc799beb72b9013d4e158d185962` 已在 GitHub Actions 取得部分相关成功结果（Application Skeleton、Windows Candidate、Portable Chrome、Documentation Integrity）；TASK-007 官方 Tampermonkey 隔离 Windows 实验于该 head 的 Actions run `45019225183`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45019225183）已成功完成；此证据仅适用于隔离实验，不表示实际用户 Profile 或产品级安装、注入及业务验证通过。必须按 head 完整检查并区分候选/隔离实验和真实用户环境与产品级验收，不能据部分绿色记录关闭 #857/#486/#510/#610。
+- **集成状态**：准备分支有未合并 Draft PR #926；不应直接把此分支视为已纳入 `main` 的正式准入更新。正式开发起点仍为有条件续接 TASK-013 / Issue #857，先核对 PR #925 的实际剩余功能和完整 CI；无须另建 Issue 或从 TASK-001 重做。

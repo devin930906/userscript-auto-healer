@@ -33,7 +33,7 @@
 
 - 当前 Electron 桌面界面主要位于 `app/ui/index.html`、`app/ui/index.ts`，受 `app/preload/index.ts` 与 `app/main/index.ts` 的原生 IPC、安全边界约束。不能把此 HTML 渲染界面视为独立联网网页应用或直接授予 Node/文件系统权限。
 - 当前源码中的单页区块包含：.user.js 导入与进度；测试场景登记、只读诊断与观察历史；人工候选导出；带原生确认的手动恢复；可选 AI 查询；独立 Chrome/CDP 与隔离 GM 测试。已存在真实按钮、输入与状态区域，但各功能的**最终产品级验收**分别依赖既有 TASK 与 TEST，不得由界面存在推断完成。
-- `app/ui/index.html` 已使用 HTML 标签、关联表单、部分 `aria-live` 状态反馈及原生控件；当前所读 HTML 未引用独立样式表。上述仅是源码静态观察，**并未在本次迁移中完成实际界面渲染、视觉对比、无障碍辅助技术测试、Windows 多缩放比测试或最终人工操作验收**。
+- `app/ui/index.html` 已采用原生 HTML 表单、关联标签、部分 `aria-live` 状态反馈，以及七个 `role="tab"` / `role="tabpanel"` 区域，并通过 `<link rel="stylesheet" href="./index.css">` 加载真实存在的 `app/ui/index.css`。当前 CSS 已定义深靛视觉变量、`:focus-visible`、状态与危险恢复样式，以及 `max-width: 760px` / `640px` 等窄窗口规则；这些仅是 **main 分支源码静态核查**，不是实际渲染、颜色对比、键盘行为、辅助技术、Windows 缩放或用户体验验收通过。
 - 正式产品需求仍以 `docs/02-requirements.md`、本文件、`docs/07-testing.md`、`docs/08-release.md` 与原有 ADR 为准；不得因缺少独立 `PRODUCT.md` / `DESIGN.md` 就宣告没有既有 UI 或自动新建另一套相互冲突的设计权威。
 
 ### 设计与交互继续开发的边界
