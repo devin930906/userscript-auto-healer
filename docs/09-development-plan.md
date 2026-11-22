@@ -631,3 +631,10 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **Required/相关检查**：该精确 head 的 31 个 check runs 中 29 个 success、2 个可选诊断 job skipped、0 个 failure。Application Skeleton Checks run [#44995638952](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638952) 的 `boundary` 与 `windows-shell-smoke` 均 success；Windows Candidate EXE/ZIP run [#44995638933](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638933) success；Documentation Integrity、Issue Coordination 和隔离 Tampermonkey matrix 也在同一 head 完成 success。上述检查不等于真实用户 GUI、Tampermonkey/GM/业务验收或 Stable GATE 通过。
 - **本地与云端测试边界**：本地全量 `npm test` 记录为 1,258 total / 1,203 pass / 43 fail / 12 skipped；失败类别仍为 TASK-011 restore 41 项、TEST-003 symlink `EPERM` 1 项及 TASK-018/TEST-018 E2E 1 项。该全量结果没有被记录为全绿；PR 的 Windows machine checks 通过也不覆盖用户交互式 GUI 或最终人工验收。
 - **下一步**：继续 #857 尚未贯通的授权动态诊断、完整逐脚本批处理协调、候选人工评估后的安全应用/失败恢复及其 TEST-022/GATE-007 证据；不得合并 PR、关闭 Issue、创建 Release 或宣称 Stable。
+
+## 2026-11-22 TASK-013 / Issue #857 — 本轮收尾与下一轮续接
+
+- 本轮收尾时，PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 精确 head 为 `51c12933e5ac3203682e0e2c07b0c65703171cd4`，base 为 `main@146f9a987e7e633496d723e7f517c68282e1fe07`，仍 Open、未合并；#857 仍 Open。`0a5b64f` 的 29 success / 2 skipped 只保留为前一 head 的历史收据。
+- 当前 head 的 GitHub check runs 为 30 个：28 success、2 optional diagnostic skipped、0 failure。Application Skeleton [#45017092193](https://github.com/devin930906/userscript-auto-healer/actions/runs/45017092193)、Windows Candidate [#45017092162](https://github.com/devin930906/userscript-auto-healer/actions/runs/45017092162，attempt 2)、Documentation、Issue Fence 和完整隔离 Tampermonkey matrix 均完成成功。第一次 Candidate attempt 的 `SHELL_SMOKE_DROPPED_FIRST_READ_NOT_STARTED` 已经按日志读取后受控重跑；重跑通过不等于时序根因已经修复。
+- 下一轮必须先处理只读审查保留的 3 项：smoke 在下一次文件 change 前等待恢复回执及输入控件 idle；源文件 picker 后立即做文件名/SHA 校验并在各原生对话框之间重新检查 capability；过期或消费失败提示“重新导入原脚本，再重新观察”。这些代码修复和相应 TDD 尚未在本轮实施。
+- 本地完整 `npm test` 仍为 1,258 total / 1,203 pass / 43 fail / 12 skipped；下一轮不得把 Windows runner 的 1,258 / 1,255 / 0 / 3 回归收据误写成全套本地测试通过。Stable、合并、Release、#857 关闭和 TEST-022/GATE-007 仍未达成。
