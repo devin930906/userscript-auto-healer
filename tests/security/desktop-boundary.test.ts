@@ -2518,7 +2518,7 @@ test('TASK-013/TEST-023/026: native candidate export verifies original before di
 
 test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import state before consecutive file changes',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
- const begin=main.indexOf('const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype');
+ const begin=main.indexOf("const area=document.getElementById('drop-area')");
  const end=main.indexOf('const uiScenarioSelect=',begin);
  assert.ok(begin>=0&&end>begin);
  const smoke=main.slice(begin,end);
@@ -2526,6 +2526,14 @@ test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import sta
  const secondDispatch=smoke.indexOf("input.dispatchEvent(new Event('change',{bubbles:true}))",
   firstDispatch+1);
  const helper=smoke.indexOf('const waitForImportReady=async');
+ const firstDrop=smoke.indexOf("area.dispatchEvent(new DragEvent('drop'");
+ const firstDropIdle=smoke.indexOf('const firstDropIdle=await waitForImportReady()');
+ const badDrop=smoke.indexOf('const badDrop=new DataTransfer()');
+ const badDropIdle=smoke.indexOf('const badDropIdle=await waitForImportReady()');
+ const directoryScan=smoke.indexOf('const oldEntry=Object.getOwnPropertyDescriptor');
+ assert.ok(helper>=0&&helper<firstDrop&&firstDropIdle>firstDrop&&
+  firstDropIdle<badDrop&&badDropIdle>badDrop&&badDropIdle<directoryScan,
+  'independent drags must wait for native finish and acknowledged recovery');
  const scanIdle=smoke.indexOf('const scanIdle=await waitForImportReady()');
  const batchIdle=smoke.indexOf('const batchIdle=await waitForImportReady()');
  assert.ok(helper>=0&&scanIdle>helper&&scanIdle<firstDispatch,
@@ -2539,6 +2547,8 @@ test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import sta
  assert.match(smoke,/choose-files.*?disabled/);
  assert.match(smoke,/choose-folder.*?disabled/);
  assert.match(smoke,/cancel-import.*?disabled/);
+ assert.match(smoke,/if\(!firstDropIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+ assert.match(smoke,/if\(!badDropIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
  assert.match(smoke,/if\(!scanIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
  assert.match(smoke,/if\(!batchIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
 });
