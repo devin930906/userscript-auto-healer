@@ -2518,7 +2518,7 @@ test('TASK-013/TEST-023/026: native candidate export verifies original before di
 
 test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import state before consecutive file changes',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
- const begin=main.indexOf("const area=document.getElementById('drop-area')");
+ const begin=main.indexOf('const waitForImportReady=async');
  const end=main.indexOf('const uiScenarioSelect=',begin);
  assert.ok(begin>=0&&end>begin);
  const smoke=main.slice(begin,end);
