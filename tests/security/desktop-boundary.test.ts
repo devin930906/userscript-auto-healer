@@ -2510,7 +2510,7 @@ test('TASK-013/TEST-023/026: native candidate export verifies original before di
   assert.ok(handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')>initialRead&&
    handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')<firstBackupDialog);
   assert.ok(finalRead>exportDialog,'source is re-read after destination dialogs to reject changed bytes');
-  assert.ok((handler.match(/importedDomCandidateExportStore\\.isReserved\\(win,id\\)/g)??[]).length>=3,
+  assert.ok((handler.match(/importedDomCandidateExportStore\.isReserved\(win,id\)/g)??[]).length>=3,
    'short-lived candidate authority must be rechecked before/between awaited native dialogs');
   assert.match(ui,/请重新导入原始脚本，再重新进行 DOM 观察/,
    'expired and consumed candidate receipts need explicit recovery instructions');
