@@ -239,9 +239,11 @@ const scenarioCancelButton = document.getElementById('scenario-cancel') as HTMLB
 const scenarioList = document.getElementById('scenario-list');
 const importedDomTarget=document.getElementById('imported-dom-target') as HTMLInputElement|null;
 const importedDomRunButton=document.getElementById('imported-dom-run') as HTMLButtonElement|null;
+const importedDomCancelButton=document.getElementById('imported-dom-cancel') as HTMLButtonElement|null;
 const importedDomResult=document.getElementById('imported-dom-result');
 const importedDomItems=document.getElementById('imported-dom-items');
 let scenarioBusy=false;
+let importedDomCancelRequested=false;
 function updateScenarioControls():void{
  if(scenarioScript)scenarioScript.disabled=seenScripts.size===0;
  if(scenarioRegister)scenarioRegister.disabled=seenScripts.size===0||scenarioBusy||
@@ -846,6 +848,7 @@ const gmObserveButtons={
 const gmLinks=document.getElementById('gm-probe-links');
 const gmResult=document.getElementById('gm-probe-result');
 function updateImportedDomControls():void{
+ if(importedDomCancelButton)importedDomCancelButton.disabled=!importedDomBusy||importedDomCancelRequested;
  if(importedDomTarget)importedDomTarget.disabled=importedDomBusy||importedDomCandidateExportBusy;
  if(importedDomRunButton)importedDomRunButton.disabled=importedDomBusy||
   importedDomCandidateExportBusy||scenarioInspectionBusy||!browserConnected||seenScripts.size===0||
@@ -1800,8 +1803,27 @@ importedDomTarget?.addEventListener('input',()=>{
  }
  updateImportedDomControls();
 });
+importedDomCancelButton?.addEventListener('click',()=>{
+ if(!importedDomBusy||importedDomCancelRequested)return;
+ importedDomCancelRequested=true;
+ browserControls();
+ if(importedDomResult)importedDomResult.textContent=
+  '已请求取消本轮只读 DOM 观察；正在等待主进程确认，尚不能视为已经取消。';
+ void window.healer.cancelScenarioInspection().then(result=>{
+  if(!importedDomBusy)return;
+  if(!result.ok){
+   if(importedDomResult)importedDomResult.textContent=
+    '本轮 DOM 观察取消请求未确认：'+(result.code??'UNKNOWN')+
+    '。请等待原生检查结束；不会因此自动修复脚本。';
+  }
+ }).catch(()=>{
+  if(importedDomBusy&&importedDomResult)importedDomResult.textContent=
+   '没有可靠取消回执；请等待本轮检查完成，原始脚本不会被覆盖。';
+ });
+});
 importedDomRunButton?.addEventListener('click',()=>{
  if(importedDomBusy||scenarioInspectionBusy||importedDomCandidateExportBusy)return;
+ importedDomCancelRequested=false;
  const targetUrl=importedDomTarget?.value.trim()??'';
  const requestId=++importedDomRequestId;
  const generation=++importedDomGeneration;
@@ -1933,6 +1955,7 @@ importedDomRunButton?.addEventListener('click',()=>{
   if(requestId!==importedDomRequestId)return;
   importedDomActiveTarget=null;
   importedDomBusy=false;
+  importedDomCancelRequested=false;
   scenarioInspectionBusy=false;
   browserControls();
  });
