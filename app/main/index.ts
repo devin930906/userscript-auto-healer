@@ -1968,6 +1968,16 @@ function registerSafeIpc(): void {
       if(source.canceled||source.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
       const sourcePath=source.filePaths[0];
+      // Fail closed before any destination picker: the user must reselect
+      // the exact imported filename and original bytes of this candidate.
+      const initial=await importApprovedPaths([sourcePath],controller.signal);
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(initial.errors.length!==0||initial.scripts.length!==1||
+         initial.scripts[0].filename!==capability.filename||
+         initial.scripts[0].sha256!==capability.context.originalSha256)
+        return {ok:false,code:'SOURCE_IDENTITY_MISMATCH',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
 
       const backup=await dialog.showOpenDialog(win,{
         title:'选择独立备份文件夹（只新建文件，不覆盖已有文件）',
@@ -1977,6 +1987,8 @@ function registerSafeIpc(): void {
       if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
       if(backup.canceled||backup.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
 
       const destination=await dialog.showOpenDialog(win,{
         title:'选择候选及原始恢复版本的独立导出文件夹',
@@ -1986,6 +1998,8 @@ function registerSafeIpc(): void {
       if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
       if(destination.canceled||destination.filePaths.length!==1)
         return {ok:false,code:'CANCELLED',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
 
       // Read the newly selected source after directory selection, so the hash
       // shown in the final confirmation describes the latest native snapshot.
@@ -1995,6 +2009,8 @@ function registerSafeIpc(): void {
          current.scripts[0].filename!==capability.filename||
          current.scripts[0].sha256!==capability.context.originalSha256)
         return {ok:false,code:'SOURCE_IDENTITY_MISMATCH',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
 
       const approved=await dialog.showMessageBox(win,{
         type:'question',buttons:['创建独立备份、候选及原始恢复版本','取消'],
