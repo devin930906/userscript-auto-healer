@@ -253,6 +253,9 @@ function updateScenarioControls():void{
 // disables the renderer action; the native service verifies consent again.
 scenarioApprove?.addEventListener('change', updateScenarioControls);
 let busy = false;
+// On reload, the native process may still own an abandoned batch receipt.
+// Lock all new renderer imports until recovery or acknowledgement settles.
+let startupRecoveryPending = true;
 let activeImport = false;
 let nativeImportMode = false;
 let liveNativeImportProgress:NativeImportProgress|null=null;
@@ -295,9 +298,11 @@ function updateImportSummary(): void {
   if (importSummary) importSummary.textContent =
     '本次会话：成功 ' + acceptedCount + '，重复 ' + duplicateCount +
     '，失败 ' + failedCount + '，未处理 ' + unprocessedCount +
-    '。' + (activeImport
-      ? cancelRequested ? ' 正在取消，当前文件读取完成后停止。' : ' 正在导入，只读分析。'
-      : ' 不代表真实 Tampermonkey 或业务修复验证。')+
+    '。' + (startupRecoveryPending
+      ? ' 正在核对上次批量导入的恢复回执，暂不能开始新导入。'
+      : activeImport
+        ? cancelRequested ? ' 正在取消，当前文件读取完成后停止。' : ' 正在导入，只读分析。'
+        : ' 不代表真实 Tampermonkey 或业务修复验证。')+
     (nativeImportMode&&liveNativeImportProgress?.active===true
       ? ' 原生进度：'+({
           PICKING:'等待选择文件',SCANNING:'扫描授权文件夹',
@@ -677,7 +682,16 @@ cancelImport?.addEventListener('click', () => {
   }
 });
 updateImportSummary();
-void recoverDroppedImportBatch();
+// The synchronous locked() entry makes pickers, file input and drag/drop
+// mutually exclusive with recovery; the main process still enforces IPC
+// ownership independently. Always restore status when recovery settles.
+void locked(async () => {
+  try { await recoverDroppedImportBatch(); }
+  finally {
+    startupRecoveryPending = false;
+    updateImportSummary();
+  }
+});
 
 chooseFile?.addEventListener('click', () => { void locked(async () => importNativeSelection('files')); });
 chooseFolder?.addEventListener('click', () => { void locked(async () => importNativeSelection('folder')); });
