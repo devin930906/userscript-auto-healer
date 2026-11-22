@@ -207,17 +207,22 @@ export class ImportedDomDiagnosticIndex{
  }
  recordImported(hash:unknown,hints:unknown,filename:unknown=null,source?:unknown):void{
   if(typeof hash!=='string'||!HASH.test(hash))return;
+  const previous=this.profiles.get(hash);
+  if(!previous&&this.profiles.size>=MAX_IMPORTED_SCRIPTS){
+   this.truncatedScripts=true;
+   return;
+  }
+  // Retain source bytes only for a script actually tracked by this index.
+  // A rejected over-cap import must not create an orphan source sidecar.
   if(source!==undefined)this.retainCandidateSource(hash,source);
   const label=typeof filename==='string'&&filename.length>0&&filename.length<=255&&
    !/[\u0000-\u001f\u007f/\\:]/.test(filename)?filename:null;
   const safeHints=hints===null||hints===undefined?null:snapshotHints(hints);
-  const previous=this.profiles.get(hash);
   if(previous){
    if(!previous.hints&&safeHints)
     this.profiles.set(hash,Object.freeze({hash,filename:previous.filename??label,hints:safeHints}));
    return;
   }
-  if(this.profiles.size>=MAX_IMPORTED_SCRIPTS){this.truncatedScripts=true;return;}
   this.profiles.set(hash,Object.freeze({hash,filename:label,hints:safeHints}));
  }
  plan(targetInput:unknown):ImportedDomPlan{
