@@ -160,6 +160,7 @@
         <input id="imported-dom-target" type="url" maxlength="4096" placeholder="https://example.com/page">
         <div class="actions">
           <button id="imported-dom-run" type="button" class="primary" disabled>原生授权后检查匹配脚本</button>
+          <button id="imported-dom-cancel" type="button" class="secondary" disabled>取消本轮批量 DOM 观察</button>
         </div>
         <p id="imported-dom-result" role="status" aria-live="polite">导入脚本后，输入目标网址并启动受控 Chrome，即可查看有限 DOM 观测结果。整体状态仍为 UNKNOWN，直到后续真实脚本和业务验收完成。</p>
         <ol id="imported-dom-items" aria-labelledby="imported-dom-result"></ol>
