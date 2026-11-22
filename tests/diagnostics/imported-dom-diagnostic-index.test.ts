@@ -179,6 +179,22 @@ test('TASK-013/TEST-022/026: idle candidate source is eagerly dropped at its exp
   'the timer must remove the source even if no later import or lookup occurs');
 });
 
+test('TASK-013/TEST-022/026: candidate-source timer failure drops retained source fail-closed',()=>{
+ const source='temporary private candidate bytes';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ let attempts=0;
+ const index=new ImportedDomDiagnosticIndex(()=>100,{
+  setTimeout:()=>{attempts++;throw new Error('timer unavailable');},
+  clearTimeout:()=>{}
+ });
+ assert.doesNotThrow(()=>index.recordImported(hash,null,'timer-failure.user.js',source));
+ assert.ok(attempts>=1,'the injected timer failure must be exercised');
+ assert.equal(index.readUtf8CandidateSource(hash),null,
+  'source text must not remain in memory without a scheduled expiration');
+ assert.equal(index.plan('https://example.org/app').items.length,1,
+  'failing to retain candidate source must not discard independent AST metadata');
+});
+
 test('TASK-013/TEST-022/026: a closed import owner cannot repopulate the replacement window index',()=>{
  const oldWindow={};
  const newWindow={};
