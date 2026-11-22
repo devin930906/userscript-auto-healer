@@ -2576,3 +2576,21 @@ test('TASK-013/TEST-002/022: renderer skips unrelated file names before charging
  assert.match(body,/droppedImportProgress\.processed=index\+1/,
   'skipping an unrelated file must not stall batch progress reporting');
 });
+
+test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'batch DOM diagnosis must remain reachable');
+ const body=main.slice(start,end);
+ const guard=body.indexOf('if(candidatePreviewCount<16)');
+ const source=body.indexOf('const source=importedDomDiagnosticIndex.readUtf8CandidateSource',guard);
+ const absent=body.indexOf('if(source===null)',source);
+ const proposal=body.indexOf('proposeImportedDomCandidate(',absent);
+ const charge=body.indexOf('candidatePreviewCount++',guard);
+ assert.ok(guard>=0&&source>guard&&absent>source&&proposal>absent&&
+  charge>absent&&charge<proposal,
+  'a missing source must not spend a proposal slot; only source-backed evaluations spend one');
+ assert.match(body,/BATCH_PREVIEW_LIMIT/,
+  'the maximum of sixteen actually attempted proposals must remain enforced');
+});
