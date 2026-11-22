@@ -109,4 +109,7 @@
 - [x] **Step 2: Run the full `npm test` suite** and compare against the fresh baseline of 1,251 total / 1,196 passed / 43 failed / 12 skipped; report any changed failure set rather than claiming the suite passed.
 - [x] **Step 3: Update only evidence-backed TASK-013 status** in `docs/09-development-plan.md` and `docs/12-handoff.md`; retain #857 and #925 as Open and list genuine remaining work.
 - [x] **Step 4: Re-run relevant checks after documentation edits, inspect the full diff and working tree, and create a local commit.**
-- [ ] **Step 5: Push the existing PR #925 branch and verify the exact new SHA, required check status, and Windows candidate/shell-smoke jobs through GitHub.** Do not merge the PR or create a Release.
+- [x] **Step 5: Push the existing PR #925 branch and verify the exact new SHA, required check status, and Windows candidate/shell-smoke jobs through GitHub.** Do not merge the PR or create a Release.
+
+**Execution receipt (2026-11-22):** PR #925 remains open and unmerged at exact head `0a5b64f79a0d753000c1243d4cd655bbe15b3226`, based on `main@146f9a987e7e633496d723e7f517c68282e1fe07`. GitHub reports 31 check runs: 29 successful, 2 optional diagnostic jobs skipped, and 0 failures. Application Skeleton Checks run `44995638952` passed, including `boundary` and `windows-shell-smoke`; Windows Candidate EXE and ZIP run `44995638933` passed; Documentation Integrity, Issue Coordination, and the isolated Tampermonkey matrix also passed at this exact head. The PR was not merged and no Release was created.
+

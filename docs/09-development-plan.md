@@ -624,3 +624,11 @@ TASK-001..021、原任务依赖和验收要求保持不变。每次启动正式�
 - **本地验证**：`npm run build`、`npm run typecheck`、`.github/scripts/verify-predevelopment.py`（28 REQ/TEST、21 TASK、11 GATE）、`git diff --check` 通过。定向索引/候选/导出/桌面安全测试 **114/114** 通过。完整 `npm test` 为 **1,258 total / 1,203 pass / 43 fail / 12 skipped**；43 项仍为 TASK-011 restore 41 项、TEST-003 symlink `EPERM` 1 项及 TASK-018/TEST-018 1 项，与本地基线失败类别一致；全套仍不记为通过。
 - **同步前 GitHub 状态**：代码验证后观察到 PR #925 Open、未合并，head `35c70b4cfb712e55130decf38ba30b85004c8571`，base `main@146f9a987e7e633496d723e7f517c68282e1fe07`；该 SHA 尚不包含本轮本地改动。同步后须以新精确 HEAD 复查 Windows smoke、Candidate packaging、Documentation Integrity、Issue Coordination 与 Tampermonkey matrix。
 - **仍未完成**：#857 的授权动态诊断与完整逐脚本协调、候选人工评估后的应用与失败恢复、可选 AI、真实 Tampermonkey/GM/业务正反断言及完整测试仍未贯通。#857 保持 Open；TEST-022/GATE-007、其他 Stable GATE、同源 EXE+ZIP、最终集中人工验收与正式 Release 均未通过。
+
+## 2026-11-22 TASK-013 / Issue #857 — PR #925 精确 head 同步与 Windows checks 收据
+
+- **远端精确状态**：PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 已包含本轮候选独立导出提交，当前 head 为 `0a5b64f79a0d753000c1243d4cd655bbe15b3226`，base 为 `main@146f9a987e7e633496d723e7f517c68282e1fe07`；PR 仍 Open、未合并。Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 仍 Open。
+- **Required/相关检查**：该精确 head 的 31 个 check runs 中 29 个 success、2 个可选诊断 job skipped、0 个 failure。Application Skeleton Checks run [#44995638952](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638952) 的 `boundary` 与 `windows-shell-smoke` 均 success；Windows Candidate EXE/ZIP run [#44995638933](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638933) success；Documentation Integrity、Issue Coordination 和隔离 Tampermonkey matrix 也在同一 head 完成 success。上述检查不等于真实用户 GUI、Tampermonkey/GM/业务验收或 Stable GATE 通过。
+- **本地与云端测试边界**：本地全量 `npm test` 记录为 1,258 total / 1,203 pass / 43 fail / 12 skipped；失败类别仍为 TASK-011 restore 41 项、TEST-003 symlink `EPERM` 1 项及 TASK-018/TEST-018 E2E 1 项。该全量结果没有被记录为全绿；PR 的 Windows machine checks 通过也不覆盖用户交互式 GUI 或最终人工验收。
+- **下一步**：继续 #857 尚未贯通的授权动态诊断、完整逐脚本批处理协调、候选人工评估后的安全应用/失败恢复及其 TEST-022/GATE-007 证据；不得合并 PR、关闭 Issue、创建 Release 或宣称 Stable。
+

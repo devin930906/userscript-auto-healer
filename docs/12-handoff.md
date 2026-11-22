@@ -485,3 +485,11 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **测试覆盖限制**：新增 IPC 对话框顺序由 desktop-boundary 源码边界断言核验；候选能力 store 与候选/文件导出服务另有可执行单测。没有用 Electron mock 实际驱动每一个系统对话框取消、等待期过期、窗口关闭或确认后的部分写入回执；也未做真实窗口或屏幕阅读器操作验收。原始文件保护仍由现有 native source lock、验证备份与导出服务承担。
 - **GitHub 同步前状态**：PR #925 在本轮本地验证时仍 Open、未合并，观察 head `35c70b4cfb712e55130decf38ba30b85004c8571`；本轮修改待本地 commit 与 push。推送后必须按新精确 SHA 核验 Application Skeleton `windows-shell-smoke`、Candidate Windows packaging、Documentation Integrity、Issue Coordination 及 Tampermonkey matrix；不合并 PR。
 - **剩余范围**：#857 仍缺完整批量协调、候选后续应用与失败恢复、授权动态诊断/可选 AI、真实 Tampermonkey/GM/业务正反验收及 TEST-022/GATE-007。#857 与 #610 保持 Open；其他 TASK/GATE、同源 EXE+ZIP、最终集中人工验收与正式 Stable Release 未完成。下一步完成本文档检查、保存本地提交并同步 PR #925，再按新 SHA 处理真实 Windows/CI 结果。
+
+## 2026-11-22 PR #925 候选导出 head 与 Windows checks 续接
+
+- PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 当前 head 为 `0a5b64f79a0d753000c1243d4cd655bbe15b3226`，base 为 `main@146f9a987e7e633496d723e7f517c68282e1fe07`，仍 Open、未合并；Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 保持 Open。
+- 精确 head 的 GitHub check runs 为 31 项：29 success、2 个可选诊断 job skipped、0 failure。Application Skeleton Checks [#44995638952](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638952) 的 `boundary` 与 `windows-shell-smoke` 通过；Windows Candidate EXE/ZIP [#44995638933](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638933)、Documentation Integrity、Issue Coordination 与隔离 Tampermonkey matrix 均已在该 head 完成。候选包和隔离矩阵仍不是正式 Stable/真实用户环境验收。
+- 本地 `npm test` 仍为 1,258 total / 1,203 pass / 43 fail / 12 skipped；43 项为既有 TASK-011 restore、TEST-003 symlink `EPERM` 与 TASK-018/TEST-018 E2E 类别，不能记为全量通过。候选导出只证明经原生确认的独立人工导出边界，未授予安装、执行、Tampermonkey、GM、业务或自动应用权限。
+- **下一续接**：继续 #857 的逐脚本动态诊断与完整批量协调、候选后续安全应用/失败恢复和 TEST-022/GATE-007 证据；真实 Tampermonkey/GM/业务验收、同源 EXE+ZIP、最终集中人工验收及 Release 仍未完成。
+
