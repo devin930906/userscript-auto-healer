@@ -2490,3 +2490,28 @@ test('TASK-017/TEST-002/022: desktop ordinary user journey enforces unforced sel
   assert.ok(html.includes('UNKNOWN / 受阻'));
   assert.ok(ui.includes('无法判断是否已安装'));
 });
+
+test('TASK-013/TEST-023/026: native candidate export verifies original before directory dialogs and checks capability lifetime',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const start=main.indexOf("ipcMain.handle('scenario:export-imported-candidate'");
+  const end=main.indexOf("ipcMain.handle('scenario:cancel'",start);
+  assert.ok(start>=0&&end>start);
+  const handler=main.slice(start,end);
+  const picked=handler.indexOf('const sourcePath=source.filePaths[0]');
+  const initialRead=handler.indexOf('const initial=await importApprovedPaths([sourcePath],controller.signal)');
+  const firstBackupDialog=handler.indexOf('const backup=await dialog.showOpenDialog');
+  const finalRead=handler.indexOf('const current=await importApprovedPaths([sourcePath],controller.signal)');
+  const exportDialog=handler.indexOf('const destination=await dialog.showOpenDialog');
+  assert.ok(picked>=0&&initialRead>picked&&firstBackupDialog>initialRead,
+   'source identity must be validated before asking for backup or export folders');
+  assert.ok(handler.indexOf('initial.scripts[0].filename!==capability.filename')>initialRead&&
+   handler.indexOf('initial.scripts[0].filename!==capability.filename')<firstBackupDialog);
+  assert.ok(handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')>initialRead&&
+   handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')<firstBackupDialog);
+  assert.ok(finalRead>exportDialog,'source is re-read after destination dialogs to reject changed bytes');
+  assert.ok((handler.match(/importedDomCandidateExportStore\\.isReserved\\(win,id\\)/g)??[]).length>=3,
+   'short-lived candidate authority must be rechecked before/between awaited native dialogs');
+  assert.match(ui,/请重新导入原始脚本，再重新进行 DOM 观察/,
+   'expired and consumed candidate receipts need explicit recovery instructions');
+});
