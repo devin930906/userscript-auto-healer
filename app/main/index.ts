@@ -1617,11 +1617,13 @@ function registerSafeIpc(): void {
               candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_NOT_ATTEMPTED'
             };
           if(candidatePreviewCount<16){
-            candidatePreviewCount++;
             const source=importedDomDiagnosticIndex.readUtf8CandidateSource(item.scriptSha256);
             if(source===null){
               candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'SOURCE_UNAVAILABLE'};
             }else{
+              // Only source-backed proposals spend the bounded evaluation
+              // budget. Missing/expired sources must not starve later scripts.
+              candidatePreviewCount++;
               const proposal=proposeImportedDomCandidate({source,
                 expectedSourceSha256:item.scriptSha256,targetUrl:plan.targetUrl,
                 observation,nativeConsent:true});
