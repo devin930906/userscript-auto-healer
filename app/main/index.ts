@@ -2310,6 +2310,17 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.startsWith('bad-drop.txt: NOT_USER_SCRIPT')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype,'webkitGetAsEntry'); " +
+      // Wait for the main-owned recovery receipt AND enabled picker controls.
+      // Seeing a rendered row alone can precede the recovery acknowledgement.
+      "const waitForImportReady=async()=>{const until=Date.now()+6000; " +
+      "while(Date.now()<until){ " +
+      "const recovery=await a.recoverDroppedImportBatch().catch(()=>({code:'RECOVERY_STATUS_UNAVAILABLE'})); " +
+      "const idle=document.getElementById('cancel-import')?.disabled===true && " +
+      "document.getElementById('choose-files')?.disabled===false && " +
+      "document.getElementById('choose-folder')?.disabled===false && " +
+      "document.getElementById('select-files')?.disabled===false; " +
+      "if(idle&&recovery.code==='NO_PENDING_RECOVERY')return true; " +
+      "await new Promise(resolve=>setTimeout(resolve,40));}return false;}; " +
       "let releaseScan=null;Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',{ " +
       "configurable:true,writable:true,value:function(){const file=this.getAsFile(); " +
       "if(file&&file.name==='scan-fixture.user.js')return {isFile:false,isDirectory:true,name:'scan-root', " +
@@ -2325,7 +2336,8 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.includes('已取消拖放目录扫描')) && document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "if(releaseScan)releaseScan(); " +
-      "await new Promise(resolve=>setTimeout(resolve,20)); " +
+      "const scanIdle=await waitForImportReady(); " +
+      "if(!scanIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',oldEntry); " +
       "const input=document.getElementById('select-files'); " +
       "const sample=new DataTransfer(); sample.items.add(new File(['bad'],'invalid.txt')); " +
@@ -2337,6 +2349,8 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.startsWith('invalid.txt:')) && " +
       "lines.some(x=>x.startsWith('accepted-batch.user.js:')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const batchIdle=await waitForImportReady(); " +
+      "if(!batchIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const next=new DataTransfer(); next.items.add(new File(['// first'],'cancel-first.user.js')); " +
       "let releaseFirstRead; const firstReadGate=new Promise(resolve=>{releaseFirstRead=resolve;}); " +
       "let signalFirstReadStarted; const firstReadStarted=new Promise(resolve=>{signalFirstReadStarted=resolve;}); " +
