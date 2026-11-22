@@ -1774,8 +1774,8 @@ function importedDomCandidateExportReason(code:string|undefined):string{
  const reasons:Record<string,string>={
   CANCELLED:'已取消；尚未收到文件导出回执。',
   EXPORT_BUSY:'另一个系统原生操作仍在进行，请稍后再试。',
-  CANDIDATE_UNAVAILABLE:'该预览句柄已失效或已使用；请重新观察后生成候选。',
-  CANDIDATE_EXPIRED:'该候选预览已过期；请重新观察后生成候选。',
+  CANDIDATE_UNAVAILABLE:'候选预览已失效或已使用，不能继续导出。',
+  CANDIDATE_EXPIRED:'候选预览已过期，不能继续导出。',
   SOURCE_IDENTITY_MISMATCH:'重新选择的文件名或 SHA-256 与预览不符；没有开始导出。',
   INVALID_IMPORT:'所选脚本未通过重新读取验证；没有生成成功回执。',
   UNSUPPORTED_ENCODING:'所选脚本编码不符合此候选导出路径。',
@@ -1890,20 +1890,20 @@ importedDomRunButton?.addEventListener('click',()=>{
        if(consumed||candidateExpiredOrUnavailable){
         terminal=true;
         action.dataset.exportTerminal='true';
-        action.textContent='需重新观测后导出';
+        action.textContent='需重新导入并观测';
        }else action.textContent='重新选择并导出';
        receipt.textContent=importedDomCandidateExportReason(answer.code)+
         (consumed
-         ?'最终确认后此候选已结束；文件暂存可能已开始。请先检查所选备份与导出目录中的文件，再重新观测生成候选。'
+         ?'最终确认后此候选已结束；文件暂存可能已开始。请先检查所选备份与导出目录中的文件。请重新导入原始脚本，再重新进行 DOM 观察。'
          :candidateExpiredOrUnavailable
-          ?'本次请求未开始文件写入；请重新观察后生成候选。'
+          ?'本次请求未开始文件写入；请重新导入原始脚本，再重新进行 DOM 观察以生成新候选。'
           :'若最终确认尚未完成，可重新发起；原始脚本不会由此操作覆盖。');
       }).catch(()=>{
        if(generation!==importedDomGeneration||requestId!==importedDomRequestId)return;
        terminal=true;
        action.dataset.exportTerminal='true';
-       action.textContent='状态不明，请重新观测';
-       receipt.textContent='未收到可靠文件回执。请检查所选备份与导出目录；不要重复使用此候选。原始脚本未被本程序改写。';
+       action.textContent='导出状态不明';
+       receipt.textContent='未收到可靠文件回执。请检查所选备份与导出目录，不要重复使用此候选。请重新导入原始脚本，再重新进行 DOM 观察；原始脚本未被本程序改写。';
       }).finally(()=>{
        importedDomCandidateExportBusy=false;
        if(generation===importedDomGeneration&&requestId===importedDomRequestId){
