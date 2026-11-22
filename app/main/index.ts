@@ -2371,6 +2371,12 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
       "document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      // The canceled-row log is emitted before the finish IPC and recovery
+      // acknowledgement settle. Do not race the final summary assertion with
+      // that pending native completion; verify the same genuine idle contract
+      // used for the earlier dropped-file fixture batches.
+      "const cancelImportIdle=await waitForImportReady(); " +
+      "if(!cancelImportIdle)throw Error('SHELL_SMOKE_CANCEL_IMPORT_NOT_IDLE'); " +
       "const uiScenarioSelect=document.getElementById('scenario-script'); " +
       "const uiScenarioImported=uiScenarioSelect.options.length>=2 && !uiScenarioSelect.disabled; " +
       "document.getElementById('scenario-id').value='smoke_ui_scenario'; " +
