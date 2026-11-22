@@ -1,5 +1,17 @@
 # 项目开发交接
 
+## 2026-11-22 当前开发交接入口（覆盖旧快照的实时解释）
+
+> 本节为 **2026-11-22 远端 GitHub 核验快照**，优先于下方标记“当前最新”的历史快照；原有历史记录均保留，不回写其过去的 CI 结果。未来续接仍必须再次查询实时 main、Issues、PR 与精确 head SHA。
+
+- **仓库与集成基准**：`devin930906/userscript-auto-healer`，默认 `main@146f9a987e7e633496d723e7f517c68282e1fe07`（本轮只读核验）；准备审计 PR [#926](https://github.com/devin930906/userscript-auto-healer/pull/926) 是 docs-only Draft，尚未合并到 main。PR #926 当前变更包含 `docs/11-readiness.md` 与本交接文件；以最终 PR 实际 diff 为准。
+- **当前开放产品 PR**：[ #925 ](https://github.com/devin930906/userscript-auto-healer/pull/925)，TASK-013 / Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857)，head `4babea4f1e49cc799beb72b9013d4e158d185962`，未合并。已有批量导入、AST/只读 DOM 观察及候选导出等子范围，不得认作全自动诊断—修复—同一 CDP Chrome/Tampermonkey 真实业务验收完成。继续前检查其最新 diff、审查意见、CI 与剩余依赖。
+- **当前开放 Issues（四项）**：[#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013 批次闭环）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（TASK-007 真实 Tampermonkey 验收）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（TASK-005 Chrome/CDP 偶发启动）、[#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021 Stable 全门槛/EXE+ZIP）。已关闭历史 Issues 不因本节重新开启；不能把关闭等同 Stable 验收通过。
+- **证据层级**：PR #925 精确 head 的 Actions 隔离 Tampermonkey 实验 [#45019225183](https://github.com/devin930906/userscript-auto-healer/actions/runs/45019225183) 已成功，Windows Candidate 与其他专项 CI 亦有对应成功记录；这些不是用户实际 Profile、管理器正式安装、脚本注入、修复后业务恢复、全部 GATE 或最终人工验收通过。准备审计 PR #926 的前一次 head `cf79f274b74b8ed435e46fc69fa667c04ae810b5` 对应三个工作流检查已成功，但新增交接文件后的新 head 需要重新检查。
+- **权威入口**：需求以 `docs/00-intake.md`、`docs/02-requirements.md` 为准；界面以 `docs/05-experience.md` 为准；TASK 为 `docs/09-development-plan.md`、映射为 `docs/10-traceability.md`；质量与交付为 `docs/07-testing.md`、`docs/08-release.md`、`docs/11-readiness.md`、`docs/14-stable-work-register.md`。沿用 REQ-001..028、TASK-001..021、TEST-001..028、GATE-001..011，按实时证据更新状态，不另造编号和竞争性文档。
+- **续接及安全**：不建立 Issue 认领/独占锁；同一 Issue 可跨对话、多 PR；使用独立分支、精确 SHA、文件差异、PR 和 CI 防止覆盖。GitHub 插件优先读取与写入，MCP 只补不足能力；任何平台实体化或审批不绕过。Superpowers 负责过程、ECC Web 负责领域分析、Impeccable Web 针对现有桌面 UI 的交互/设计审查；这些技能不代替仓库操作或 Windows 实测。
+- **下一开发入口与限制**：有条件续接 **TASK-013 / #857 / PR #925** 已确认未完成子范围；不得在本准备阶段提前实现产品功能。正式开发阶段继续自动化 CI，Stable 发布前统一执行真实 Windows EXE 安装/卸载、ZIP 解压/重启、指定 Chrome/Chrome++ 与 Profile、安全 CDP、Tampermonkey 实际脚本执行、修复和回滚、UI/无障碍与业务验收。未经安全授权不能写用户原文件或扩展/Profile；未通过全部 GATE 不得发布 Stable。
+
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
 > **当前最新续接（2026-11-19，PR #909..#922 全量任务代码整合、1220 项测试全绿与 main@19b7391 Windows Candidate 双包交付实测）**：
