@@ -351,6 +351,16 @@ export class ImportedDomCandidateExportStore<T extends object>{
   return entry.context;
  }
 
+ /** Check an already reserved handle after awaited native dialogs.
+  * This never extends the deadline or authorizes another export. */
+ isReserved(owner:object,id:unknown):boolean{
+  this.pruneExpired();
+  if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
+     typeof id!=='string'||!CANDIDATE_ID.test(id))return false;
+  const entry=this.entries.get(id);
+  return !!entry&&entry.owner===owner&&entry.reserved;
+ }
+
  release(owner:object,id:unknown):boolean{
   this.pruneExpired();
   if(!owner||typeof owner!=='object'||nodeTypes.isProxy(owner)||
