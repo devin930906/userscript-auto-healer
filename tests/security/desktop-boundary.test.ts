@@ -2665,7 +2665,8 @@ test('TASK-013/TEST-022: dropped directory entry errors isolate siblings and lat
  const result=await (env.scan as (data:unknown,signal:AbortSignal)=>Promise<Array<{name:string}>>)({
   items:roots.map(entry=>({kind:'file',webkitGetAsEntry:()=>entry})),files:[]
  },new AbortController().signal);
- assert.deepEqual(result.map(item=>item.name),[
+ // Snapshot values into this Node realm: a vm Array has a distinct prototype.
+ assert.deepEqual(Array.from(result,item=>item.name),[
   'first.user.js','second.user.js','third.user.js','last-root.user.js'
  ]);
  assert.equal(env.failedCount,3,'each unreadable entry counts as an isolated failure');
