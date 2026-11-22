@@ -1,5 +1,7 @@
 # 原始输入与项目边界
 
+> **2026-11-22 现行端口校准**：本轮原始功能要求的正式文本请参照 [完整原文](original-product-requirements.txt) 及 [原始需求校准](product-rebaseline.md)。下方保留的早期输入快照将 `9223` 写成默认值，属于历史记录；现行已明确默认 CDP 端口为 `9896`，`9223` 仅是命令行示例。不得为消除冲突而改写旧版引文。
+
 > 当前产品原始输入见 [用户需求原文](original-product-requirements.txt)，历史输入与后续 ZIP、Tampermonkey 决定保留供追溯。
 
 ## 原始输入
