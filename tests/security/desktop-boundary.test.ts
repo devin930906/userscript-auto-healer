@@ -2617,3 +2617,61 @@ test('TASK-013/TEST-022: startup dropped-batch recovery owns the renderer import
  assert.doesNotMatch(boot,/void recoverDroppedImportBatch\(\)/,
   'fire-and-forget bootstrap must not allow overlapping new imports');
 });
+
+test('TASK-013/TEST-022: dropped directory entry errors isolate siblings and later roots',async()=>{
+ const ts=await import('typescript');
+ const vm=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function readDropEntry<T>(');
+ const end=ui.indexOf("cancelImport?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'bounded dropped-folder scan must exist');
+ const source=ui.slice(start,end)+
+  '\n(globalThis as unknown as {scan:typeof filesFromDrop}).scan=filesFromDrop;';
+ const js=ts.transpileModule(source,{compilerOptions:{
+  target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None
+ }}).outputText;
+ const lines:string[]=[];
+ const env:Record<string,unknown>={
+  MAX_DIRECTORY_ENTRIES:10000,MAX_DIRECTORY_DEPTH:8,MAX_FILES:1000,
+  cancelRequested:false,failedCount:0,
+  logLine:(line:string)=>lines.push(line),updateImportSummary:()=>{},
+  setTimeout,clearTimeout,AbortController
+ };
+ vm.runInNewContext(js,env,{timeout:1000});
+ const file=(name:string,rejected=false)=>({
+  name,isFile:true,isDirectory:false,
+  file:(ok:(v:unknown)=>void,fail:(e:Error)=>void)=>
+   rejected?fail(new Error('file read denied')):ok({name})
+ });
+ const folder=(name:string,entries:unknown[],rejected=false)=>{
+  let consumed=false;
+  return {name,isFile:false,isDirectory:true,createReader:()=>({
+   readEntries:(ok:(v:unknown[])=>void,fail:(e:Error)=>void)=>{
+    if(rejected){fail(new Error('directory read denied'));return;}
+    if(consumed){ok([]);return;}
+    consumed=true;ok(entries);
+   }
+  })};
+ };
+ const roots=[
+  folder('root',[
+   file('bad.user.js',true),file('first.user.js'),
+   folder('denied',[],true),file('second.user.js')
+  ]),
+  folder('another-root',[file('third.user.js')]),
+  file('bad-root.user.js',true),
+  file('last-root.user.js')
+ ];
+ const result=await (env.scan as (data:unknown,signal:AbortSignal)=>Promise<Array<{name:string}>>)({
+  items:roots.map(entry=>({kind:'file',webkitGetAsEntry:()=>entry})),files:[]
+ },new AbortController().signal);
+ assert.deepEqual(result.map(item=>item.name),[
+  'first.user.js','second.user.js','third.user.js','last-root.user.js'
+ ]);
+ assert.equal(env.failedCount,3,'each unreadable entry counts as an isolated failure');
+ assert.deepEqual(lines,[
+  'bad.user.js: READ_OR_IMPORT_FAILED',
+  'denied: DIRECTORY_READ_FAILED',
+  'bad-root.user.js: READ_OR_IMPORT_FAILED'
+ ]);
+});
