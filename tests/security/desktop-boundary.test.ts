@@ -2602,7 +2602,12 @@ test('TASK-013/TEST-022: startup dropped-batch recovery owns the renderer import
  const summary=ui.slice(ui.indexOf('function updateImportSummary()'),ui.indexOf('function logLine('));
  assert.match(summary,/startupRecoveryPending\s*\?/,
   'pending recovery must be shown in the accessible import status');
- const boot=ui.slice(ui.indexOf('updateImportSummary();\\nvoid locked',ui.indexOf("cancelImport?.addEventListener('click'")),ui.indexOf("chooseFile?.addEventListener('click'",ui.indexOf("cancelImport?.addEventListener('click'")));
+ const handlers=ui.indexOf("cancelImport?.addEventListener('click'");
+ const bootStart=ui.indexOf('void locked(async () => {',handlers);
+ const pickerStart=ui.indexOf("chooseFile?.addEventListener('click'",handlers);
+ assert.ok(handlers>=0&&bootStart>handlers&&pickerStart>bootStart,
+  'startup recovery lock must be established before picker handlers');
+ const boot=ui.slice(bootStart,pickerStart);
  assert.match(boot,/void locked\(async \(\) => \{/,
   'recovery must hold the same synchronous lock used by picker and drop handlers');
  assert.match(boot,/await recoverDroppedImportBatch\(\)/,
