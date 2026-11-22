@@ -1,5 +1,11 @@
 # 开发前最终准入审查
 
+> **2026-11-22 当前准入入口（优先于下列按日期保留的历史记录）**：`main@1fcd1480d135a12ef5c766115465999bb444514f`。准备 PR [#926](https://github.com/devin930906/userscript-auto-healer/pull/926) 已合并为 `28efdb591969b30ac4d963f0fbe6b634dee863f3`；PR [#927](https://github.com/devin930906/userscript-auto-healer/pull/927) 也已合并为当前 `main` HEAD。文末“#926 仍未合并”是合并前的时间性记录，不是当前阻断。无需重建文档或从 TASK-001 重启。
+>
+> **当前产品实施与依赖**：开放中的 PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) HEAD `4babea4f1e49cc799beb72b9013d4e158d185962` 尚未合并，现有实现包括分批导入、只读诊断及受控的手动候选导出，但不等同自动修复与真实 Tampermonkey/业务功能验收。当前开放的对应 Issue 为 [#857](https://github.com/devin930906/userscript-auto-healer/issues/857)（TASK-013）、[#486](https://github.com/devin930906/userscript-auto-healer/issues/486)（TASK-007）、[#510](https://github.com/devin930906/userscript-auto-healer/issues/510)（TASK-005）和 [#610](https://github.com/devin930906/userscript-auto-healer/issues/610)（TASK-021）；按既有依赖和准入条件继续推进。旧版 `docs/12-handoff.md` 顶部的 2026-11-19 “最新”是历史快照，且 PR #925 正在修改该共享文件，必须在合法集成时核对最新内容，不从准备分支覆盖它。
+>
+> **本轮质量证据边界**：PR #925 HEAD 的31项 GitHub PR checks 为29项成功、2项跳过，不能替代其 PR 描述记录的全量 `npm test` 失败情况，也不能替代真实产品级验收。2026-11-22 GitHub 安全接口核验显示 Dependabot alerts 未启用（403）及 Code Scanning 没有分析结果（404）；Secret Scanning 开放告警查询为空不等于已经证明全面无风险。验证范围、启用条件及处理方式已作为既有 TASK-021 的交接证据写在 [#610 评论](https://github.com/devin930906/userscript-auto-healer/issues/610#issuecomment-7080025505)。**本次仍为有条件准入；所有 Stable GATE 与最终真实环境验收须独立签核。**
+
 > **2026-11-02 有效范围校正**：下方历史有条件准入及当时旧 Issue 认领受阻结论均按原发生时间保留；新版（4）/（7）已取消 Issue 独占锁，旧交接不能阻止已授权且满足其他依赖的产品开发。正式 TEST/GATE 仍须独立验证；见 `docs/19-stable-v7-migration.md`。
 
 
