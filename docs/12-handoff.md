@@ -492,4 +492,3 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 精确 head 的 GitHub check runs 为 31 项：29 success、2 个可选诊断 job skipped、0 failure。Application Skeleton Checks [#44995638952](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638952) 的 `boundary` 与 `windows-shell-smoke` 通过；Windows Candidate EXE/ZIP [#44995638933](https://github.com/devin930906/userscript-auto-healer/actions/runs/44995638933)、Documentation Integrity、Issue Coordination 与隔离 Tampermonkey matrix 均已在该 head 完成。候选包和隔离矩阵仍不是正式 Stable/真实用户环境验收。
 - 本地 `npm test` 仍为 1,258 total / 1,203 pass / 43 fail / 12 skipped；43 项为既有 TASK-011 restore、TEST-003 symlink `EPERM` 与 TASK-018/TEST-018 E2E 类别，不能记为全量通过。候选导出只证明经原生确认的独立人工导出边界，未授予安装、执行、Tampermonkey、GM、业务或自动应用权限。
 - **下一续接**：继续 #857 的逐脚本动态诊断与完整批量协调、候选后续安全应用/失败恢复和 TEST-022/GATE-007 证据；真实 Tampermonkey/GM/业务验收、同源 EXE+ZIP、最终集中人工验收及 Release 仍未完成。
-
