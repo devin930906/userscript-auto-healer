@@ -127,6 +127,7 @@ export class ImportedDomDiagnosticIndex{
  private readonly candidateSources=new Map<string,CandidateSource>();
  private candidateSourceBytes=0;
  private candidateSourceExpiryTimer:ReturnType<typeof setTimeout>|null=null;
+ private candidateSourceTimerGeneration=0;
  private readonly candidateSourceTtlMs:number;
  private readonly scheduleTimer:(callback:()=>void,delayMs:number)=>ReturnType<typeof setTimeout>;
  private readonly cancelTimer:(timer:ReturnType<typeof setTimeout>)=>void;
@@ -140,6 +141,9 @@ export class ImportedDomDiagnosticIndex{
   this.cancelTimer=lifecycle.clearTimeout??clearTimeout;
  }
  private scheduleCandidateSourceExpiry():void{
+  // A canceled callback can already be queued. Fence it off from any newer
+  // expiry timer so it cannot reschedule or cancel the live window timer.
+  const generation=++this.candidateSourceTimerGeneration;
   if(this.candidateSourceExpiryTimer!==null){
    this.cancelTimer(this.candidateSourceExpiryTimer);
    this.candidateSourceExpiryTimer=null;
@@ -151,6 +155,7 @@ export class ImportedDomDiagnosticIndex{
   const delay=Math.max(0,nextExpiry-this.now());
   try{
    const timer=this.scheduleTimer(()=>{
+    if(generation!==this.candidateSourceTimerGeneration)return;
     this.candidateSourceExpiryTimer=null;
     this.pruneCandidateSources();
    },delay);
@@ -198,6 +203,7 @@ export class ImportedDomDiagnosticIndex{
   return entry.source;
  }
  clearCandidateSources():void{
+  this.candidateSourceTimerGeneration++;
   if(this.candidateSourceExpiryTimer!==null){
    this.cancelTimer(this.candidateSourceExpiryTimer);
    this.candidateSourceExpiryTimer=null;
