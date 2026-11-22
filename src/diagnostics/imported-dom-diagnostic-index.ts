@@ -149,12 +149,18 @@ export class ImportedDomDiagnosticIndex{
    nextExpiry=Math.min(nextExpiry,entry.expiresAt);
   if(!Number.isFinite(nextExpiry))return;
   const delay=Math.max(0,nextExpiry-this.now());
-  const timer=this.scheduleTimer(()=>{
-   this.candidateSourceExpiryTimer=null;
-   this.pruneCandidateSources();
-  },delay);
-  this.candidateSourceExpiryTimer=timer;
-  timer.unref?.();
+  try{
+   const timer=this.scheduleTimer(()=>{
+    this.candidateSourceExpiryTimer=null;
+    this.pruneCandidateSources();
+   },delay);
+   this.candidateSourceExpiryTimer=timer;
+   timer.unref?.();
+  }catch{
+   // Never retain imported source text if its bounded lifetime cannot be
+   // scheduled. AST-only diagnostic metadata remains available separately.
+   this.clearCandidateSources();
+  }
  }
  private pruneCandidateSources():void{
   const now=this.now();
