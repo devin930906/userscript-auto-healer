@@ -2587,6 +2587,16 @@ test('TASK-013/TEST-002/022: renderer skips unrelated file names before charging
   'skipping an unrelated file must not stall batch progress reporting');
 });
 
+test('TASK-013/TEST-022/026: native batch candidate source lookup binds SHA and filename',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'native diagnosis handler must be present');
+ const body=main.slice(start,end);
+ assert.match(body,/readUtf8CandidateSource\(\s*item\.scriptSha256\s*,\s*item\.filename\s*\)/,
+  'an imported hash alone must not select candidate source bytes for a different filename');
+});
+
 test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
