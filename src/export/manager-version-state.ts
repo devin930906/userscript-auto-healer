@@ -353,6 +353,7 @@ export function reconcileBatchImportedScriptsVersionState(
     }
 
     const observationMap = new Map<string, InstalledScriptObservation>();
+    const ambiguousScriptIds = new Set<string>();
     const observationByName = new Map<string, InstalledScriptObservation>();
 
     if (untrustedInstalledObservations !== null && untrustedInstalledObservations !== undefined) {
@@ -425,9 +426,14 @@ export function reconcileBatchImportedScriptsVersionState(
         });
 
         if (validObs.scriptId) {
-          // An explicit manager script identity cannot attest to any other
-          // imported script merely because the displayed names match.
-          observationMap.set(validObs.scriptId, validObs);
+          // Multiple observations for the same manager identity are ambiguous,
+          // regardless of their order. Never let the final record win.
+          if (ambiguousScriptIds.has(validObs.scriptId) || observationMap.has(validObs.scriptId)) {
+            ambiguousScriptIds.add(validObs.scriptId);
+            observationMap.delete(validObs.scriptId);
+          } else {
+            observationMap.set(validObs.scriptId, validObs);
+          }
         } else {
           // Only truly ID-less legacy observations can use name fallback.
           observationByName.set(validObs.name.trim().toLowerCase(), validObs);
@@ -488,7 +494,9 @@ export function reconcileBatchImportedScriptsVersionState(
       const installUrl = typeof urlVal === 'string' ? urlVal : undefined;
       const exportFileName = typeof fileVal === 'string' ? fileVal : undefined;
 
-      const matchedObs = observationMap.get(scriptId) || observationByName.get(name.trim().toLowerCase());
+      const matchedObs = ambiguousScriptIds.has(scriptId)
+        ? undefined
+        : observationMap.get(scriptId) || observationByName.get(name.trim().toLowerCase());
 
       if (!matchedObs) {
         missingCount++;
