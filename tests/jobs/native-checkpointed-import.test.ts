@@ -42,7 +42,7 @@ test('TASK-013/TEST-022/026: failed isolated child preserves diagnostic TAP deta
  try{
   const childFile=join(home,'nested-failure.test.cjs');
   await writeFile(childFile,
-   "const {test}=require('node:test');test('failed nested sentinel',()=>{throw Error('UAH_CHILD_FAILURE_SENTINEL');});\\n".replace('\\\\n','\\n'));
+   "const {test}=require('node:test');test('failed nested sentinel',()=>{throw Error('UAH_CHILD_FAILURE_SENTINEL');});\\n");
   assert.throws(()=>runNodeTestChild(['--test','--test-reporter=tap',childFile]),
    /UAH_CHILD_FAILURE_SENTINEL/,
    'the outer CI failure must expose the child assertion instead of only ERR_TEST_FAILURE');
