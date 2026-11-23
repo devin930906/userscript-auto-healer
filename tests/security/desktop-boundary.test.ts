@@ -642,6 +642,7 @@ test('TASK-013/TEST-023/026: imported candidate export uses a one-use main-only 
 });
 
 test('TASK-013/TEST-022/023: accepted fresh imports retire prior manual candidate export capabilities',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const native=main.slice(main.indexOf('const runNativeImport = async ('),
   main.indexOf("ipcMain.handle('import:get-progress'"));
