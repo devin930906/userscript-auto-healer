@@ -2622,6 +2622,22 @@ test('TASK-013/TEST-022/026: native batch candidate source lookup binds SHA and 
   'an imported hash alone must not select candidate source bytes for a different filename');
 });
 
+test('TASK-013/TEST-022/026: candidate proposal exceptions preserve completed DOM observation evidence',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'native batch diagnosis handler must remain present');
+ const body=main.slice(start,end);
+ // An isolated candidate error must not fall through to the outer
+ // OBSERVATION_FAILED catch and discard an already accepted DOM result.
+ assert.match(body,/candidatePreviewCount\\+\\+;\\s*try\\s*\\{\\s*const proposal=proposeImportedDomCandidate\\(/,
+  'candidate generation must have its own guarded failure boundary');
+ assert.match(body,/catch\\s*\\{\\s*candidateFields=\\{candidateStatus:'NOT_PROPOSED',\\s*candidateReason:'PREVIEW_FAILED'\\};\\s*\\}/,
+  'a candidate-only exception must be reported without erasing the DOM observation');
+ assert.match(body,/domStatus:'LIMITED_DOM_SIGNAL_ONLY'/,
+  'the previously completed read-only observation remains in the per-item result');
+});
+
 test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
