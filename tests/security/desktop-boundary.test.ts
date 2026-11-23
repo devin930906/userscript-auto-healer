@@ -26,8 +26,8 @@ const approvedIpcChannels=[
   'import:dropped-batch:begin','import:dropped-batch:finish','import:dropped-batch:recover',
   'import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
- 'scenario:diagnose-imported-batch','scenario:imported-batch-progress','scenario:export-imported-candidate','scenario:export-manual',
- 'scenario:history','scenario:inspect','scenario:register'
+ 'scenario:diagnose-imported-batch','scenario:export-imported-candidate','scenario:export-manual',
+ 'scenario:history','scenario:imported-batch-progress','scenario:inspect','scenario:register'
 ] as const;
 
 
@@ -2502,7 +2502,7 @@ test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or 
   'cancellation or timeout after partial observation must never return ok:true');
  assert.match(handler,/observationReceiptDelivered=true;\s*return \{ok:true,status:'UNKNOWN'/,
   'receipt ownership must be marked only at the final success path');
- assert.match(handler,/finally\{\s*clearTimeout\(deadline\);\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);\s*if\(!observationReceiptDelivered\)importedDomCandidateExportStore\.clearOwner\(win\);/,
+ assert.match(handler,/finally\{\s*clearTimeout\(deadline\);\s*importedDomProgress=null;\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);\s*if\(!observationReceiptDelivered\)importedDomCandidateExportStore\.clearOwner\(win\);/,
   'failure/cancelled observations must revoke partial one-use export handles');
  assert.match(handler,/if\(revoked\(\)\|\|win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)/,
   'window and owned-browser replacement must remain fail-closed');
@@ -2853,7 +2853,7 @@ test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries 
  const handler=main.slice(start,end);
  assert.match(handler,/new ReadOnlyBatchCoordinator\(\{\s*count:ready\.length,\s*concurrency:1,\s*maxAttempts:2,\s*timeoutMs:120000\s*\}/,
   'each script must receive at most two sequential read-only attempts within the existing batch deadline');
- assert.match(handler,/return observation\.code==='CDP_FAILED'\?'RETRYABLE_FAILURE':'PERMANENT_FAILURE'/,
+ assert.match(handler,/const retryable=observation\.code==='CDP_FAILED';[\s\S]*?return retryable\?'RETRYABLE_FAILURE':'PERMANENT_FAILURE'/,
   'only a bounded transient CDP observation failure may consume the retry budget');
  assert.match(handler,/controller\.signal\.addEventListener\('abort',cancelCoordinator/,
   'batch cancellation and owner revocation must cancel queued retries');

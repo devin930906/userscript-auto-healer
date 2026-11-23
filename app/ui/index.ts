@@ -1920,13 +1920,14 @@ importedDomRunButton?.addEventListener('click',()=>{
  if(importedDomResult)importedDomResult.textContent=
   '等待系统原生确认；脚本不会执行，本次只读取声明的页面选择器数量。';
  // Poll advisory, main-owned counters only while this generation is current.
+ let importedDomFinalDelivered=false;
  let progressRequestInFlight=false;
  const importedDomProgressTimer=setInterval(()=>{
   if(progressRequestInFlight||generation!==importedDomGeneration||
      !importedDomBusy||importedDomCancelRequested)return;
   progressRequestInFlight=true;
   void window.healer.getImportedDomProgress().then(progress=>{
-   if(generation!==importedDomGeneration||!importedDomBusy||
+   if(importedDomFinalDelivered||generation!==importedDomGeneration||!importedDomBusy||
       importedDomCancelRequested||!progress.active||!importedDomResult)return;
    if(progress.phase==='AWAITING_CONSENT'){
     importedDomResult.textContent='等待系统原生确认；尚未访问网页或执行脚本。';
@@ -1950,6 +1951,7 @@ importedDomRunButton?.addEventListener('click',()=>{
    .finally(()=>{progressRequestInFlight=false;});
  },600);
  void window.healer.diagnoseImportedBatch(targetUrl).then(result=>{
+  importedDomFinalDelivered=true;
   if(generation!==importedDomGeneration)return;
   importedDomActiveTarget=null;
   importedDomDisplayedTarget=targetUrl;
@@ -2074,6 +2076,7 @@ importedDomRunButton?.addEventListener('click',()=>{
    importedDomItems?.append(row);
   }
  }).catch(()=>{
+  importedDomFinalDelivered=true;
   if(generation!==importedDomGeneration)return;
   importedDomActiveTarget=null;
   importedDomDisplayedTarget=targetUrl;
