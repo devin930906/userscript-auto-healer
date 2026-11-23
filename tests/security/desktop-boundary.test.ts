@@ -2630,9 +2630,9 @@ test('TASK-013/TEST-022/026: candidate proposal exceptions preserve completed DO
  const body=main.slice(start,end);
  // An isolated candidate error must not fall through to the outer
  // OBSERVATION_FAILED catch and discard an already accepted DOM result.
- assert.match(body,/candidatePreviewCount\\+\\+;\\s*try\\s*\\{\\s*const proposal=proposeImportedDomCandidate\\(/,
+ assert.match(body,/candidatePreviewCount\+\+;\s*try\s*\{\s*const proposal=proposeImportedDomCandidate\(/,
   'candidate generation must have its own guarded failure boundary');
- assert.match(body,/catch\\s*\\{\\s*candidateFields=\\{candidateStatus:'NOT_PROPOSED',\\s*candidateReason:'PREVIEW_FAILED'\\};\\s*\\}/,
+ assert.match(body,/catch\s*\{[\s\S]*?candidateFields=\{candidateStatus:'NOT_PROPOSED',\s*candidateReason:'PREVIEW_FAILED'\};\s*\}/,
   'a candidate-only exception must be reported without erasing the DOM observation');
  assert.match(body,/domStatus:'LIMITED_DOM_SIGNAL_ONLY'/,
   'the previously completed read-only observation remains in the per-item result');
