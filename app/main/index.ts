@@ -1826,7 +1826,7 @@ function registerSafeIpc(): void {
       return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
         truncatedScripts:plan.truncatedScripts,...unverified};
     }finally{
-      if(deadline)clearTimeout(deadline);
+      clearTimeout(deadline);
       importedDomProgress=null;
       importedDomDiagnosticIndex.clearCandidateSources();
       if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);

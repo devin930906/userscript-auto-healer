@@ -2536,8 +2536,8 @@ test('TASK-013/TEST-022/NFR-009: consent time is excluded from the 120-second DO
   'the execution budget starts only after native consent and before opening Chrome');
  assert.match(handler.slice(startTimerAt,openedAt),/deadlineExpired=true;\s*controller\.abort\(\);\s*\},120000\);/,
   'retain the exact fail-closed 120-second timeout after consent');
- assert.match(handler,/finally\{\s*if\(deadline\)clearTimeout\(deadline\);/,
-  'both rejected and successful consent must safely clear any started deadline');
+ assert.match(handler,/finally\{\s*clearTimeout\(deadline\);/,
+  'both rejected and successful consent must safely clear the optional deadline');
 });
 
 test('TASK-013/TEST-022: DOM result assembly failures keep actual observation attempts',()=>{
