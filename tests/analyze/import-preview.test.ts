@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {importDroppedBytes} from '../../src/import/import-service';
 import {previewImportedScriptAnalysis,previewIsolatedImportedBatch,MAX_ISOLATED_ANALYSIS_BYTES} from '../../src/analyze/import-preview';
-import {previewImportedBatchOffMain,validateIsolatedBatchPreviewResult,validateIsolatedPreviewReply} from '../../src/analyze/isolated-batch-preview';
+import {previewImportedBatchOffMain,validateIsolatedBatchPreviewResult,validateIsolatedPreviewReply,readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
 
 // TASK-013 / TEST-022: two independent workflow_dispatch diagnostics on the
 // same Git ref must not cancel or replace one another before their genuine
@@ -32,6 +32,48 @@ function imported(code:string){
  if('code' in result)throw Error(result.code);
  return result;
 }
+
+test('TASK-013/TEST-022: isolated AST keeps bounded DOM selector hints main-only',()=>{
+ const script=imported(header+
+  'document.querySelector("#submit");'+
+  'document.querySelectorAll(`.result`);'+
+  'document.querySelector(dynamic || ".fallback");'+
+  'document.querySelector("#submit");'+
+  'document.querySelector("#unsafe\\nselector");');
+ const [workerPreview]=previewIsolatedImportedBatch([script]);
+ assert.equal(workerPreview.status,'STATIC_ANALYSIS_ONLY');
+ const hints=(workerPreview as unknown as {diagnosticHints?:unknown}).diagnosticHints;
+ assert.deepEqual(hints,{
+  matchPatterns:['https://example.org/*'],
+  unsupportedScope:false,
+  selectorSitesTruncated:false,
+  selectorSites:[
+   {offset:header.length,method:'querySelector',selector:'#submit'},
+   {offset:header.length+'document.querySelector("#submit");'.length,
+    method:'querySelectorAll',selector:'.result'}
+  ]
+ });
+ const publicPreview=previewImportedScriptAnalysis(script) as unknown as Record<string,unknown>;
+ assert.equal(Object.prototype.hasOwnProperty.call(publicPreview,'diagnosticHints'),false,
+  'the synchronous preview sent to the renderer must remain selector-free');
+ const accepted=validateIsolatedPreviewReply([workerPreview],1);
+ assert.ok(accepted);
+ if(!accepted)return;
+ assert.equal(Object.prototype.hasOwnProperty.call(accepted[0],'diagnosticHints'),false,
+  'validated hints must not become serializable preview properties');
+ assert.deepEqual(readMainOnlyDiagnosticHints(accepted[0]),hints,
+  'Electron main can recover the validated sidecar only from the exact preview object');
+ assert.equal(readMainOnlyDiagnosticHints({...accepted[0]}),null,
+  'copying a preview cannot carry main-only selector data');
+ let hintGetterCalls=0;
+ const hostileHints=Object.defineProperty({},'matchPatterns',{
+  enumerable:true,get(){hintGetterCalls++;throw new Error('hostile hint getter');}
+ });
+ assert.equal(validateIsolatedPreviewReply([{
+  ...workerPreview,diagnosticHints:hostileHints
+ }],1),null);
+ assert.equal(hintGetterCalls,0,'hostile Worker hint accessors must not execute');
+});
 
 test('TASK-013/TEST-022/NFR-009: expired absolute queue deadline prevents Worker startup',async()=>{
  const workers=require('node:worker_threads') as
@@ -1199,3 +1241,4 @@ test('TASK-013/TEST-022/026: failed retirement blocks every later Worker for thi
  console.log('DEBUG_GATE_STATE',JSON.stringify((process as unknown as
   Record<string,unknown>).__uah_isolated_ast_worker_gate_v1__));
 });
+

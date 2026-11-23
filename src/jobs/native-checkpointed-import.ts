@@ -9,7 +9,7 @@ import {createHash} from 'node:crypto';
 import {types as nodeTypes} from 'node:util';
 import {lstat,mkdir} from 'node:fs/promises';
 import {dirname,isAbsolute,join,resolve} from 'node:path';
-import {MAX_SELECTED_FILES,type ImportedScript} from '../import/import-service';
+import {MAX_SELECTED_FILES,type ImportOutcome,type ImportedScript} from '../import/import-service';
 import {MAX_BATCH_PREVIEW_FILES,MAX_BATCH_PREVIEW_BYTES,
  MAX_ISOLATED_ANALYSIS_BYTES,unavailableImportPreview,
  type ImportAnalysisPreview} from '../analyze/import-preview';
@@ -120,9 +120,9 @@ export async function runCheckpointedNativeImportAnalysis(
  // the native importer's verified bytes, ordered and domain-separated.
  // v1/v2 did not bind the decoder and v3 grouped only by file count,
  // allowing the isolated Worker's 1 MiB budget to starve valid later files.
- // v4 leaves older on-disk scheduling hints intact in separate directories.
+ // v5 isolates the 120-second batch budget from obsolete 15-second v4 scheduling hints.
  // No persisted success can substitute for current-session AST evidence.
- const nameHash=createHash('sha256').update('uah-native-import-batch-v4\0');
+ const nameHash=createHash('sha256').update('uah-native-import-batch-v5\0');
  const groups:Array<{scripts:typeof bound;fingerprint:string}>=[];
  for(const script of bound){
   nameHash.update(script.sha256);nameHash.update('\0');
@@ -337,8 +337,11 @@ export async function runCheckpointedNativeImportAnalysis(
   observations[ordinal]=previews;
   return 'DONE' as const;
  };
+ // A single coordinator deadline governs the entire batch; it must match
+ // the native 120-second cap rather than accidentally using a per-segment
+ // 15-second total. Each isolated Worker retains its 10-second deadline.
  const options={count:groups.length,concurrency:1,maxAttempts:2,
-  timeoutMs:15000,jobHashes:groups.map(g=>g.fingerprint)};
+  timeoutMs:MAX_TOTAL_PREVIEW_MS,jobHashes:groups.map(g=>g.fingerprint)};
  const loaded=await loadReadOnlyBatchJournal(directory,options,worker);
  if(loaded.status==='BLOCKED'&&loaded.reason!=='NOT_FOUND')
   return fail(count,loaded.reason);
@@ -553,4 +556,46 @@ export async function runCheckpointedNativeImportAnalysis(
  }finally{
   releaseNativeAstWorkerLease(lease,safeToLaunchWorkers);
  }
+}
+
+/** Route every successfully imported batch through the same durable,
+ * hash-bound read-only AST scheduler, regardless of whether bytes came from
+ * the native picker, renderer file picker, drag/drop, or folder scan.
+ * The journal root is supplied by Electron main from app.getPath('userData');
+ * renderer data never chooses or receives it. A prior checkpoint is only a
+ * scheduling hint: each invocation revalidates and reparses the current bytes.
+ */
+export async function analyzeImportedOutcomeWithCheckpoint(
+ journalRoot:string,outcome:ImportOutcome,signal?:AbortSignal,
+ onProgress?:(processed:number,total:number)=>void
+):Promise<Readonly<{checkpoint:BatchOutcome|null;canceled:boolean;unprocessed:number}>>{
+ // Outcomes are created only by the native import service or the main-owned
+ // DroppedImportBatch. Still snapshot plain own data before touching nested
+ // fields so a malformed caller cannot run getters in the privileged process.
+ if(!outcome||typeof outcome!=='object'||nodeTypes.isProxy(outcome))
+  return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),canceled:false,unprocessed:0});
+ let descriptors:PropertyDescriptorMap;
+ try{descriptors=Object.getOwnPropertyDescriptors(outcome);}
+ catch{return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),canceled:false,unprocessed:0});}
+ const allowed=new Set(['scripts','errors','duplicates','canceled','unprocessed']);
+ if(Reflect.ownKeys(descriptors).some(key=>typeof key!=='string'||!allowed.has(key)))
+  return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),canceled:false,unprocessed:0});
+ const scriptSlot=descriptors.scripts;
+ const canceledSlot=descriptors.canceled;
+ const unprocessedSlot=descriptors.unprocessed;
+ if(!scriptSlot||!Object.prototype.hasOwnProperty.call(scriptSlot,'value')||
+    nodeTypes.isProxy(scriptSlot.value)||!Array.isArray(scriptSlot.value)||
+    (canceledSlot&&(!Object.prototype.hasOwnProperty.call(canceledSlot,'value')||
+      typeof canceledSlot.value!=='boolean'))||
+    (unprocessedSlot&&(!Object.prototype.hasOwnProperty.call(unprocessedSlot,'value')||
+      typeof unprocessedSlot.value!=='number'||!Number.isSafeInteger(unprocessedSlot.value)||
+      unprocessedSlot.value<0)))
+  return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),canceled:false,unprocessed:0});
+ const scripts=scriptSlot.value as readonly ImportedScript[];
+ const checkpoint=scripts.length===0?null:
+  await runCheckpointedNativeImportAnalysis(journalRoot,scripts,signal,onProgress);
+ return Object.freeze({checkpoint,
+  canceled:canceledSlot?.value===true||
+   (checkpoint?.status==='BLOCKED'&&checkpoint.reason==='CANCELLED'),
+  unprocessed:typeof unprocessedSlot?.value==='number'?unprocessedSlot.value:0});
 }

@@ -5,7 +5,10 @@ import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {importApprovedPaths,type ImportedScript} from '../../src/import/import-service';
-import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
+import {exportReviewedImportedCandidateOnly,exportReviewedImportedSelectorOnly}
+ from '../../src/repair/imported-manual-export';
+import {proposeImportedDomCandidate,
+ type ImportedDomCandidateManualExportContext} from '../../src/repair/imported-dom-candidate';
 import type {ScenarioInput} from '../../src/scenarios/scenario-registry';
 import type {DynamicObservation} from '../../src/observe/dom-observer';
 
@@ -26,6 +29,25 @@ const observation=():DynamicObservation=>({
  routeChangeDetected:false,selectorCountChanged:false,domCountChanged:false,
  userscriptVerified:false
 });
+const importedCandidateSource=header+
+ "document.querySelector('#old');\ndocument.querySelector('#new');\n";
+const importedCandidateHash=hash(importedCandidateSource);
+const importedCandidateDom=(oldCount:number,newCount:number):DynamicObservation=>({
+ ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',
+ samples:[sample('2026-11-22T00:00:00Z',oldCount,newCount),
+  sample('2026-11-22T00:00:01Z',oldCount,newCount)],
+ routeChangeDetected:false,selectorCountChanged:false,domCountChanged:false,
+ userscriptVerified:false
+});
+function importedCandidateContext(oldCount=0,newCount=1):
+ ImportedDomCandidateManualExportContext{
+ const proposal=proposeImportedDomCandidate({source:importedCandidateSource,
+  expectedSourceSha256:importedCandidateHash,targetUrl:'https://example.com/app',
+  observation:importedCandidateDom(oldCount,newCount),nativeConsent:true});
+ assert.equal(proposal.status,'CANDIDATE_ONLY',JSON.stringify(proposal));
+ if(proposal.status!=='CANDIDATE_ONLY')throw new Error('candidate fixture is ineligible');
+ return proposal.manualExportContext;
+}
 const scenario=(digest:string):ScenarioInput=>({
  id:'native_bridge',scriptSha256:digest,
  userApproved:true,requiresLogin:false,targetUrl:'https://example.com/',
@@ -344,4 +366,67 @@ test('TASK-009/012 TEST-014/019/020/023: imported getElementById is staged, inde
   assert.equal(result.automaticPatchAllowed,false);
   assert.equal(result.businessVerified,false);
  },source);
+});
+
+test('TASK-013/TEST-022/023: imported batch candidate exports the reviewed direction with a verified recovery copy',async()=>{
+ const cases=[
+  {oldCount:0,newCount:1,
+   selectors:['#old','#new'],
+   expected:header+'document.querySelector("#new");\ndocument.querySelector(\'#new\');\n'},
+  {oldCount:1,newCount:0,
+   selectors:['#new','#old'],
+   expected:header+"document.querySelector('#old');\ndocument.querySelector(\"#old\");\n"}
+ ];
+ for(const item of cases){
+  await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+   const context=importedCandidateContext(item.oldCount,item.newCount);
+   assert.deepEqual(context.scenario.assertions.map(assertion=>assertion.selector),
+    item.selectors);
+   const result=await exportReviewedImportedCandidateOnly(script,context,{
+    backupDirectory,exportDirectory,userApproved:true
+   });
+   assert.equal(result.status,'MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED',JSON.stringify(result));
+   if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')return;
+   assert.equal(await readFile(join(exportDirectory,result.exportFileName),'utf8'),item.expected);
+   assert.equal(await readFile(join(exportDirectory,result.recoveryExportFileName),'utf8'),source);
+   assert.equal(await readFile(join(backupDirectory,result.backupFileName),'utf8'),source);
+   assert.equal(await readFile(join(backupDirectory,result.candidateFileName),'utf8'),item.expected);
+   assert.equal(await readFile(scriptPath,'utf8'),source,
+    'manual export must never modify the selected original userscript');
+   assert.equal(result.sourceSha256,importedCandidateHash);
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(result.automaticRollbackAllowed,false);
+   assert.equal(result.tampermonkeyVerified,false);
+   assert.equal(result.businessVerified,false);
+   assert.equal(JSON.stringify(result).includes(scriptPath),false);
+   assert.equal(JSON.stringify(result).includes('#old'),false);
+  },importedCandidateSource);
+ }
+});
+
+test('TASK-013/TEST-022/023/026: imported batch candidate export rejects mismatched source and context before writes',async()=>{
+ await fixture(async({script,scriptPath,source,backupDirectory,exportDirectory})=>{
+  const context=importedCandidateContext();
+  const options={backupDirectory,exportDirectory,userApproved:true};
+  const wrongDigest={...context,originalSha256:'f'.repeat(64)};
+  const wrongCandidate={...context,candidateSha256:'e'.repeat(64)};
+  const wrongName={...script,filename:'different.user.js'};
+  const wrongHash={...script,sha256:'e'.repeat(64)};
+  let getterCalls=0;
+  const hostileContext=Object.defineProperty({},'scenario',{
+   enumerable:true,get(){getterCalls++;throw new Error('untrusted context getter');}
+  });
+  for(const [imported,review] of [
+   [script,wrongDigest],[script,wrongCandidate],[wrongName,context],[wrongHash,context],
+   [script,hostileContext]
+  ] as const){
+   const result=await exportReviewedImportedCandidateOnly(imported,review,options);
+   assert.equal(result.status,'BLOCKED',JSON.stringify(result));
+   assert.equal(result.automaticPatchAllowed,false);
+   assert.equal(await readdir(backupDirectory).then(files=>files.length),0);
+   assert.equal(await readdir(exportDirectory).then(files=>files.length),0);
+   assert.equal(await readFile(scriptPath,'utf8'),source);
+  }
+  assert.equal(getterCalls,0,'hostile review-context accessors must not run');
+ },importedCandidateSource);
 });

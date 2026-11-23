@@ -7,11 +7,13 @@ import {strict as assert} from 'node:assert';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {importApprovedPaths} from '../../src/import/import-service';
+import {DroppedImportBatch,importApprovedPaths,type ImportOutcome} from '../../src/import/import-service';
+import * as checkpointedImportModule from '../../src/jobs/native-checkpointed-import';
 import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
 import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
+import {readMainOnlyDiagnosticHints,MAX_TOTAL_PREVIEW_MS} from '../../src/analyze/isolated-batch-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 
 function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
@@ -19,7 +21,23 @@ function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
  // Node uses this variable to tell a child that it is already under the test
  // runner. Remove it when deliberately starting a separate child test runner.
  delete childEnv.NODE_TEST_CONTEXT;
- return execFileSync(process.execPath,args,{encoding:'utf8',env:childEnv});
+ try{
+  return execFileSync(process.execPath,args,{encoding:'utf8',env:childEnv});
+ }catch(error){
+  // execFileSync's thrown message omits TAP written to stdout. Without
+  // exposing the child's failed assertion the parent CI can only report
+  // ERR_TEST_FAILURE, hiding the cause of isolated Worker regressions.
+  const stdout=error&&typeof error==='object'&&'stdout' in error&&
+    typeof error.stdout==='string'?error.stdout:'';
+  const stderr=error&&typeof error==='object'&&'stderr' in error&&
+    typeof error.stderr==='string'?error.stderr:'';
+  const rows=stdout.split(/\r?\n/);
+  const failureAt=rows.findIndex(row=>/^not ok \d+ - /.test(row));
+  const relevant=failureAt>=0?rows.slice(failureAt,failureAt+55).join('\n'):
+    stdout.slice(-8192);
+  throw new Error('Isolated Node test runner failed; bounded child TAP diagnostics:\n'+
+   relevant.slice(0,8192)+'\n'+stderr.slice(-2048),{cause:error});
+ }
 }
 
 test('TASK-013/TEST-022: nested node test runner executes its selected test body',async()=>{
@@ -32,6 +50,18 @@ test('TASK-013/TEST-022: nested node test runner executes its selected test body
   assert.match(output,/UAH_CHILD_TEST_BODY_EXECUTED/);
   assert.match(output,/(?:^|\r?\n)# tests 1(?:\r?\n|$)/);
   assert.match(output,/(?:^|\r?\n)# pass 1(?:\r?\n|$)/);
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
+test('TASK-013/TEST-022/026: failed isolated child preserves diagnostic TAP details',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-nested-node-failure-'));
+ try{
+  const childFile=join(home,'nested-failure.test.cjs');
+  await writeFile(childFile,
+   "const {test}=require('node:test');test('failed nested sentinel',()=>{throw Error('UAH_CHILD_FAILURE_SENTINEL');});\n");
+  assert.throws(()=>runNodeTestChild(['--test','--test-reporter=tap',childFile]),
+   /UAH_CHILD_FAILURE_SENTINEL/,
+   'the outer CI failure must expose the child assertion instead of only ERR_TEST_FAILURE');
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
@@ -59,6 +89,101 @@ test('TASK-013/TEST-022/026: checkpointed native import must reject an array Pro
 });
 
 const header='// ==UserScript==\n// @name native-batch\n// @match https://example.org/*\n// ==/UserScript==\n';
+
+test('TASK-013/TEST-022/026: renderer-dropped outcomes use the shared checkpoint and fresh AST on reimport',async()=>{
+ type CheckpointedOutcome=Awaited<ReturnType<typeof runCheckpointedNativeImportAnalysis>>;
+ type Analyzer=(journalRoot:string,outcome:ImportOutcome,signal?:AbortSignal,
+  onProgress?:(processed:number,total:number)=>void)=>Promise<{
+   checkpoint:CheckpointedOutcome|null;canceled:boolean;unprocessed:number
+  }>;
+ const candidate=(checkpointedImportModule as unknown as Record<string,unknown>)
+  .analyzeImportedOutcomeWithCheckpoint;
+ assert.equal(typeof candidate,'function',
+  'all validated import outcomes need one main-process checkpointed AST entrypoint');
+ if(typeof candidate!=='function')return;
+ const analyze=candidate as Analyzer;
+ const home=await mkdtemp(join(tmpdir(),'uah-dropped-checkpoint-entry-'));
+ try{
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const journalRoot=join(userData,'readonly-import-journals');
+  const makeOutcome=(names:readonly string[],revision='v1')=>{
+   const batch=new DroppedImportBatch();
+   for(const name of names){
+    const source=header+'document.querySelector("#'+name+'-'+revision+'");\n';
+    const added=batch.add(name+'.user.js',Buffer.from(source));
+    assert.equal(added.ok,true);
+   }
+   const finished=batch.finish();
+   assert.ok(finished);
+   return finished!;
+  };
+  const firstOutcome=makeOutcome(['alpha','beta']);
+  assert.equal(firstOutcome.scripts.every(script=>'sourcePath' in script),false,
+   'renderer bytes must remain path-free while entering the shared pipeline');
+
+  let workerStarts=0;
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  const runWorker=isolated.previewImportedBatchOffMain;
+  const workerSpy=mock.method(isolated,'previewImportedBatchOffMain',(...args:Parameters<typeof runWorker>)=>{
+   workerStarts++;
+   return runWorker(...args);
+  });
+  try{
+   const first=await analyze(journalRoot,firstOutcome);
+   assert.equal(first.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(first.checkpoint?.resumed,false);
+   assert.deepEqual(first.checkpoint?.previews.map(row=>row.status),
+    ['STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY']);
+   assert.deepEqual(readMainOnlyDiagnosticHints(first.checkpoint?.previews[0])?.selectorSites,
+    [{offset:header.length,method:'querySelector',selector:'#alpha-v1'}],
+    'the checkpointed native pipeline must preserve only the exact Worker sidecar object for main');
+   const firstDispatches=workerStarts;
+   assert.ok(firstDispatches>0,'the fresh dropped batch must run the real isolated AST worker');
+
+   const second=await analyze(journalRoot,firstOutcome);
+   assert.equal(second.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(second.checkpoint?.resumed,true,
+    'same ordered byte identities should find only the matching scheduling hint');
+   assert.deepEqual(second.checkpoint?.previews.map(row=>row.status),
+    ['STATIC_ANALYSIS_ONLY','STATIC_ANALYSIS_ONLY']);
+   assert.ok(workerStarts>firstDispatches,
+    'a resumed scheduling hint must still rerun the AST worker on newly imported bytes');
+
+   const reordered=await analyze(journalRoot,makeOutcome(['beta','alpha']));
+   assert.equal(reordered.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(reordered.checkpoint?.resumed,false,
+    'reordering scripts must not reuse the prior batch identity');
+   const changed=await analyze(journalRoot,makeOutcome(['alpha','beta'],'v2'));
+   assert.equal(changed.checkpoint?.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+   assert.equal(changed.checkpoint?.resumed,false,
+    'changed script bytes must create a separate scheduling identity');
+
+   const journalDirectories=await readdir(journalRoot);
+   assert.equal(journalDirectories.length,3);
+   for(const directory of journalDirectories){
+    const journal=await readFile(join(journalRoot,directory,BATCH_JOURNAL_FILENAME),'utf8');
+    assert.equal(journal.includes('alpha.user.js'),false);
+    assert.equal(journal.includes('https://example.org'),false);
+    assert.equal(journal.includes('document.querySelector'),false);
+   }
+  }finally{workerSpy.mock.restore();}
+
+  const cancelledController=new AbortController();
+  cancelledController.abort();
+  const cancelled=await analyze(journalRoot,makeOutcome(['cancelled']),
+   cancelledController.signal);
+  assert.equal(cancelled.checkpoint?.status,'BLOCKED');
+  assert.equal(cancelled.checkpoint?.reason,'CANCELLED');
+  assert.equal(cancelled.canceled,true);
+  assert.equal(cancelled.unprocessed,0);
+  assert.deepEqual(cancelled.checkpoint?.previews.map(row=>row.status),
+   ['SKIPPED_CANCELLED']);
+  assert.equal((await readdir(journalRoot)).length,3,
+   'a pre-cancelled imported batch must not write a new checkpoint');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
 
 test('TASK-013/TEST-022/026: cancellation during early per-file recovery preserves later completed segment evidence',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-recovery-later-segment-'));
@@ -227,6 +352,48 @@ test('TASK-013/TEST-022/NFR-009: delayed native deadline timer prevents post-bud
   }finally{patch.mock.restore();}
  }finally{
   clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
+test('TASK-013/TEST-022/NFR-009: later segment still dispatches after the obsolete 15-second batch cutoff',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-batch-120s-regression-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ let calls=0;
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>{
+   calls++;
+   assert.equal(args[5],120000,'all segments share the native 120-second deadline');
+   if(calls===1)now=16000; // Beyond the obsolete 15-second coordinator budget.
+   return {previews:args[0].map(previewImportedScriptAnalysis),
+    safeToContinue:true} as unknown as
+    Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`segment-budget-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#budget-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const result=await runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts);
+  assert.equal(calls,2,'the second legitimate segment must not be lost at 16 seconds');
+  assert.equal(result.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(result.previews.map(row=>row.status),
+   Array(17).fill('STATIC_ANALYSIS_ONLY'));
+  assert.ok(result.previews.every(row=>row.automaticPatchAllowed===false&&
+   row.businessVerified===false&&row.tampermonkeyVerified===false),
+   'crossing the old cutoff must not grant repair or manager authority');
+ }finally{
+  patch.mock.restore();clock.mock.restore();
   await rm(home,{recursive:true,force:true});
  }
 });
@@ -1017,7 +1184,7 @@ test('TASK-013/TEST-022/026: restored FAILED checkpoint does not imply prior Wor
   const root=join(userData,'readonly-journals');
   await mkdir(root,{recursive:true});
   const nameHash=createHash('sha256')
-   .update('uah-native-import-batch-v4\0')
+   .update('uah-native-import-batch-v5\0')
    .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
    .digest('hex');
   const batchDirectory=join(root,'batch-'+nameHash);
@@ -1026,7 +1193,8 @@ test('TASK-013/TEST-022/026: restored FAILED checkpoint does not imply prior Wor
    .update('uah-native-import-segment-v3\0').update('0').update('\0')
    .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
    .digest('hex');
-  const options={count:1,maxAttempts:2,concurrency:1,timeoutMs:15000,
+  const options={count:1,maxAttempts:2,concurrency:1,
+    timeoutMs:MAX_TOTAL_PREVIEW_MS,
    jobHashes:[segmentHash]};
   const seed=new ReadOnlyBatchCoordinator(options,async()=> 'DONE');
   const exhausted={...seed.snapshot(),jobs:[{
@@ -1820,3 +1988,4 @@ test('TASK-013 / TEST-022: checkpointed native AST partitions by byte budget and
    assert.equal((await readFile(path,'utf8')).includes('document.querySelector'),true);
  }finally{await rm(home,{recursive:true,force:true});}
 });
+

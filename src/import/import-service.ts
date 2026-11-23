@@ -97,7 +97,10 @@ export interface ImportOutcome {
 }
 
 function failure(name: string, code: ImportFailureCode): ImportFailure {
-  return { filename: name, code };
+  const safeDisplayName=name.length>0&&name.length<=128&&
+    !/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(name)
+    ?name:'[invalid filename]';
+  return { filename: safeDisplayName, code };
 }
 
 function validName(name: unknown): name is string {
@@ -106,6 +109,17 @@ function validName(name: unknown): name is string {
   return typeof name === 'string' && name.length > 0 && name.length <= 255 &&
     /^[^\\/:*?"<>|\u0000-\u001f]+\.user\.js$/i.test(name) &&
     !/^(?:con|conin\$|conout\$|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(name);
+}
+
+/** Read the intrinsic typed-array length without consulting Proxy traps or
+ * caller-defined byteLength properties. A null result is not a byte payload.
+ */
+function nativeByteLength(value:unknown):number|null{
+  try{
+    if(nodeTypes.isProxy(value)||!NATIVE_BYTE_LENGTH)return null;
+    const length=NATIVE_BYTE_LENGTH.call(value) as number;
+    return Number.isSafeInteger(length)&&length>=0?length:null;
+  }catch{return null;}
 }
 
 function decode(raw: Uint8Array, allowGb18030: boolean):
@@ -160,9 +174,8 @@ function fromBytes(name: string, bytes: Uint8Array, allowGb18030 = false):
     // A renderer-provided view may have a side-effectful own byteLength
     // getter. Use the intrinsic TypedArray internal-slot accessor instead.
     // Reject proxies before invoking any view conversion or reflection.
-    if (nodeTypes.isProxy(bytes) || !NATIVE_BYTE_LENGTH)
-      return failure(name, 'INVALID_DRAG_DATA');
-    const length = NATIVE_BYTE_LENGTH.call(bytes) as number;
+    const length=nativeByteLength(bytes);
+    if(length===null)return failure(name,'INVALID_DRAG_DATA');
     if (length > MAX_SCRIPT_BYTES) return failure(name, 'FILE_TOO_LARGE');
     copied = new Uint8Array(bytes);
   } catch {
@@ -193,6 +206,112 @@ export function importDroppedBytes(name: unknown, bytes: unknown): ImportedScrip
     // instanceof on a revoked Proxy can throw; it must not escape the IPC
     // import boundary or crash an otherwise independent import batch.
     return failure(name, 'INVALID_DRAG_DATA');
+  }
+}
+
+export interface DroppedImportBatchAddResult{
+  readonly ok:boolean;
+  readonly processed:number;
+  readonly code?:string;
+}
+
+/**
+ * Bounded, main-process-owned collection for renderer file-picker/drop bytes.
+ * The caller sends one payload at a time; this object keeps only validated
+ * unique scripts and per-file failures until the main process finalizes it.
+ * It never stores paths, executes source, or grants downstream authority.
+ */
+export class DroppedImportBatch{
+  #scripts:ImportedScript[]=[];
+  #errors:ImportFailure[]=[];
+  #seenHashes=new Set<string>();
+  #selectedBytes=0;
+  #processed=0;
+  #duplicates=0;
+  #finalized=false;
+  #fileLimitRecorded=false;
+  #byteLimitReached=false;
+
+  add(name:unknown,bytes:unknown):DroppedImportBatchAddResult{
+    if(this.#finalized)
+      return {ok:false,processed:this.#processed,code:'BATCH_FINALIZED'};
+    if(this.#processed>=MAX_SELECTED_FILES){
+      if(!this.#fileLimitRecorded){
+        this.#fileLimitRecorded=true;
+        this.#errors.push(failure(typeof name==='string'?name:'(selection)','SCAN_LIMIT'));
+      }
+      return {ok:false,processed:this.#processed,code:'SCAN_LIMIT'};
+    }
+    this.#processed++;
+    const filename=typeof name==='string'?name:'(invalid)';
+    if(this.#byteLimitReached){
+      this.#errors.push(failure(filename,'SCAN_LIMIT'));
+      return {ok:false,processed:this.#processed,code:'SCAN_LIMIT'};
+    }
+    // Validate the name before charging bytes, matching the native importer's
+    // rule that non-userscript selections do not consume the file-read budget.
+    if(!validName(name)){
+      const invalid=importDroppedBytes(name,bytes);
+      if('code' in invalid){
+        this.#errors.push(invalid);
+        return {ok:false,processed:this.#processed,code:invalid.code};
+      }
+      return {ok:false,processed:this.#processed,code:'INVALID_DRAG_DATA'};
+    }
+    const length=nativeByteLength(bytes);
+    // The intrinsic byteLength getter also accepts Uint16Array/Uint32Array.
+    // Rejected non-byte views must not consume the physical-read budget or
+    // starve later valid scripts in the same authorized dropped batch.
+    if(length===null||!(bytes instanceof Uint8Array)){
+      const invalid=importDroppedBytes(name,bytes);
+      if('code' in invalid){
+        this.#errors.push(invalid);
+        return {ok:false,processed:this.#processed,code:invalid.code};
+      }
+      return {ok:false,processed:this.#processed,code:'INVALID_DRAG_DATA'};
+    }
+    if(length>MAX_SCRIPT_BYTES){
+      const oversized=importDroppedBytes(name,bytes);
+      if('code' in oversized){
+        this.#errors.push(oversized);
+        return {ok:false,processed:this.#processed,code:oversized.code};
+      }
+      return {ok:false,processed:this.#processed,code:'FILE_TOO_LARGE'};
+    }
+    if(this.#selectedBytes+length>MAX_TOTAL_IMPORTED_BYTES){
+      this.#byteLimitReached=true;
+      this.#errors.push(failure(filename,'SCAN_LIMIT'));
+      return {ok:false,processed:this.#processed,code:'SCAN_LIMIT'};
+    }
+    this.#selectedBytes+=length;
+    const imported=importDroppedBytes(name,bytes);
+    if('code' in imported){
+      this.#errors.push(imported);
+      return {ok:false,processed:this.#processed,code:imported.code};
+    }
+    if(this.#seenHashes.has(imported.sha256)){
+      this.#duplicates++;
+      return {ok:true,processed:this.#processed};
+    }
+    this.#seenHashes.add(imported.sha256);
+    this.#scripts.push(imported);
+    return {ok:true,processed:this.#processed};
+  }
+
+  /** Transfer staged results to one finalizer exactly once. */
+  finish():ImportOutcome|null{
+    if(this.#finalized)return null;
+    this.#finalized=true;
+    const result:ImportOutcome={
+      scripts:this.#scripts,
+      errors:this.#errors,
+      duplicates:this.#duplicates
+    };
+    this.#scripts=[];
+    this.#errors=[];
+    this.#seenHashes.clear();
+    this.#selectedBytes=0;
+    return result;
   }
 }
 

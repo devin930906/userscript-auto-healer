@@ -16,6 +16,9 @@ export interface SelectorSite {
   readonly selector:string|null;
   readonly kind:SelectorKind;
   readonly fallbackGroup:number|null;
+  readonly topLevel:boolean;
+  readonly nativeDocumentReceiver:boolean;
+  readonly argumentCount:number;
 }
 export interface SelectorAnalysis {
   readonly status:'OK'|'PARSE_ERROR'|'SOURCE_TOO_LARGE';
@@ -62,6 +65,23 @@ export function analyzeSelectors(source:string):SelectorAnalysis {
     return {status:'PARSE_ERROR',sites:[]};
   }
   const sites:SelectorSite[]=[];
+  const topLevelCallOffsets=new Set<number>();
+  const programBody=Array.isArray(ast.body)?ast.body:[];
+  for(const value of programBody){
+    const statement=nodeOf(value);
+    if(statement?.type==='ExpressionStatement'){
+      const expression=nodeOf(statement.expression);
+      if(expression?.type==='CallExpression'&&typeof expression.start==='number')
+        topLevelCallOffsets.add(expression.start);
+    }else if(statement?.type==='VariableDeclaration'&&Array.isArray(statement.declarations)){
+      for(const declaration of statement.declarations){
+        const item=nodeOf(declaration);
+        const initializer=nodeOf(item?.init);
+        if(initializer?.type==='CallExpression'&&typeof initializer.start==='number')
+          topLevelCallOffsets.add(initializer.start);
+      }
+    }
+  }
   function walk(node:AstNode,owners:string[],fallback:number|null,functionLabel?:string):void {
     let scope=owners;
     if(node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||
@@ -88,8 +108,9 @@ export function analyzeSelectors(source:string):SelectorAnalysis {
       if(callee?.type==='MemberExpression'){
         const name=memberName(callee);
         const recognized=name!==null && METHODS.has(name);
+        const receiver=nodeOf(callee.object);
+        const args=Array.isArray(node.arguments)?node.arguments:[];
         if(recognized || (callee.computed===true && name===null)){
-          const args=Array.isArray(node.arguments)?node.arguments:[];
           const detail=recognized?argumentData(args[0]):
             {kind:'needs-runtime-confirmation' as const,selector:null};
           sites.push({
@@ -99,7 +120,10 @@ export function analyzeSelectors(source:string):SelectorAnalysis {
             owner:scope.at(-1)??'<top-level>',
             scope:scope.join('/')||'<top-level>',
             method:recognized?name!:'<dynamic-member>',
-            selector:detail.selector,kind:detail.kind,fallbackGroup:group
+            selector:detail.selector,kind:detail.kind,fallbackGroup:group,
+            topLevel:topLevelCallOffsets.has(node.start??-1),
+            nativeDocumentReceiver:receiver?.type==='Identifier'&&receiver.name==='document',
+            argumentCount:args.length
           });
         }
       }
