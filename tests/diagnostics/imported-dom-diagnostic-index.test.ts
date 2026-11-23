@@ -212,6 +212,25 @@ test('TASK-013/TEST-022/026: candidate-source identity, size and expiry are boun
   'strings that do not round-trip as strict UTF-8 must not be retained');
 });
 
+test('TASK-013/TEST-022/026: source sidecar requires an exportable filename',()=>{
+ const source='// ==UserScript==\n// @name Filename gate\n// ==/UserScript==\n';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ for(const name of [undefined,null,'','../unsafe.user.js','unsafe\\name.user.js','x'.repeat(256)]){
+  const index=new ImportedDomDiagnosticIndex();
+  index.recordImported(hash,hints('#old'),name,source);
+  assert.equal(index.readUtf8CandidateSource(hash),null,
+   'unexportable labels must never retain private script bytes');
+  const item=index.plan('https://example.org/app').items[0];
+  assert.equal(item.status,'READY_FOR_INSPECTION',
+   'read-only metadata should remain independently usable');
+  assert.equal(item.filename,null);
+ }
+ const eligible=new ImportedDomDiagnosticIndex();
+ eligible.recordImported(hash,hints('#old'),'safe.user.js',source);
+ assert.equal(eligible.readUtf8CandidateSource(hash,'safe.user.js'),source);
+ eligible.clearCandidateSources();
+});
+
 test('TASK-013/TEST-022/026: blocked AST hints must not retain imported source text',()=>{
  const source='// ==UserScript==\\n// @name Private import\\n// ==/UserScript==\\n';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');

@@ -236,11 +236,14 @@ export class ImportedDomDiagnosticIndex{
   // private source in memory for a later consented candidate preview.
   // Malformed, excluded, truncated and selector-less imports remain visible
   // as blocked metadata, but must not consume source-retention capacity.
-  if(source!==undefined&&safeHints&&safeHints.selectorSites.length>0&&
-     safeHints.matchPatterns.length>0&&!safeHints.unsupportedScope&&
-     !safeHints.selectorSitesTruncated)this.retainCandidateSource(hash,source);
   const label=typeof filename==='string'&&filename.length>0&&filename.length<=255&&
    !/[\u0000-\u001f\u007f/\\:]/.test(filename)?filename:null;
+  // Candidate export always requires a native-reselected, filename-bound
+  // original. An anonymous/unsafe label can never yield an export handle,
+  // so keeping the private source for it serves no legitimate purpose.
+  if(source!==undefined&&label!==null&&safeHints&&safeHints.selectorSites.length>0&&
+     safeHints.matchPatterns.length>0&&!safeHints.unsupportedScope&&
+     !safeHints.selectorSitesTruncated)this.retainCandidateSource(hash,source);
   if(previous){
    // Even identical bytes do not certify that the *new* isolated AST run
    // succeeded. Never reuse old hints if its fresh receipt was unavailable,
