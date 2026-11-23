@@ -464,12 +464,12 @@ test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped 
     'teardown must release the batch session ID');
   assert.ok(cleanup.includes('controller.abort()')&&cleanup.includes('droppedImportController=null'),
     'teardown must cancel analysis and release the busy lock');
-  assert.ok(/win\.webContents\.on\('render-process-gone',[^;]*abortDroppedImportForWindow\(win\)/.test(main),
-    'renderer process loss must clean up its batch');
+  assert.match(main,/win\.webContents\.on\('render-process-gone',\(\)=>\{[\s\S]*?nativeImportController\?\.abort\(\);[\s\S]*?abortDroppedImportForWindow\(win\);[\s\S]*?\}\);/,
+    'renderer process loss must revoke native imports and clean up dropped batches');
   assert.ok(/win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)[\s\S]*?abortDroppedImportForWindow\(win\)/.test(main),
     'main-frame reload must clean up its batch');
-  assert.match(main,/if\(isMainFrame&&!isInPlace\)abortDroppedImportForWindow\(win\)/,
-    'fragment-only navigation must not orphan the live renderer batch');
+  assert.match(main,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?nativeImportController\?\.abort\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+    'only full main-frame navigation revokes native imports and handles dropped recovery');
   assert.match(main,/win\.webContents\.on\('did-finish-load',[\s\S]*?pending\.ready=true/,
     'a pending result becomes recoverable only after the replacement document loads');
   assert.match(main,/pending\.frameEpoch!==mainFrameNavigationEpoch/,
