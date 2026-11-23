@@ -26,7 +26,7 @@ const approvedIpcChannels=[
   'import:dropped-batch:begin','import:dropped-batch:finish','import:dropped-batch:recover',
   'import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
- 'scenario:diagnose-imported-batch','scenario:export-imported-candidate','scenario:export-manual',
+ 'scenario:diagnose-imported-batch','scenario:imported-batch-progress','scenario:export-imported-candidate','scenario:export-manual',
  'scenario:history','scenario:inspect','scenario:register'
 ] as const;
 
@@ -2886,4 +2886,20 @@ test('TASK-013/TEST-022/026: invalid imported DOM URL must not call a TDZ-uninit
   assert.ok(plan<helper&&helper<invalid,
     'INVALID_TARGET_URL must be returned after blockedItem is initialized, not rejected by a TDZ ReferenceError');
   assert.match(handler.slice(invalid,invalid+350),/code:'INVALID_TARGET_URL'/);
+});
+
+
+test('TASK-013/TEST-022/026: imported-batch DOM progress is read-only, bounded and main-owned',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.ok(approvedIpcChannels.includes('scenario:imported-batch-progress' as typeof approvedIpcChannels[number]));
+ assert.match(main,/ipcMain\.handle\('scenario:imported-batch-progress'/);
+ assert.match(main,/if\(args\.length\)return \{active:false as const\}/);
+ assert.match(main,/importedDomProgress\s*=\s*\{phase:'AWAITING_CONSENT'/);
+ assert.match(main,/importedDomProgress\s*=\s*null/);
+ assert.match(preload,/getImportedDomProgress:\s*\(\):\s*Promise<unknown>\s*=>\s*ipcRenderer\.invoke\('scenario:imported-batch-progress'\)/);
+ assert.match(ui,/getImportedDomProgress\(\):Promise<\{/);
+ assert.match(ui,/window\.healer\.getImportedDomProgress\(\)/);
+ assert.match(ui,/clearInterval\(importedDomProgressTimer\)/);
 });
