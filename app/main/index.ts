@@ -1634,7 +1634,8 @@ function registerSafeIpc(): void {
               // Only source-backed proposals spend the bounded evaluation
               // budget. Missing/expired sources must not starve later scripts.
               candidatePreviewCount++;
-              const proposal=proposeImportedDomCandidate({source,
+              try{
+                const proposal=proposeImportedDomCandidate({source,
                 expectedSourceSha256:item.scriptSha256,targetUrl:plan.targetUrl,
                 observation,nativeConsent:true});
               if(proposal.status==='CANDIDATE_ONLY'&&
@@ -1651,6 +1652,12 @@ function registerSafeIpc(): void {
                   candidateBefore:proposal.change.before,candidateAfter:proposal.change.after};
               }else candidateFields={candidateStatus:'NOT_PROPOSED',
                 candidateReason:proposal.status==='BLOCKED'?proposal.reason:'SUMMARY_LIMIT_EXCEEDED'};
+              }catch{
+                // The read-only DOM observation has already completed. A
+                // candidate preview failure must not erase that evidence or
+                // block later scripts in this batch.
+                candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_FAILED'};
+              }
             }
           }else candidateFields={candidateStatus:'NOT_PROPOSED',
             candidateReason:'BATCH_PREVIEW_LIMIT'};
