@@ -1324,6 +1324,46 @@ test('TASK-013/TEST-022/026: exhausted malformed AST segment recovers each scrip
  }finally{injected.mock.restore();}
 });
 
+test('TASK-013/TEST-022/026: cancelled batch fences the exclusive DOM gate until underlying worker retires',async()=>{
+ let started!:()=>void;
+ const entered=new Promise<void>(resolve=>{started=resolve;});
+ let finish!:()=>void;
+ const workerRetires=new Promise<void>(resolve=>{finish=resolve;});
+ let dispatched=0;
+ const coordinator=new ReadOnlyBatchCoordinator({
+  count:2,concurrency:1,maxAttempts:2,timeoutMs:30000,
+  jobHashes:[SCRIPT_A,SCRIPT_B]
+ },async()=>{
+  dispatched++;
+  started();
+  await workerRetires;
+  return 'DONE';
+ });
+ const running=coordinator.run();
+ await entered;
+ coordinator.cancel();
+ const terminal=await running;
+ assert.deepEqual(terminal.jobs.map(x=>x.state),['CANCELLED','CANCELLED']);
+ assert.equal(dispatched,1);
+ // A terminal scheduling snapshot does not retire an underlying read-only
+ // CDP operation. The main-process exclusive gate must await real retirement.
+ const candidate=(coordinator as unknown as Record<string,unknown>).whenWorkersRetired;
+ assert.equal(typeof candidate,'function','provide a real task retirement receipt');
+ if(typeof candidate!=='function'){finish();return;}
+ let retired=false;
+ const retirement=(candidate as (this:ReadOnlyBatchCoordinator)=>Promise<void>)
+  .call(coordinator).then(()=>{retired=true;});
+ await Promise.resolve();
+ assert.equal(retired,false,'cancellation must not unlock an active CDP worker');
+ finish();
+ await retirement;
+ assert.equal(retired,true,'the gate may unlock only after the worker settles');
+ assert.equal(dispatched,1,'late worker retirement must not replay cancelled jobs');
+ assert.equal(terminal.automaticPatchAllowed,false);
+ assert.equal(terminal.tampermonkeyVerified,false);
+ assert.equal(terminal.businessVerified,false);
+});
+
 test('TASK-013/TEST-022/026: cancelled pre-worker checkpoint failure is normalized and never dispatches',async()=>{
  let entered!:()=>void;
  const saving=new Promise<void>(resolve=>{entered=resolve;});
