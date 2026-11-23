@@ -218,6 +218,19 @@ export class ImportedDomDiagnosticIndex{
    this.truncatedScripts=true;
    return;
   }
+  // A subsequent import of the same content hash is a NEW source-selection
+  // event, not continued authorization to use an older candidate snapshot.
+  // Drop any earlier source sidecar before considering new, strictly checked
+  // bytes. In particular, a reimport without eligible source must not borrow
+  // the earlier source under the newly selected filename.
+  if(previous){
+   const retained=this.candidateSources.get(hash);
+   if(retained){
+    this.candidateSources.delete(hash);
+    this.candidateSourceBytes-=retained.bytes;
+    this.scheduleCandidateSourceExpiry();
+   }
+  }
   // Retain source bytes only for a script actually tracked by this index.
   // A rejected over-cap import must not create an orphan source sidecar.
   if(source!==undefined)this.retainCandidateSource(hash,source);
@@ -225,8 +238,9 @@ export class ImportedDomDiagnosticIndex{
    !/[\u0000-\u001f\u007f/\\:]/.test(filename)?filename:null;
   const safeHints=hints===null||hints===undefined?null:snapshotHints(hints);
   if(previous){
-   if(!previous.hints&&safeHints)
-    this.profiles.set(hash,Object.freeze({hash,filename:previous.filename??label,hints:safeHints}));
+   const retainedHints=previous.hints??safeHints;
+   if(previous.filename!==label||retainedHints!==previous.hints)
+    this.profiles.set(hash,Object.freeze({hash,filename:label,hints:retainedHints}));
    return;
   }
   this.profiles.set(hash,Object.freeze({hash,filename:label,hints:safeHints}));
