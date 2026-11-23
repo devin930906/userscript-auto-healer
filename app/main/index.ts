@@ -1857,7 +1857,10 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     nativeAiReviewEvidence.revoke(id);
     nativeAiDiscoveryController?.abort();
-    if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress)
+    // Native/dropped import owns the same main-window source and preview
+    // state. Never begin an observing session before that import retires.
+    if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress||
+       nativeImportController||droppedImportController)
       return {ok:false,code:'OBSERVATION_BUSY',...unverified};
     const selected=scenarioSession.resolveReadOnlyDom(id);
     if(!selected.ok)return {ok:false,code:selected.code,...unverified};

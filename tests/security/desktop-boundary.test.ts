@@ -2979,6 +2979,23 @@ test('TASK-013/TEST-022/026: invalid imported DOM URL must not call a TDZ-uninit
 });
 
 
+test('TASK-013/TEST-022/026: ordinary scenario inspection cannot overlap native or dropped import',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:inspect'");
+ const end=main.indexOf("ipcMain.handle(",start+1);
+ assert.ok(start>=0&&end>start,'expected ordinary scenario inspector');
+ const handler=main.slice(start,end);
+ const guard=handler.indexOf("code:'OBSERVATION_BUSY'");
+ assert.ok(guard>0,'ordinary inspection must have an early busy response');
+ const before=handler.slice(0,guard);
+ assert.match(before,/nativeImportController/,
+  'native OS picker, file/folder read and AST preview must block ordinary observation');
+ assert.match(before,/droppedImportController/,
+  'unfinished renderer drop batches must block ordinary observation');
+ assert.ok(guard<handler.indexOf('scenarioSession.resolveReadOnlyDom(id)'),
+  'rejection must precede any inspection resolution');
+});
+
 test('TASK-013/TEST-022/026: cancelled DOM batch retains the native import busy fence until workers actually retire',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const begin=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
