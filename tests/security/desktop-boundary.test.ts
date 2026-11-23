@@ -883,6 +883,20 @@ test('TASK-017/TEST-022: manual candidate export control exposes its consent and
 });
 
 
+test('TASK-013/TEST-022/026: navigation and renderer loss revoke active DOM consent',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf('async function createMainWindow()');
+ const end=main.indexOf("win.webContents.on('did-finish-load'",start);
+ assert.ok(start>=0&&end>start);
+ const lifecycle=main.slice(start,end);
+ assert.match(lifecycle,
+  /win\.webContents\.on\('render-process-gone',\(\)=>\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+  'renderer process loss must revoke the read-only DOM observation lease');
+ assert.match(lifecycle,
+  /win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+  'a replacement main frame must revoke the old DOM observation before new IPC');
+});
+
 test('TASK-013/TEST-022/026: one dropped script cannot survive a stale renderer frame',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const begin=main.indexOf("ipcMain.handle('import:dropped',");
