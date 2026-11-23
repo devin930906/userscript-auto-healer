@@ -2979,6 +2979,37 @@ test('TASK-013/TEST-022/026: invalid imported DOM URL must not call a TDZ-uninit
 });
 
 
+test('TASK-013/TEST-022/026: cancelled DOM batch retains the native import busy fence until workers actually retire',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const begin=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",begin);
+ assert.ok(begin>=0&&end>begin,'expected native batch handler');
+ const handler=main.slice(begin,end);
+ const finallyStart=handler.lastIndexOf('}finally{');
+ const cleanup=handler.slice(finallyStart);
+ assert.ok(finallyStart>=0,'expected the native batch finally path');
+ const retirement=cleanup.indexOf('observationCoordinator.whenWorkersRetired().then(');
+ const lastBusyReset=cleanup.lastIndexOf('scenarioObserveInProgress=false;');
+ assert.ok(retirement>=0,'existing worker retirement receipt must guard native imports');
+ assert.ok(lastBusyReset>retirement,
+  'native-import busy flag must not clear until the underlying CDP worker retires');
+ assert.match(cleanup,
+  /observationCoordinator\.whenWorkersRetired\(\)\.then\(\s*\(\)=>\{\s*scenarioObserveInProgress=false;\s*diagnosticGate\.release\(lease\);\s*\}/,
+  'clear native-import busy state together with the exclusive diagnostic lease');
+ assert.match(cleanup,
+  /else\s*\{?\s*scenarioObserveInProgress=false;\s*diagnosticGate\.release\(lease\);/,
+  'without a started coordinator, normal cleanup must release both barriers');
+ const nativeStart=main.indexOf('const runNativeImport = async');
+ const nativeEnd=main.indexOf("ipcMain.handle('import:get-progress'",nativeStart);
+ assert.ok(nativeStart>=0&&nativeEnd>nativeStart);
+ assert.match(main.slice(nativeStart,nativeEnd),/if\(scenarioObserveInProgress\|\|nativeImportController/,
+  'native file/folder import must remain blocked until real CDP worker retirement');
+ const dropped=main.indexOf("ipcMain.handle('import:dropped-batch:begin'");
+ assert.ok(dropped>=0);
+ assert.match(main.slice(dropped,dropped+700),/scenarioObserveInProgress/,
+  'dropped-batch import must share the same busy fence');
+});
+
 test('TASK-013/TEST-022/026: imported-batch DOM progress is read-only, bounded and main-owned',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
