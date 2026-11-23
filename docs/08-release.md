@@ -14,14 +14,14 @@
 采用语义化版本候选，提交 SHA 为不可变来源；正式 tag 与 Release 必须指向通过 GATE 的同一个源提交，Release 不提前发布。
 
 ## 云端构建
-计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、已实证存在的 Inno Setup 候选安装器（NSIS 可保留备选）与 Windows/PowerShell 原生 ZIP 压缩步骤；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量与第三方依赖许可证仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；目前仅新增候选双包构建工作流，Stable 正式签名、发布及全量验收流程仍未完成。
+计划 push/PR 触发文档与代码检查，release 需显式 workflow_dispatch 或受保护 tag，最小 GITHUB_TOKEN permissions（读 contents，独立发布 Job 写 contents）；GitHub 托管 Windows x64 runner 推荐 windows-2025，独立 job 完成 lockfile 安装、类型检查、测试、构建、已实证存在的 Inno Setup 候选安装器（NSIS 可保留备选）与 Windows/PowerShell 原生 ZIP 压缩步骤；禁止在外部 PR 获 Secrets，Actions 凭据、计费/用量与第三方依赖许可证仍未实核。CI 采用缓存版本/依赖 lock hash、超时/取消/并发策略、失败日志脱敏、工件保留策略。文档审查与正式构建必须不同工作流；已部署 [候选双包工作流](../.github/workflows/windows-candidate-packages.yml) 及独立的 [正式发布工作流](../.github/workflows/release.yml)，均使用 Windows 2025 runner 和 Node.js 22。候选只归档供验证。正式发布入口可由 v* 标签或显式手动发布触发，须先确认同一候选的验证、权限和用户批准，再允许操作。待执行的正式版本与发布条件由 TASK-021 / #610 追踪。
 
 ## EXE 安装版
 候选 Inno Setup 6 生成真实 .exe 安装程序（仅临时文本安装/卸载已通过：https://github.com/devin930906/userscript-auto-healer/actions/runs/39089013574）；Electron+electron-builder NSIS 作为待验证备选（见 ADR-001/003）。计划每用户安装优先且不强求管理员权限；应用可执行入口/运行资源随包携带，用户选择的 Chrome 外置；可自选安装位置与桌面/开始菜单快捷方式，升级向后兼容，卸载保留用户数据默认应提示并可明确选删除。具体安装器许可/签名方案待核定；未签名文件不得称已签名。干净 Windows VM 实际安装、启动、核心场景、升级、卸载和数据完整性为必备验收。
 
 ## ZIP 便携版
 必须是真实的 `.zip` 归档，来自与 EXE 安装版相同源提交的完整 Windows 便携应用目录及运行依赖。优先使用 Windows GitHub Actions 中可验证的 PowerShell `Compress-Archive` 创建 ZIP，并通过文件头、归档条目清单、解压文件哈希、路径安全与实际启动验证证明格式及内容正确；不得通过重命名扩展名伪造 ZIP。不得将 GitHub Actions 自动提供的工件容器 ZIP 当作已经验证的产品便携包。
-便携包中须包含完整应用入口与必要资源，不要求用户安装 Node/npm，不假设用户 Chrome 已内置于包中。配置与历史默认存放于允许的用户数据位置；若选择便携目录，遇只读目录必须提示并安全降级到获用户同意的路径；凭据及迁移策略须实测。需检查 ZIP 条目相对路径、拒绝绝对路径与 `../` 路径穿越并避免解压覆盖，完整性校验 SHA-256；在干净 Windows VM 中解压至非构建目录，验证首次启动、核心功能、退出、数据保留和多路径运行。当前尚无正式便携应用，因此以上均为发布验收要求，**不是已通过结果**。原先 RAR5 试用技术 PoC 只保留历史记录，RAR 创建器及其生产许可证不再是正式发布依赖。
+便携包中须包含完整应用入口与必要资源，不要求用户安装 Node/npm，不假设用户 Chrome 已内置于包中。配置与历史默认存放于允许的用户数据位置；若选择便携目录，遇只读目录必须提示并安全降级到获用户同意的路径；凭据及迁移策略须实测。需检查 ZIP 条目相对路径、拒绝绝对路径与 `../` 路径穿越并避免解压覆盖，完整性校验 SHA-256；在干净 Windows VM 中解压至非构建目录，验证首次启动、核心功能、退出、数据保留和多路径运行。以上是下一次 Stable 候选必须执行的验收要求。v1.1.3 已发布的便携包与后续待验收候选分别按版本和校验值追溯。原先 RAR5 试用技术 PoC 只保留历史记录，RAR 创建器及其生产许可证不再是正式发布依赖。
 
 ## 发布产物
 预期 Userscript-Auto-Healer-vX.Y.Z-Setup.exe、Userscript-Auto-Healer-vX.Y.Z-Portable.zip、SHA256SUMS.txt、发行说明；具体文件名非实际产物。构建须记录版本、commitSHA、runner image、lockfile SHA、tool version、dependency/license audit，上传 GitHub Releases 的是 .exe/.zip 产品文件本体；下载后校验 SHA-256 与大小。签名证书未提供、成本/授权待核查，正式签名策略必须确定或明确披露未签名风险（不宣称已签）。
@@ -29,8 +29,21 @@
 ## 验证规则
 GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部阻断项满足前禁止发布 Stable。测试数据、API Key 和登录资料严禁进入公开 Release 工件。
 
+### 最终集中人工验收
+
+进入条件为已批准的候选来源、成功的适用自动化检查、同一源提交构建的 EXE 和真正便携 ZIP，以及包含文件名、大小、SHA-256 与 Actions Run ID 的候选记录。验证前读取 [测试标准](07-testing.md) 及 [TASK-021 / #610](https://github.com/devin930906/userscript-auto-healer/issues/610)。
+
+| 真实环境验证 | 对应 TEST/GATE |
+|---|---|
+| 干净 Windows 环境执行 EXE 安装、启动、升级、卸载及数据保留确认 | TEST-027，GATE-008/011 |
+| 解压便携 ZIP 后直接启动，复验不同路径、权限与用户数据行为 | TEST-028，GATE-009/011 |
+| 按已授权的 Chrome、Profile、Tampermonkey 与测试脚本验证注入、GM、业务正反断言及错误恢复 | TEST-006/008/009/017/018/020/021/022，GATE-004/005/006/007 |
+| 完成桌面用户旅程、键盘焦点、缩放、状态反馈和失败恢复体验 | TEST-002/022，GATE-001/002/007 |
+
+退出条件为 #610 记录实际候选文件与哈希、环境、逐项结果和报告，适用 GATE 全部通过，并具备本次正式发布授权。候选变化时重跑受影响的机器和人工检查。发布前后分别对照候选及正式附件的 SHA-256、大小与来源。
+
 ## 校验值
-正式 Stable 发布产物仍为“未提供”；2026-10-20 Windows 开发候选 EXE/ZIP 的实算 SHA-256 与构建来源另见下节，不能挪用作最终 Release 校验。
+已发布的 [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3) 关联来源 e0753cc6624a689f3d62cb721dae8f8d05d0d1c2，并附独立 SHA256SUMS.txt。下一次 Stable 来源、正式产物和校验值待按 #610 核准。候选记录保留其实际构建来源与哈希，不作为后续正式 Release 的校验值。
 
 ## 2026-10-20 Windows 开发候选双包阶段记录（非 Stable）
 
@@ -106,9 +119,9 @@ GATE 执行按类别分离 CI build 和真实 Windows+管理器复现，全部�
 
 - **工程事实与代码就绪**：
   - PR [#841](https://github.com/devin930906/userscript-auto-healer/pull/841) 已通过 Squash 合并至主干 `main@a30136b6920fca56a73c1d51a6603a11957c5054`。
-  - 新增生产发布工作流 [`.github/workflows/release.yml`](.github/workflows/release.yml)，支持受保护 tag `v*` 与 `workflow_dispatch` 触发，包含完整的 TypeScript 类型检查、真实 Windows 锁与重定位回归、全量 1073 项自动化测试、生产安装包与便携包构建及 GitHub Releases 自动发布。
-  - 新增生产发布脚本 [`scripts/windows-package-production.ps1`](scripts/windows-package-production.ps1)，使用生产 Inno Setup 规范 [`packaging/windows/installer.iss`](packaging/windows/installer.iss)（独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户安装 `PrivilegesRequired=lowest`、覆盖升级目录保持 `UsePreviousAppDir=yes`），并构建真实便携 ZIP，执行全量 155 个文件哈希一致性比对、NTFS ACL 只读直启验证、静默安装/升级/卸载保留测试与 `SHA256SUMS.txt` 双向自校验。
-  - 新增发布规范自动化测试 [`tests/packaging/production-packaging-spec.test.ts`](tests/packaging/production-packaging-spec.test.ts)（5 项测试全绿），全工程本地测试总数达到 **1073 项**（**1063 项 pass**、0 fail、10 项条件 skip）。
+  - 新增生产发布工作流 [`.github/workflows/release.yml`](../.github/workflows/release.yml)，支持受保护 tag `v*` 与 `workflow_dispatch` 触发，包含完整的 TypeScript 类型检查、真实 Windows 锁与重定位回归、全量 1073 项自动化测试、生产安装包与便携包构建及 GitHub Releases 自动发布。
+  - 新增生产发布脚本 [`scripts/windows-package-production.ps1`](../scripts/windows-package-production.ps1)，使用生产 Inno Setup 规范 [`packaging/windows/installer.iss`](../packaging/windows/installer.iss)（独立 AppId `{{9F7B3E2A-1D4C-4E5F-8A9B-0C1D2E3F4A5B}}`、单用户安装 `PrivilegesRequired=lowest`、覆盖升级目录保持 `UsePreviousAppDir=yes`），并构建真实便携 ZIP，执行全量 155 个文件哈希一致性比对、NTFS ACL 只读直启验证、静默安装/升级/卸载保留测试与 `SHA256SUMS.txt` 双向自校验。
+  - 新增发布规范自动化测试 [`tests/packaging/production-packaging-spec.test.ts`](../tests/packaging/production-packaging-spec.test.ts)（5 项测试全绿），全工程本地测试总数达到 **1073 项**（**1063 项 pass**、0 fail、10 项条件 skip）。
   - 版本号由 `0.0.1-dev` 正式提升为正式稳定版 `0.0.1`。
   - 云端生产发布工作流运行 [#43049182838](https://github.com/devin930906/userscript-auto-healer/actions/runs/43049182838)（Artifact ID `13868942959`，274,354,742 字节）成功验证 154 个文件哈希一致性、NTFS ACL 只读直启、Inno Setup 安装升级与数据保留。生产 Setup EXE SHA-256：`3531011ff741651b01182309e922a6f51986e5bb88f07a34431b653ae390f98c`，生产 Portable ZIP SHA-256：`cb18c26c24b026786103b3bc6d7a6d97dc4a2e5c26f970891cb427ba51301870`。
   - 此前云端 Candidate Packaging 运行 [#43040889627](https://github.com/devin930906/userscript-auto-healer/actions/runs/43040889627)（Artifact ID `13865347719`，278,021,169 字节）候选 EXE SHA-256：`7f67adccb897a96f50b0738388a18df552c7506e98d36ddbfaae7efcc9921824`，候选 ZIP SHA-256：`33537afbcf5311ad27047ec8611d3d4f0ea6d2bef7a1394502b56e530f868625`。

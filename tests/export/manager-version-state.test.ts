@@ -330,6 +330,28 @@ test('TASK-012/TEST-023: individual proxy script descriptor fails closed as INVA
   assert.equal(itemTrap, false, 'Proxy trap on item must not be triggered');
 });
 
+test('TASK-012/TEST-023: a different explicit script ID cannot authenticate a same-name import', () => {
+  const source = [{scriptId:'expected-id',name:'Shared Name',version:'1.0.0',sha256:origSha}];
+  const foreign = [{
+    scriptId:'different-id',name:'Shared Name',version:'1.0.0',
+    activeScriptSha256:origSha,injected:true,gmApiVerified:true
+  }];
+  const result = reconcileBatchImportedScriptsVersionState(source,foreign,{userApproved:true});
+  assert.equal(result.status,'COMPLETED');
+  assert.equal(result.matchedCount,0);
+  assert.equal(result.missingCount,1);
+  assert.deepEqual(result.missingScriptIds,['expected-id']);
+  assert.equal(result.items[0].status,'MISSING_NOT_INSTALLED');
+  assert.equal(result.items[0].managerVerified,false);
+  assert.equal(result.automaticInstallAllowed,false);
+
+  // A genuinely ID-less legacy observation may still be matched by name.
+  const legacy = [{name:'Shared Name',version:'1.0.0',
+    activeScriptSha256:origSha,injected:true,gmApiVerified:true}];
+  const legacyResult = reconcileBatchImportedScriptsVersionState(source,legacy,{userApproved:true});
+  assert.equal(legacyResult.items[0].status,'INSTALLED_MATCH');
+});
+
 test('TASK-012/TEST-023: launchBatchUserscriptInstallation blocks unconsented or invalid execution', async () => {
   const fakeSession: any = {
     ok: true,

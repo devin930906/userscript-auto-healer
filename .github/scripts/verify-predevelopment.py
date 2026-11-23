@@ -165,9 +165,11 @@ def check_stage_contract():
     assert "仍是候选技术基线，不是实测最终决定" not in handoff, (
         "Handoff incorrectly contradicts conditional ADR-001 decision"
     )
-    assert "尚未开发正式产品功能" in read("docs/13-predevelopment-admission.md") or (
-        "没有正式产品" in read("README.md")
-    ), "Do not turn predevelopment proof into a product-completed claim"
+    # The README can list already released versions. Its current development
+    # and release claims must point to the separate authoritative records.
+    readme = read("README.md")
+    for authority in ("docs/11-readiness.md", "docs/08-release.md"):
+        assert f"]({authority})" in readme, f"README must link to {authority}"
 
 
 def main():

@@ -1,5 +1,7 @@
 # 开发前最终准入审查
 
+> **2026-11-23 现行结论：有条件准入。** 新版（7）、（8）、（9）共用同一准入结论和任务路线。获授权继续开发时，先核验 TASK-013 / [Issue #857](https://github.com/devin930906/userscript-auto-healer/issues/857) 与开放 [PR #925](https://github.com/devin930906/userscript-auto-healer/pull/925) 的最新差异和检查。可先做适用且依赖满足的独立范围。具体准入依据、14 个开放 Issues 快照和剩余验收见 [本轮增量核验](#2026-11-23-新版4准备标准增量核验)。以下有日期记录按各自基准解释。
+
 > **2026-11-22 准备增量再核验（以上一轮已合并修订为起点）**：从 GitHub 重新读取确认当前 `main@3b0556ec76d08a8c8c0dc9377ad0adf605cc88f2`，文档 PR [#932](https://github.com/devin930906/userscript-auto-healer/pull/932) 已合并，`docs/02-requirements.md` 保留连续 28 项 REQ 且依赖图无环，`docs/08-release.md` 的 GATE-001..011 均明确为未完成。该合并意外触发 Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 自动关闭，已按未满足的 TASK-013/TEST-022 验收恢复为 Open 并附原因；产品 PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 仍在 Open，本次不触碰其文件或将其成果视为已合并。旧版必需检查 `Issue coordination / stale round fence` 当前实际由可信基准脚本核对 PR SHA/文件冲突，并**不要求 Issue 独占认领**；具体行为由 `.github/scripts/issue-merge-fence.py` 与规则集 #26307718 提供证据。此次仅校准 `docs/05-experience.md` 对现有 `app/ui/index.css` 的源码事实，未进行真实 UI 渲染、Windows/Chrome/Tampermonkey 实测或新的产品构建；仍按原“有条件准入”与全部 Stable GATE 的阻断条件续接。
 
 > **2026-11-22 准入审查快照（优先于下列更早的历史记录）**：本轮文档修订前的主干基准为 `main@1fcd1480d135a12ef5c766115465999bb444514f`。准备 PR [#926](https://github.com/devin930906/userscript-auto-healer/pull/926) 已合并为 `28efdb591969b30ac4d963f0fbe6b634dee863f3`；PR [#927](https://github.com/devin930906/userscript-auto-healer/pull/927) 也已合并；其合并提交即上述本轮文档修订前的主干基准。文末“#926 仍未合并”是合并前的时间性记录，不是当前阻断。无需重建文档或从 TASK-001 重启。
@@ -144,3 +146,56 @@ Chrome Browser MCP 实际读取用户已连接 Windows x64 Chrome **155.0.8059.4
 - `docs/05-experience.md` 已保留经确认的 TASK-017 深色控制台设计：七标签、深靛霓虹令牌、键盘标签导航、原生授权与危险恢复交互。此轮不替换品牌或新建设计体系。由于没有取得真实桌面渲染截图与实际操作结果，窗口缩放、视觉对比、完整键盘旅程和无障碍测试均保持待验证。
 - 原产品 PR #925 的最新 head `4babea4f1e49cc799beb72b9013d4e158d185962` 已在 GitHub Actions 取得部分相关成功结果（Application Skeleton、Windows Candidate、Portable Chrome、Documentation Integrity）；TASK-007 官方 Tampermonkey 隔离 Windows 实验于该 head 的 Actions run `45019225183`（https://github.com/devin930906/userscript-auto-healer/actions/runs/45019225183）已成功完成；此证据仅适用于隔离实验，不表示实际用户 Profile 或产品级安装、注入及业务验证通过。必须按 head 完整检查并区分候选/隔离实验和真实用户环境与产品级验收，不能据部分绿色记录关闭 #857/#486/#510/#610。
 - **集成状态**：准备分支有未合并 Draft PR #926；不应直接把此分支视为已纳入 `main` 的正式准入更新。正式开发起点仍为有条件续接 TASK-013 / Issue #857，先核对 PR #925 的实际剩余功能和完整 CI；无须另建 Issue 或从 TASK-001 重做。
+
+## 2026-11-23 新版（4）准备标准增量核验
+
+核验基准为 devin930906/userscript-auto-healer 的 [main@96cd4028e227d4934077933f5123230c14ec0367](https://github.com/devin930906/userscript-auto-healer/commit/96cd4028e227d4934077933f5123230c14ec0367)。旧准备 PR #926 已合并，随后 #929–#933 的相关文档校正已进入该基准。此次对齐现行入口、Issue 路线及三种执行方式。切换执行方式时按 [迁移与续接](19-stable-v7-migration.md) 重新核验服务器和环境。
+
+| 项目 | 验收条件 | 状态 | 证据位置 | 阻断原因 | 恢复条件 |
+|---|---|---|---|---|---|
+| 项目与原始输入 | 核准 owner/repo、分支、输入和版本决定 | 已确认 | 本轮 main 基准、[00](00-intake.md)、[原始输入](original-product-requirements.txt)、[01](01-product.md)、[ADR-004](adr/ADR-004-portable-zip.md) | 无 | 新会话重新读取目标引用；保留后续批准的 ZIP 与 Tampermonkey 决定 |
+| 需求与正式路线 | 稳定编号、需求行为、依赖、TEST/GATE 有对应 | 已确认准备依据 | [02](02-requirements.md)、[09](09-development-plan.md)、[10](10-traceability.md)；现有验证脚本检查 28 REQ/TEST 行、21 TASK、11 GATE | 无；具体功能验收按实际证据 | 每个实施范围同步任务映射与适用测试 |
+| 核心技术与架构 | 已有技术决策、实现边界及历史 PoC 可追溯 | 有条件准入 | [03](03-feasibility.md)、[04](04-architecture.md)、[早期实证](13-predevelopment-admission.md) 与已合并 Windows 工程 | Chrome/CDP 间歇性故障根因仍开放，支持矩阵有待实测 | TASK-005/#510 依据新可比证据复现；按 TASK-007/#486 完成可信管理器和业务验证 |
+| 界面与交互 | 使用正式界面规范、任务与测试入口 | 已确认设计依据 | [05](05-experience.md)、TASK-017/#607、TEST-002/022、当前 Electron UI 源码 | 真实桌面视觉、无障碍和全路径用户体验待验证 | 在对应界面改动执行适用自动化与渲染检查，在最终集中阶段验证真实 Windows 用户流程 |
+| 安全和授权 | 保持 Chrome/Profile 归属、最小权限、用户授权、原件保护与失败恢复 | 有条件准入 | [06](06-security-risk.md)、[07](07-testing.md)、[08](08-release.md) | 真实环境、事务和自动应用需要对应产品证据 | 依照 TEST-017/018/019/020/021/022/026 及相应 GATE 逐项验收 |
+| 云端检查与并行 | PR 检查覆盖 main，写入及集成以真实 diff 和 SHA 为据 | 已核验当前配置 | [Ruleset #26307718](https://github.com/devin930906/userscript-auto-healer/rules/26307718)、[可信基准规则](../.github/workflows/governance-issue-merge-fence.yml)、[GitHub Required Checks 规则](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks) | 共享文件与 PR #925 有路径冲突 | main 规则要求 PR 和严格 required check。required context 对 main PR 触发，未设路径过滤；Docs 和应用检查各有路径过滤且未列为该规则集的 required context。未读取到启用 Merge Queue 的规则 |
+| Actions 与凭据 | 云端可运行，外来 PR 与发布隔离 | 已确认当前触发范围 | [应用检查](../.github/workflows/app-check.yml)、[文档检查](../.github/workflows/docs-check.yml)、[候选双包](../.github/workflows/windows-candidate-packages.yml)、[发布工作流](../.github/workflows/release.yml) | runner 无真实用户 Windows/Profile；发布入口可写 Release | Required check 只 checkout 可信 base；应用检查按 PR/引用取消旧运行；发布工作流独立由 v* tag 或手动触发。发布前须满足 #610、全部适用 GATE 及用户授权 |
+| Issues 路线 | 复用真实 Issues、分类、里程碑与依赖 | 已核对 Open/Closed 范围 | 下表、[09](09-development-plan.md)、[10](10-traceability.md) | 原生关系的同步范围见下文 | 分别核验 TASK 依赖与 GitHub 实际关系 |
+| 双包与最终人工验收 | EXE 和真 ZIP 有同源构建、校验、真实运行和集中验收路径 | 已确认发布设计 | [08](08-release.md)、TEST-027/028、GATE-008/009/011、[#610](https://github.com/devin930906/userscript-auto-healer/issues/610) | 当前开发基准的最终双包和完整 Stable 验收仍待完成 | 核准同源 EXE 安装/升级/卸载与数据保留、ZIP 解压直启与数据行为、SHA-256、兼容性和业务结果 |
+| 首个可执行范围与交接 | 给出真实 TASK/Issue/PR、读写边界、机器验证与退出条件 | 有条件准入 | 见下方续接范围、[12](12-handoff.md)、[三种执行方式](19-stable-v7-migration.md#2026-11-23-三种新版开发指令的共用入口) | 共享文档由开放中的 PR #925 同时改动 | 下一会话核对最新 PR、main 基准、文件、接口和测试后，只执行获准且依赖满足的范围 |
+
+### GitHub Issues 分类与范围
+
+以下是本轮核验的开放工作入口。TASK 状态、Issue 状态、代码集成、机器检查和最终人工验收均须依据对应证据维护。
+
+| TASK | 现行 Issue | 工作分类和验收入口 |
+|---|---|---|
+| TASK-005 | [#510](https://github.com/devin930906/userscript-auto-healer/issues/510) | Chrome/CDP 间歇性故障；TEST-006/008/009 |
+| TASK-007 | [#486](https://github.com/devin930906/userscript-auto-healer/issues/486) | 首选管理器及真实业务验证；TEST-017/018 |
+| TASK-009 | [#487](https://github.com/devin930906/userscript-auto-healer/issues/487) | 诊断到保守候选的集成；TEST-014/019 |
+| TASK-010 | [#488](https://github.com/devin930906/userscript-auto-healer/issues/488) | 可信业务验收门控；TEST-018/021 |
+| TASK-011 | [#489](https://github.com/devin930906/userscript-auto-healer/issues/489) | 原件保护、原子事务与失败恢复；TEST-020/021 |
+| TASK-012 | [#603](https://github.com/devin930906/userscript-auto-healer/issues/603) | 导出与管理器版本；TEST-023 |
+| TASK-013 | [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) | 批处理续接、持久恢复与完整验收；TEST-022/GATE-007 |
+| TASK-014 | [#604](https://github.com/devin930906/userscript-auto-healer/issues/604) | 可选 AI 产品集成与隐私预算；TEST-015/016 |
+| TASK-015 | [#605](https://github.com/devin930906/userscript-auto-healer/issues/605) | 授权监控、记录与复检；TEST-024 |
+| TASK-016 | [#606](https://github.com/devin930906/userscript-auto-healer/issues/606) | 多脚本兼容及回退；TEST-025 |
+| TASK-017 | [#607](https://github.com/devin930906/userscript-auto-healer/issues/607) | Windows 界面与用户旅程；TEST-002/022 |
+| TASK-018 | [#608](https://github.com/devin930906/userscript-auto-healer/issues/608) | 安全审计与产品级端到端回归；TEST-007/018/026 |
+| TASK-019 | [#609](https://github.com/devin930906/userscript-auto-healer/issues/609) | 最终 EXE 安装、升级与数据保留；TEST-027/GATE-008/011 |
+| TASK-021 | [#610](https://github.com/devin930906/userscript-auto-healer/issues/610) | 最终同源 EXE + ZIP、全门槛验收和授权发布；GATE-001..011 |
+
+关闭的 #480（TASK-008）、#215（TASK-020）、#440（TASK-013）对应各自历史故障。TASK-020 的最终便携 ZIP 验收继续通过 #610 追踪。TASK-001..006 的既有成果及 #856 的历史接入范围按对应合并证据解释，TASK-005 余下故障入口为 #510。旧治理 #565 已关闭，旧协调引用及诊断记录保留供审计。
+
+[Next Stable 里程碑 #1](https://github.com/devin930906/userscript-auto-healer/milestone/1) 已归入上述 14 个开放 Issues，未设版本号或截止日期。GitHub 新增 UI/UX、安全与测试、Windows 打包、Stable 发行分类，保留原有缺陷及功能标签。GitHub 原生 blocked-by 已回读七条：#607 等待 #604/#605/#606/#857，#608 等待 #607，#609 等待 #608，#610 等待 #609。其他前置条件按 [09 的 TASK 依赖](09-development-plan.md#任务依赖) 核实。上述是验收依赖；具备自身前提且互不重叠的子范围仍可推进。暂无独立父子层级或 Projects 管理需求。
+
+TASK-013 的基础批处理与 TASK-014 的可选 AI 应分段验收。#857 所述 #604 用于已配置 AI 的集成验收；基础流先按无 AI 的授权和安全前提推进，再按 #604 接入配置后的 AI。避免把两者同步写成反向硬依赖。
+
+云端构建使用公开仓库标准 Windows 2025 x64 托管运行器，官方参考规格为 4 vCPU、16 GB 内存、14 GB SSD，账号实际用量及当前排队容量需在运行时复核。候选和正式工作流分别应用其 YAML 与工件元数据中的保留期，文件将在工件过期后失效。参见 [GitHub 托管运行器规格](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
+
+### 下一开发范围与验证
+
+- TASK-013 / #857 追踪 REQ-022 和 TEST-022。先查看 [#925 的文件](https://github.com/devin930906/userscript-auto-healer/pull/925/files) 与实时检查，区分 main 已整合基线与在制分批导入、只读诊断和受控候选导出。该 PR 于本轮核验时的 head 为 21688b6c506f4581d8a884b90c578dcf5d21b7a7，base 为上述 main 基准。该 head 的 [Required Fence](https://github.com/devin930906/userscript-auto-healer/actions/runs/45149656583)、[Windows 候选双包](https://github.com/devin930906/userscript-auto-healer/actions/runs/45149661317) 和相关应用/文档检查已有成功结果。[隔离 Tampermonkey 矩阵](https://github.com/devin930906/userscript-auto-healer/actions/runs/45149661107) 已取消。仅用对应 head 的当前运行记录判断验证。
+- 准入允许审核并继续已明确、安全独立的子范围。先核对原生导入、批次状态、取消/重试与用户反馈的实际差异及 TEST-022 覆盖，按需检查 app/main、app/preload、app/ui、src/jobs、src/import 与相关测试。完整逐脚本信任链、真实管理器/GM/业务断言、自动应用和恢复由相应依赖与 TEST/GATE 控制，缺证据时保留受阻。
+- 代码范围确认后适用入口为 Node.js 22、锁定依赖、npm ci、npm run typecheck、npm test 与匹配改动的 Windows Actions。准备文档使用 python .github/scripts/verify-predevelopment.py 和 Documentation Integrity。对 docs/07、09、10、12、14 及其他共享文件先核对 #925 的实际文件清单。当前从本节读取更新时点，在允许的整合路径中回填共享文件。
+- 本轮准入仍为**有条件准入**，支持按同一项目依据选用新版（7）、（8）或（9）。运行环境变化本身不改变准入。GATE-001..011 和新一轮 Stable 放行以 [08](08-release.md) 与 #610 为准，先完成适用产品、真实环境、同源双包及集中人工验收，再核对正式发布授权。
