@@ -1691,6 +1691,10 @@ function registerSafeIpc(): void {
       }
       results.sort((a,b)=>a.ordinal-b.ordinal);
       if(revoked())return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',...unverified};
+      // Keep window and owned-browser identity explicit at the success boundary.
+      // A changed owner must never receive a successful batch or export grants.
+      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
+        return {ok:false,code:'CANCELLED',...unverified};
       observationReceiptDelivered=true;
       return {ok:true,status:'UNKNOWN' as const,
         reason:'DOM_SIGNAL_DOES_NOT_VERIFY_SCRIPT_OR_BUSINESS',
