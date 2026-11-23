@@ -91,6 +91,9 @@ interface Window {
       localArchiveStatus?:'SAVED_UNVERIFIED'|'UNAVAILABLE';
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
+    getImportedDomProgress():Promise<{active:boolean;
+      phase?:'AWAITING_CONSENT'|'OPENING_TARGET'|'OBSERVING';
+      processed?:number;total?:number;currentIndex?:number;attempts?:number}>;
     diagnoseImportedBatch(targetUrl:string):Promise<{ok:boolean;code?:string;
       status?:'UNKNOWN';reason?:string;targetMatchedCount?:number;
       truncatedScripts?:boolean;
@@ -1916,6 +1919,36 @@ importedDomRunButton?.addEventListener('click',()=>{
  importedDomItems?.replaceChildren();
  if(importedDomResult)importedDomResult.textContent=
   '等待系统原生确认；脚本不会执行，本次只读取声明的页面选择器数量。';
+ // Poll advisory, main-owned counters only while this generation is current.
+ let progressRequestInFlight=false;
+ const importedDomProgressTimer=setInterval(()=>{
+  if(progressRequestInFlight||generation!==importedDomGeneration||
+     !importedDomBusy||importedDomCancelRequested)return;
+  progressRequestInFlight=true;
+  void window.healer.getImportedDomProgress().then(progress=>{
+   if(generation!==importedDomGeneration||!importedDomBusy||
+      importedDomCancelRequested||!progress.active||!importedDomResult)return;
+   if(progress.phase==='AWAITING_CONSENT'){
+    importedDomResult.textContent='等待系统原生确认；尚未访问网页或执行脚本。';
+   }else if(progress.phase==='OPENING_TARGET'){
+    importedDomResult.textContent='正在打开已授权目标网页；仅准备只读 DOM 观测。';
+   }else if(progress.phase==='OBSERVING'&&
+     typeof progress.processed==='number'&&typeof progress.total==='number'&&
+     typeof progress.currentIndex==='number'&&typeof progress.attempts==='number'&&
+     Number.isSafeInteger(progress.processed)&&Number.isSafeInteger(progress.total)&&
+     Number.isSafeInteger(progress.currentIndex)&&Number.isSafeInteger(progress.attempts)&&
+     progress.total>0&&progress.processed>=0&&progress.processed<=progress.total&&
+     progress.currentIndex>=0&&progress.currentIndex<=progress.total&&
+     progress.attempts>=0&&progress.attempts<=2){
+    importedDomResult.textContent='逐脚本只读 DOM 检查：已结束 '+
+     progress.processed+' / '+progress.total+' 项'+
+     (progress.currentIndex>0?'；当前第 '+progress.currentIndex+
+       ' 项（第 '+progress.attempts+' 次尝试）':'')+
+     '。结果仍是未验证信号，不会自动修改原脚本。';
+   }
+  }).catch(()=>{/* Polling cannot affect the final diagnosis. */})
+   .finally(()=>{progressRequestInFlight=false;});
+ },600);
  void window.healer.diagnoseImportedBatch(targetUrl).then(result=>{
   if(generation!==importedDomGeneration)return;
   importedDomActiveTarget=null;
@@ -2047,6 +2080,7 @@ importedDomRunButton?.addEventListener('click',()=>{
   if(importedDomResult)importedDomResult.textContent=
    '批量 DOM 观察失败；没有验证结论。请确认受控 Chrome 状态后再试。';
  }).finally(()=>{
+  clearInterval(importedDomProgressTimer);
   if(requestId!==importedDomRequestId)return;
   importedDomActiveTarget=null;
   importedDomBusy=false;

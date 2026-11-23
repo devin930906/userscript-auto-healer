@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   // Main resolves the imported script identities and all selectors internally.
   diagnoseImportedBatch: (targetUrl: string): Promise<unknown> =>
     ipcRenderer.invoke('scenario:diagnose-imported-batch',targetUrl),
+  getImportedDomProgress: (): Promise<unknown> => ipcRenderer.invoke('scenario:imported-batch-progress'),
   readScenarioHistory: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:history',id),
   // Only a short-lived opaque ID; all source and destination paths are native-selected.
   exportImportedDomCandidate: (candidateId: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-imported-candidate',candidateId),

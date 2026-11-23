@@ -169,6 +169,10 @@ let nativeRestoreController:AbortController|null=null;
 const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
+type ImportedDomProgress=Readonly<{phase:'AWAITING_CONSENT'|'OPENING_TARGET'|'OBSERVING';
+ processed:number;total:number;currentIndex:number;attempts:number}>;
+// Main-owned: never disclose script names, SHA, URL, selectors or authority.
+let importedDomProgress:ImportedDomProgress|null=null;
 let scenarioObserveEpoch=0;
 function cancelScenarioObservation():void{
   scenarioObserveEpoch++;
@@ -1526,6 +1530,17 @@ function registerSafeIpc(): void {
     }catch{return markLimitedSessionArchiveUnavailable(current);}
   });
 
+  // Read-only aggregate counters, no renderer-provided data or capabilities.
+  ipcMain.handle('scenario:imported-batch-progress',(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {active:false as const};
+    const progress=importedDomProgress;
+    return scenarioObserveInProgress&&progress
+      ?Object.freeze({active:true as const,phase:progress.phase,
+        processed:progress.processed,total:progress.total,
+        currentIndex:progress.currentIndex,attempts:progress.attempts})
+      :Object.freeze({active:false as const});
+  });
   // Ordinary batch path: selector sites are resolved exclusively from the
   // main-only AST sidecar. The renderer submits only the configured URL; it
   // cannot choose a script hash, selector, source path, endpoint or consent.
@@ -1590,6 +1605,8 @@ function registerSafeIpc(): void {
     if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',
       items:plan.items.map(item=>blockedItem(item,'OBSERVATION_BUSY')),
       truncatedScripts:plan.truncatedScripts,...unverified};
+    importedDomProgress={phase:'AWAITING_CONSENT',processed:0,total:ready.length,
+      currentIndex:0,attempts:0};
     const controller=new AbortController();
     const epoch=scenarioObserveEpoch;
     scenarioObserveController=controller;
@@ -1620,6 +1637,7 @@ function registerSafeIpc(): void {
         return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
           truncatedScripts:plan.truncatedScripts,...unverified};
       }
+      if(importedDomProgress)importedDomProgress={...importedDomProgress,phase:'OPENING_TARGET'};
       const opened=await openApprovedTarget(owned,plan.targetUrl,true,controller.signal);
       if(revoked())return {ok:false,code:'CANCELLED',
         items:plan.items.map(item=>blockedItem(item,'CANCELLED')),
@@ -1627,10 +1645,16 @@ function registerSafeIpc(): void {
       if(!opened.ok)return {ok:false,code:opened.code,
         items:plan.items.map(item=>blockedItem(item,opened.code)),
         truncatedScripts:plan.truncatedScripts,...unverified};
+      if(importedDomProgress)importedDomProgress={...importedDomProgress,phase:'OBSERVING'};
       const observations:Array<Awaited<ReturnType<typeof observeApprovedDomSeries>>|undefined>=
         Array.from({length:ready.length});
       const observationCodes:Array<string|undefined>=Array.from({length:ready.length});
       let coordinator!:ReadOnlyBatchCoordinator;
+      const finishCurrent=()=>{
+        if(importedDomProgress&&!controller.signal.aborted)
+          importedDomProgress={...importedDomProgress,
+            processed:Math.min(ready.length,importedDomProgress.processed+1)};
+      };
       coordinator=new ReadOnlyBatchCoordinator({
         count:ready.length,concurrency:1,maxAttempts:2,timeoutMs:120000
       },async(index,signal)=>{
@@ -1640,6 +1664,9 @@ function registerSafeIpc(): void {
           coordinator.cancel();
           return 'PERMANENT_FAILURE';
         }
+        const attempt=coordinator.snapshot().jobs[index]?.attempts??0;
+        if(importedDomProgress)
+          importedDomProgress={...importedDomProgress,currentIndex:index+1,attempts:attempt};
         try{
           const observation=await observeApprovedDomSeries(
             owned,opened,plan.targetUrl!,true,
@@ -1652,12 +1679,16 @@ function registerSafeIpc(): void {
           if(observation.ok){
             observations[index]=observation;
             observationCodes[index]=undefined;
+            finishCurrent();
             return 'DONE';
           }
           observationCodes[index]=observation.code;
-          return observation.code==='CDP_FAILED'?'RETRYABLE_FAILURE':'PERMANENT_FAILURE';
+          const retryable=observation.code==='CDP_FAILED';
+          if(!retryable||attempt>=2)finishCurrent();
+          return retryable?'RETRYABLE_FAILURE':'PERMANENT_FAILURE';
         }catch{
           observationCodes[index]='OBSERVATION_FAILED';
+          finishCurrent();
           return 'PERMANENT_FAILURE';
         }
       });
@@ -1787,6 +1818,7 @@ function registerSafeIpc(): void {
         truncatedScripts:plan.truncatedScripts,...unverified};
     }finally{
       clearTimeout(deadline);
+      importedDomProgress=null;
       importedDomDiagnosticIndex.clearCandidateSources();
       if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
       if(scenarioObserveController===controller)scenarioObserveController=null;
