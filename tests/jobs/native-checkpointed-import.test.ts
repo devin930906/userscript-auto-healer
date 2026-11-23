@@ -185,6 +185,48 @@ test('TASK-013/TEST-022/026: renderer-dropped outcomes use the shared checkpoint
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-013/TEST-022/026: cancelled import outcome must not dispatch a fresh AST batch',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-cancelled-import-outcome-'));
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ const actual=isolated.previewImportedBatchOffMain;
+ let dispatched=0;
+ const spy=mock.method(isolated,'previewImportedBatchOffMain',
+  (...args:Parameters<typeof actual>)=>{
+   dispatched++;
+   return actual(...args);
+  });
+ try{
+  const batch=new DroppedImportBatch();
+  assert.equal(batch.add('completed.user.js',
+   Buffer.from(header+'document.querySelector("#completed");')).ok,true);
+  const completed=batch.finish();
+  assert.ok(completed);
+  // A native partial import retains completed source bytes while its
+  // cancellation result forbids starting a new asynchronous AST operation.
+  const cancelled:ImportOutcome={...completed!,canceled:true,unprocessed:2};
+  const root=join(home,'userdata');
+  await mkdir(root);
+  const journalRoot=join(root,'readonly-journals');
+  let progress=0;
+  const result=await checkpointedImportModule.analyzeImportedOutcomeWithCheckpoint(
+   journalRoot,cancelled,undefined,()=>{progress++;});
+  assert.equal(result.canceled,true);
+  assert.equal(result.unprocessed,2);
+  assert.equal(cancelled.scripts.length,1,'validated imports remain available for display');
+  assert.equal(result.checkpoint?.status,'BLOCKED');
+  assert.equal(result.checkpoint?.status==='BLOCKED'&&result.checkpoint.reason,'CANCELLED');
+  assert.deepEqual(result.checkpoint?.previews.map(row=>row.status),['SKIPPED_CANCELLED']);
+  assert.equal(dispatched,0,'cancelled importer must not launch any new worker');
+  assert.equal(progress,0,'cancelled importer must not claim newly analysed progress');
+  await assert.rejects(readdir(journalRoot),{code:'ENOENT'},
+   'cancelled importer must not create any journal');
+ }finally{
+  spy.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/TEST-022/026: cancellation during early per-file recovery preserves later completed segment evidence',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-recovery-later-segment-'));
  const isolated=require('../../src/analyze/isolated-batch-preview') as
