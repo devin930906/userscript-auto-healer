@@ -266,11 +266,15 @@ export class ImportedDomDiagnosticIndex{
     Object.freeze({...base,status:'BLOCKED' as const,code});
    if(!targetUrl||!target){items.push(blocked('INVALID_TARGET_URL'));continue;}
    const hints=profile.hints;
-   if(!hints||hints.selectorSites.length===0){
-    items.push(blocked('NO_LITERAL_SELECTORS'));continue;
-   }
+   if(!hints){items.push(blocked('NO_LITERAL_SELECTORS'));continue;}
+   // Unsupported metadata and a truncated Worker result remain the primary
+   // blockers even if no eligible selectors survived. Reporting an empty
+   // selector set first would mask the actionable safety restriction.
    if(hints.unsupportedScope){items.push(blocked('UNSUPPORTED_MATCH_RULES'));continue;}
    if(hints.selectorSitesTruncated){items.push(blocked('SELECTOR_LIMIT_EXCEEDED'));continue;}
+   if(hints.selectorSites.length===0){
+    items.push(blocked('NO_LITERAL_SELECTORS'));continue;
+   }
    if(hints.matchPatterns.length===0){items.push(blocked('NO_MATCH_METADATA'));continue;}
    if(!hints.matchPatterns.some(pattern=>matchingExactOriginPattern(pattern,target))){
     items.push(blocked('TARGET_NOT_MATCHED'));continue;
