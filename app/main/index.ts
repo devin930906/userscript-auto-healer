@@ -1402,6 +1402,12 @@ function registerSafeIpc(): void {
         session.frameEpoch!==mainFrameNavigationEpoch||
         session.owner!==win||!win||win.isDestroyed())
       return {ok:false,processed:0,code:'STALE_BATCH'};
+    // A file.arrayBuffer() can finish after the user cancelled a dropped
+    // import. Do not accept late bytes into the native batch; finish/recover
+    // still retains all previously validated scripts without re-adding them.
+    const controller=droppedImportController;
+    if(!controller||controller.signal.aborted)
+      return {ok:false,processed:0,code:controller?.signal.aborted?'CANCELLED':'STALE_BATCH'};
     return session.batch.add(name,data);
   });
   ipcMain.handle('import:dropped-batch:finish',async(event,batchId:unknown)=>{
