@@ -136,7 +136,8 @@ export class ImportedDomDiagnosticIndex{
   lifecycle:CandidateSourceLifecycleOptions={}){
   this.candidateSourceTtlMs=typeof lifecycle.candidateSourceTtlMs==='number'&&
     Number.isFinite(lifecycle.candidateSourceTtlMs)&&lifecycle.candidateSourceTtlMs>0
-      ?lifecycle.candidateSourceTtlMs:CANDIDATE_SOURCE_TTL_MS;
+      ?Math.min(lifecycle.candidateSourceTtlMs,CANDIDATE_SOURCE_TTL_MS)
+      :CANDIDATE_SOURCE_TTL_MS;
   this.scheduleTimer=lifecycle.setTimeout??setTimeout;
   this.cancelTimer=lifecycle.clearTimeout??clearTimeout;
  }
