@@ -442,3 +442,25 @@ test('TASK-012/TEST-023: conflicting observations for one explicit script ID can
   assert.equal(result.automaticInstallAllowed, false);
   assert.equal(result.automaticPatchAllowed, false);
 });
+
+
+test('TASK-012/TEST-023: conflicting ID-less legacy manager observations cannot authenticate by last name', () => {
+  const imported = [{scriptId:'expected-id',name:'Shared Legacy',version:'1.0.0',sha256:origSha}];
+  const conflicting = [
+    {name:'Shared Legacy',version:'0.9.0',
+     activeScriptSha256:candSha,injected:true,gmApiVerified:true},
+    {name:'Shared Legacy',version:'1.0.0',
+     activeScriptSha256:origSha,injected:true,gmApiVerified:true}
+  ];
+  for(const observations of [conflicting,[...conflicting].reverse()]){
+    const result = reconcileBatchImportedScriptsVersionState(imported,observations,{userApproved:true});
+    assert.equal(result.status,'COMPLETED');
+    assert.equal(result.matchedCount,0);
+    assert.equal(result.missingCount,1);
+    assert.equal(result.items[0].status,'MISSING_NOT_INSTALLED');
+    assert.equal(result.items[0].managerVerified,false);
+    assert.equal(result.automaticInstallAllowed,false);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.automaticRollbackAllowed,false);
+  }
+});
