@@ -2457,7 +2457,7 @@ test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or 
   'receipt ownership must be marked only at the final success path');
  assert.match(handler,/finally\{\s*clearTimeout\(deadline\);\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);\s*if\(!observationReceiptDelivered\)importedDomCandidateExportStore\.clearOwner\(win\);/,
   'failure/cancelled observations must revoke partial one-use export handles');
- assert.match(handler,/if\(win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)/,
+ assert.match(handler,/if\(revoked\(\)\|\|win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)/,
   'window and owned-browser replacement must remain fail-closed');
 });
 
