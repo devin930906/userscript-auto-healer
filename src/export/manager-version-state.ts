@@ -425,9 +425,13 @@ export function reconcileBatchImportedScriptsVersionState(
         });
 
         if (validObs.scriptId) {
+          // An explicit manager script identity cannot attest to any other
+          // imported script merely because the displayed names match.
           observationMap.set(validObs.scriptId, validObs);
+        } else {
+          // Only truly ID-less legacy observations can use name fallback.
+          observationByName.set(validObs.name.trim().toLowerCase(), validObs);
         }
-        observationByName.set(validObs.name.trim().toLowerCase(), validObs);
       }
     }
 
