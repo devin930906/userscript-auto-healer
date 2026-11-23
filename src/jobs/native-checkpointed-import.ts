@@ -592,6 +592,21 @@ export async function analyzeImportedOutcomeWithCheckpoint(
       unprocessedSlot.value<0)))
   return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),canceled:false,unprocessed:0});
  const scripts=scriptSlot.value as readonly ImportedScript[];
+ // A native importer can finish some read-only file imports before its own
+ // cancellation. Preserve those bytes for the caller's display, but do not
+ // start a NEW AST task or publish a checkpoint after cancellation. The
+ // cancellation result is an independent stop signal, even when no separate
+ // AbortSignal was supplied by the caller.
+ if(canceledSlot?.value===true){
+  const count=scripts.length;
+  if(count>MAX_SELECTED_FILES)
+   return Object.freeze({checkpoint:fail(0,'INVALID_INPUT'),
+    canceled:true,unprocessed:typeof unprocessedSlot?.value==='number'?
+     unprocessedSlot.value:0});
+  return Object.freeze({checkpoint:count===0?null:fail(count,'CANCELLED'),
+   canceled:true,unprocessed:typeof unprocessedSlot?.value==='number'?
+    unprocessedSlot.value:0});
+ }
  const checkpoint=scripts.length===0?null:
   await runCheckpointedNativeImportAnalysis(journalRoot,scripts,signal,onProgress);
  return Object.freeze({checkpoint,
