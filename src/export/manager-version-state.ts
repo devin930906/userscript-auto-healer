@@ -449,6 +449,18 @@ export function reconcileBatchImportedScriptsVersionState(
       }
     }
 
+    // A legacy name-only manager observation cannot authenticate two imports.
+    // Exact-ID evidence remains authoritative for each distinct script ID.
+    const importedNameCounts = new Map<string, number>();
+    for (const raw of untrustedImportedScripts) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) continue;
+      const descriptor = Object.getOwnPropertyDescriptors(raw);
+      const importedName = descriptor.name?.value;
+      if (typeof importedName !== 'string' || importedName.length === 0 || importedName.length > 256) continue;
+      const key = importedName.trim().toLowerCase();
+      importedNameCounts.set(key, (importedNameCounts.get(key) ?? 0) + 1);
+    }
+
     const items: SingleScriptReconciliationResult[] = [];
     const missingScriptIds: string[] = [];
     let matchedCount = 0;
@@ -502,10 +514,12 @@ export function reconcileBatchImportedScriptsVersionState(
       const installUrl = typeof urlVal === 'string' ? urlVal : undefined;
       const exportFileName = typeof fileVal === 'string' ? fileVal : undefined;
 
+      const normalizedName = name.trim().toLowerCase();
       const matchedObs = ambiguousScriptIds.has(scriptId)
         ? undefined
-        : observationMap.get(scriptId) || (ambiguousLegacyNames.has(name.trim().toLowerCase())
-          ? undefined : observationByName.get(name.trim().toLowerCase()));
+        : observationMap.get(scriptId) || (ambiguousLegacyNames.has(normalizedName) ||
+          importedNameCounts.get(normalizedName) !== 1
+          ? undefined : observationByName.get(normalizedName));
 
       if (!matchedObs) {
         missingCount++;

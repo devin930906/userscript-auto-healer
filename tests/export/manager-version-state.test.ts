@@ -464,3 +464,24 @@ test('TASK-012/TEST-023: conflicting ID-less legacy manager observations cannot 
     assert.equal(result.automaticRollbackAllowed,false);
   }
 });
+
+test('TASK-012/TEST-023: one ID-less manager observation cannot authenticate two same-name imported scripts', () => {
+  const imported = [
+    {scriptId:'first-id',name:'Shared Legacy',version:'1.0.0',sha256:origSha},
+    {scriptId:'second-id',name:' shared legacy ',version:'1.0.0',sha256:origSha}
+  ];
+  const observed = [{name:'Shared Legacy',version:'1.0.0',
+    activeScriptSha256:origSha,injected:true,gmApiVerified:true}];
+  for (const descriptors of [imported,[...imported].reverse()]) {
+    const result = reconcileBatchImportedScriptsVersionState(descriptors,observed,{userApproved:true});
+    assert.equal(result.status,'COMPLETED');
+    assert.equal(result.matchedCount,0);
+    assert.equal(result.missingCount,2);
+    assert.deepEqual(result.items.map(item=>item.status),[
+      'MISSING_NOT_INSTALLED','MISSING_NOT_INSTALLED']);
+    assert.ok(result.items.every(item=>item.managerVerified===false));
+    assert.equal(result.automaticInstallAllowed,false);
+    assert.equal(result.automaticPatchAllowed,false);
+    assert.equal(result.automaticRollbackAllowed,false);
+  }
+});
