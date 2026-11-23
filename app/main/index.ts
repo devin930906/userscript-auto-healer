@@ -1516,18 +1516,34 @@ function registerSafeIpc(): void {
   // accepts a file path/hash from renderer, or returns raw evidence/hash data.
   ipcMain.handle('scenario:history',async(event,id:unknown)=>{
     authorizeSender(event);
-    const current=readLimitedSessionHistory(scenarioSession,limitedScenarioHistory,id);
+    const owner=mainWindow;
+    const frameEpoch=mainFrameNavigationEpoch;
+    const session=scenarioSession;
+    const stale=()=>!owner||owner!==mainWindow||owner.isDestroyed()||
+      frameEpoch!==mainFrameNavigationEpoch||session!==scenarioSession;
+    // An archive read may finish after the document navigates or its native
+    // scenario scope is replaced. Never return the old window's history to
+    // a superseded renderer request, even on the archive error path.
+    const unavailable=()=>Object.freeze({ok:false as const,
+      code:'HISTORY_UNAVAILABLE' as const,
+      automaticPatchAllowed:false as const,automaticRollbackAllowed:false as const,
+      tampermonkeyVerified:false as const,businessVerified:false as const});
+    const current=readLimitedSessionHistory(session,limitedScenarioHistory,id);
     if(!current.ok)return current;
-    const selected=scenarioSession.resolveReadOnlyDom(id);
+    const selected=session.resolveReadOnlyDom(id);
     if(!selected.ok)return current;
     try{
       const key=limitedScenarioHistoryKey(
         selected.scenario.scriptSha256,selected.scenario.id);
       const stored=await readLimitedHealthArchive(app.getPath('userData'),key);
+      if(stale())return unavailable();
       if(stored.status==='BLOCKED')return markLimitedSessionArchiveUnavailable(current);
       if(stored.status!=='ARCHIVE_READ_UNVERIFIED')return current;
       return mergeLimitedSessionArchive(current,stored);
-    }catch{return markLimitedSessionArchiveUnavailable(current);}
+    }catch{
+      if(stale())return unavailable();
+      return markLimitedSessionArchiveUnavailable(current);
+    }
   });
 
   // Read-only aggregate counters, no renderer-provided data or capabilities.
