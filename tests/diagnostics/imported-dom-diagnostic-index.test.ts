@@ -292,6 +292,26 @@ test('TASK-013/TEST-022/026: an over-cap imported script never retains untracked
  index.clearCandidateSources();
 });
 
+test('TASK-013/TEST-022/026: injected source TTL cannot exceed five-minute privacy bound',()=>{
+ let now=100;
+ const timer={unref(){}} as unknown as ReturnType<typeof setTimeout>;
+ const scheduled:number[]=[];
+ const index=new ImportedDomDiagnosticIndex(()=>now,{
+  candidateSourceTtlMs:60*60*1000,
+  setTimeout:(_callback,delay)=>{scheduled.push(delay);return timer;},
+  clearTimeout:()=>{}
+ });
+ const source='privacy bounded source';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ index.recordImported(hash,hints('#old'),'privacy.user.js',source);
+ assert.equal(scheduled[0],5*60*1000,
+  'a caller-supplied lifecycle override must never extend private source retention');
+ now+=5*60*1000+1;
+ assert.equal(index.readUtf8CandidateSource(hash),null,
+  'a long TTL override must not keep script source beyond five minutes');
+ index.clearCandidateSources();
+});
+
 test('TASK-013/TEST-022/026: idle candidate source is eagerly dropped at its expiry deadline',()=>{
  let now=100;
  const scheduled:Array<{callback:()=>void;delay:number}>=[];
