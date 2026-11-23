@@ -1619,6 +1619,7 @@ function registerSafeIpc(): void {
     let deadlineExpired=false;
     let deadline:NodeJS.Timeout|undefined;
     let observationReceiptDelivered=false;
+    let observationCoordinator:ReadOnlyBatchCoordinator|null=null;
     let candidatePreviewCount=0;
     const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
       win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
@@ -1701,6 +1702,7 @@ function registerSafeIpc(): void {
           return 'PERMANENT_FAILURE';
         }
       });
+      observationCoordinator=coordinator;
       const cancelCoordinator=()=>coordinator.cancel();
       controller.signal.addEventListener('abort',cancelCoordinator,{once:true});
       let batchSnapshot:ReturnType<ReadOnlyBatchCoordinator['snapshot']>;
@@ -1832,7 +1834,17 @@ function registerSafeIpc(): void {
       if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
       if(scenarioObserveController===controller)scenarioObserveController=null;
       scenarioObserveInProgress=false;
-      diagnosticGate.release(lease);
+      // Cancellation/timeout can settle the coordinator before an in-flight
+      // CDP observer settles. The existing exclusive lease must outlive every
+      // such read-only operation so the next diagnostic cannot overlap it.
+      // Keep the lease held indefinitely if a broken observer never retires;
+      // reopening the application is safer than overlapping CDP operations.
+      if(observationCoordinator){
+        void observationCoordinator.whenWorkersRetired().then(
+          ()=>{diagnosticGate.release(lease);},
+          ()=>{/* Unknown retirement cannot authorize a new diagnostic. */}
+        );
+      }else diagnosticGate.release(lease);
     }
   });
 
