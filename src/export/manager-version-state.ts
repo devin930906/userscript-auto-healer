@@ -355,6 +355,7 @@ export function reconcileBatchImportedScriptsVersionState(
     const observationMap = new Map<string, InstalledScriptObservation>();
     const ambiguousScriptIds = new Set<string>();
     const observationByName = new Map<string, InstalledScriptObservation>();
+    const ambiguousLegacyNames = new Set<string>();
 
     if (untrustedInstalledObservations !== null && untrustedInstalledObservations !== undefined) {
       if (!Array.isArray(untrustedInstalledObservations) || nodeTypes.isProxy(untrustedInstalledObservations)) {
@@ -435,8 +436,15 @@ export function reconcileBatchImportedScriptsVersionState(
             observationMap.set(validObs.scriptId, validObs);
           }
         } else {
-          // Only truly ID-less legacy observations can use name fallback.
-          observationByName.set(validObs.name.trim().toLowerCase(), validObs);
+          // ID-less legacy identities must be unambiguous. A repeated
+          // normalized name cannot be authenticated by last-write-wins.
+          const legacyName = validObs.name.trim().toLowerCase();
+          if (ambiguousLegacyNames.has(legacyName) || observationByName.has(legacyName)) {
+            ambiguousLegacyNames.add(legacyName);
+            observationByName.delete(legacyName);
+          } else {
+            observationByName.set(legacyName, validObs);
+          }
         }
       }
     }
@@ -496,7 +504,8 @@ export function reconcileBatchImportedScriptsVersionState(
 
       const matchedObs = ambiguousScriptIds.has(scriptId)
         ? undefined
-        : observationMap.get(scriptId) || observationByName.get(name.trim().toLowerCase());
+        : observationMap.get(scriptId) || (ambiguousLegacyNames.has(name.trim().toLowerCase())
+          ? undefined : observationByName.get(name.trim().toLowerCase()));
 
       if (!matchedObs) {
         missingCount++;
