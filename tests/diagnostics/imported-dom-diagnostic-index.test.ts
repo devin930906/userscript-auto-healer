@@ -212,6 +212,33 @@ test('TASK-013/TEST-022/026: candidate-source identity, size and expiry are boun
   'strings that do not round-trip as strict UTF-8 must not be retained');
 });
 
+test('TASK-013/TEST-022/026: blocked AST hints must not retain imported source text',()=>{
+ const source='// ==UserScript==\\n// @name Private import\\n// ==/UserScript==\\n';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ const cases=[
+  null,
+  {matchPatterns:['https://example.org/*'],unsupportedScope:true,
+   selectorSitesTruncated:false,selectorSites:[{offset:0,method:'querySelector',selector:'#old'}]},
+  {matchPatterns:['https://example.org/*'],unsupportedScope:false,
+   selectorSitesTruncated:true,selectorSites:[{offset:0,method:'querySelector',selector:'#old'}]},
+  {matchPatterns:[],unsupportedScope:false,selectorSitesTruncated:false,
+   selectorSites:[{offset:0,method:'querySelector',selector:'#old'}]},
+  {matchPatterns:['https://example.org/*'],unsupportedScope:false,
+   selectorSitesTruncated:false,selectorSites:[]}
+ ];
+ for(const invalid of cases){
+  const index=new ImportedDomDiagnosticIndex();
+  index.recordImported(hash,invalid,'private.user.js',source);
+  assert.equal(index.readUtf8CandidateSource(hash,'private.user.js'),null,
+   'no eligible AST and metadata means no justified private source retention');
+  assert.equal(index.plan('https://example.org/app').items[0].status,'BLOCKED');
+ }
+ const eligible=new ImportedDomDiagnosticIndex();
+ eligible.recordImported(hash,hints('#old'),'private.user.js',source);
+ assert.equal(eligible.readUtf8CandidateSource(hash,'private.user.js'),source);
+ eligible.clearCandidateSources();
+});
+
 test('TASK-013/TEST-022/026: candidate source retention is capped per window',()=>{
  const index=new ImportedDomDiagnosticIndex();
  const first='x'.repeat(256*1024-1)+'!';
@@ -221,9 +248,9 @@ test('TASK-013/TEST-022/026: candidate source retention is capped per window',()
  for(let i=0;i<64;i++){
   const source='x'.repeat(256*1024-1)+String.fromCharCode(0x21+i);
   const hash=createHash('sha256').update(source,'utf8').digest('hex');
-  index.recordImported(hash,null,`candidate-${i}.user.js`,source);
+  index.recordImported(hash,hints('#old'),`candidate-${i}.user.js`,source);
  }
- index.recordImported(lastHash,null,'candidate-over-cap.user.js',last);
+ index.recordImported(lastHash,hints('#old'),'candidate-over-cap.user.js',last);
  assert.ok(index.readUtf8CandidateSource(firstHash));
  assert.equal(index.readUtf8CandidateSource(lastHash),null,
   'source text above the 16 MiB per-window budget must be rejected');
@@ -257,7 +284,7 @@ test('TASK-013/TEST-022/026: idle candidate source is eagerly dropped at its exp
  });
  const source='short lived source';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
- index.recordImported(hash,null,'idle.user.js',source);
+ index.recordImported(hash,hints('#old'),'idle.user.js',source);
  assert.equal(scheduled[0]?.delay,10);
  now=111;
  scheduled[0]?.callback();
@@ -281,7 +308,7 @@ test('TASK-013/TEST-022/026: stale canceled candidate-source timer cannot resche
  });
  const source='candidate held by live replacement timer';
  const hash=createHash('sha256').update(source).digest('hex');
- index.recordImported(hash,null,'candidate.user.js',source);
+ index.recordImported(hash,hints('#old'),'candidate.user.js',source);
  assert.equal(scheduled.length,1);
  now=101;
  assert.equal(index.readUtf8CandidateSource(hash),source);
@@ -303,7 +330,7 @@ test('TASK-013/TEST-022/026: candidate-source timer failure drops retained sourc
   setTimeout:()=>{attempts++;throw new Error('timer unavailable');},
   clearTimeout:()=>{}
  });
- assert.doesNotThrow(()=>index.recordImported(hash,null,'timer-failure.user.js',source));
+ assert.doesNotThrow(()=>index.recordImported(hash,hints('#old'),'timer-failure.user.js',source));
  assert.ok(attempts>=1,'the injected timer failure must be exercised');
  assert.equal(index.readUtf8CandidateSource(hash),null,
   'source text must not remain in memory without a scheduled expiration');
