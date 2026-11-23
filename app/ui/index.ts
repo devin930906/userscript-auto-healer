@@ -452,7 +452,11 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
       : await window.healer.chooseFolder();
     // The main process revokes previous candidate handles only after a
     // native selection was accepted, never when the OS picker was canceled.
-    if(!result.canceled&&!result.errors.some(item=>item.code==='IMPORT_BUSY'))
+    // A partially canceled import may still have accepted validated scripts.
+    // Only an empty OS-picker cancellation (or IMPORT_BUSY rejection) leaves
+    // prior candidate actions intact.
+    if((!result.canceled||result.scripts.length>0||result.errors.length>0)&&
+       !result.errors.some(item=>item.code==='IMPORT_BUSY'))
       retireImportedDomCandidatesAfterImport();
     show(result);
     if (result.canceled) {
