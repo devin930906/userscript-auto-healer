@@ -2507,6 +2507,21 @@ test('TASK-013/TEST-022/023/026: rejected DOM batch preserves reviewed export gr
     'busy operations must return before any native export grant is retired');
 });
 
+test('TASK-013/TEST-022/026: rejected DOM batch cannot abort an independent native AI discovery',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'expected the real imported-batch handler');
+ const handler=main.slice(start,end);
+ const busy=handler.indexOf("if(lease===null)return {ok:false,code:'OBSERVATION_BUSY'");
+ const abort=handler.indexOf('nativeAiDiscoveryController?.abort()');
+ const retire=handler.indexOf('importedDomCandidateExportStore.clearOwner(win)');
+ assert.ok(busy>=0&&abort>busy&&retire>abort,
+  'only an accepted diagnostic gate may supersede native AI discovery or reviewed exports');
+ assert.doesNotMatch(handler.slice(0,busy),/nativeAiDiscoveryController\?\.abort\(\)/,
+  'invalid URL, missing browser, no eligible script and busy requests cannot interrupt AI discovery');
+});
+
 test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or return success',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");

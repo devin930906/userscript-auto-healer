@@ -1546,7 +1546,6 @@ function registerSafeIpc(): void {
   // cannot choose a script hash, selector, source path, endpoint or consent.
   ipcMain.handle('scenario:diagnose-imported-batch',async(event,targetInput:unknown)=>{
     authorizeSender(event);
-    nativeAiDiscoveryController?.abort();
     if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress||
        manualExportInProgress||nativeImportController||droppedImportController||
        nativeSelectionInProgress)
@@ -1604,6 +1603,9 @@ function registerSafeIpc(): void {
     if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',
       items:plan.items.map(item=>blockedItem(item,'OBSERVATION_BUSY')),
       truncatedScripts:plan.truncatedScripts,...unverified};
+    // A rejected or busy diagnostic must not cancel an unrelated native AI
+    // discovery. Supersede it only after this operation owns the gate.
+    nativeAiDiscoveryController?.abort();
     // Only an accepted diagnostic lease supersedes prior reviewed export grants.
     // Invalid, no-browser and busy requests must not revoke a separately
     // reviewed, still-valid main-owned one-use manual export capability.
