@@ -1625,7 +1625,7 @@ function registerSafeIpc(): void {
         }
         try{
           const observation=await observeApprovedDomSeries(
-            owned,opened,plan.targetUrl,true,
+            owned,opened,plan.targetUrl!,true,
             item.selectorSites.map(site=>site.selector),3,250,signal);
           if(signal.aborted||revoked()){
             observationCodes[index]='CANCELLED';
