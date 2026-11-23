@@ -356,6 +356,48 @@ test('TASK-013/TEST-022/NFR-009: delayed native deadline timer prevents post-bud
  }
 });
 
+test('TASK-013/TEST-022/NFR-009: later segment still dispatches after the obsolete 15-second batch cutoff',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-native-batch-120s-regression-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ const isolated=require('../../src/analyze/isolated-batch-preview') as
+  typeof import('../../src/analyze/isolated-batch-preview');
+ let calls=0;
+ const patch=mock.method(isolated,'previewImportedBatchOffMain',
+  async(...args:Parameters<typeof isolated.previewImportedBatchOffMain>)=>{
+   calls++;
+   assert.equal(args[5],120000,'all segments share the native 120-second deadline');
+   if(calls===1)now=16000; // Beyond the obsolete 15-second coordinator budget.
+   return {previews:args[0].map(previewImportedScriptAnalysis),
+    safeToContinue:true} as unknown as
+    Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+  });
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(home,`segment-budget-${index}.user.js`);
+   await writeFile(path,header+`document.querySelector("#budget-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  const userData=join(home,'userdata');
+  await mkdir(userData);
+  const result=await runCheckpointedNativeImportAnalysis(
+   join(userData,'readonly-journals'),scripts);
+  assert.equal(calls,2,'the second legitimate segment must not be lost at 16 seconds');
+  assert.equal(result.status,'READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(result.previews.map(row=>row.status),
+   Array(17).fill('STATIC_ANALYSIS_ONLY'));
+  assert.ok(result.previews.every(row=>row.automaticPatchAllowed===false&&
+   row.businessVerified===false&&row.tampermonkeyVerified===false),
+   'crossing the old cutoff must not grant repair or manager authority');
+ }finally{
+  patch.mock.restore();clock.mock.restore();
+  await rm(home,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/TEST-022/NFR-009: budget stop preserves fresh later native segment observations',async()=>{
  const home=await mkdtemp(join(tmpdir(),'uah-native-budget-later-observation-'));
  const performance=require('node:perf_hooks').performance as Performance;
