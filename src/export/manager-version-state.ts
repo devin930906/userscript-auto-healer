@@ -353,7 +353,9 @@ export function reconcileBatchImportedScriptsVersionState(
     }
 
     const observationMap = new Map<string, InstalledScriptObservation>();
+    const ambiguousScriptIds = new Set<string>();
     const observationByName = new Map<string, InstalledScriptObservation>();
+    const ambiguousLegacyNames = new Set<string>();
 
     if (untrustedInstalledObservations !== null && untrustedInstalledObservations !== undefined) {
       if (!Array.isArray(untrustedInstalledObservations) || nodeTypes.isProxy(untrustedInstalledObservations)) {
@@ -425,12 +427,24 @@ export function reconcileBatchImportedScriptsVersionState(
         });
 
         if (validObs.scriptId) {
-          // An explicit manager script identity cannot attest to any other
-          // imported script merely because the displayed names match.
-          observationMap.set(validObs.scriptId, validObs);
+          // Multiple observations for the same manager identity are ambiguous,
+          // regardless of their order. Never let the final record win.
+          if (ambiguousScriptIds.has(validObs.scriptId) || observationMap.has(validObs.scriptId)) {
+            ambiguousScriptIds.add(validObs.scriptId);
+            observationMap.delete(validObs.scriptId);
+          } else {
+            observationMap.set(validObs.scriptId, validObs);
+          }
         } else {
-          // Only truly ID-less legacy observations can use name fallback.
-          observationByName.set(validObs.name.trim().toLowerCase(), validObs);
+          // ID-less legacy identities must be unambiguous. A repeated
+          // normalized name cannot be authenticated by last-write-wins.
+          const legacyName = validObs.name.trim().toLowerCase();
+          if (ambiguousLegacyNames.has(legacyName) || observationByName.has(legacyName)) {
+            ambiguousLegacyNames.add(legacyName);
+            observationByName.delete(legacyName);
+          } else {
+            observationByName.set(legacyName, validObs);
+          }
         }
       }
     }
@@ -488,7 +502,10 @@ export function reconcileBatchImportedScriptsVersionState(
       const installUrl = typeof urlVal === 'string' ? urlVal : undefined;
       const exportFileName = typeof fileVal === 'string' ? fileVal : undefined;
 
-      const matchedObs = observationMap.get(scriptId) || observationByName.get(name.trim().toLowerCase());
+      const matchedObs = ambiguousScriptIds.has(scriptId)
+        ? undefined
+        : observationMap.get(scriptId) || (ambiguousLegacyNames.has(name.trim().toLowerCase())
+          ? undefined : observationByName.get(name.trim().toLowerCase()));
 
       if (!matchedObs) {
         missingCount++;
