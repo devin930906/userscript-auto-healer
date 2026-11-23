@@ -1957,19 +1957,28 @@ importedDomRunButton?.addEventListener('click',()=>{
   importedDomDisplayedTarget=targetUrl;
   if(!result.ok){
    if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
+   // A stopped batch can still contain completed read-only observations.
+   // Preserve each attempt and signal without implying a valid final
+   // batch, verified script, business acceptance, or export permission.
+   const blockedItems=Array.isArray(result.items)?result.items.slice(0,1000):[];
+   const observedBeforeStop=blockedItems.filter(item=>item.domStatus==='LIMITED_DOM_SIGNAL_ONLY').length;
    if(importedDomResult)importedDomResult.textContent=
     '批量 DOM 观察未完成：'+importedDomBlockReason(result.code)+
     '；没有报告脚本或业务验证成功。'+
+    (observedBeforeStop>0
+      ?' 批次中止前保留了 '+observedBeforeStop+' 项有限 DOM 信号，仅供排查；不代表运行时验收。'
+      :'')+
     (result.code==='BROWSER_NOT_RUNNING'
      ?'短时源码缓存已清除；请启动本程序受控 Chrome，并重新导入原始脚本后再次观测，以便生成新的候选预览。'
      :'');
-   // The main process can return a bounded static receipt without opening
-   // any browser. Keep per-script reasons visible even on an error response.
-   const blockedItems=Array.isArray(result.items)?result.items.slice(0,1000):[];
    for(const item of blockedItems){
     if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
     const row=document.createElement('li');
-    row.textContent=item.filename+': '+importedDomBlockReason(item.code)+
+    row.textContent=item.filename+': '+
+     (item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'
+      ?'中止前取得 '+item.checkedSelectorCount+
+       ' 个选择器的有限 DOM 信号；脚本及业务未验证；批次已中止，候选导出不可用'
+      :importedDomBlockReason(item.code))+
      (item.attempts>0?'（尝试 '+item.attempts+' 次）':'（未开始）');
     importedDomItems?.append(row);
    }
