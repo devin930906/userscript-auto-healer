@@ -100,6 +100,18 @@ test('TASK-013/TEST-022: diagnostic plans cap scripts, selectors and match patte
   'SELECTOR_LIMIT_EXCEEDED');
 });
 
+test('TASK-013/TEST-022/026: retained source lookup is bound to its imported filename',()=>{
+ const source='// ==UserScript==\n// @name File identity\n// ==/UserScript==\n';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ const index=new ImportedDomDiagnosticIndex();
+ index.recordImported(hash,hints('#old'),'original.user.js',source);
+ assert.equal(index.readUtf8CandidateSource(hash,'other.user.js'),null,
+  'a matching content hash must not authorize a different displayed file');
+ assert.equal(index.readUtf8CandidateSource(hash,null),null,
+  'unlabeled candidates have no filename-bound export authority');
+ assert.equal(index.readUtf8CandidateSource(hash,'original.user.js'),source);
+});
+
 test('TASK-013/TEST-022/026: UTF-8 candidate source stays main-only and clears after batch use',()=>{
  const source='// ==UserScript==\n// @match https://example.org/*\n// @grant none\n// ==/UserScript==\ndocument.querySelector("#old");\n';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
