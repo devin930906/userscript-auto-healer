@@ -2490,6 +2490,23 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
   'an async import result must not write into a replacement window index');
 });
 
+test('TASK-013/TEST-022/023/026: rejected DOM batch preserves reviewed export grants',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+  const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+  assert.ok(start>=0&&end>start);
+  const handler=main.slice(start,end);
+  const lease=handler.indexOf('const lease=diagnosticGate.reserve()');
+  const busy=handler.indexOf("if(lease===null)return {ok:false,code:'OBSERVATION_BUSY'");
+  const retired=handler.indexOf('importedDomCandidateExportStore.clearOwner(win)');
+  assert.ok(lease>=0&&busy>lease&&retired>busy,
+    'invalid/no-browser/busy requests must not revoke a previously reviewed one-use export');
+  assert.doesNotMatch(handler.slice(0,retired),/importedDomCandidateExportStore\.clearOwner\(/,
+    'revocation must not precede successful reservation of the diagnostic gate');
+  assert.match(handler.slice(busy,retired),/truncatedScripts:plan\.truncatedScripts,\.\.\.unverified\};/,
+    'busy operations must return before any native export grant is retired');
+});
+
 test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or return success',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");

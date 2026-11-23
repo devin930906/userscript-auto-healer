@@ -1551,7 +1551,6 @@ function registerSafeIpc(): void {
        manualExportInProgress||nativeImportController||droppedImportController||
        nativeSelectionInProgress)
       return {ok:false,code:'OBSERVATION_BUSY',...unverified};
-    if(mainWindow)importedDomCandidateExportStore.clearOwner(mainWindow);
     const plan=importedDomDiagnosticIndex.plan(targetInput);
     type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
       domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
@@ -1605,6 +1604,10 @@ function registerSafeIpc(): void {
     if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',
       items:plan.items.map(item=>blockedItem(item,'OBSERVATION_BUSY')),
       truncatedScripts:plan.truncatedScripts,...unverified};
+    // Only an accepted diagnostic lease supersedes prior reviewed export grants.
+    // Invalid, no-browser and busy requests must not revoke a separately
+    // reviewed, still-valid main-owned one-use manual export capability.
+    importedDomCandidateExportStore.clearOwner(win);
     importedDomProgress={phase:'AWAITING_CONSENT',processed:0,total:ready.length,
       currentIndex:0,attempts:0};
     const controller=new AbortController();
