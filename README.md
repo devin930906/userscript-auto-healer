@@ -1,23 +1,18 @@
 # Userscript Auto Healer
 
-> **当前产品需求与续接**：以 [原始需求校准](docs/product-rebaseline.md) 为本轮入口。下文含历史开发状态；历史发布不代表新基线已经验收。
-
-> **2026-11-02 现行（4）/（7）入口**：原有开发成果继续有效；新版取消 Issue 独占锁、使用独立分支／PR／最新 SHA 与 CI 检查控制并发。参见 [迁移与正式交接](docs/19-stable-v7-migration.md)。**目前仍非正式 Stable。**
-
-
-> 状态：（7）正式开发中：TASK-001..006 已有阶段性实现并整合；TASK-007..011 有独立阶段代码成果，但真实 Tampermonkey 产品级业务验收、完整自动应用和恢复事务仍未闭环。TASK-011 的备份-only、恢复来源身份检查及原生协作式文件互斥已通过 Windows 局部测试（PR #44–53，详见 docs/07-testing.md、docs/09-development-plan.md）。**没有正式产品成品；最终 Stable 尚未完成，真实自动修复/回滚仍未交付，没有经完整验收的正式 EXE、ZIP 或 GitHub Release**。Windows runner 已构建并验证有限开发候选 EXE+真实 ZIP 的安装/解压与候选数据保留（PR #146–149；见 docs/08-release.md），不得当作正式交付。
+> **开发状态（2026-11-23）**：本仓库按新版（4）增量准备，支持新版（7）全云端、（8）云端优先加本地辅助、（9）本地优先。开发维持有条件准入，续接 [TASK-013 / Issue #857](https://github.com/devin930906/userscript-auto-healer/issues/857) 时先核对 [PR #925](https://github.com/devin930906/userscript-auto-healer/pull/925)。具体准入条件见 [开发前审查](docs/11-readiness.md)，执行方式见 [迁移与正式交接](docs/19-stable-v7-migration.md)。
 
 ## 项目用途
 针对目标网站 DOM、Selector 和页面运行机制变化导致的 `.user.js` 油猴脚本失效，设计 Windows 本地优先、CDP 诊断、保守自动修复与可验证回滚的工具。用户可指定 Chrome/便携版路径、专用调试 Profile、默认 9896 端口（9223 仅为历史启动参数示例），批量导入脚本，必要时启用自定义 AI 服务。
 
 ## 核心功能与支持环境
-拟支持静态 AST、真实浏览器动态诊断、脚本管理器环境验证、多级修复、差异/备份/回滚、批处理、健康记录、共享兼容层及受控 AI。目标交付 Windows `.exe` 安装程序与真实 `.zip` 便携发行包；**正式产品开发、真实用户设备兼容、正式应用双包及签名均未验收**；开发前 Chrome/CDP、GM API、AST 和打包工具链 PoC 的通过结果单独列于下方。
+拟支持静态 AST、真实浏览器动态诊断、脚本管理器环境验证、多级修复、差异/备份/回滚、批处理、健康记录、共享兼容层及受控 AI。目标交付 Windows `.exe` 安装程序与真实 `.zip` 便携发行包；**下一次 Stable 的完整功能、真实用户设备、同源双包与签名状态仍须验收**；开发前 Chrome/CDP、GM API、AST 和打包工具链 PoC 的通过结果单独列于下方。
 
 ## 准备成果与开发入口
 见 [docs/00-intake.md](docs/00-intake.md)、[docs/11-readiness.md](docs/11-readiness.md)、[docs/12-handoff.md](docs/12-handoff.md)。需求权威来源为 `docs/00-intake.md` 与 `docs/02-requirements.md`；任务位于 `docs/09-development-plan.md`；架构与发布证据分别在 `docs/04-architecture.md`、`docs/08-release.md`。
 
 ## 运行与发布状态
-已有 Electron+TypeScript 开发入口、11 项自动化安全配置测试，并在 Windows runner 完成真实 Electron 桌面启动及受限 IPC 验证（仍非完整功能验收）；已有 Windows 临时开发候选安装 EXE 与真实便携 ZIP 的受限 CI 验证（见 docs/08-release.md），但尚无经完整 Stable 验收的正式安装程序、正式便携包或 Release；不得将开发候选当作已交付软件。
+GitHub 已发布 [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3)，附 EXE 安装版、Portable ZIP 及 SHA-256 清单。后续代码和下一次 Stable 的验收状态以 [现行发布标准](docs/08-release.md) 与 [Issue #610](https://github.com/devin930906/userscript-auto-healer/issues/610) 的对应证据为准。Windows Actions 候选包的结果只适用于其实际构建提交与验证范围。
 
 ## 2026-10-18 开发前实测状态
 
@@ -30,7 +25,7 @@ Windows GitHub Actions 已实际验证 Chrome/CDP、真实 Violentmonkey v2.49.0
 - 开发前 AST PoC 亦已通过：`poc/ast-selector-feasibility.cjs` 使用真实解析器，按源码位置/函数归属区分确定定位器与必须运行时确认的动态表达式；验证 https://github.com/devin930906/userscript-auto-healer/actions/runs/39093951314。此实验不代表程序已实现自动修复。
 
 ## 2026-10-18 ZIP 发行格式变更
-用户已批准 Windows 正式发行改为 **EXE 安装版 + ZIP 便携版**（I-010 / ADR-004）。REQ-028、TEST-028、TASK-020 及 Stable GATE 已更新；不再依赖 RAR 生产许可证。RAR5 试用 PoC 仅为历史技术研究，不等于已生成或验收 ZIP 产品。目前仍没有正式安装包或便携 ZIP。
+用户已批准 Windows 正式发行改为 **EXE 安装版 + ZIP 便携版**（I-010 / ADR-004）。REQ-028、TEST-028、TASK-020 及 Stable GATE 已更新；不再依赖 RAR 生产许可证。RAR5 试用 PoC 仅为历史技术研究，不等于已生成或验收 ZIP 产品。下列 PoC 是当时的工具链证据；现有下载入口见上方「运行与发布状态」。
 
 - **POC-03C 已通过（限于工具链）**：Windows Actions 使用原生 ZIP 压缩，验证文件头、相对路径、解压及 SHA-256 一致性（https://github.com/devin930906/userscript-auto-healer/actions/runs/39095747797）；仍无正式产品 ZIP、真实运行或 Stable 验收。
 

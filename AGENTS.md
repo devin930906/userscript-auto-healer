@@ -1,5 +1,12 @@
 # 开发代理约束
 
+## 现行准备标准与开发入口
+
+- 准备与续接以新版（4）及所选的新版（7）、（8）或（9）为准。先读 [准入审查](docs/11-readiness.md) 的最新有日期结论与 [正式交接](docs/12-handoff.md)，再按 [迁移与执行方式](docs/19-stable-v7-migration.md#2026-11-23-三种新版开发指令的共用入口) 核对当次 GitHub 基准、实际 Issue/PR、差异和对应提交的检查。
+- 一套 REQ/NFR/ADR/RISK/TEST/GATE/TASK 适用于全部执行方式。计划与依赖见 [09](docs/09-development-plan.md)，追踪见 [10](docs/10-traceability.md)，界面见 [05](docs/05-experience.md)，发布门槛见 [08](docs/08-release.md)。范围、任务编号、验收和授权不随执行环境切换。
+- 准备工作止于工程依据、Issues 路线及续接。正式开发另行启动，按有条件准入的限制选择可执行子范围。TASK-001 是原始启动里程碑。现行 TASK 入口见准入审查，切勿重跑已整合工作。
+- Issue 用于范围、依赖与验收追踪。同一 Issue 可跨会话、跨多个独立 PR 续接。并行检查现有实现、文件、接口和依赖；优先使用隔离分支、受保护的 PR、预期 head 或其他适用条件写入，并在每次写入后复核服务器结果。旧认领、签名轮次和历史引用仅作审计资料。
+
 ## GitHub 文件读取与实体化授权边界（2026-11-22 现行补充）
 
 - **获取仓库正文**：先用已授权的 GitHub 插件直接读取指定仓库、引用及路径上的文件文本、PR 差异或 Actions 日志；只有插件缺少必要功能、证据不完整或明确失败时，才评估 GitHub MCP 的等效结构化/文本操作。读取前核对 `owner/repo`、分支及必要的提交或 blob SHA；已取得完整有效内容时不重复下载。
@@ -24,16 +31,16 @@
 - 用户已指定新版（4）与新版（7）作为今后的执行规则。历史（4）有条件准入和已有产品代码仍有效，不重建 TASK/REQ/TEST/GATE，不回退已合并功能，也不把历史治理实验证据标记为失败。
 - **当前不要求 Issue 独占认领、轮次所有权、签名释放、原子再认领或 `HANDOFF_BLOCKED` 作为产品开发准入条件。** 单个 Issue 可以由多个对话按真实独立工作范围开发；若目标文件、共享接口或依赖发生冲突，必须暂停对应写入并协调差异，不得覆盖竞争提交。
 - 开始前重新读取默认分支最新 SHA、Issues、全部开放 PR、变更文件范围及测试。每个变更使用独立分支、PR 与 Required Checks；严格核对头部提交、基准 SHA、目标文件的远端状态及合并后检查；不得强推、抢占旧分支或绕过审查/安全授权。旧 `work/issue-*` 与 `coord/issue-*` 引用全部保留为历史，不是未来开发必须取得的锁。
-- `docs/16-cross-session-issue-claims.md`、`docs/17-owner-authorized-governance-recovery.md`、`docs/18-claim-round-coordination.md`、`docs/18-production-coordination-gates.md` 的旧认领协议、治理脚本和工作流属于历史/可选诊断，**不构成新版（7）产品 PR 的先决条件**。旧治理 Issue #565 应在完成迁移对账后按事实分类收尾，而非继续引入签名认领子任务。
+- `docs/16-cross-session-issue-claims.md`、`docs/17-owner-authorized-governance-recovery.md`、`docs/18-claim-round-coordination.md`、`docs/18-production-coordination-gates.md` 的旧认领协议、治理脚本和工作流属于历史/可选诊断，**不构成新版（7）产品 PR 的先决条件**。旧治理 Issue #565 已关闭，其记录供历史审查。
 - 现存 Ruleset #26307718 要求的旧名称检查 `Issue coordination / stale round fence` 在过渡期保留同名 GitHub required context，但其脚本改为**无需认领的 PR 安全核验**：真实 PR 头部、可信基准、文件清单、其他开放 PR 同文件冲突；这是过渡兼容，绝不声称实现了跨对话绝对互斥。另一个 coord 引用非强推 Ruleset #26308886 可暂留以保护历史引用。
 - `docs/11-readiness.md` 2026-10-18 的有条件准入是历史记录，不能因旧锁未交接而永久中断今日已获准的独立产品开发；是否达到 Stable 仍只按真实 REQ/TEST/GATE、Windows 双发行和最后集中人工验收判断。
 
 
 ## 项目权威资料顺序
-用户本次明确批准的目标与 docs/00-intake.md → docs/02-requirements.md → docs/03-feasibility.md 和 docs/adr → docs/04-architecture.md → docs/06-security-risk.md → docs/07-testing.md → docs/08-release.md → docs/09-development-plan.md → docs/10-traceability.md → docs/11-readiness.md → docs/12-handoff.md → docs/13-predevelopment-admission.md。相互冲突时明确列出并核验，严禁编造批准。
+用户本次明确批准的目标与 docs/00-intake.md → docs/01-product.md、docs/02-requirements.md → docs/03-feasibility.md 和 docs/adr → docs/04-architecture.md、docs/05-experience.md → docs/06-security-risk.md → docs/07-testing.md → docs/08-release.md → docs/09-development-plan.md、docs/10-traceability.md → docs/11-readiness.md、docs/12-handoff.md。docs/13-predevelopment-admission.md 保存历史启动证据。Issue、PR、提交和 CI 的进度以现场 GitHub 为准。
 
 ## 开发边界
-当前执行开发前准备阶段不得提前写产品功能；当后续明确启动正式开发、且满足 docs/11-readiness.md 和 docs/13-predevelopment-admission.md 的阶段准入时，允许按 TASK-001 安全骨架及其验证要求进行实际开发。**此条不得被用作永久禁止开发的理由**。无论阶段如何，禁止虚报 Stable、跨仓库混用代码或把临时 PoC 当正式功能。
+准备阶段只进行增量审计、必要工程文档与验证配置、Issues 整理和准入交接。后续获授权进入正式开发时，按 docs/11-readiness.md 的当前条件和 docs/09-development-plan.md 的真实依赖选择未完成的任务范围。PoC、开发候选、当前 Stable 验收和历史 Release 各按对应证据记录。
 
 ## 代码规则
 ADR-001 已有条件决定 TASK-001 可使用 Electron+TypeScript 作为首期技术骨架；未来扩大支持范围或更改框架时必须以兼容实证和新 ADR 复审。按失败测试→最小实现→回归/安全测试→代码复审开发。所有安全敏感接口要求结构化输入、资源归属、限时/取消与不泄密错误；脚本源文件修改以最小范围并留版本。
@@ -70,15 +77,17 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 本仓库已从旧版（4）的有条件准入进入持续（7）开发；新版（4）不要求重新初始化、重新批准已经确认的需求、重启 TASK-001、重新编号历史 TASK，或把已合并 PR 反向变成虚假的新 Issues。迁移基准与事实快照见 `docs/15-issue-driven-stable-bridge.md`。
 - `docs/09-development-plan.md` 的 TASK-001..021 是正式工程任务编号；GitHub `#N` 是 Issues/PR 独立编号，二者不可互换。开发前核对 `TASK ↔ REQ/NFR ↔ TEST/GATE ↔ Issue ↔ PR/commit ↔ CI`，与 `docs/10-traceability.md`、`docs/14-stable-work-register.md` 一致；原有工程文档及 ADR 仍为产品、质量和授权权威。
 - 优先续接已有 Open PR 和相应 Issue；无可用 PR 时选择依赖已满足的已批准 TASK；必要时先检查重复、创建范围明确且可验收的 Issue。远期/未定事项保留正式计划，不以 Issue 数量代替覆盖程度。Issue 未创建不使已批准 TASK 自动失效；该 TASK 执行前按实际规则建立/关联追踪。
-- 已核验的当前关键 Issues：TASK-007→#486、TASK-008→#480、TASK-009→#487、TASK-010→#488、TASK-011→#489、TASK-013→#440、TASK-020→#215。其他 TASK 以正式任务表和当前仓库实况为准，切勿误判其已完成或无待办。
+- 任务与 Issues 的最近核验见 [准入审查](docs/11-readiness.md#2026-11-23-新版4准备标准增量核验)。TASK-013 的在制入口是 #857 及其开放 PR #925；#440 追踪历史 AST Worker 故障。#215、#480 也按其历史缺陷范围解释，正式验收依据对应 TEST/GATE。
 - 每个代码 PR 记录 TASK、对应 Issue（如有）、相关 REQ/NFR、TEST/GATE、目标 SHA、真实测试证据、剩余阻断及准确目标分支；无需代码变更的验收工作不强造 PR。仅当整个 Issue 的验收已满足且 GitHub 自动关闭条件适用时，使用 `Fixes #N` / `Closes #N`；否则使用 `Refs #N` 并保留 Open。已合并 PR 不自动等于任务完成、Stage 通过或 Stable 发布。
 - 已确认的 Issue #215/#440/#480 均属独立间歇性故障，必须保留失败证据；单次绿色重跑不等于根因修复。开发过程中新增故障先查重复；保留原有安全边界，不提高超时/跳过测试/伪造管理器证据以让 CI 变绿。
 - 每次开发会话结束同步核验最新 main SHA、Issues/PR、实际提交与 Checks，并**按影响范围**更新 09/10/12/14 及其权威证据；不重新覆盖历史记录。原有 `docs/11-readiness.md` 与 `docs/13-predevelopment-admission.md` 的准入结论是当时的历史阶段结论，不是最新代码的 Stable 质量认证。
 - 本治理迁移仅调整任务关联与交接，不自动授予产品代码开发之外的权限、真实用户 Chrome/Tampermonkey 操作、仓库保护更改、正式 EXE/ZIP Release 或 GATE 通过。后续每次必须检查当前有效工具与仓库权限。
 
-## 跨网页会话 Issue 独占认领与并行集成（2026-10-31 增量）
+## 历史记录：Issue 独占认领与并行集成（2026-10-31）
 
-- 当前正式执行补充规范：`docs/16-cross-session-issue-claims.md`；承接原 `docs/15-issue-driven-stable-bridge.md`，不推翻既有（4）阶段准入、需求、TASK-001..021、历史 PR 或已经完成的代码。此规则须与用户本次批准的新版（7）共同执行。
+> 本节及下方认领、恢复和签名协调记录已由无独占认领迁移取代。现行规则见本文件开头及 [迁移记录](docs/19-stable-v7-migration.md)。
+
+- 当时的正式执行补充规范：`docs/16-cross-session-issue-claims.md`；承接原 `docs/15-issue-driven-stable-bridge.md`，不推翻既有（4）阶段准入、需求、TASK-001..021、历史 PR 或已经完成的代码。此规则须与用户本次批准的新版（7）共同执行。
 - 对新的产品 Issue 实施代码前，全面核查当前 Open Issues / PR / 已有分支 / CI / 依赖 / 文件范围；通过服务端**仅创建、已存在必拒绝**的 Git 引用操作申请固定 `work/issue-<N>` 分支，再读取核对归属与 SHA 才能进入编码。单独的标签、Assignee、评论及非原子读后写不提供互斥；若实际工具不能保证仅创建则 **CLAIM_BLOCKED**，不得冒险并行写入。
 - 已有的 `feat/`、`fix/`、`diagnostic/` 历史分支需要先核对真实归属，不自动删除、抢占或视作无人开发；冲突时跳过该 Issue 并检查下一个依赖与文件范围均合格的任务。会话失联、久未提交均不是自动释放条件。
 - 不同 Issue 不自动构成安全并行：检查源/测试目录、共享 API、工作流、锁文件和 TASK 依赖；每项仅修改自己已确认的范围，各用独立分支，PR 按最新主分支审查并在合并后重新运行适用集成测试。协议不承诺零冲突，也不更改仓库权限、发布条件或用户设备授权。
@@ -89,7 +98,7 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 新增可选择手动运行的 GitHub Actions `governance-issue-claim-race.yml`，仅用于竞争测试 ref，不认领产品 Issues、不更改产品代码、不进入 Release。使用两个独立执行 Job + 最终核验 Job 检查“一位成功、一位明确冲突、再次创建不覆盖”。只有取得实际 workflow run success 才能声称该轮 GitHub runner 测试通过。
 - 当前连接实际测过的 create-only 分支接口为 GitHub 插件 `mcp__GitHub__create_branch` 与 GitHub MCP `mcp__Github_MCP__create_branch`；**每次新会话仍须先核验工具语义与权限**。认领失败后只允许重新读取和选择下一可行 Issue，不得从成功读取别人创建的分支推断本会话已经认领。并行执行其他 Issues 时仍必须检查文件和共享契约冲突，禁止将“同 Issue 互斥成功”误解为“所有 Issues 可安全同时开发”。
 
-## 已执行的独立 Runner 原子认领证据（2026-10-31）
+### 已执行的独立 Runner 原子认领证据（2026-10-31）
 - 新版（7）兼容性专用 GitHub Actions [#41211634125](https://github.com/devin930906/userscript-auto-healer/actions/runs/41211634125) 已在 GitHub 独立 `ubuntu-latest` Runner A、B 与核验 Runner 上执行且所有 Job 成功：A HTTP 422，B HTTP 201，请求相差 1640ms；第三 Runner 再次以不同有效 SHA 创建同一引用被 HTTP 422 拒绝，原引用 SHA 不变。原始日志与完整实验条件在 `docs/16-cross-session-issue-claims.md`。
 - 这是 GitHub 服务端针对相同 ref 的真实并发竞争证据，不是两个独立 ChatGPT 会话已被启动的证据，也不自动赋予每个 Issue 共享文件的并行修改安全性。**只有自己那次创建返回明确成功并且远程状态核对一致的会话才能声明占有该 Issue**；失败或结果未知时禁止接手现有认领分支。
 
@@ -101,14 +110,14 @@ Actions 使用最小 token 权限、锁定第三方依赖、控制外部 PR 权�
 - 新一轮必须重新原子认领，并从最新 main 建立独立实施分支；每次写入/合并前核验当前轮次。创建引用成功与释放引用安全是独立能力。**读取后直接 DELETE Git 引用不是条件删除**，不得作为自动释放。
 - 新增测试专用生命周期脚本/Actions 只允许操作 `test/claim-lifecycle-*`，不是产品 Issue 生产协调机制。八个旧认领分支仍须逐项核验与安全交接，不得把文档更新当作 Stable 验收或强互斥已部署。
 
-## Owner-authorized governance #565 deadlock bootstrap (2026-11-01)
+### Owner-authorized governance #565 deadlock bootstrap (2026-11-01)
 
 - **Exception is limited to governance repair only**, authorized by the repository owner's explicit request to solve the repeated-execution deadlock. See `docs/17-owner-authorized-governance-recovery.md`. The independently created `repair/governance-565-bootstrap-20261101` branch is a *one-off isolated repair lane*, **not** a legitimate transfer/renewal of `work/issue-565` or any product claim.
 - In the single-writer repair lane, only the five paths listed in `docs/17-owner-authorized-governance-recovery.md` may change, using a PR into `main` and the read-only `governance-recovery-guard.yml` check. Existing historical claims, implementation branches, TASK/REQ/NFR/TEST/GATE and Stable Release criteria remain unchanged.
 - **This exception does not unblock competing product writes.** Before any product development, establish a production-grade owner/round coordinator, authenticated safe release/reacquisition and enforceable stale-writer/merge protection. Individually reconcile eight historical product Issues and preserve all work. A successful bootstrap CI or merge is not proof of these steps.
 - If legacy refs move, other PRs compete, the one-time scope expands, or owner permission is uncertain, stop this repair without force push/delete/branch stealing. Repository ruleset checks currently returned no rules; the classic branch-protection read was permission-denied, so do not assume main is unprotected or protected.
 
-## 2026-11-01 V2 owner-signed cross-session product recovery and guarded integration
+### 2026-11-01 V2 owner-signed cross-session product recovery and guarded integration
 
 - Historical `work/issue-215/440/480/486/487/488/489/510` branches are immutable preserved evidence, **not** the new per-round claim. Do not remove, reset, force-update, or infer historical owner exit from PR merges or file equality.
 - The approved replacement contract for these eight Issues uses `coord/issue-N` (server non-fast-forward protected by ruleset #26308886) and per-round `impl/issue-N-rR` branches based on the active coordination commit. Owner recovery requires the actual GitHub workflow result, Issue-specific confirmation `RECOVER-N-PRESERVE-HISTORY`, pinned old ref identity, fresh main/PR check and complete changed-file blob reconciliation. Without these, product development remains `HANDOFF_BLOCKED`.
