@@ -2913,6 +2913,6 @@ test('TASK-013/TEST-022: late progress polling cannot overwrite a delivered fina
  const flow=ui.slice(click,end+150);
  assert.match(flow,/let importedDomFinalDelivered=false;/);
  assert.match(flow,/if\(importedDomFinalDelivered\|\|generation!==importedDomGeneration/);
- assert.match(flow,/diagnoseImportedBatch\(targetUrl\)\.then\(result=>\{\n  importedDomFinalDelivered=true;/);
- assert.match(flow,/\}\)\.catch\(\(\)=>\{\n  importedDomFinalDelivered=true;/);
+ assert.match(flow,/diagnoseImportedBatch\(targetUrl\)\.then\(result=>\{\r?\n  importedDomFinalDelivered=true;/);
+ assert.match(flow,/\}\)\.catch\(\(\)=>\{\r?\n  importedDomFinalDelivered=true;/);
 });
