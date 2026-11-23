@@ -450,6 +450,10 @@ async function importNativeSelection(kind: 'files'|'folder'): Promise<void> {
     const result = kind === 'files'
       ? await window.healer.chooseFiles()
       : await window.healer.chooseFolder();
+    // The main process revokes previous candidate handles only after a
+    // native selection was accepted, never when the OS picker was canceled.
+    if(!result.canceled&&!result.errors.some(item=>item.code==='IMPORT_BUSY'))
+      retireImportedDomCandidatesAfterImport();
     show(result);
     if (result.canceled) {
       unprocessedCount += result.unprocessed ?? 0;
@@ -488,6 +492,7 @@ async function importFiles(files: readonly File[]): Promise<void> {
       return;
     }
     batchId=started.batchId;
+    retireImportedDomCandidatesAfterImport();
     droppedImportProgress={processed:0,total:files.length};
     updateImportSummary();
     let readBytes = 0;
@@ -868,6 +873,18 @@ let importedDomGeneration=0;
 let importedDomRequestId=0;
 let importedDomActiveTarget:string|null=null;
 let importedDomDisplayedTarget:string|null=null;
+// A new accepted import revokes native preview capabilities. Retire their
+// matching renderer actions immediately rather than showing clickable stale
+// buttons until the next denied export request.
+function retireImportedDomCandidatesAfterImport():void{
+ importedDomGeneration++;
+ importedDomRequestId++;
+ importedDomActiveTarget=null;
+ importedDomDisplayedTarget=null;
+ importedDomItems?.replaceChildren();
+ if(importedDomResult)importedDomResult.textContent=
+  '已开始新的脚本导入；上一轮只读 DOM 候选操作已撤下。导入结束后请重新进行 DOM 观察。';
+}
 let manualExportBusy=false;
 let stopInProgress=false;
 let chromeSelected=false;
