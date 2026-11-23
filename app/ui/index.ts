@@ -1920,7 +1920,19 @@ importedDomRunButton?.addEventListener('click',()=>{
    if(result.code==='BROWSER_NOT_RUNNING')browserConnected=false;
    if(importedDomResult)importedDomResult.textContent=
     '批量 DOM 观察未完成：'+importedDomBlockReason(result.code)+
-    '；没有报告脚本或业务验证成功。';
+    '；没有报告脚本或业务验证成功。'+
+    (result.code==='BROWSER_NOT_RUNNING'
+     ?'短时源码缓存已清除；请启动本程序受控 Chrome，并重新导入原始脚本后再次观测，以便生成新的候选预览。'
+     :'');
+   // The main process can return a bounded static receipt without opening
+   // any browser. Keep per-script reasons visible even on an error response.
+   const blockedItems=Array.isArray(result.items)?result.items.slice(0,1000):[];
+   for(const item of blockedItems){
+    if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
+    const row=document.createElement('li');
+    row.textContent=item.filename+': '+importedDomBlockReason(item.code);
+    importedDomItems?.append(row);
+   }
    return;
   }
   const items=Array.isArray(result.items)?result.items.slice(0,1000):[];
