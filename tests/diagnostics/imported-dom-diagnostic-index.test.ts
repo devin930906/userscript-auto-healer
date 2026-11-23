@@ -375,6 +375,24 @@ test('TASK-013/TEST-022/026: a closed import owner cannot repopulate the replace
  assert.equal(activeIndex.readUtf8CandidateSource(hash),source);
 });
 
+test('TASK-013/TEST-022/026: invalidated native frame cannot reinsert delayed diagnostic bytes',()=>{
+ const source='// ==UserScript==\\n// @name Epoch fencing\\n// ==/UserScript==\\n';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ const index=new ImportedDomDiagnosticIndex();
+ const win={};
+ let currentFrame=true;
+ const recorded=recordImportedDomForCurrentOwner(index,index,win,win,false,
+  hash,hints('#old'),'stale.user.js',source,()=>currentFrame);
+ assert.equal(recorded,true);
+ index.clearCandidateSources();
+ currentFrame=false;
+ assert.equal(recordImportedDomForCurrentOwner(index,index,win,win,false,
+  hash,hints('#old'),'stale.user.js',source,()=>currentFrame),false,
+  'a same-window reload must revoke the previous native import frame');
+ assert.equal(index.readUtf8CandidateSource(hash),null,
+  'the stale async result must not restore private candidate bytes');
+});
+
 test('TASK-013/TEST-023/026: candidate export capabilities are owner-bound, reserved and one-use',()=>{
  const Store=candidateStoreConstructor();
  assert.ok(Store,'main-only imported candidate export store must exist');
