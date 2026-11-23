@@ -883,6 +883,20 @@ test('TASK-017/TEST-022: manual candidate export control exposes its consent and
 });
 
 
+test('TASK-013/TEST-022/026: one dropped script cannot survive a stale renderer frame',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const begin=main.indexOf("ipcMain.handle('import:dropped',");
+ const end=main.indexOf("ipcMain.handle('import:cancel-dropped'",begin);
+ assert.ok(begin>=0&&end>begin);
+ const handler=main.slice(begin,end);
+ assert.match(handler,/const droppedFrameEpoch=mainFrameNavigationEpoch/,
+  'single-file import captures the originating renderer frame');
+ assert.match(handler,/currentFrame:\(\)=>[\s\S]*?mainFrameNavigationEpoch===droppedFrameEpoch/,
+  'late checkpoint analysis must not reinsert AST hints after navigation');
+ assert.match(handler,/if\(win!==mainWindow\|\|win\.isDestroyed\(\)\|\|[\s\S]*?droppedFrameEpoch!==mainFrameNavigationEpoch\)/,
+  'old single-file invocation never returns success after page replacement');
+});
+
 test('TASK-013/TEST-022/026: native import completion is fenced to originating main frame',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf('const runNativeImport = async');
