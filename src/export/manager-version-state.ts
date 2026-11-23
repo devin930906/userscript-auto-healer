@@ -686,11 +686,12 @@ export async function launchBatchUserscriptInstallation(
     return failResult('BLOCKED', 'NOT_AUTHORIZED');
   }
 
-  if (!Array.isArray(untrustedScripts) || nodeTypes.isProxy(untrustedScripts)) {
+  const scriptRows = snapshotOwnDataArray(untrustedScripts, 500);
+  if (!scriptRows) {
     return failResult('BLOCKED', 'INVALID_OPTIONS');
   }
 
-  if (untrustedScripts.length === 0) {
+  if (scriptRows.length === 0) {
     return Object.freeze({
       status: 'COMPLETED' as const,
       totalCount: 0,
@@ -706,25 +707,25 @@ export async function launchBatchUserscriptInstallation(
 
   const session = untrustedSession as ManagedLaunchResult;
   if (!isLiveApprovedChromeSession(session)) {
-    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', untrustedScripts.length);
+    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', scriptRows.length);
   }
 
   const endpoint = validBrowserWebSocket(session.browserWebsocket);
   if (!endpoint) {
-    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', untrustedScripts.length);
+    return failResult('BLOCKED', 'UNVERIFIED_BROWSER', scriptRows.length);
   }
 
   const ownership = await awaitListenerProofOrRevocation(endpoint.port, session.pid, signal);
   if (signal?.aborted || ownership.cancelled) {
-    return failResult('CANCELLED', 'CANCELLED', untrustedScripts.length);
+    return failResult('CANCELLED', 'CANCELLED', scriptRows.length);
   }
   if (!ownership.ok || !isLiveApprovedChromeSession(session)) {
-    return failResult('BLOCKED', 'UNOWNED_LISTENER', untrustedScripts.length);
+    return failResult('BLOCKED', 'UNOWNED_LISTENER', scriptRows.length);
   }
 
   const socket = await connectBrowserWebSocket(endpoint.url);
   if (!socket) {
-    return failResult('BLOCKED', 'CDP_FAILED', untrustedScripts.length);
+    return failResult('BLOCKED', 'CDP_FAILED', scriptRows.length);
   }
 
   const items: SingleInstallOutcome[] = [];
@@ -735,7 +736,7 @@ export async function launchBatchUserscriptInstallation(
   let commandId = 1;
 
   try {
-    for (const raw of untrustedScripts) {
+    for (const raw of scriptRows) {
       if (signal?.aborted) {
         items.push(Object.freeze({
           scriptId: (raw && typeof (raw as any).scriptId === 'string') ? (raw as any).scriptId : 'unknown',
