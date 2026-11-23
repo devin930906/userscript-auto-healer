@@ -2586,7 +2586,7 @@ async function createMainWindow(): Promise<void> {
       "releaseFirstRead(); " +
       "const cancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
-      "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
+      "if(lines.some(x=>x.includes('用户取消导入：其余 2 份文件未加入批次。')) && " +
       "document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       // The canceled-row log is emitted before the finish IPC and recovery
@@ -2694,7 +2694,7 @@ async function createMainWindow(): Promise<void> {
       "a.security.sandboxed === true && " +
       "a.security.isolated === true, droppedCancelReadStarted:firstReadDidStart, " +
       "droppedCancelAcknowledged:cancelled, " +
-      "droppedCancelSummaryCorrect:['成功 5','失败 2','未处理 1','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
+      "droppedCancelSummaryCorrect:['成功 4','失败 2','未处理 2','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
       "keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
       true
     ) as { ok?: boolean; keys?: string[]; nativeHash?:string;
