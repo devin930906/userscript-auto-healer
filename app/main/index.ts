@@ -2219,11 +2219,15 @@ async function createMainWindow(): Promise<void> {
   if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
   win.webContents.on('render-process-gone',()=>{
+    // The destroyed renderer must not retain an authorized DOM observation.
+    cancelScenarioObservation();
     nativeImportController?.abort();
     abortDroppedImportForWindow(win);
   });
   win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{
     if(isMainFrame&&!isInPlace){
+      // A new document needs fresh native consent; abort the old DOM lease.
+      cancelScenarioObservation();
       nativeImportController?.abort();
       abortDroppedImportForWindow(win);
     }
