@@ -87,7 +87,9 @@ async function boundedRead(path:string):Promise<{bytes:Buffer;file:Identity}|nul
    pieces.push(Buffer.from(chunk.subarray(0,bytesRead)));
   }
   const after=await handle.stat({bigint:true});
-  if(!sameFile(before,after)||total!==Number(after.size))return null;
+  // A second pathname created during the read invalidates the single-link
+  // journal identity even when size and timestamps have not changed.
+  if(after.nlink!==1n||!sameFile(before,after)||total!==Number(after.size))return null;
   return {bytes:Buffer.concat(pieces,total),file:after};
  }finally{await handle.close();}
 }

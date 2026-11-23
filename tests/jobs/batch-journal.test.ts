@@ -689,3 +689,44 @@ test('TASK-013/TEST-022/026: cancel after initial checkpoint must persist termin
   }finally{patched.mock.restore();}
  });
 });
+
+test('TASK-013/TEST-022/026: hard link introduced between file-handle stat snapshots is rejected',async()=>{
+ await withJournal(async directory=>{
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  assert.equal((await saveReadOnlyBatchJournal(directory,coordinator)).status,
+   'CHECKPOINT_SAVED_UNVERIFIED');
+  const originalFile=join(directory,BATCH_JOURNAL_FILENAME);
+  const foreignLink=join(directory,'second-journal-name');
+  const fsPromises=require('node:fs/promises') as typeof import('node:fs/promises');
+  const actualOpen=fsPromises.open;
+  let injected=false;
+  (fsPromises as {open:typeof actualOpen}).open=async(...args)=>{
+   const handle=await actualOpen(...args);
+   if(args[0]===originalFile){
+    const originalStat=handle.stat.bind(handle);
+    let checked=false;
+    handle.stat=(async(...statArgs)=>{
+     const result=await originalStat(...statArgs);
+     if(!checked){
+      checked=true;
+      // Preserve the original single-link stat while changing link count
+      // before the reader's post-read identity check.
+      const {linkSync}=require('node:fs') as typeof import('node:fs');
+      linkSync(originalFile,foreignLink);
+      injected=true;
+     }
+     return result;
+    }) as typeof handle.stat;
+   }
+   return handle;
+  };
+  try{
+   const restored=await loadReadOnlyBatchJournal(directory,options,completed);
+   assert.equal(injected,true,'fixture creates a second name after first fstat');
+   assert.deepEqual(restored,{status:'BLOCKED',reason:'INVALID_CHECKPOINT'});
+   assert.equal((await readFile(foreignLink)).equals(await readFile(originalFile)),true);
+  }finally{
+   (fsPromises as {open:typeof actualOpen}).open=actualOpen;
+  }
+ });
+});
