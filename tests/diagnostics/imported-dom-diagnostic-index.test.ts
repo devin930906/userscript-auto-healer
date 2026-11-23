@@ -56,6 +56,23 @@ test('TASK-013/TEST-022: imported DOM diagnosis plans each script independently'
  assert.equal(result.items[0].scriptSha256,shaA);
 });
 
+test('TASK-013/TEST-022: unsupported scope and truncated evidence keep precise blocked reasons even without sites',()=>{
+ const index=new ImportedDomDiagnosticIndex();
+ index.recordImported(shaA,{
+  matchPatterns:['https://example.org/*'],unsupportedScope:true,
+  selectorSitesTruncated:false,selectorSites:[]
+ });
+ index.recordImported(shaB,{
+  matchPatterns:['https://example.org/*'],unsupportedScope:false,
+  selectorSitesTruncated:true,selectorSites:[]
+ });
+ const result=index.plan('https://example.org/app');
+ assert.deepEqual(result.items.map(code),[
+  'UNSUPPORTED_MATCH_RULES','SELECTOR_LIMIT_EXCEEDED'
+ ]);
+ assert.equal(result.items.every(item=>item.status==='BLOCKED'),true);
+});
+
 test('TASK-013/TEST-022/026: an exact target must match a declared exact-origin @match',()=>{
  const index=new ImportedDomDiagnosticIndex();
  index.recordImported(shaA,hints('#submit'));
