@@ -363,6 +363,9 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
 interface ImportedDomImportOwner{
   readonly window:BrowserWindow;
   readonly index:ImportedDomDiagnosticIndex;
+  /** Native picker results expire on main-frame navigation. Drop recovery
+   * intentionally omits this gate because its accepted batch can be resumed. */
+  readonly currentFrame?:()=>boolean;
 }
 async function summarizeResult(result:ImportOutcome,owner:ImportedDomImportOwner,
   signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
@@ -380,7 +383,8 @@ async function summarizeResult(result:ImportOutcome,owner:ImportedDomImportOwner
     }
     recordImportedDomForCurrentOwner(owner.index,importedDomDiagnosticIndex,
       owner.window,mainWindow,owner.window.isDestroyed(),script.sha256,
-      readMainOnlyDiagnosticHints(previews[i]),script.filename,candidateSource);
+      readMainOnlyDiagnosticHints(previews[i]),script.filename,candidateSource,
+      owner.currentFrame);
     return summarize(script,previews[i]);
   });
   return {batchCheckpoint:checkpoint?.status,
@@ -1281,8 +1285,12 @@ function registerSafeIpc(): void {
         duplicates:0,unprocessed:0};
     const win=mainWindow;
     if(!win||win.isDestroyed()) throw new Error('NO_WINDOW');
-    const importOwner:ImportedDomImportOwner={window:win,index:importedDomDiagnosticIndex};
+    const nativeFrameEpoch=mainFrameNavigationEpoch;
     const controller=new AbortController();
+    const currentNativeFrame=()=>win===mainWindow&&!win.isDestroyed()&&
+      !controller.signal.aborted&&mainFrameNavigationEpoch===nativeFrameEpoch;
+    const importOwner:ImportedDomImportOwner={window:win,
+      index:importedDomDiagnosticIndex,currentFrame:currentNativeFrame};
     nativeImportController=controller;
     nativeImportCounters={phase:'PICKING',processed:0,total:0,accepted:0,duplicates:0,failed:0};
     try {
@@ -1290,8 +1298,8 @@ function registerSafeIpc(): void {
         ? {title:'选择 .user.js 文件',defaultPath:getInitialDialogPath('scripts'),properties:['openFile','multiSelections'],
           filters:[{name:'Userscript',extensions:['js']}]}
         : {title:'选择脚本文件夹',defaultPath:getInitialDialogPath('scriptFolder',rememberedPaths.scripts),properties:['openDirectory']});
-      if(choice.canceled||win!==mainWindow||win.isDestroyed()||
-        controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
+      if(choice.canceled||!currentNativeFrame()||
+        (kind==='folder'&&choice.filePaths.length!==1))
         return {canceled:true,scripts:[],errors:[],duplicates:0,
           unprocessed:controller.signal.aborted?choice.filePaths.length:0};
       // A fresh native source selection supersedes old reviewed candidate grants.
@@ -1313,7 +1321,7 @@ function registerSafeIpc(): void {
         : await scanApprovedDirectory(choice.filePaths[0],controller.signal,progress);
       // Only validated content hashes, never source paths or bytes, bind
       // subsequently staged scenarios to this window's import session.
-      if(win===mainWindow&&!win.isDestroyed())
+      if(currentNativeFrame())
         for(const script of result.scripts){
           scenarioSession.recordImported(script.sha256);
           // A new native picker is a new explicit source selection. The
@@ -1328,12 +1336,17 @@ function registerSafeIpc(): void {
         nativeImportCounters={phase:'ANALYZING',processed:0,total:result.scripts.length,
           accepted:result.scripts.length,duplicates:result.duplicates,failed:result.errors.length};
       }
-      return await summarizeResult(result,importOwner,controller.signal,(processed,total)=>{
-        if(nativeImportController!==controller||controller.signal.aborted)return;
+      const summary=await summarizeResult(result,importOwner,controller.signal,(processed,total)=>{
+        if(nativeImportController!==controller||!currentNativeFrame())return;
         nativeImportCounters={phase:'ANALYZING',processed,total,
           accepted:result.scripts.length,duplicates:result.duplicates,
           failed:result.errors.length};
       });
+      // An old IPC invocation must not return a valid imported batch to a
+      // different renderer document after an awaited checkpoint/AST result.
+      if(!currentNativeFrame())return {canceled:true,scripts:[],errors:[],
+        duplicates:0,unprocessed:result.scripts.length};
+      return summary;
     } finally {
       if(nativeImportController===controller){
         nativeImportController=null;
@@ -2201,9 +2214,15 @@ async function createMainWindow(): Promise<void> {
   });
   if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
-  win.webContents.on('render-process-gone',()=>abortDroppedImportForWindow(win));
+  win.webContents.on('render-process-gone',()=>{
+    nativeImportController?.abort();
+    abortDroppedImportForWindow(win);
+  });
   win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{
-    if(isMainFrame&&!isInPlace)abortDroppedImportForWindow(win);
+    if(isMainFrame&&!isInPlace){
+      nativeImportController?.abort();
+      abortDroppedImportForWindow(win);
+    }
   });
   win.webContents.on('did-finish-load',()=>{
     const pending=pendingDroppedImportRecovery;

@@ -883,6 +883,21 @@ test('TASK-017/TEST-022: manual candidate export control exposes its consent and
 });
 
 
+test('TASK-013/TEST-022/026: native import completion is fenced to originating main frame',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf('const runNativeImport = async');
+ const end=main.indexOf("ipcMain.handle('import:get-progress'",start);
+ const handler=main.slice(start,end);
+ assert.ok(start>=0&&end>start);
+ assert.match(handler,/const nativeFrameEpoch=mainFrameNavigationEpoch/);
+ assert.match(handler,/mainFrameNavigationEpoch===nativeFrameEpoch/);
+ assert.match(handler,/currentFrame:currentNativeFrame/);
+ assert.match(handler,/if\(currentNativeFrame\(\)\)[\s\S]*?scenarioSession\.recordImported/);
+ assert.match(handler,/if\(!currentNativeFrame\(\)\)return \{canceled:true/);
+ assert.match(main,/readMainOnlyDiagnosticHints\(previews\[i\]\),script\.filename,candidateSource,[\s\S]*?owner\.currentFrame/);
+ assert.match(main,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?nativeImportController\?\.abort\(\)/);
+});
+
 test('TASK-017/TEST-022: native import progress ignores stale batches and out-of-order phase receipts',()=>{
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  // Each native batch owns a generation; old in-flight IPC replies must not

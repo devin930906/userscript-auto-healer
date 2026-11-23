@@ -444,10 +444,15 @@ export function recordImportedDomForCurrentOwner(
  ownerWindow:object,
  activeWindow:object|null,
  ownerWindowDestroyed:boolean,
- hash:unknown,hints:unknown,filename:unknown=null,source?:unknown
+ hash:unknown,hints:unknown,filename:unknown=null,source?:unknown,
+ currentFrame?:()=>boolean
 ):boolean{
  if(ownerIndex!==activeIndex||ownerWindow!==activeWindow||ownerWindowDestroyed)
   return false;
+ // Native dialogs and isolated AST work can outlive a renderer reload in the
+ // same BrowserWindow. The old frame cannot authorize a new import sidecar.
+ try{if(currentFrame&&!currentFrame())return false;}
+ catch{return false;}
  ownerIndex.recordImported(hash,hints,filename,source);
  return true;
 }
