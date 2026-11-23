@@ -113,7 +113,7 @@ test('TASK-013/TEST-022/026: retained source lookup is bound to its imported fil
 });
 
 test('TASK-013/TEST-022/026: reimport updates filename without reusing earlier candidate bytes',()=>{
- const source='// ==UserScript==\\n// @name Reimport identity\\n// ==/UserScript==\\n';
+ const source='// ==UserScript==\n// @name Reimport identity\n// ==/UserScript==\n';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
  const index=new ImportedDomDiagnosticIndex();
  index.recordImported(hash,hints('#old'),'first.user.js',source);
