@@ -538,3 +538,29 @@ test('TASK-012/TEST-023: batch install rejects accessor-backed script arrays bef
   assert.equal(sparseResult.code,'INVALID_OPTIONS');
   assert.equal(sparseResult.automaticSilentInstallForbidden,true);
 });
+
+
+test('TASK-012/TEST-023: install refuses accessor-backed descriptors before browser access', async () => {
+  let readCount=0;
+  const hostile=Object.defineProperty({
+    name:'Untrusted',installUrl:'https://example.com/untrusted.user.js'
+  },'scriptId',{enumerable:true,get(){readCount++;throw Error('unsafe getter')}});
+  const blocked=await launchBatchUserscriptInstallation(
+    {},[hostile],{userApproved:true});
+  assert.equal(blocked.status,'BLOCKED');
+  assert.equal(blocked.code,'INVALID_OPTIONS');
+  assert.equal(readCount,0);
+  assert.equal(blocked.automaticInstallAllowed,false);
+
+  let inheritedCalls=0;
+  const inherited=Object.create({
+    get scriptId(){inheritedCalls++;throw Error('inherited getter');}
+  });
+  inherited.name='Inherited';
+  inherited.installUrl='https://example.com/inherited.user.js';
+  const inheritedResult=await launchBatchUserscriptInstallation(
+    {},[inherited],{userApproved:true});
+  assert.equal(inheritedResult.status,'BLOCKED');
+  assert.equal(inheritedResult.code,'INVALID_OPTIONS');
+  assert.equal(inheritedCalls,0);
+});
