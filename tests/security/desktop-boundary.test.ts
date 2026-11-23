@@ -2540,6 +2540,24 @@ test('TASK-013/TEST-022/NFR-009: consent time is excluded from the 120-second DO
   'both rejected and successful consent must safely clear the optional deadline');
 });
 
+test('TASK-013/TEST-002/022: interrupted DOM batch UI preserves limited per-script evidence without export actions',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const entry=ui.indexOf('void window.healer.diagnoseImportedBatch(targetUrl).then(result=>');
+ const failed=ui.indexOf('if(!result.ok){',entry);
+ const succeeded=ui.indexOf('const items=Array.isArray(result.items)?result.items.slice(0,1000):[];',failed);
+ assert.ok(entry>=0&&failed>entry&&succeeded>failed,
+  'expected the batch DOM failure receipt branch');
+ const block=ui.slice(failed,succeeded);
+ assert.match(block,/const observedBeforeStop=blockedItems\.filter\(item=>item\.domStatus==='LIMITED_DOM_SIGNAL_ONLY'\)\.length;/,
+  'a failed batch must distinguish previously observed limited DOM signals');
+ assert.match(block,/item\.domStatus==='LIMITED_DOM_SIGNAL_ONLY'/,
+  'each per-script failure row must retain truthful partial evidence');
+ assert.match(block,/批次已中止[^']*候选[^']*不可用/,
+  'partial evidence must be clearly unverified with no candidate export authority');
+ assert.doesNotMatch(block,/exportImportedDomCandidate\(/,
+  'failure receipts never present a candidate export action');
+});
+
 test('TASK-013/TEST-022: DOM result assembly failures keep actual observation attempts',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
