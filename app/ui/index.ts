@@ -1835,6 +1835,7 @@ function importedDomCandidateReason(code:string|undefined):string{
   SOURCE_UNAVAILABLE:'主进程没有可用的严格 UTF-8 源码',
   BATCH_PREVIEW_LIMIT:'本批候选预览达到 16 项上限',
   PREVIEW_NOT_ATTEMPTED:'本项未尝试生成候选预览',
+  PREVIEW_FAILED:'候选生成失败；已完成的只读 DOM 观察结果仍保留，原始脚本未修改',
   INVALID_INPUT:'候选输入无效',NOT_AUTHORIZED:'缺少原生授权',
   SOURCE_IDENTITY_MISMATCH:'源码身份与导入哈希不一致',
   SOURCE_TOO_LARGE:'源码超过 256 KiB 限制',
