@@ -2638,6 +2638,16 @@ test('TASK-013/TEST-022/026: candidate proposal exceptions preserve completed DO
   'the previously completed read-only observation remains in the per-item result');
 });
 
+test('TASK-013/TEST-022/026: candidate preview failure is legible without revoking DOM evidence',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function importedDomCandidateReason(');
+ const end=ui.indexOf('function importedDomCandidateExportReason(',start);
+ assert.ok(start>=0&&end>start,'candidate result translator must remain available');
+ const messages=ui.slice(start,end);
+ assert.match(messages,/PREVIEW_FAILED:'[^']*候选[^']*失败[^']*DOM[^']*保留[^']*未修改'/,
+  'candidate-generation errors need a clear, read-only, no-mutation explanation');
+});
+
 test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
