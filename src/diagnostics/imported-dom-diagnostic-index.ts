@@ -238,9 +238,11 @@ export class ImportedDomDiagnosticIndex{
    !/[\u0000-\u001f\u007f/\\:]/.test(filename)?filename:null;
   const safeHints=hints===null||hints===undefined?null:snapshotHints(hints);
   if(previous){
-   const retainedHints=previous.hints??safeHints;
-   if(previous.filename!==label||retainedHints!==previous.hints)
-    this.profiles.set(hash,Object.freeze({hash,filename:label,hints:retainedHints}));
+   // Even identical bytes do not certify that the *new* isolated AST run
+   // succeeded. Never reuse old hints if its fresh receipt was unavailable,
+   // malformed or rejected. A failed reanalysis must remain BLOCKED until
+   // a later validated import provides new evidence.
+   this.profiles.set(hash,Object.freeze({hash,filename:label,hints:safeHints}));
    return;
   }
   this.profiles.set(hash,Object.freeze({hash,filename:label,hints:safeHints}));
