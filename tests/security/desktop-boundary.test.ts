@@ -2793,3 +2793,32 @@ test('TASK-013/TEST-022: dropped directory entry errors isolate siblings and lat
   'bad-root.user.js: READ_OR_IMPORT_FAILED'
  ]);
 });
+
+
+test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries and preserves per-script blocked receipts',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(main,/import\\s+\\{\\s*ReadOnlyBatchCoordinator\\s*\\}\\s+from\\s+['"]\\.\\.\\/\\.\\.\\/src\\/jobs\\/batch-coordinator['"]/,
+  'the real native DOM batch must reuse the existing bounded coordinator');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'the native imported DOM batch handler must remain separately auditable');
+ const handler=main.slice(start,end);
+ assert.match(handler,/new ReadOnlyBatchCoordinator\\(\\{\\s*count:ready\\.length,\\s*concurrency:1,\\s*maxAttempts:2,\\s*timeoutMs:120000\\s*\\}/,
+  'each script must receive at most two sequential read-only attempts within the existing batch deadline');
+ assert.match(handler,/observation\\.code==='CDP_FAILED'[\\s\\S]*?return 'RETRYABLE_FAILURE'/,
+  'only a bounded transient CDP observation failure may consume the retry budget');
+ assert.match(handler,/controller\\.signal\\.addEventListener\\('abort',cancelCoordinator/,
+  'batch cancellation and owner revocation must cancel queued retries');
+ assert.match(handler,/batchSnapshot\\.jobs\\[index\\]/,
+  'the final per-script receipt must be derived from the coordinator outcome');
+ assert.match(handler,/attempts:job\\.attempts/,
+  'the user-visible receipt must retain the actual attempt count');
+ assert.match(handler,/if\\(!opened\\.ok\\)[\\s\\S]*?items:plan\\.items\\.map/,
+  'a shared target-open failure must return a blocked receipt for every imported script');
+ assert.match(ui,/item\\.attempts/,
+  'the UI must disclose actual attempts instead of hiding retry behavior');
+ assert.match(handler,/automaticPatchAllowed:false/);
+ assert.match(handler,/tampermonkeyVerified:false/);
+ assert.match(handler,/businessVerified:false/);
+});
