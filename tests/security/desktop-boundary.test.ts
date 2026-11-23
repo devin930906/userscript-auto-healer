@@ -659,8 +659,8 @@ test('TASK-013/TEST-022/023: accepted fresh imports retire prior manual candidat
   'canceling a native picker must not revoke already reviewed candidates');
  assert.match(ui,/function retireImportedDomCandidatesAfterImport\(\):void\{[\s\S]*?importedDomGeneration\+\+[\s\S]*?importedDomItems\?\.replaceChildren\(\)/,
   'the renderer must remove earlier candidate export actions when a new import is accepted');
- assert.match(ui,/if\(!result\.canceled[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
-  'native import must not clear candidate actions when the picker is canceled');
+ assert.match(ui,/if\(\(!result\.canceled\|\|result\.scripts\.length>0\|\|result\.errors\.length>0\)[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
+  'native picker cancellation with no accepted results preserves old actions, but partially completed imports retire them');
  assert.match(ui,/batchId=started\.batchId;[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
   'a newly accepted dropped batch must retire stale candidate actions');
 });
