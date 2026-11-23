@@ -2443,6 +2443,24 @@ test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in ma
   'an async import result must not write into a replacement window index');
 });
 
+test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or return success',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const handler=main.slice(start,end);
+ assert.match(handler,/let observationReceiptDelivered=false;/,
+  'only a completely delivered batch receipt can retain export capabilities');
+ assert.match(handler,/if\(revoked\(\)\)return \{ok:false,code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED'/,
+  'cancellation or timeout after partial observation must never return ok:true');
+ assert.match(handler,/observationReceiptDelivered=true;\s*return \{ok:true,status:'UNKNOWN'/,
+  'receipt ownership must be marked only at the final success path');
+ assert.match(handler,/finally\{\s*clearTimeout\(deadline\);\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);\s*if\(!observationReceiptDelivered\)importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'failure/cancelled observations must revoke partial one-use export handles');
+ assert.match(handler,/if\(win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)/,
+  'window and owned-browser replacement must remain fail-closed');
+});
+
 test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not optional manual scenarios',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  const workspace=html.match(/<section id="import-workspace"[\s\S]*?<\/section>/)?.[0];
