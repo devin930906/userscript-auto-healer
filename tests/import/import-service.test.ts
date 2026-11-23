@@ -625,6 +625,26 @@ test('TASK-013/TEST-026: dropped batch rejects malformed bytes without invoking 
   assert.deepEqual(batch.finish()?.errors,[{filename:'proxy.user.js',code:'INVALID_DRAG_DATA'}]);
 });
 
+test('TASK-013/TEST-022/026: rejected non-byte typed arrays never exhaust the dropped batch byte budget',()=>{
+  const batch=new DroppedImportBatch();
+  // Share the same 8 MiB backing store: invalid typed-array shapes should not
+  // be charged before importDroppedBytes rejects them. A malicious renderer
+  // can otherwise exhaust the entire aggregate quota with rejected items.
+  const wrongElementType=new Uint16Array(4*1024*1024);
+  for(let i=0;i<16;i++){
+    const receipt=batch.add(`rejected-${i}.user.js`,wrongElementType);
+    assert.deepEqual(receipt,{ok:false,processed:i+1,code:'INVALID_DRAG_DATA'});
+  }
+  const bytes=new TextEncoder().encode(script);
+  const accepted=batch.add('valid-after-rejections.user.js',bytes);
+  assert.deepEqual(accepted,{ok:true,processed:17},
+    'invalid typed arrays cannot starve a subsequent valid script');
+  const final=batch.finish();
+  assert.deepEqual(final?.scripts.map(item=>item.filename),['valid-after-rejections.user.js']);
+  assert.equal(final?.errors.length,16);
+  assert.ok(final?.errors.every(error=>error.code==='INVALID_DRAG_DATA'));
+});
+
 test('TASK-013/TEST-022: dropped batch enforces the 1000-file limit',()=>{
   const batch=new DroppedImportBatch();
   const bytes=new TextEncoder().encode(script);
