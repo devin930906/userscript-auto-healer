@@ -131,6 +131,28 @@ test('TASK-013/TEST-022/026: reimport updates filename without reusing earlier c
   'identical source bytes remain a single per-window diagnostic identity');
 });
 
+test('TASK-013/TEST-022/026: failed same-hash reanalysis cannot reuse earlier AST hints',()=>{
+ const index=new ImportedDomDiagnosticIndex();
+ index.recordImported(shaA,hints('#old'),'original.user.js');
+ assert.equal(index.plan('https://example.org/app').items[0].status,'READY_FOR_INSPECTION');
+ // Same bytes do not prove that this import's isolated AST worker completed.
+ // A failed or untrusted new analysis must remove any previously cached hints.
+ index.recordImported(shaA,null,'reimported.user.js');
+ const blocked=index.plan('https://example.org/app').items[0];
+ assert.equal(blocked.filename,'reimported.user.js');
+ assert.equal(blocked.status,'BLOCKED');
+ assert.equal(code(blocked),'NO_LITERAL_SELECTORS');
+ const hostile=new Proxy({}, {get(){throw Error('untrusted hint access');}});
+ index.recordImported(shaA,hostile,'reimported.user.js');
+ assert.equal(code(index.plan('https://example.org/app').items[0]),'NO_LITERAL_SELECTORS');
+ // Fresh, independently validated hints can restore read-only eligibility.
+ index.recordImported(shaA,hints('#fresh'),'reimported.user.js');
+ const ready=index.plan('https://example.org/app').items[0];
+ assert.equal(ready.status,'READY_FOR_INSPECTION');
+ if(ready.status==='READY_FOR_INSPECTION')
+  assert.equal(ready.selectorSites[0].selector,'#fresh');
+});
+
 test('TASK-013/TEST-022/026: UTF-8 candidate source stays main-only and clears after batch use',()=>{
  const source='// ==UserScript==\n// @match https://example.org/*\n// @grant none\n// ==/UserScript==\ndocument.querySelector("#old");\n';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
