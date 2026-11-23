@@ -691,6 +691,31 @@ export async function launchBatchUserscriptInstallation(
     return failResult('BLOCKED', 'INVALID_OPTIONS');
   }
 
+  // Snapshot descriptors before any browser work. The cancellation path must
+  // never dereference an untrusted script object or inherited getter.
+  const safeRows: unknown[] = [];
+  for (const raw of scriptRows) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) {
+      safeRows.push(null);
+      continue;
+    }
+    const proto = Object.getPrototypeOf(raw);
+    if (proto !== Object.prototype && proto !== null) {
+      return failResult('BLOCKED', 'INVALID_OPTIONS');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(raw);
+    const fields = ['scriptId', 'name', 'installUrl'] as const;
+    if (fields.some(field => descriptors[field] &&
+        !Object.prototype.hasOwnProperty.call(descriptors[field], 'value'))) {
+      return failResult('BLOCKED', 'INVALID_OPTIONS');
+    }
+    safeRows.push(Object.freeze({
+      scriptId: descriptors.scriptId?.value,
+      name: descriptors.name?.value,
+      installUrl: descriptors.installUrl?.value
+    }));
+  }
+
   if (scriptRows.length === 0) {
     return Object.freeze({
       status: 'COMPLETED' as const,
@@ -736,7 +761,7 @@ export async function launchBatchUserscriptInstallation(
   let commandId = 1;
 
   try {
-    for (const raw of scriptRows) {
+    for (const raw of safeRows) {
       if (signal?.aborted) {
         items.push(Object.freeze({
           scriptId: (raw && typeof (raw as any).scriptId === 'string') ? (raw as any).scriptId : 'unknown',
