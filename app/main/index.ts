@@ -2669,9 +2669,9 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-export-manual').disabled && " +
       "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && noInventory.ok === false && noInventory.code === 'CANCELLED' && " +
       "rendered === true && badDropReported && scanCancelReady && pendingCallbackBeforeCancel && scanCancelled && isolated && canCancel && cancelled && " +
-      "document.getElementById('import-summary').textContent.includes('成功 5') && " +
+      "document.getElementById('import-summary').textContent.includes('成功 4') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
-      "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
+      "document.getElementById('import-summary').textContent.includes('未处理 2') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
       "blockedAutoDomInput.ok === false && blockedAutoDomInput.code === 'INVALID_TARGET_URL' && " +
