@@ -3054,3 +3054,25 @@ test('TASK-013/TEST-022: late progress polling cannot overwrite a delivered fina
  assert.match(flow,/diagnoseImportedBatch\(targetUrl\)\.then\(result=>\{\r?\n  importedDomFinalDelivered=true;/);
  assert.match(flow,/\}\)\.catch\(\(\)=>\{\r?\n  importedDomFinalDelivered=true;/);
 });
+
+test('TASK-015/TEST-024/026: delayed history archive cannot cross native frame or scenario scope',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:history'");
+ const end=main.indexOf("ipcMain.handle('scenario:imported-batch-progress'",start);
+ assert.ok(start>=0&&end>start,'expected bounded read-only history handler');
+ const handler=main.slice(start,end);
+ assert.match(handler,/const owner=mainWindow;/);
+ assert.match(handler,/const frameEpoch=mainFrameNavigationEpoch;/);
+ assert.match(handler,/const session=scenarioSession;/);
+ assert.match(handler,/owner!==mainWindow\|\|owner\.isDestroyed\(\)/);
+ assert.match(handler,/frameEpoch!==mainFrameNavigationEpoch\|\|session!==scenarioSession/);
+ const readAt=handler.indexOf("await readLimitedHealthArchive(");
+ const rejectAt=handler.indexOf("if(stale())return unavailable();",readAt);
+ const mergeAt=handler.indexOf("mergeLimitedSessionArchive(current,stored)",readAt);
+ assert.ok(readAt>=0&&rejectAt>readAt&&mergeAt>rejectAt,
+  'old archive results must be rejected before merging with a replaced session');
+ assert.match(handler.slice(rejectAt),/catch\{\s*if\(stale\(\)\)return unavailable\(\);/,
+  'even a rejected archive read must not return old-session history');
+ assert.match(handler,/code:'HISTORY_UNAVAILABLE'[\s\S]*?automaticPatchAllowed:false[\s\S]*?automaticRollbackAllowed:false[\s\S]*?tampermonkeyVerified:false[\s\S]*?businessVerified:false/,
+  'stale requests must return a fail-closed response with no manager or repair authority');
+});
