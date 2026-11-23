@@ -381,13 +381,15 @@ test('TASK-013/TEST-022/026: invalidated native frame cannot reinsert delayed di
  const index=new ImportedDomDiagnosticIndex();
  const win={};
  let currentFrame=true;
- const recorded=recordImportedDomForCurrentOwner(index,index,win,win,false,
-  hash,hints('#old'),'stale.user.js',source,()=>currentFrame);
+ const recordWithFrame=(current:()=>boolean)=>
+  Reflect.apply(recordImportedDomForCurrentOwner,undefined,[
+   index,index,win,win,false,hash,hints('#old'),'stale.user.js',source,current
+  ]) as boolean;
+ const recorded=recordWithFrame(()=>currentFrame);
  assert.equal(recorded,true);
  index.clearCandidateSources();
  currentFrame=false;
- assert.equal(recordImportedDomForCurrentOwner(index,index,win,win,false,
-  hash,hints('#old'),'stale.user.js',source,()=>currentFrame),false,
+ assert.equal(recordWithFrame(()=>currentFrame),false,
   'a same-window reload must revoke the previous native import frame');
  assert.equal(index.readUtf8CandidateSource(hash),null,
   'the stale async result must not restore private candidate bytes');
