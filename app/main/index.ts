@@ -1,8 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron';
-import { importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
-import {previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
-import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
-import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpointed-import';
+import { DroppedImportBatch, importApprovedPaths, importDroppedBytes, scanApprovedDirectory, type ImportOutcome, type ImportedScript, type ReadOnlyImportProgress } from '../../src/import/import-service';
+import {MAX_ANALYSIS_BYTES,previewImportedScriptAnalysis,type ImportAnalysisPreview} from '../../src/analyze/import-preview';
+import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
+import {ImportedDomDiagnosticIndex,recordImportedDomForCurrentOwner}
+  from '../../src/diagnostics/imported-dom-diagnostic-index';
+import {ImportedDomCandidateExportStore}
+  from '../../src/diagnostics/imported-dom-diagnostic-index';
+import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
+import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -107,7 +112,10 @@ import {DesktopScenarioSession} from '../../src/scenarios/desktop-session';
 import {openApprovedTarget} from '../../src/browser/cdp-target';
 import {inspectApprovedScenarioDomSeries,summarizeReadOnlyScenarioDomSeries} from '../../src/diagnostics/scenario-dom-diagnostic';
 import {observeApprovedDomSeries} from '../../src/observe/dom-observer';
-import {exportReviewedImportedSelectorOnly} from '../../src/repair/imported-manual-export';
+import {proposeImportedDomCandidate,
+  type ImportedDomCandidateManualExportContext} from '../../src/repair/imported-dom-candidate';
+import {exportReviewedImportedCandidateOnly,exportReviewedImportedSelectorOnly}
+  from '../../src/repair/imported-manual-export';
 import {inspectApprovedPageExceptions} from '../../src/diagnostics/cdp-page-exceptions';
 import {LimitedHealthRegistry} from '../../src/health/health-registry';
 import {recordLimitedScenarioInspection} from '../../src/health/scenario-inspection';
@@ -136,6 +144,17 @@ let nativeAiDiscoveryController:AbortController|null=null;
 let nativeAiReviewEvidence=new NativeAiEvidenceStore();
 // A new window gets a fresh read-only scenario scope; no disk persistence.
 let scenarioSession=new DesktopScenarioSession();
+// Only bounded Worker-derived AST sites and parsed @match hints are retained;
+// original bytes, paths and URLs are never stored in this per-window index.
+let importedDomDiagnosticIndex=new ImportedDomDiagnosticIndex();
+interface ImportedDomCandidateExportContext{
+  readonly filename:string;
+  readonly context:ImportedDomCandidateManualExportContext;
+}
+// Only short-lived review context and a safe display name are retained.
+// The source path and candidate source are deliberately never stored here.
+const importedDomCandidateExportStore=
+  new ImportedDomCandidateExportStore<ImportedDomCandidateExportContext>();
 // No disk persistence, no manager or business authority, fresh per window.
 let limitedScenarioHistory=new LimitedHealthRegistry();
 // Native-picked paths stay strictly in the privileged process. A renderer
@@ -150,6 +169,10 @@ let nativeRestoreController:AbortController|null=null;
 const diagnosticGate=createExclusiveOwnedDiagnosticGate();
 let scenarioObserveController:AbortController|null=null;
 let scenarioObserveInProgress=false;
+type ImportedDomProgress=Readonly<{phase:'AWAITING_CONSENT'|'OPENING_TARGET'|'OBSERVING';
+ processed:number;total:number;currentIndex:number;attempts:number}>;
+// Main-owned: never disclose script names, SHA, URL, selectors or authority.
+let importedDomProgress:ImportedDomProgress|null=null;
 let scenarioObserveEpoch=0;
 function cancelScenarioObservation():void{
   scenarioObserveEpoch++;
@@ -187,6 +210,75 @@ let nativeImportCounters:NativeImportCounters|null=null;
 // The renderer can cancel its current read-only dropped-file AST preview.
 // Never grant arbitrary-path, manager or script-write authority through this.
 let droppedImportController: AbortController | null = null;
+interface ActiveDroppedImportBatch{
+  readonly id:string;
+  readonly owner:BrowserWindow;
+  readonly frameEpoch:number;
+  readonly batch:DroppedImportBatch;
+}
+type DroppedBatchSummary=Awaited<ReturnType<typeof summarizeResult>>;
+type DroppedImportRecoveryOutcome=
+  |{readonly ok:true;readonly result:DroppedBatchSummary}
+  |{readonly ok:false;readonly code:'DROPPED_IMPORT_FAILED'};
+interface PendingDroppedImportRecovery{
+  id:string;
+  frameEpoch:number;
+  ready:boolean;
+  settled:boolean;
+  readonly owner:BrowserWindow;
+  readonly controller:AbortController;
+  result:Promise<DroppedImportRecoveryOutcome>;
+}
+let droppedImportBatchSession:ActiveDroppedImportBatch|null=null;
+let pendingDroppedImportRecovery:PendingDroppedImportRecovery|null=null;
+let mainFrameNavigationEpoch=0;
+function abortDroppedImportForWindow(win:BrowserWindow):void{
+  if(mainWindow!==win)return;
+  mainFrameNavigationEpoch++;
+  const session=droppedImportBatchSession;
+  if(session?.owner===win){
+    const result=session.batch.finish();
+    droppedImportBatchSession=null;
+    if(result){
+      const controller=droppedImportController??new AbortController();
+      droppedImportController=controller;
+      createPendingDroppedImportRecovery(win,result,controller,false);
+    }
+  }else{
+    const previous=pendingDroppedImportRecovery;
+    if(previous?.owner===win){
+      previous.id=randomUUID();
+      previous.frameEpoch=mainFrameNavigationEpoch;
+      previous.ready=false;
+    }
+  }
+  const pending=pendingDroppedImportRecovery;
+  if(pending?.owner===win)return;
+  const controller=droppedImportController;
+  if(controller){
+    controller.abort();
+    if(droppedImportController===controller)droppedImportController=null;
+  }
+}
+function discardDroppedImportForWindow(win:BrowserWindow):void{
+  if(mainWindow!==win)return;
+  mainFrameNavigationEpoch++;
+  const session=droppedImportBatchSession;
+  if(session?.owner===win){
+    session.batch.finish();
+    droppedImportBatchSession=null;
+  }
+  const pending=pendingDroppedImportRecovery;
+  if(pending?.owner===win){
+    pendingDroppedImportRecovery=null;
+    pending.controller.abort();
+  }
+  const controller=droppedImportController;
+  if(controller){
+    controller.abort();
+    if(droppedImportController===controller)droppedImportController=null;
+  }
+}
 let gmProbeSession: ManualTampermonkeyDiagnosticSession | null = null;
 let gmStartInProgress = false;
 let gmStartAbort: AbortController | null = null;
@@ -272,25 +364,57 @@ function summarize(script: ImportedScript, analysis: ImportAnalysisPreview = pre
     sha256:script.sha256, textEncoding:script.textEncoding,
     analysis};
 }
-async function summarizeResult(result: Awaited<ReturnType<typeof importApprovedPaths>>,
-  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void,
-  nativeJournalRoot?:string) {
-  // Only the native OS picker may opt into persistence. Dropped bytes still
-  // use the existing ephemeral, read-only worker; no renderer path is trusted.
-  const checkpoint=nativeJournalRoot&&result.scripts.length>0
-    ?await runCheckpointedNativeImportAnalysis(nativeJournalRoot,
-      result.scripts,signal,onProgress)
-    :undefined;
-  const previews=checkpoint?.previews??
-    await runImportedReadOnlyAnalysisQueue(result.scripts,signal,onProgress);
+interface ImportedDomImportOwner{
+  readonly window:BrowserWindow;
+  readonly index:ImportedDomDiagnosticIndex;
+  /** Native picker results expire on main-frame navigation. Drop recovery
+   * intentionally omits this gate because its accepted batch can be resumed. */
+  readonly currentFrame?:()=>boolean;
+}
+async function summarizeResult(result:ImportOutcome,owner:ImportedDomImportOwner,
+  signal?:AbortSignal,onProgress?:(processed:number,total:number)=>void) {
+  // Every validated source shares the same durable read-only scheduler. The
+  // root is selected here in Electron main; renderer input cannot choose it.
+  const analyzed=await analyzeImportedOutcomeWithCheckpoint(
+    join(app.getPath('userData'),'readonly-import-journals'),result,signal,onProgress);
+  const checkpoint=analyzed.checkpoint;
+  const previews=checkpoint?.previews??[];
+  const scripts=result.scripts.map((script,i)=>{
+    let candidateSource:string|undefined;
+    if(script.textEncoding==='utf-8'&&script.byteLength<=MAX_ANALYSIS_BYTES){
+      try{candidateSource=new TextDecoder('utf-8',{fatal:true}).decode(script.bytes);}
+      catch{candidateSource=undefined;}
+    }
+    recordImportedDomForCurrentOwner(owner.index,importedDomDiagnosticIndex,
+      owner.window,mainWindow,owner.window.isDestroyed(),script.sha256,
+      readMainOnlyDiagnosticHints(previews[i]),script.filename,candidateSource,
+      owner.currentFrame);
+    return summarize(script,previews[i]);
+  });
   return {batchCheckpoint:checkpoint?.status,
     batchCheckpointReason:checkpoint?.status==='BLOCKED'?checkpoint.reason:undefined,
     batchResumed:checkpoint?.status==='READ_ONLY_BATCH_CHECKPOINTED_UNVERIFIED'
       ?checkpoint.resumed:false,
-    canceled:result.canceled===true||signal?.aborted===true,
-    unprocessed:result.unprocessed??0,
-    scripts:result.scripts.map((script,i)=>summarize(script,previews[i])),
+    canceled:analyzed.canceled,
+    unprocessed:analyzed.unprocessed,
+    scripts,
     errors:result.errors, duplicates:result.duplicates};
+}
+
+function createPendingDroppedImportRecovery(win:BrowserWindow,result:ImportOutcome,
+  controller:AbortController,ready=true):PendingDroppedImportRecovery{
+  for(const script of result.scripts)scenarioSession.recordImported(script.sha256);
+  const pending:PendingDroppedImportRecovery={
+    id:randomUUID(),frameEpoch:mainFrameNavigationEpoch,ready,settled:false,
+    owner:win,controller,
+    result:Promise.resolve({ok:false as const,code:'DROPPED_IMPORT_FAILED' as const})
+  };
+  pending.result=summarizeResult(result,{window:win,index:importedDomDiagnosticIndex},
+    controller.signal).then(summary=>({ok:true as const,result:summary}))
+    .catch(()=>({ok:false as const,code:'DROPPED_IMPORT_FAILED' as const}))
+    .finally(()=>{pending.settled=true;});
+  pendingDroppedImportRecovery=pending;
+  return pending;
 }
 
 function createNativeAiDesktopSelection(
@@ -1159,13 +1283,18 @@ function registerSafeIpc(): void {
   // Keep the native-selected batch cancellable between bounded file reads.
   const runNativeImport = async (event: Electron.IpcMainInvokeEvent, kind: 'files'|'folder') => {
     authorizeSender(event);
-    if(nativeImportController||droppedImportController||manualExportInProgress||
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {canceled:false,scripts:[],errors:[{filename:'(selection)',code:'IMPORT_BUSY'}],
         duplicates:0,unprocessed:0};
     const win=mainWindow;
     if(!win||win.isDestroyed()) throw new Error('NO_WINDOW');
+    const nativeFrameEpoch=mainFrameNavigationEpoch;
     const controller=new AbortController();
+    const currentNativeFrame=()=>win===mainWindow&&!win.isDestroyed()&&
+      !controller.signal.aborted&&mainFrameNavigationEpoch===nativeFrameEpoch;
+    const importOwner:ImportedDomImportOwner={window:win,
+      index:importedDomDiagnosticIndex,currentFrame:currentNativeFrame};
     nativeImportController=controller;
     nativeImportCounters={phase:'PICKING',processed:0,total:0,accepted:0,duplicates:0,failed:0};
     try {
@@ -1173,10 +1302,13 @@ function registerSafeIpc(): void {
         ? {title:'选择 .user.js 文件',defaultPath:getInitialDialogPath('scripts'),properties:['openFile','multiSelections'],
           filters:[{name:'Userscript',extensions:['js']}]}
         : {title:'选择脚本文件夹',defaultPath:getInitialDialogPath('scriptFolder',rememberedPaths.scripts),properties:['openDirectory']});
-      if(choice.canceled||win!==mainWindow||win.isDestroyed()||
-        controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
+      if(choice.canceled||!currentNativeFrame()||
+        (kind==='folder'&&choice.filePaths.length!==1))
         return {canceled:true,scripts:[],errors:[],duplicates:0,
           unprocessed:controller.signal.aborted?choice.filePaths.length:0};
+      // A fresh native source selection supersedes old reviewed candidate grants.
+      // Native picker cancellation above leaves previously reviewed grants intact.
+      importedDomCandidateExportStore.clearOwner(win);
       if(kind==='files'&&choice.filePaths.length>0)saveRememberedPath('scripts',choice.filePaths[0]);
       else if(kind==='folder'&&choice.filePaths.length===1)saveRememberedPath('scriptFolder',choice.filePaths[0]);
       nativeImportCounters={phase:kind==='folder'?'SCANNING':'IMPORTING',
@@ -1193,7 +1325,7 @@ function registerSafeIpc(): void {
         : await scanApprovedDirectory(choice.filePaths[0],controller.signal,progress);
       // Only validated content hashes, never source paths or bytes, bind
       // subsequently staged scenarios to this window's import session.
-      if(win===mainWindow&&!win.isDestroyed())
+      if(currentNativeFrame())
         for(const script of result.scripts){
           scenarioSession.recordImported(script.sha256);
           // A new native picker is a new explicit source selection. The
@@ -1208,12 +1340,17 @@ function registerSafeIpc(): void {
         nativeImportCounters={phase:'ANALYZING',processed:0,total:result.scripts.length,
           accepted:result.scripts.length,duplicates:result.duplicates,failed:result.errors.length};
       }
-      return await summarizeResult(result,controller.signal,(processed,total)=>{
-        if(nativeImportController!==controller||controller.signal.aborted)return;
+      const summary=await summarizeResult(result,importOwner,controller.signal,(processed,total)=>{
+        if(nativeImportController!==controller||!currentNativeFrame())return;
         nativeImportCounters={phase:'ANALYZING',processed,total,
           accepted:result.scripts.length,duplicates:result.duplicates,
           failed:result.errors.length};
-      },join(app.getPath('userData'),'readonly-import-journals'));
+      });
+      // An old IPC invocation must not return a valid imported batch to a
+      // different renderer document after an awaited checkpoint/AST result.
+      if(!currentNativeFrame())return {canceled:true,scripts:[],errors:[],
+        duplicates:0,unprocessed:result.scripts.length};
+      return summary;
     } finally {
       if(nativeImportController===controller){
         nativeImportController=null;
@@ -1236,28 +1373,121 @@ function registerSafeIpc(): void {
     nativeImportController.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
+  ipcMain.handle('import:dropped-batch:begin',event=>{
+    authorizeSender(event);
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
+    if(pendingDroppedImportRecovery?.owner===win)
+      return {ok:false,code:'IMPORT_RECOVERY_PENDING'};
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
+        nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
+      return {ok:false,code:'IMPORT_BUSY'};
+    // New accepted batches must not retain export handles from a previous
+    // import/DOM observation. A blocked begin above does not revoke them.
+    importedDomCandidateExportStore.clearOwner(win);
+    const controller=new AbortController();
+    const batchId=randomUUID();
+    droppedImportController=controller;
+    droppedImportBatchSession={
+      id:batchId,owner:win,frameEpoch:mainFrameNavigationEpoch,
+      batch:new DroppedImportBatch()
+    };
+    return {ok:true,batchId};
+  });
+  ipcMain.handle('import:dropped-batch:add',(event,batchId:unknown,name:unknown,data:unknown)=>{
+    authorizeSender(event);
+    const session=droppedImportBatchSession;
+    const win=mainWindow;
+    if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.frameEpoch!==mainFrameNavigationEpoch||
+        session.owner!==win||!win||win.isDestroyed())
+      return {ok:false,processed:0,code:'STALE_BATCH'};
+    return session.batch.add(name,data);
+  });
+  ipcMain.handle('import:dropped-batch:finish',async(event,batchId:unknown)=>{
+    authorizeSender(event);
+    const session=droppedImportBatchSession;
+    const win=mainWindow;
+    const controller=droppedImportController;
+    if(typeof batchId!=='string'||!session||session.id!==batchId||
+        session.frameEpoch!==mainFrameNavigationEpoch||
+        session.owner!==win||!win||win.isDestroyed()||!controller)
+      return {ok:false,code:'STALE_BATCH'};
+    const frameEpoch=session.frameEpoch;
+    const result=session.batch.finish();
+    if(!result)return {ok:false,code:'BATCH_FINALIZED'};
+    droppedImportBatchSession=null;
+    const pending=createPendingDroppedImportRecovery(win,result,controller);
+    const summary=await pending.result;
+    if(win!==mainWindow||win.isDestroyed()||frameEpoch!==mainFrameNavigationEpoch||
+        pendingDroppedImportRecovery!==pending||pending.frameEpoch!==frameEpoch||!pending.ready)
+      return {ok:false,code:'STALE_BATCH'};
+    if(!summary.ok)return {ok:false,code:summary.code,recoveryId:pending.id};
+    return {ok:true,recoveryId:pending.id,...summary.result};
+  });
+  ipcMain.handle('import:dropped-batch:recover',async event=>{
+    authorizeSender(event);
+    const pending=pendingDroppedImportRecovery;
+    const win=mainWindow;
+    if(!pending)return {ok:false,code:'NO_PENDING_RECOVERY'};
+    if(!win||win.isDestroyed()||pending.owner!==win)
+      return {ok:false,code:'STALE_RECOVERY'};
+    const frameEpoch=mainFrameNavigationEpoch;
+    if(!pending.ready||pending.frameEpoch!==frameEpoch)
+      return {ok:false,code:'RECOVERY_NOT_READY'};
+    const summary=await pending.result;
+    if(pendingDroppedImportRecovery!==pending||win!==mainWindow||win.isDestroyed()||
+        frameEpoch!==mainFrameNavigationEpoch||pending.frameEpoch!==frameEpoch||!pending.ready)
+      return {ok:false,code:'STALE_RECOVERY'};
+    if(!summary.ok)return {ok:false,code:summary.code,recoveryId:pending.id};
+    return {ok:true,recoveryId:pending.id,result:summary.result};
+  });
+  ipcMain.handle('import:dropped-batch:acknowledge',(event,recoveryId:unknown)=>{
+    authorizeSender(event);
+    const pending=pendingDroppedImportRecovery;
+    const win=mainWindow;
+    if(typeof recoveryId!=='string'||!pending||pending.id!==recoveryId||
+        pending.owner!==win||!win||win.isDestroyed()||!pending.ready||
+        pending.frameEpoch!==mainFrameNavigationEpoch)
+      return {ok:false,code:'STALE_RECOVERY'};
+    pendingDroppedImportRecovery=null;
+    if(droppedImportController===pending.controller)droppedImportController=null;
+    return {ok:true};
+  });
   ipcMain.handle('import:dropped', async (event, name:unknown, data:unknown) => {
     authorizeSender(event);
     const win=mainWindow;
     if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW'};
-    if(nativeImportController||droppedImportController||manualExportInProgress||
+    if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
     const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
+    // An accepted single dropped script starts a new source review lifecycle.
+    // Invalid input above must not revoke capabilities or write source files.
+    importedDomCandidateExportStore.clearOwner(win);
+    const droppedFrameEpoch=mainFrameNavigationEpoch;
     const controller=new AbortController();
     droppedImportController=controller;
     try{
       // A dragged .user.js is untrusted even after successful byte import.
-      // AST parsing must not block the privileged Electron event loop.
-      // No script is executed, applied or sent to the browser/manager.
-      const [analysis]=await runImportedReadOnlyAnalysisQueue([result],controller.signal);
-      if(win!==mainWindow||win.isDestroyed())
+      // It shares the main-owned durable, read-only checkpointed AST path;
+      // no script is executed, applied or sent to a browser/manager.
+      const summary=await summarizeResult({scripts:[result],errors:[],duplicates:0},
+        {window:win,index:importedDomDiagnosticIndex,
+          currentFrame:()=>win===mainWindow&&!win.isDestroyed()&&
+            mainFrameNavigationEpoch===droppedFrameEpoch},controller.signal);
+      if(win!==mainWindow||win.isDestroyed()||
+         droppedFrameEpoch!==mainFrameNavigationEpoch)
         return {ok:false,code:'WINDOW_CLOSED'};
       // Cancellation only stops optional AST work. Validated imported bytes
       // were already read, so retain the SHA for this window's staged history.
       scenarioSession.recordImported(result.sha256);
-      return {ok:true,script:summarize(result,analysis)};
+      return {ok:true,script:summary.scripts[0],
+        batchCheckpoint:summary.batchCheckpoint,
+        batchCheckpointReason:summary.batchCheckpointReason,
+        batchResumed:summary.batchResumed,
+        canceled:summary.canceled,unprocessed:summary.unprocessed};
     }catch{
       return {ok:false,code:'DROPPED_IMPORT_FAILED'};
     }finally{
@@ -1266,9 +1496,13 @@ function registerSafeIpc(): void {
   });
   ipcMain.handle('import:cancel-dropped',event=>{
     authorizeSender(event);
-    if(!droppedImportController)
+    const controller=droppedImportController;
+    const pending=pendingDroppedImportRecovery;
+    if(!controller||(pending?.controller===controller&&pending.settled))
       return {ok:false,code:'NO_ACTIVE_DROPPED_IMPORT'};
-    droppedImportController.abort();
+    if(controller.signal.aborted)
+      return {ok:false,code:'CANCELLATION_ALREADY_REQUESTED'};
+    controller.abort();
     return {ok:true,status:'CANCELLATION_REQUESTED'};
   });
   // Stage one bounded, read-only scenario only for a script imported by this
@@ -1294,6 +1528,312 @@ function registerSafeIpc(): void {
       if(stored.status!=='ARCHIVE_READ_UNVERIFIED')return current;
       return mergeLimitedSessionArchive(current,stored);
     }catch{return markLimitedSessionArchiveUnavailable(current);}
+  });
+
+  // Read-only aggregate counters, no renderer-provided data or capabilities.
+  ipcMain.handle('scenario:imported-batch-progress',(event,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length)return {active:false as const};
+    const progress=importedDomProgress;
+    return scenarioObserveInProgress&&progress
+      ?Object.freeze({active:true as const,phase:progress.phase,
+        processed:progress.processed,total:progress.total,
+        currentIndex:progress.currentIndex,attempts:progress.attempts})
+      :Object.freeze({active:false as const});
+  });
+  // Ordinary batch path: selector sites are resolved exclusively from the
+  // main-only AST sidecar. The renderer submits only the configured URL; it
+  // cannot choose a script hash, selector, source path, endpoint or consent.
+  ipcMain.handle('scenario:diagnose-imported-batch',async(event,targetInput:unknown)=>{
+    authorizeSender(event);
+    if(scenarioObserveInProgress||gmActionInProgress||gmStartInProgress||
+       manualExportInProgress||nativeImportController||droppedImportController||
+       nativeSelectionInProgress)
+      return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    const plan=importedDomDiagnosticIndex.plan(targetInput);
+    type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
+      domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
+      checkedSelectorCount:number;attempts:number;triageStatus?:string;faultCategory?:string;
+      evidenceCount?:number;reason?:string;automaticPatchAllowed:false;
+      candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
+      candidateExportId?:string;
+      candidateOriginalSha256?:string;candidateSha256?:string;
+      candidateBefore?:string;candidateAfter?:string;
+      tampermonkeyVerified:false;businessVerified:false};
+    const blockedItem=(item:typeof plan.items[number],code?:string,attempts=0)=>({
+      ordinal:item.ordinal,filename:item.filename??('脚本 '+(item.ordinal+1)),
+      status:'UNKNOWN' as const,domStatus:'NOT_OBSERVED' as const,
+      code:code??('code' in item?item.code:undefined),checkedSelectorCount:0,attempts,
+      ...unverified
+    });
+    if(!plan.targetUrl){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'INVALID_TARGET_URL',
+        items:plan.items.map(item=>blockedItem(item,'INVALID_TARGET_URL')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+    }
+    const ready=plan.items.filter((item)=>item.status==='READY_FOR_INSPECTION');
+    const blocked=plan.items.filter((item)=>item.status==='BLOCKED');
+    const results:ImportedDomResultItem[]=blocked.map(item=>blockedItem(item));
+    if(ready.length===0){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:true,status:'UNKNOWN' as const,reason:'NO_ELIGIBLE_SCRIPT',
+        targetMatchedCount:0,truncatedScripts:plan.truncatedScripts,
+        items:results,...unverified};
+    }
+    const owned=readOwnedBrowser();
+    if(!owned){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      // Even without a running owned browser, preserve each script's static
+      // eligibility result. Eligible items remain NOT_OBSERVED, never verified.
+      const perScriptBlocks=plan.items.map(item=>
+        item.status==='READY_FOR_INSPECTION'
+          ?blockedItem(item,'BROWSER_NOT_RUNNING'):blockedItem(item));
+      return {ok:false,code:'BROWSER_NOT_RUNNING',
+        items:perScriptBlocks,truncatedScripts:plan.truncatedScripts,...unverified};
+    }
+    const win=mainWindow;
+    if(!win||win.isDestroyed()){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'NO_WINDOW',
+        items:plan.items.map(item=>blockedItem(item,'NO_WINDOW')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+    }
+    const lease=diagnosticGate.reserve();
+    if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',
+      items:plan.items.map(item=>blockedItem(item,'OBSERVATION_BUSY')),
+      truncatedScripts:plan.truncatedScripts,...unverified};
+    // A rejected or busy diagnostic must not cancel an unrelated native AI
+    // discovery. Supersede it only after this operation owns the gate.
+    nativeAiDiscoveryController?.abort();
+    // Only an accepted diagnostic lease supersedes prior reviewed export grants.
+    // Invalid, no-browser and busy requests must not revoke a separately
+    // reviewed, still-valid main-owned one-use manual export capability.
+    importedDomCandidateExportStore.clearOwner(win);
+    importedDomProgress={phase:'AWAITING_CONSENT',processed:0,total:ready.length,
+      currentIndex:0,attempts:0};
+    const controller=new AbortController();
+    const epoch=scenarioObserveEpoch;
+    scenarioObserveController=controller;
+    scenarioObserveInProgress=true;
+    let deadlineExpired=false;
+    let deadline:NodeJS.Timeout|undefined;
+    let observationReceiptDelivered=false;
+    let candidatePreviewCount=0;
+    const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
+      win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
+    try{
+      const selectorCount=ready.reduce((sum,item)=>sum+
+        (item.status==='READY_FOR_INSPECTION'?item.selectorSites.length:0),0);
+      const consent=await dialog.showMessageBox(win,{
+        type:'question',buttons:['允许批量只读 DOM 观测','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'允许在受控 Chrome 执行批量只读 DOM 计数，并在严格符合条件时生成最多 16 项仅内存候选预览？',
+        detail:plan.targetUrl+'\n将检查 '+ready.length+' 份脚本中的最多 '+
+          selectorCount+' 个 AST 字面选择器，批次最长 120 秒。每个脚本最多尝试 2 次，仅对临时 CDP 通信失败重试 1 次；其他失败、取消、权限拒绝及目标不匹配不会重试。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
+          '\n候选源码只在主进程内存短暂保留，整个批次最多 16 MiB，观测结束或窗口关闭后清除。符合条件的候选可由你另行发起原生文件选择、独立目录选择及最终保存确认，创建备份和人工候选；本次观察本身不会写入或导出任何文件。'+
+          '\n结果只代表限定 DOM 计数或一条待审阅字面选择器差异；登录状态和真实业务断言仍需另行配置与验证。'
+      });
+      if(consent.response!==0||revoked()){
+        const code=controller.signal.aborted||revoked()?'CANCELLED':'NOT_AUTHORIZED';
+        return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
+          truncatedScripts:plan.truncatedScripts,...unverified};
+      }
+      // Consent time is not batch execution time. Start the fixed 120-second
+      // stop budget only after explicit native authorization, before the
+      // first controlled Chrome operation. Rejection leaves no running timer.
+      deadline=setTimeout(()=>{
+        deadlineExpired=true;
+        controller.abort();
+      },120000);
+      if(importedDomProgress)importedDomProgress={...importedDomProgress,phase:'OPENING_TARGET'};
+      const opened=await openApprovedTarget(owned,plan.targetUrl,true,controller.signal);
+      if(revoked())return {ok:false,code:'CANCELLED',
+        items:plan.items.map(item=>blockedItem(item,'CANCELLED')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+      if(!opened.ok)return {ok:false,code:opened.code,
+        items:plan.items.map(item=>blockedItem(item,opened.code)),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+      if(importedDomProgress)importedDomProgress={...importedDomProgress,phase:'OBSERVING'};
+      const observations:Array<Awaited<ReturnType<typeof observeApprovedDomSeries>>|undefined>=
+        Array.from({length:ready.length});
+      const observationCodes:Array<string|undefined>=Array.from({length:ready.length});
+      let coordinator!:ReadOnlyBatchCoordinator;
+      const finishCurrent=()=>{
+        if(importedDomProgress&&!controller.signal.aborted)
+          importedDomProgress={...importedDomProgress,
+            processed:Math.min(ready.length,importedDomProgress.processed+1)};
+      };
+      coordinator=new ReadOnlyBatchCoordinator({
+        count:ready.length,concurrency:1,maxAttempts:2,timeoutMs:120000
+      },async(index,signal)=>{
+        const item=ready[index];
+        if(!item||signal.aborted||revoked()){
+          observationCodes[index]='CANCELLED';
+          coordinator.cancel();
+          return 'PERMANENT_FAILURE';
+        }
+        const attempt=coordinator.snapshot().jobs[index]?.attempts??0;
+        if(importedDomProgress)
+          importedDomProgress={...importedDomProgress,currentIndex:index+1,attempts:attempt};
+        try{
+          const observation=await observeApprovedDomSeries(
+            owned,opened,plan.targetUrl!,true,
+            item.selectorSites.map(site=>site.selector),3,250,signal);
+          if(signal.aborted||revoked()){
+            observationCodes[index]='CANCELLED';
+            coordinator.cancel();
+            return 'PERMANENT_FAILURE';
+          }
+          if(observation.ok){
+            observations[index]=observation;
+            observationCodes[index]=undefined;
+            finishCurrent();
+            return 'DONE';
+          }
+          observationCodes[index]=observation.code;
+          const retryable=observation.code==='CDP_FAILED';
+          if(!retryable||attempt>=2)finishCurrent();
+          return retryable?'RETRYABLE_FAILURE':'PERMANENT_FAILURE';
+        }catch{
+          observationCodes[index]='OBSERVATION_FAILED';
+          finishCurrent();
+          return 'PERMANENT_FAILURE';
+        }
+      });
+      const cancelCoordinator=()=>coordinator.cancel();
+      controller.signal.addEventListener('abort',cancelCoordinator,{once:true});
+      let batchSnapshot:ReturnType<ReadOnlyBatchCoordinator['snapshot']>;
+      try{batchSnapshot=await coordinator.run();}
+      finally{controller.signal.removeEventListener('abort',cancelCoordinator);}
+      for(let index=0;index<ready.length;index++){
+        const item=ready[index];
+        const job=batchSnapshot.jobs[index];
+        const observation=observations[index];
+        if(job.state!=='SUCCEEDED'||!observation){
+          const code=job.state==='CANCELLED'
+            ?(deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED')
+            :observationCodes[index]??(job.state==='FAILED'?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED');
+          results.push(blockedItem(item,code,job.attempts));
+          continue;
+        }
+        try{
+          const scenario={
+            id:'auto_dom_'+item.ordinal,
+            scriptSha256:item.scriptSha256,
+            targetUrl:plan.targetUrl,
+            userApproved:true,
+            requiresLogin:false,
+            loginReady:false,
+            steps:[],
+            assertions:item.selectorSites.map(site=>({
+              kind:'selector-present' as const,selector:site.selector
+            }))
+          };
+          const triage=summarizeReadOnlyScenarioDomSeries(scenario,observation,true);
+          if(triage.status!=='LIMITED_DOM_SIGNAL_ONLY'||triage.code!=='NONE'){
+            results.push(blockedItem(item,triage.code||'OBSERVATION_BLOCKED',job.attempts));
+            continue;
+          }
+          let candidateFields:Pick<ImportedDomResultItem,
+            'candidateStatus'|'candidateReason'|'candidateOriginalSha256'|
+            'candidateExportId'|'candidateSha256'|'candidateBefore'|'candidateAfter'>={
+              candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_NOT_ATTEMPTED'
+            };
+          if(candidatePreviewCount<16){
+            const source=importedDomDiagnosticIndex.readUtf8CandidateSource(
+              item.scriptSha256,item.filename);
+            if(source===null){
+              candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'SOURCE_UNAVAILABLE'};
+            }else{
+              // Only source-backed proposals spend the bounded evaluation
+              // budget. Missing/expired sources must not starve later scripts.
+              candidatePreviewCount++;
+              try{
+                const proposal=proposeImportedDomCandidate({source,
+                expectedSourceSha256:item.scriptSha256,targetUrl:plan.targetUrl,
+                observation,nativeConsent:true});
+              if(proposal.status==='CANDIDATE_ONLY'&&
+                 proposal.change.before.length<=1024&&proposal.change.after.length<=1024){
+                const candidateExportId=item.filename
+                  ?importedDomCandidateExportStore.put(win,Object.freeze({
+                    filename:item.filename,context:proposal.manualExportContext
+                  }),performance.now()+5*60*1000)??undefined
+                  :undefined;
+                candidateFields={candidateStatus:'CANDIDATE_ONLY',
+                  ...(candidateExportId?{candidateExportId}:{}),
+                  candidateOriginalSha256:proposal.originalSha256,
+                  candidateSha256:proposal.candidateSha256,
+                  candidateBefore:proposal.change.before,candidateAfter:proposal.change.after};
+              }else candidateFields={candidateStatus:'NOT_PROPOSED',
+                candidateReason:proposal.status==='BLOCKED'?proposal.reason:'SUMMARY_LIMIT_EXCEEDED'};
+              }catch{
+                // The read-only DOM observation has already completed. A
+                // candidate preview failure must not erase that evidence or
+                // block later scripts in this batch.
+                candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_FAILED'};
+              }
+            }
+          }else candidateFields={candidateStatus:'NOT_PROPOSED',
+            candidateReason:'BATCH_PREVIEW_LIMIT'};
+          results.push({ordinal:item.ordinal,
+            filename:item.filename??('脚本 '+(item.ordinal+1)),
+            status:'UNKNOWN' as const,domStatus:'LIMITED_DOM_SIGNAL_ONLY' as const,
+            attempts:job.attempts,checkedSelectorCount:triage.checkedAssertions,
+            triageStatus:triage.triage.status,
+            faultCategory:triage.triage.category,
+            evidenceCount:triage.triage.evidenceIds.length,
+            reason:'BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED' as const,
+            ...candidateFields,
+            automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
+            businessVerified:false as const});
+        }catch{
+          results.push(blockedItem(item,'OBSERVATION_FAILED',job.attempts));
+        }
+      }
+      if(revoked()&&results.length<plan.items.length){
+        for(const item of plan.items){
+          if(results.some(row=>row.ordinal===item.ordinal))continue;
+          results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
+        }
+      }
+      results.sort((a,b)=>a.ordinal-b.ordinal);
+      if(revoked()){
+        const cancelledItems=results.map(item=>item.candidateStatus==='CANDIDATE_ONLY'
+          ?{...item,candidateStatus:'NOT_PROPOSED' as const,
+             candidateReason:'BATCH_CANCELLED',candidateExportId:undefined}
+          :item);
+        return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',
+          items:cancelledItems,truncatedScripts:plan.truncatedScripts,...unverified};
+      }
+      // Keep window and owned-browser identity explicit at the success boundary.
+      // A changed owner must never receive a successful batch or export grants.
+      if(revoked()||win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned){
+        const cancelledItems=results.map(item=>item.candidateStatus==='CANDIDATE_ONLY'
+          ?{...item,candidateStatus:'NOT_PROPOSED' as const,
+             candidateReason:'BATCH_CANCELLED',candidateExportId:undefined}
+          :item);
+        return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',
+          items:cancelledItems,truncatedScripts:plan.truncatedScripts,...unverified};
+      }
+      observationReceiptDelivered=true;
+      return {ok:true,status:'UNKNOWN' as const,
+        reason:'DOM_SIGNAL_DOES_NOT_VERIFY_SCRIPT_OR_BUSINESS',
+        targetMatchedCount:ready.length,truncatedScripts:plan.truncatedScripts,
+        items:results,...unverified};
+    }catch{
+      const code=deadlineExpired?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED';
+      return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+    }finally{
+      clearTimeout(deadline);
+      importedDomProgress=null;
+      importedDomDiagnosticIndex.clearCandidateSources();
+      if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
+      if(scenarioObserveController===controller)scenarioObserveController=null;
+      scenarioObserveInProgress=false;
+      diagnosticGate.release(lease);
+    }
   });
 
   // Fresh native consent, verified owned Chrome process and a scenario ID from
@@ -1547,6 +2087,150 @@ function registerSafeIpc(): void {
       diagnosticGate.release(lease);
     }
   });
+  // A renderer-held capability is only an opaque handle. The original source
+  // and both destination directories must be freshly chosen by native dialogs;
+  // a final native confirmation is required before any file staging begins.
+  ipcMain.handle('scenario:export-imported-candidate',async(event,id:unknown,...args:unknown[])=>{
+    authorizeSender(event);
+    if(args.length!==0)return {ok:false,code:'INVALID_REQUEST',...unverified};
+    if(nativeAiDiscoveryBusy||manualExportInProgress||scenarioObserveInProgress||nativeImportController||
+       droppedImportController||nativeSelectionInProgress||gmActionInProgress||gmStartInProgress)
+      return {ok:false,code:'EXPORT_BUSY',...unverified};
+    const win=mainWindow;
+    if(!win||win.isDestroyed())return {ok:false,code:'NO_WINDOW',...unverified};
+    const capability=importedDomCandidateExportStore.reserve(win,id);
+    if(!capability)return {ok:false,code:'CANDIDATE_UNAVAILABLE',...unverified};
+    const lease=diagnosticGate.reserve();
+    if(lease===null){
+      importedDomCandidateExportStore.release(win,id);
+      return {ok:false,code:'EXPORT_BUSY',...unverified};
+    }
+    const controller=new AbortController();
+    const exportFrameEpoch=mainFrameNavigationEpoch;
+    const exportSenderFrame=event.senderFrame;
+    const abortOnWindowClose=()=>controller.abort();
+    win.once('closed',abortOnWindowClose);
+    let consumed=false;
+    const invalidated=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed()||
+      mainFrameNavigationEpoch!==exportFrameEpoch||
+      event.senderFrame!==exportSenderFrame||win.webContents.mainFrame!==exportSenderFrame;
+    manualExportInProgress=true;
+    nativeSelectionInProgress=true;
+    try{
+      const source=await dialog.showOpenDialog(win,{
+        title:'重新选择候选预览中的同一份 .user.js 原始脚本',
+        defaultPath:getInitialDialogPath('scripts'),
+        properties:['openFile'],
+        filters:[{name:'Userscripts (*.user.js)',extensions:['js']}]
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(source.canceled||source.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      const sourcePath=source.filePaths[0];
+      // Fail closed before any destination picker: the user must reselect
+      // the exact imported filename and original bytes of this candidate.
+      const initial=await importApprovedPaths([sourcePath],controller.signal);
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(initial.errors.length!==0||initial.scripts.length!==1||
+         initial.scripts[0].filename!==capability.filename||
+         initial.scripts[0].sha256!==capability.context.originalSha256)
+        return {ok:false,code:'SOURCE_IDENTITY_MISMATCH',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+
+      const backup=await dialog.showOpenDialog(win,{
+        title:'选择独立备份文件夹（只新建文件，不覆盖已有文件）',
+        defaultPath:getInitialDialogPath('backup'),
+        properties:['openDirectory']
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(backup.canceled||backup.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+
+      const destination=await dialog.showOpenDialog(win,{
+        title:'选择候选及原始恢复版本的独立导出文件夹',
+        defaultPath:getInitialDialogPath('export'),
+        properties:['openDirectory']
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(destination.canceled||destination.filePaths.length!==1)
+        return {ok:false,code:'CANCELLED',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+
+      // Read the newly selected source after directory selection, so the hash
+      // shown in the final confirmation describes the latest native snapshot.
+      const current=await importApprovedPaths([sourcePath],controller.signal);
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(current.errors.length!==0||current.scripts.length!==1||
+         current.scripts[0].filename!==capability.filename||
+         current.scripts[0].sha256!==capability.context.originalSha256)
+        return {ok:false,code:'SOURCE_IDENTITY_MISMATCH',...unverified};
+      if(!importedDomCandidateExportStore.isReserved(win,id))
+        return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+
+      const approved=await dialog.showMessageBox(win,{
+        type:'question',buttons:['创建独立备份、候选及原始恢复版本','取消'],
+        defaultId:1,cancelId:1,noLink:true,
+        message:'确认把这份候选另存为新文件？',
+        detail:'原始脚本：'+sourcePath+'\n文件名：'+current.scripts[0].filename+
+          '\n候选观测目标：'+capability.context.scenario.targetUrl+
+          '\n原始 SHA-256：'+current.scripts[0].sha256+
+          '\n候选 SHA-256：'+capability.context.candidateSha256+
+          '\n候选选择器差异：'+
+            capability.context.scenario.assertions[0].selector+' → '+
+            capability.context.scenario.assertions[1].selector+
+          '\n备份文件夹：'+backup.filePaths[0]+
+          '\n候选与原始恢复文件夹：'+destination.filePaths[0]+
+          '\n会创建独立的备份、候选、原始恢复脚本及检查点，不会覆盖或修改源文件，也不会安装或执行候选。'+
+          '\n候选只经过静态规则和只读 DOM 证据复核；Tampermonkey、GM、登录状态与业务结果仍未验证。'
+      });
+      if(invalidated())return {ok:false,code:'WINDOW_CLOSED',...unverified};
+      if(approved.response!==0)return {ok:false,code:'CANCELLED',...unverified};
+
+      // Expiry is rechecked here, after the dialogs. Consume exactly once and
+      // do not await between final confirmation, consume, and file staging.
+      const reviewed=importedDomCandidateExportStore.consume(win,id);
+      if(!reviewed)return {ok:false,code:'CANDIDATE_EXPIRED',...unverified};
+      consumed=true;
+      manualExportCommitInProgress=true;
+      saveRememberedPath('backup',backup.filePaths[0]);
+      saveRememberedPath('export',destination.filePaths[0]);
+      const result=await exportReviewedImportedCandidateOnly(
+        current.scripts[0],reviewed.context,{
+          backupDirectory:backup.filePaths[0],
+          exportDirectory:destination.filePaths[0],
+          userApproved:true
+        });
+      if(result.status!=='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED')
+        return {ok:false,code:result.reason,candidateConsumed:true,...unverified,
+          automaticRollbackAllowed:false,managerInstalled:false};
+      return {ok:true,status:result.status,
+        backupFileName:result.backupFileName,
+        candidateFileName:result.candidateFileName,
+        exportFileName:result.exportFileName,
+        recoveryExportFileName:result.recoveryExportFileName,
+        checkpointFileName:result.checkpointFileName,
+        sourceSha256:result.sourceSha256,
+        candidateSha256:result.candidateSha256,
+        candidateByteLength:result.candidateByteLength,
+        automaticRollbackAllowed:false,
+        managerInstalled:false,
+        ...unverified};
+    }catch{
+      return {ok:false,code:'EXPORT_FAILED',candidateConsumed:consumed,...unverified,
+        automaticRollbackAllowed:false,managerInstalled:false};
+    }finally{
+      if(!consumed)importedDomCandidateExportStore.release(win,id);
+      win.removeListener('closed',abortOnWindowClose);
+      manualExportCommitInProgress=false;
+      manualExportInProgress=false;
+      nativeSelectionInProgress=false;
+      diagnosticGate.release(lease);
+    }
+  });
   ipcMain.handle('scenario:cancel',event=>{
     authorizeSender(event);
     if(!scenarioObserveInProgress)
@@ -1579,6 +2263,31 @@ async function createMainWindow(): Promise<void> {
   });
   if (useWindowsTitleBar) win.removeMenu();
   mainWindow = win;
+  win.webContents.on('render-process-gone',()=>{
+    // The destroyed renderer must not retain an authorized DOM observation.
+    cancelScenarioObservation();
+    importedDomCandidateExportStore.clearOwner(win);
+    importedDomDiagnosticIndex.clearCandidateSources();
+    nativeImportController?.abort();
+    abortDroppedImportForWindow(win);
+  });
+  win.webContents.on('did-start-navigation',(_event,_url,isInPlace,isMainFrame)=>{
+    if(isMainFrame&&!isInPlace){
+      // A new document needs fresh native consent; abort the old DOM lease.
+      cancelScenarioObservation();
+      importedDomCandidateExportStore.clearOwner(win);
+      importedDomDiagnosticIndex.clearCandidateSources();
+      nativeImportController?.abort();
+      abortDroppedImportForWindow(win);
+    }
+  });
+  win.webContents.on('did-finish-load',()=>{
+    const pending=pendingDroppedImportRecovery;
+    if(pending?.owner===win){
+      pending.frameEpoch=mainFrameNavigationEpoch;
+      pending.ready=true;
+    }
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
@@ -1587,11 +2296,14 @@ async function createMainWindow(): Promise<void> {
       nativeAiDiscoveryController?.abort();
       nativeAiReviewEvidence.clear();
       nativeImportController?.abort();
-      droppedImportController?.abort();
+      discardDroppedImportForWindow(win);
+      importedDomDiagnosticIndex.clearCandidateSources();
+      importedDomCandidateExportStore.clearOwner(win);
       stopAllBrowserSessions();
       selectedChrome=null;selectedProfile=null;
       mainWindow=null;
       scenarioSession=new DesktopScenarioSession();
+      importedDomDiagnosticIndex=new ImportedDomDiagnosticIndex();
       limitedScenarioHistory=new LimitedHealthRegistry();
       nativeImportedPaths.clear();
     }
@@ -1699,6 +2411,7 @@ async function createMainWindow(): Promise<void> {
       "(async () => { const a = window.healer; " +
       "if (!a || typeof window.require !== 'undefined') return {ok:false}; " +
       "const s = await a.getStatus(); const noManualRestore=await a.restoreManualOriginal(); const noInventory=await a.inspectRestoreInventory(); const bad = await a.validateConfig({}); " +
+      "const blockedAutoDomInput=await a.diagnoseImportedBatch({targetUrl:'https://example.test/app',selector:'#unsafe',scriptSha256:'a'.repeat(64)}); " +
        "const noDroppedCancel=typeof a.cancelDroppedImport==='function' ? await a.cancelDroppedImport() : {code:'NOT_IMPLEMENTED'}; " +
        "const dropFuture=a.importDropped('cancel-preview.user.js',new Uint8Array([47,47,32,99,97,110,99,101,108])); " +
        "const activeDroppedCancel=await a.cancelDroppedImport(); const abortedDrop=await dropFuture; " +
@@ -1749,6 +2462,17 @@ async function createMainWindow(): Promise<void> {
       "const requestedFolderCancel=await a.cancelNativeImport(); " +
       "const cancelledNativeFolder=await pendingNativeFolder; " +
       "const nativeFiles=await a.chooseFiles(); const folderFiles=await a.chooseFolder(); " +
+      // Wait for the main-owned recovery receipt AND enabled picker controls.
+      // Seeing a rendered row alone can precede the recovery acknowledgement.
+      "const waitForImportReady=async()=>{const until=Date.now()+6000; " +
+      "while(Date.now()<until){ " +
+      "const recovery=await a.recoverDroppedImportBatch().catch(()=>({code:'RECOVERY_STATUS_UNAVAILABLE'})); " +
+      "const idle=document.getElementById('cancel-import')?.disabled===true && " +
+      "document.getElementById('choose-files')?.disabled===false && " +
+      "document.getElementById('choose-folder')?.disabled===false && " +
+      "document.getElementById('select-files')?.disabled===false; " +
+      "if(idle&&recovery.code==='NO_PENDING_RECOVERY')return true; " +
+      "await new Promise(resolve=>setTimeout(resolve,40));}return false;}; " +
       "const area=document.getElementById('drop-area'); const transfer=new DataTransfer(); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
       "transfer.items.add(new File(['// test'], 'drop-smoke.user.js')); " +
@@ -1763,12 +2487,18 @@ async function createMainWindow(): Promise<void> {
       "list.filter(x=>x.startsWith('drop-renamed.user.js:')).length===0 && " +
       "list.some(x=>x.includes('忽略重复脚本')); " +
       "if(yes)resolve(true); else if(Date.now()-start>3000)resolve(false); else setTimeout(tick,40); }; tick(); }); " +
+      // A rendered row may precede native finish/recovery acknowledgement.
+      // Deliver the next drag only after the first accepted batch is idle.
+      "const firstDropIdle=await waitForImportReady(); " +
+      "if(!firstDropIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const badDrop=new DataTransfer();badDrop.items.add(new File(['ignored'],'bad-drop.txt')); " +
       "area.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:badDrop})); " +
       "const badDropReported=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.startsWith('bad-drop.txt: NOT_USER_SCRIPT')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const badDropIdle=await waitForImportReady(); " +
+      "if(!badDropIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const oldEntry=Object.getOwnPropertyDescriptor(DataTransferItem.prototype,'webkitGetAsEntry'); " +
       "let releaseScan=null;Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',{ " +
       "configurable:true,writable:true,value:function(){const file=this.getAsFile(); " +
@@ -1785,7 +2515,8 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.includes('已取消拖放目录扫描')) && document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       "if(releaseScan)releaseScan(); " +
-      "await new Promise(resolve=>setTimeout(resolve,20)); " +
+      "const scanIdle=await waitForImportReady(); " +
+      "if(!scanIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "Object.defineProperty(DataTransferItem.prototype,'webkitGetAsEntry',oldEntry); " +
       "const input=document.getElementById('select-files'); " +
       "const sample=new DataTransfer(); sample.items.add(new File(['bad'],'invalid.txt')); " +
@@ -1797,17 +2528,34 @@ async function createMainWindow(): Promise<void> {
       "if(lines.some(x=>x.startsWith('invalid.txt:')) && " +
       "lines.some(x=>x.startsWith('accepted-batch.user.js:')))resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      "const batchIdle=await waitForImportReady(); " +
+      "if(!batchIdle)throw Error('SHELL_SMOKE_IMPORT_NOT_IDLE'); " +
       "const next=new DataTransfer(); next.items.add(new File(['// first'],'cancel-first.user.js')); " +
+      "let releaseFirstRead; const firstReadGate=new Promise(resolve=>{releaseFirstRead=resolve;}); " +
+      "let signalFirstReadStarted; const firstReadStarted=new Promise(resolve=>{signalFirstReadStarted=resolve;}); " +
       "next.items.add(new File(['// second'],'cancel-second.user.js')); " +
       "Object.defineProperty(input,'files',{configurable:true,value:next.files}); " +
+      "const originalFileArrayBuffer=File.prototype.arrayBuffer; " +
+      "File.prototype.arrayBuffer=function(){if(this.name!=='cancel-first.user.js')return originalFileArrayBuffer.call(this); " +
+      "File.prototype.arrayBuffer=originalFileArrayBuffer; signalFirstReadStarted(); " +
+      "return firstReadGate.then(()=>originalFileArrayBuffer.call(this));}; " +
       "input.dispatchEvent(new Event('change',{bubbles:true})); " +
       "const canCancel=!document.getElementById('cancel-import').disabled; " +
+      "const firstReadDidStart=await new Promise(resolve=>{const timer=setTimeout(()=>resolve(false),3000);firstReadStarted.then(()=>{clearTimeout(timer);resolve(true);});}); " +
+      "if(!firstReadDidStart)File.prototype.arrayBuffer=originalFileArrayBuffer; " +
       "document.getElementById('cancel-import').click(); " +
+      "releaseFirstRead(); " +
       "const cancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
       "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
       "document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
+      // The canceled-row log is emitted before the finish IPC and recovery
+      // acknowledgement settle. Do not race the final summary assertion with
+      // that pending native completion; verify the same genuine idle contract
+      // used for the earlier dropped-file fixture batches.
+      "const cancelImportIdle=await waitForImportReady(); " +
+      "if(!cancelImportIdle)throw Error('SHELL_SMOKE_CANCEL_IMPORT_NOT_IDLE'); " +
       "const uiScenarioSelect=document.getElementById('scenario-script'); " +
       "const uiScenarioImported=uiScenarioSelect.options.length>=2 && !uiScenarioSelect.disabled; " +
       "document.getElementById('scenario-id').value='smoke_ui_scenario'; " +
@@ -1887,6 +2635,7 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
+      "blockedAutoDomInput.ok === false && blockedAutoDomInput.code === 'INVALID_TARGET_URL' && " +
       "noNativeCancel.code === 'NO_ACTIVE_IMPORT' && idleNativeProgress.active === false && " +
       "pickingProgress.active === true && pickingProgress.phase === 'PICKING' && " +
       "pickingProgress.processed === 0 && pickingProgress.total === 0 && " +
@@ -1904,9 +2653,14 @@ async function createMainWindow(): Promise<void> {
       "nativeFiles.scripts.length === 1 && folderFiles.scripts.length === 1 && " +
       "nativeFiles.scripts[0].filename === 'approved.user.js' && d.script.filename === 'smoke.user.js' && " +
       "a.security.sandboxed === true && " +
-      "a.security.isolated === true, keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
+      "a.security.isolated === true, droppedCancelReadStarted:firstReadDidStart, " +
+      "droppedCancelAcknowledged:cancelled, " +
+      "droppedCancelSummaryCorrect:['成功 5','失败 2','未处理 1','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
+      "keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
       true
-    ) as { ok?: boolean; keys?: string[]; nativeHash?:string };
+    ) as { ok?: boolean; keys?: string[]; nativeHash?:string;
+      droppedCancelReadStarted?:boolean;droppedCancelAcknowledged?:boolean;
+      droppedCancelSummaryCorrect?:boolean };
     // TASK-009/012/017: a later, independently native-picked byte-identical
     // .user.js must become the exact local source for subsequent manual export.
     // Earlier hash-only path affinity silently retained the OLD pathname.
@@ -2032,11 +2786,53 @@ async function createMainWindow(): Promise<void> {
 
     Object.defineProperty(dialog, 'showOpenDialog', {configurable: true, writable: true, value: nativeDialog});
     Object.defineProperty(dialog, 'showMessageBox', {configurable: true, writable: true, value: nativeConsent});
+    const droppedCheckpointSmokeState=await win.webContents.executeJavaScript(
+      "(async()=>{const zone=document.getElementById('drop-area');"+
+      "const idle=()=>document.getElementById('cancel-import')?.disabled===true&&"+
+      "document.getElementById('choose-files')?.disabled===false&&"+
+      "document.getElementById('choose-folder')?.disabled===false&&"+
+      "document.getElementById('select-files')?.disabled===false&&"+
+      "!document.getElementById('import-summary')?.textContent.includes('正在导入');"+
+      "const readyAt=Date.now();while(Date.now()-readyAt<3000&&!idle())"+
+      "await new Promise(resolve=>setTimeout(resolve,30));"+
+      "if(!idle())return 'UI_BUSY_BEFORE_DROP';"+
+      "if(!zone||typeof DataTransfer!=='function')return 'DROP_API_UNAVAILABLE';"+
+      "const transfer=new DataTransfer();"+
+      "transfer.items.add(new File(['// ==UserScript==\\n// @name checkpoint smoke\\n// ==/UserScript==\\ndocument.querySelector(\\\"#checkpoint-smoke\\\");\\n'],"+
+      "'checkpoint-smoke.user.js',{type:'text/plain'}));"+
+      "const nonce=Date.now().toString(36)+Math.random().toString(36).slice(2);"+
+      "const fileName='checkpoint-smoke-'+nonce+'.user.js';"+
+      "const source=(await transfer.files[0].text())+'\\n// '+nonce;"+
+      "transfer.items.clear();"+
+      "transfer.items.add(new File([source],fileName,{type:'text/plain'}));"+
+      "const priorCount=document.querySelectorAll('#import-list li').length;"+
+      "zone.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));"+
+      "let fileRow=-1,checkpointRow=-1;const start=Date.now();"+
+      "while(Date.now()-start<10000){"+
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).slice(priorCount).map(row=>row.textContent||'');"+
+      "fileRow=lines.findIndex(text=>text.startsWith(fileName+': '));"+
+      "checkpointRow=lines.findIndex(text=>text.includes('只读 AST 批处理检查点已保存'));"+
+      "if(fileRow>=0&&checkpointRow>fileRow&&idle())return 'CHECKPOINT_SAVED';"+
+      "await new Promise(resolve=>setTimeout(resolve,30));}"+
+      "if(fileRow<0)return 'DROPPED_FILE_NOT_REPORTED';"+
+      "if(checkpointRow<=fileRow)return 'CHECKPOINT_NOT_REPORTED';"+
+      "if(!idle())return 'UI_BUSY_AFTER_DROP';return 'INCOMPLETE_RESULT';})()",
+      true
+    ) as string;
+    if(droppedCheckpointSmokeState!=='CHECKPOINT_SAVED')
+      throw new Error('SHELL_SMOKE_DROPPED_BATCH_'+droppedCheckpointSmokeState);
     rmSync(fixtureDir, {recursive: true, force: true});
     rmSync(reselectedSourceDir, {recursive: true, force: true});
-    if (!probe?.ok || probe.keys?.join(',') !==
-        'cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,disconnectExistingChrome,discoverNativeAiModels,exportManualScenario,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
-      throw new Error('SHELL_SMOKE_SECURITY_FAILED');
+    if(probe?.droppedCancelReadStarted!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_FIRST_READ_NOT_STARTED');
+    if(probe?.droppedCancelAcknowledged!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_CANCEL_FAILED');
+    if(probe?.droppedCancelSummaryCorrect!==true)
+      throw new Error('SHELL_SMOKE_DROPPED_CANCEL_SUMMARY_FAILED');
+    if(!probe?.ok)throw new Error('SHELL_SMOKE_BEHAVIORAL_PROBE_FAILED');
+    if (probe.keys?.join(',') !==
+        'acknowledgeDroppedImportRecovery,addDroppedImportBatch,beginDroppedImportBatch,cancelDroppedImport,cancelNativeImport,cancelScenarioInspection,chooseChrome,chooseFiles,chooseFolder,chooseProfile,connectExistingChrome,createProfile,diagnoseImportedBatch,disconnectExistingChrome,discoverNativeAiModels,exportImportedDomCandidate,exportManualScenario,finishDroppedImportBatch,getImportedDomProgress,getNativeImportProgress,getStatus,gmProbeStatus,importDropped,inspectRestoreIntent,inspectRestoreInventory,inspectScenario,inspectTampermonkey,observeGmFixture,openTampermonkeyStore,readScenarioHistory,recoverDroppedImportBatch,registerScenario,requestNativeAiReview,restoreManualOriginal,saveGmReport,security,startBrowser,startGmProbe,stopBrowser,stopGmProbe,validateConfig,visitGmFixture') {
+      throw new Error('SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED');
     }
     // TASK-007/TEST-017: a stopped GM fixture must immediately restore the
     // renderer controls. Only renderer state is staged; the real preload IPC
@@ -2139,6 +2935,36 @@ async function createMainWindow(): Promise<void> {
        !preCommitAborted||duringCommit.ok!==false||
        duringCommit.code!=='EXPORT_WRITE_ALREADY_STARTED'||!commitUnaffected)
       throw new Error('MANUAL_EXPORT_CANCEL_GATE_FAILED');
+    // TASK-013/TEST-022: exercise abandoned-batch cleanup only after the
+    // existing renderer smoke has completed, so the reload cannot disturb
+    // its in-flight UI assertions or event listeners.
+    const abandonedDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const started=await a.beginDroppedImportBatch();"+
+      "if(!started.ok||typeof started.batchId!=='string')return false;"+
+      "const recoveryNonce=Date.now().toString(36)+Math.random().toString(36).slice(2);"+
+      "const bytes=new TextEncoder().encode('// ==UserScript==\\n// @name abandoned '+recoveryNonce+'\\n// ==/UserScript==\\n// '+recoveryNonce+'\\n');"+
+      "const appended=await a.addDroppedImportBatch(started.batchId,'abandoned.user.js',bytes);"+
+      "return appended.ok===true;})()"
+    ) as boolean;
+    if(!abandonedDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_SETUP_FAILED');
+    await win.webContents.loadFile(uiFile);
+    const recoveredDroppedBatch=await win.webContents.executeJavaScript(
+      "(async()=>{const a=window.healer;const start=Date.now();let started=null;"+
+      "while(Date.now()-start<10000){"+
+      "const lines=Array.from(document.querySelectorAll('#import-list li')).map(row=>row.textContent||'');"+
+      "if(lines.some(text=>text.startsWith('abandoned.user.js:'))&&"+
+      "lines.some(text=>text.includes('只读 AST 批处理检查点已保存'))){"+
+      "const attempt=await a.beginDroppedImportBatch();"+
+      "if(attempt.ok&&typeof attempt.batchId==='string'){started=attempt;break;}"+
+      "if(attempt.code!=='IMPORT_RECOVERY_PENDING')return false;}"+
+      "await new Promise(resolve=>setTimeout(resolve,30));}"+
+      "if(!started)return false;"+
+      "const finished=await a.finishDroppedImportBatch(started.batchId);"+
+      "if(!finished.ok||typeof finished.recoveryId!=='string')return false;"+
+      "const acknowledged=await a.acknowledgeDroppedImportRecovery(finished.recoveryId);"+
+      "return acknowledged.ok===true;})()"
+    ) as boolean;
+    if(!recoveredDroppedBatch)throw new Error('DROPPED_BATCH_RELOAD_RECOVERY_OR_ACK_FAILED');
     const receipt = process.env.UAH_SMOKE_RECEIPT;
     if (!receipt) throw new Error('SHELL_SMOKE_RECEIPT_NOT_CONFIGURED');
     writeFileSync(receipt, JSON.stringify({
@@ -2188,7 +3014,12 @@ app.on('before-quit',()=>{
   nativeRestoreController?.abort();
   nativeAiDiscoveryController?.abort();
   nativeImportController?.abort();
+  pendingDroppedImportRecovery?.controller.abort();
+  pendingDroppedImportRecovery=null;
+  droppedImportBatchSession?.batch.finish();
+  droppedImportBatchSession=null;
   droppedImportController?.abort();
+  droppedImportController=null;
   stopAllBrowserSessions();
 });
 app.on('window-all-closed', () => {

@@ -348,10 +348,16 @@ export class ReadOnlyBatchCoordinator{
   }
   const controller=new AbortController();
   this.controller=controller;
+  // A single monotonic budget covers ALL sequential read-only jobs.
+  const batchDeadline=performance.now()+this.timeoutMs;
+  const expired=()=>performance.now()>=batchDeadline;
   const take=():MutableJob|undefined=>{
    if(controller.signal.aborted)return undefined;
    const job=this.jobs.find(j=>j.state==='QUEUED');
    if(!job)return undefined;
+   // The preceding durable transition may consume the remaining budget.
+   // Never dispatch another worker after the shared batch deadline.
+   if(expired()){this.cancel();return undefined;}
    job.state='RUNNING';
    job.attempts++;
    return job;
@@ -359,7 +365,15 @@ export class ReadOnlyBatchCoordinator{
   const lane=async()=>{
    while(true){
     const job=take();
-    if(!job)return;
+    if(!job){
+     if(onTransition&&controller.signal.aborted){
+      // Persist cancellation of still-queued jobs even if the deadline
+      // expired between completed workers and the next dispatch.
+      try{await onTransition();}
+      catch{throw Error('CHECKPOINT_FAILED');}
+     }
+     return;
+    }
     if(onTransition){
      try{await onTransition();}
      catch{
@@ -368,6 +382,7 @@ export class ReadOnlyBatchCoordinator{
       job.state='CANCELLED';
       throw Error('CHECKPOINT_FAILED');
      }
+     if(!controller.signal.aborted&&expired())this.cancel();
      if(controller.signal.aborted){
       job.state='CANCELLED';
       try{await onTransition();}
@@ -403,7 +418,7 @@ export class ReadOnlyBatchCoordinator{
       timedOut=true;
       this.cancel();
       resolve(undefined);
-     },this.timeoutMs);
+     },Math.max(0,batchDeadline-performance.now()));
     });
     try{
      const settled=await Promise.race([
@@ -416,6 +431,13 @@ export class ReadOnlyBatchCoordinator{
     finally{
      if(deadline)clearTimeout(deadline);
      removeAbortListener();
+    }
+    // A Worker may resolve after the monotonic deadline while its timer
+    // callback is still queued. Never turn that late read-only receipt into
+    // SUCCEEDED or launch another job just because Promise.race won first.
+    if(!timedOut&&!controller.signal.aborted&&expired()){
+     timedOut=true;
+     this.cancel();
     }
     if(timedOut)job.state='FAILED';
     else if(controller.signal.aborted)job.state='CANCELLED';

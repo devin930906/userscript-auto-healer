@@ -137,26 +137,32 @@ function captureCandidateDomEvidence(input:unknown):
        typeof slot.value!=='number')return null;
     selectors[key]=slot.value;
    }
-   samples.push({
+   samples.push(Object.freeze({
     ok:true,status:'LIMITED_DOM_OBSERVATION',
     observedAt:sample.observedAt,originMatchesApproved:true,
     routeChanged:sample.routeChanged,fullPageVerified:false,
     userscriptVerified:false,
-    summary:{
+    summary:Object.freeze({
      elementCount:summary.elementCount,
      iframeCount:summary.iframeCount,
      visibleShadowRoots:summary.visibleShadowRoots,
-     blindSpots:spots
-    },selectorCounts:selectors
-   });
+     blindSpots:Object.freeze(spots)
+    }),selectorCounts:Object.freeze(selectors)
+   }));
   }
-  return {
-   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples,
+  return Object.freeze({
+   ok:true,status:'LIMITED_DYNAMIC_OBSERVATION',samples:Object.freeze(samples),
    routeChangeDetected:o.routeChangeDetected,
    selectorCountChanged:o.selectorCountChanged,
    domCountChanged:o.domCountChanged,userscriptVerified:false
-  };
+  });
  }catch{return null;}
+}
+/** Capture the bounded own-data observation for a later main-only manual
+ * export. The returned snapshot contains no source bytes, path, or authority. */
+export function captureReadOnlyDynamicObservation(input:unknown):
+ Extract<DynamicObservation,{readonly ok:true}>|null{
+ return captureCandidateDomEvidence(input);
 }
 /** Static @match eligibility is necessary, not proof that Tampermonkey
  * injected this source. Unreviewed include/exclusion precedence fails closed.

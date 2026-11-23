@@ -13,18 +13,21 @@ const allowed = {
 };
 
 
-/** Exact IPC inventory: cancel-only drag/drop analysis expands the native
- * contract by precisely one channel, not by an arbitrary renderer gateway. */
+/** Exact IPC inventory: dropped-file batches use only three narrow lifecycle
+ * channels, not an arbitrary renderer gateway. */
 const approvedIpcChannels=[
  'ai:discover-native','ai:review-native','app:status','browser:choose-chrome','browser:choose-profile',
  'browser:connect-existing','browser:create-profile','browser:disconnect-existing',
  'browser:open-tampermonkey-store','browser:start','browser:stop',
  'browser:tampermonkey-hint','config:validate','gm-probe:observe',
  'gm-probe:save-report','gm-probe:start','gm-probe:status','gm-probe:stop',
- 'gm-probe:visit','import:cancel-dropped','import:cancel-native',
- 'import:dropped','import:files','import:folder','import:get-progress',
+  'gm-probe:visit','import:cancel-dropped','import:cancel-native',
+  'import:dropped','import:dropped-batch:acknowledge','import:dropped-batch:add',
+  'import:dropped-batch:begin','import:dropped-batch:finish','import:dropped-batch:recover',
+  'import:files','import:folder','import:get-progress',
  'restore:inspect-intent','restore:inspect-inventory','restore:manual-original','scenario:cancel',
- 'scenario:export-manual','scenario:history','scenario:inspect','scenario:register'
+ 'scenario:diagnose-imported-batch','scenario:export-imported-candidate','scenario:export-manual',
+ 'scenario:history','scenario:imported-batch-progress','scenario:inspect','scenario:register'
 ] as const;
 
 
@@ -218,7 +221,11 @@ test('TASK-001: main process restricts exposed IPC and unsafe navigation', () =>
   const handles=[...main.matchAll(/ipcMain\.handle\('([^']+)'/g)].map(m=>m[1]).sort();
   assert.deepEqual(handles,approvedIpcChannels);
   assert.match(main, /ipcMain\.handle\('import:cancel-dropped',event=>/);
-  assert.match(main, /authorizeSender\(event\);\s*if\(!droppedImportController\)/);
+  assert.match(main,/authorizeSender\(event\);\s*const controller=droppedImportController;\s*const pending=pendingDroppedImportRecovery;\s*if\(!controller\|\|\(pending\?\.controller===controller&&pending\.settled\)\)/);
+  assert.match(main,/pending\?\.controller===controller&&pending\.settled/,
+    'an in-flight read-only analysis remains cancelable until its summary settles');
+  assert.match(main, /ipcMain\.handle\('import:dropped-batch:recover',async event=>\{\s*authorizeSender\(event\)/);
+  assert.match(main, /ipcMain\.handle\('import:dropped-batch:acknowledge',\(event,recoveryId:unknown\)=>\{\s*authorizeSender\(event\)/);
   assert.match(main, /ipcMain\.handle\('import:cancel-native', event=>/);
   assert.match(main, /ipcMain\.handle\('import:get-progress',event=>/);
   assert.match(main, /authorizeSender\(event\);\s*\/\/ No user data/);
@@ -373,6 +380,150 @@ test('TASK-001: preload does not expose raw IPC, shell or filesystem to renderer
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\('scenario:inspect',\s*\{/);
 });
 
+test('TASK-013/TEST-026: dropped batch IPC is main-owned, frame-authorized and path-free',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:begin',\s*event\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'batch start must authorize the main frame');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:add',\s*\(event,\s*batchId:\s*unknown,\s*name:\s*unknown,\s*data:\s*unknown\)\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'each byte append must authorize the main frame');
+  assert.ok(/ipcMain\.handle\('import:dropped-batch:finish',\s*async\s*\(event,\s*batchId:\s*unknown\)\s*=>\s*\{\s*authorizeSender\(event\)/.test(main),
+    'batch finish must authorize the main frame');
+  assert.ok(/batchId\s*=\s*randomUUID\(\)/.test(main),'the main process must create batch IDs');
+  assert.ok(/session\.id\s*!==\s*batchId/.test(main),'append/finalize must reject stale batch IDs');
+  assert.ok(/beginDroppedImportBatch:\s*\(\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:begin'\)/.test(preload));
+  assert.ok(/addDroppedImportBatch:\s*\(batchId: string, name: string, bytes: Uint8Array\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:add', batchId, name, bytes\)/.test(preload));
+  assert.ok(/finishDroppedImportBatch:\s*\(batchId: string\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:finish', batchId\)/.test(preload));
+  assert.doesNotMatch(preload,/ipcRenderer\.invoke\('import:dropped-batch:(?:begin|add|finish)',[^)]*(?:path|url|sourcePath)/i);
+  assert.ok(/window\.healer\.beginDroppedImportBatch\(\)/.test(ui),'renderer file inputs must start one batch');
+  assert.ok(/window\.healer\.finishDroppedImportBatch\(batchId\)/.test(ui),'renderer file inputs must finalize once');
+  assert.ok(!/window\.healer\.importDropped\(file\.name,\s*bytes\)/.test(ui),
+    'renderer must not launch one IPC analysis job per file');
+});
+
+test('TASK-013/TEST-022/026: Windows shell drop smoke targets the rendered drop area',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(html,/<div id="drop-area">/,
+  'the application must keep an identifiable file drop area');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
+ assert.notEqual(smokeStart,-1,'the package smoke must exercise a dropped batch');
+ const smokeEnd=main.indexOf(') as string;',smokeStart);
+ assert.ok(smokeEnd>smokeStart,'the package drop assertion must stay bounded');
+ const smoke=main.slice(smokeStart,smokeEnd+12);
+ assert.match(smoke,/const zone=document\.getElementById\('drop-area'\)/,
+  'the shell smoke must dispatch through the same drop area used by the renderer');
+ assert.match(smoke,/\n\s*true\s*\n\s*\) as string;/,
+  'the synthetic native drop must run with the browser user-gesture flag');
+ assert.doesNotMatch(smoke,/const zone=document\.getElementById\('drop-zone'\)/,
+  'a stale test-only selector must not silently skip the real drop event');
+});
+
+test('TASK-013/TEST-022/026: checkpoint smoke waits for its own completed dropped batch',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
+ const smokeEnd=main.indexOf('rmSync(fixtureDir',smokeStart);
+ assert.ok(smokeStart>=0&&smokeEnd>smokeStart,
+  'the checkpoint smoke must remain a bounded, independently inspectable block');
+ const smoke=main.slice(smokeStart,smokeEnd);
+  assert.match(smoke,/text\.startsWith\(fileName\+': '\)/,
+  'checkpoint visibility must belong to the unique file sent by this drop');
+ assert.match(smoke,/text\.includes\('只读 AST 批处理检查点已保存'\)/,
+  'the unique dropped file must finish the checkpointed import before the smoke passes');
+ assert.match(smoke,/document\.getElementById\('choose-files'\)\?\.disabled===false/,
+  'the smoke must wait for the renderer import lock to be released');
+ assert.match(smoke,/document\.getElementById\('cancel-import'\)\?\.disabled===true/,
+  'the smoke must wait until its current batch has fully settled');
+ assert.match(main,/SHELL_SMOKE_DROPPED_BATCH_/,
+  'Windows failures must expose the bounded drop-smoke diagnostic stage');
+});
+
+test('TASK-013/TEST-022/026: checkpoint smoke correlates its status with new file-specific rows',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const smokeStart=main.indexOf('const droppedCheckpointSmokeState=');
+ const smokeEnd=main.indexOf('rmSync(fixtureDir',smokeStart);
+ assert.ok(smokeStart>=0&&smokeEnd>smokeStart);
+ const smoke=main.slice(smokeStart,smokeEnd);
+ assert.match(smoke,/const priorCount=document\.querySelectorAll\('#import-list li'\)\.length/,
+  'the smoke must ignore historical import log rows');
+ assert.match(smoke,/\.slice\(priorCount\)/,
+  'the checkpoint result must be read only from rows appended by this batch');
+ assert.match(smoke,/const nonce=Date\.now\(\)\.toString\(36\)\+Math\.random\(\)\.toString\(36\)\.slice\(2\)/,
+  'the fixture bytes and name must not match a checkpoint from an earlier run');
+ assert.match(smoke,/text\.startsWith\(fileName\+': '\)/,
+  'the unique fixture name must be the one reported as imported');
+});
+
+test('TASK-013/TEST-022/026: renderer teardown hooks release the active dropped batch',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const cleanup=main.match(/function abortDroppedImportForWindow\(win:BrowserWindow\):void\{[\s\S]*?\n\}/)?.[0]??'';
+  assert.ok(cleanup.includes('const session=droppedImportBatchSession;')&&cleanup.includes('session.batch.finish()'),
+    'teardown must discard staged source bytes');
+  assert.ok(cleanup.includes('droppedImportBatchSession=null'),
+    'teardown must release the batch session ID');
+  assert.ok(cleanup.includes('controller.abort()')&&cleanup.includes('droppedImportController=null'),
+    'teardown must cancel analysis and release the busy lock');
+  assert.match(main,/win\.webContents\.on\('render-process-gone',\(\)=>\{[\s\S]*?nativeImportController\?\.abort\(\);[\s\S]*?abortDroppedImportForWindow\(win\);[\s\S]*?\}\);/,
+    'renderer process loss must revoke native imports and clean up dropped batches');
+  assert.ok(/win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)[\s\S]*?abortDroppedImportForWindow\(win\)/.test(main),
+    'main-frame reload must clean up its batch');
+  assert.match(main,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?nativeImportController\?\.abort\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+    'only full main-frame navigation revokes native imports and handles dropped recovery');
+  assert.match(main,/win\.webContents\.on\('did-finish-load',[\s\S]*?pending\.ready=true/,
+    'a pending result becomes recoverable only after the replacement document loads');
+  assert.match(main,/pending\.frameEpoch!==mainFrameNavigationEpoch/,
+    'recovery and acknowledgement receipts must belong to the current document epoch');
+});
+
+test('TASK-013/TEST-022/026: reload recovers an accepted dropped batch instead of losing it',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(main,/ipcMain\.handle\('import:dropped-batch:recover'/,
+  'the next main frame must be able to recover the completed main-owned batch summary');
+ assert.match(main,/pendingDroppedImportRecovery/,
+  'teardown must retain a bounded summary until the renderer acknowledges it');
+ assert.match(preload,/recoverDroppedImportBatch:\s*\(\): Promise<unknown> => ipcRenderer\.invoke\('import:dropped-batch:recover'\)/,
+  'recovery bridge must take no renderer-supplied ID, path, bytes or hash');
+  assert.match(preload,/acknowledgeDroppedImportRecovery:\s*\(recoveryId: string\): Promise<unknown> =>\s*ipcRenderer\.invoke\('import:dropped-batch:acknowledge', recoveryId\)/,
+   'acknowledgement may only return the main-issued recovery receipt');
+  assert.match(main,/acknowledgeDroppedImportRecovery,addDroppedImportBatch/);
+  assert.match(main,/recoverDroppedImportBatch,registerScenario,requestNativeAiReview/,
+   'the package smoke preload-key inventory must include both bounded recovery methods');
+ const preloadStart=preload.indexOf("contextBridge.exposeInMainWorld('healer', Object.freeze({");
+ const preloadEnd=preload.indexOf('\n}));',preloadStart);
+ assert.ok(preloadStart>=0&&preloadEnd>preloadStart,
+  'inspect only the actual exposed healer bridge');
+ const exportedKeys=[...preload.slice(preloadStart,preloadEnd).matchAll(/^  ([A-Za-z_]\w*):/gm)]
+  .map(match=>match[1]).sort();
+ const smokeInventory=main.match(/if \(probe\.keys\?\.join\(','\) !==\s*'([^']+)'\)/);
+ assert.ok(smokeInventory,'the Windows shell smoke must retain its runtime preload inventory check');
+ assert.deepEqual(smokeInventory[1].split(','),exportedKeys,
+  'the smoke allowlist must exactly match the sorted runtime preload exports');
+ assert.match(ui,/recoverDroppedImportBatch\(\)[\s\S]*?show\(recovered\.result\)/,
+  'the reloaded renderer must render the previously accepted import result');
+  assert.match(ui,/acknowledgeDroppedImportRecovery\(recovered\.recoveryId\)/,
+   'the renderer must acknowledge the displayed recovery before the main process releases it');
+ const reloadSmokeStart=main.indexOf('const abandonedDroppedBatch=');
+ const reloadSmokeEnd=main.indexOf('const receipt = process.env.UAH_SMOKE_RECEIPT',reloadSmokeStart);
+ assert.ok(reloadSmokeStart>=0&&reloadSmokeEnd>reloadSmokeStart,
+  'the reload smoke must retain a bounded batch recovery scenario');
+ const smoke=main.slice(reloadSmokeStart,reloadSmokeEnd);
+ assert.match(smoke,/abandoned\.user\.js:/,
+  'reload smoke must verify the accepted file is present in the new renderer');
+  assert.match(smoke,/const recoveryNonce=Date\.now\(\)\.toString\(36\)\+Math\.random\(\)\.toString\(36\)\.slice\(2\)/,
+   'the reload fixture must have a fresh byte identity across packaging runs');
+ assert.match(smoke,/只读 AST 批处理检查点已保存/,
+  'reload smoke must verify the recovered batch reached its read-only checkpoint');
+  assert.match(smoke,/acknowledgeDroppedImportRecovery/,
+   'reload smoke must acknowledge the recovered receipt');
+  assert.match(smoke,/IMPORT_RECOVERY_PENDING/,
+   'reload smoke must confirm that the receipt acknowledgement releases the next batch');
+ assert.doesNotMatch(smoke,/finished\.scripts\.length===0/,
+  'reload smoke must not pass by starting an unrelated empty batch');
+});
+
 test('TASK-008/017 / TEST-013: desktop scenario exposes only bounded, non-attesting page exception signals',()=>{
   const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
   const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
@@ -436,6 +587,137 @@ test('TASK-009/012/017 TEST-019/020/023/026: manual export requires true live ow
  assert.match(html,/id="scenario-export-manual"/);
  assert.match(html,/不提供自动安装和回滚/);
  assert.match(ui,/MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED/);
+});
+
+test('TASK-013/TEST-023/026: imported candidate export uses a one-use main-only capability and native file identity',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ assert.ok(preload.includes("exportImportedDomCandidate: (candidateId: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-imported-candidate',candidateId)"),
+  'renderer may pass only the opaque candidate ID');
+ assert.doesNotMatch(preload,/ipcRenderer\.invoke\('scenario:export-imported-candidate',[^)]*(?:path|source|scenario|url|selector|consent|sha256)/i);
+ assert.match(main,/ImportedDomCandidateExportStore/);
+ assert.match(main,/ImportedDomCandidateManualExportContext/);
+ assert.match(main,/ipcMain\.handle\('scenario:export-imported-candidate',async\(event,id:unknown,\.\.\.args:unknown\[\]\)=>\{\s*authorizeSender\(event\)/);
+ const start=main.indexOf("ipcMain.handle('scenario:export-imported-candidate'");
+ const end=main.indexOf("ipcMain.handle('scenario:cancel'",start);
+ assert.ok(start>=0&&end>start,'the native export handler must remain a separately auditable block');
+ const handler=main.slice(start,end);
+ assert.match(handler,/if\(args\.length!==0\)/,
+  'the handler rejects appended renderer authority arguments');
+ assert.match(handler,/nativeAiDiscoveryBusy/,
+  'candidate native dialogs must not overlap a native AI discovery dialog');
+ assert.match(handler,/importedDomCandidateExportStore\.reserve\(win,id\)/,
+  'the capability is owner-bound and reserved before asynchronous dialogs');
+ assert.match(handler,/dialog\.showOpenDialog\(win,[\s\S]*?properties:\['openFile'\]/,
+  'the main process asks the OS to reselect the source file');
+ assert.match(handler,/importApprovedPaths\(\[sourcePath\],controller\.signal\)/,
+  'the selected file is re-read through the existing import validator');
+ assert.match(handler,/current\.scripts\[0\]\.filename!==capability\.filename/,
+  'the selected filename must match the imported batch identity');
+ assert.match(handler,/current\.scripts\[0\]\.sha256!==capability\.context\.originalSha256/,
+  'the selected bytes must match the reviewed source hash');
+ assert.match(handler,/properties:\['openDirectory'\]/,
+  'backup and export destinations must come from native directory pickers');
+ const confirmation=handler.indexOf('const approved=await dialog.showMessageBox');
+ const consume=handler.indexOf('importedDomCandidateExportStore.consume(win,id)');
+ const write=handler.indexOf('exportReviewedImportedCandidateOnly(');
+ assert.ok(confirmation>=0&&consume>confirmation&&write>consume,
+  'the one-use capability is consumed only after final native confirmation and immediately before file staging');
+ assert.match(handler,/if\(!consumed\)importedDomCandidateExportStore\.release\(win,id\)/,
+  'cancelled or mismatched selections release the reservation for a fresh attempt');
+ assert.match(handler,/candidateSha256:result\.candidateSha256/);
+ assert.match(handler,/automaticRollbackAllowed:false/);
+ assert.match(handler,/managerInstalled:false/);
+ assert.match(handler,/\.\.\.unverified/);
+ const unverifiedStart=main.indexOf('const unverified =');
+ const unverifiedEnd=main.indexOf(';',unverifiedStart);
+ const unverified=main.slice(unverifiedStart,unverifiedEnd);
+ assert.match(unverified,/automaticPatchAllowed:false as const/);
+ assert.match(unverified,/tampermonkeyVerified:false as const/);
+ assert.match(unverified,/businessVerified:false as const/);
+ assert.doesNotMatch(handler,/return \{ok:true,[\s\S]*?sourcePath:/,
+  'renderer receipts must not reveal source paths');
+ assert.match(main,/importedDomCandidateExportStore\.clearOwner\(win\)/,
+  'closing the owning window clears its pending review capabilities');
+});
+
+test('TASK-013/TEST-022/023: accepted fresh imports retire prior manual candidate export capabilities',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const native=main.slice(main.indexOf('const runNativeImport = async ('),
+  main.indexOf("ipcMain.handle('import:get-progress'"));
+ assert.match(native,/if\(choice\.canceled[\s\S]*?return \{canceled:true[\s\S]*?\};[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\)/,
+  'a completed native file/folder selection invalidates earlier candidate export grants');
+ const batch=main.slice(main.indexOf("ipcMain.handle('import:dropped-batch:begin'"),
+  main.indexOf("ipcMain.handle('import:dropped-batch:add'"));
+ assert.match(batch,/if\(scenarioObserveInProgress[\s\S]*?return \{ok:false,code:'IMPORT_BUSY'\};[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\)/,
+  'a newly authorized dropped batch invalidates older export grants');
+ const single=main.slice(main.indexOf("ipcMain.handle('import:dropped',"),
+  main.indexOf("ipcMain.handle('import:cancel-dropped'"));
+ assert.match(single,/const result=importDroppedBytes\(name,data\);[\s\S]*?if\('code' in result\)return \{ok:false,code:result\.code\};[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\)/,
+  'a valid single dropped file invalidates previous candidate grants without allowing invalid data to do so');
+ assert.doesNotMatch(native,/importedDomCandidateExportStore\.clearOwner\(win\)[\s\S]*?if\(choice\.canceled/,
+  'canceling a native picker must not revoke already reviewed candidates');
+ assert.match(ui,/function retireImportedDomCandidatesAfterImport\(\):void\{[\s\S]*?importedDomGeneration\+\+[\s\S]*?importedDomItems\?\.replaceChildren\(\)/,
+  'the renderer must remove earlier candidate export actions when a new import is accepted');
+ assert.match(ui,/if\(\(!result\.canceled\|\|result\.scripts\.length>0\|\|result\.errors\.length>0\)[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
+  'native picker cancellation with no accepted results preserves old actions, but partially completed imports retire them');
+ assert.match(ui,/batchId=started\.batchId;[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
+  'a newly accepted dropped batch must retire stale candidate actions');
+});
+
+test('TASK-013/017 TEST-022/023: imported DOM candidate export is per-item, accessible and stale-reply fenced',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ assert.match(preload,/exportImportedDomCandidate: \(candidateId: string\): Promise<unknown> => ipcRenderer\.invoke\('scenario:export-imported-candidate',candidateId\)/);
+ assert.match(ui,/candidateExportId\?:string/);
+ assert.match(ui,/if\(typeof item\.candidateExportId==='string'/,
+  'only an item with a live main-issued capability may render the export action');
+ assert.match(ui,/window\.healer\.exportImportedDomCandidate\(candidateExportId\)/);
+ assert.doesNotMatch(ui,/window\.healer\.exportImportedDomCandidate\([^)]*,/,
+  'the renderer cannot attach source, path, target, selector, or consent data');
+ assert.match(ui,/action\.textContent='另存候选与原始恢复版'/);
+ assert.match(ui,/receipt\.setAttribute\('role','status'\)/);
+ assert.match(ui,/receipt\.setAttribute\('aria-live','polite'\)/);
+ assert.match(ui,/importedDomCandidateExportBusy/,
+  'the action must lock while native dialogs and file staging are pending');
+ assert.match(ui,/if\(importedDomTarget\)importedDomTarget\.disabled=importedDomBusy\|\|importedDomCandidateExportBusy/,
+  'the observed target cannot be changed while diagnosis or export owns the preview');
+ const targetInputStart=ui.indexOf("importedDomTarget?.addEventListener('input'");
+ const targetInputEnd=ui.indexOf("importedDomRunButton?.addEventListener('click'",targetInputStart);
+ assert.ok(targetInputStart>=0&&targetInputEnd>targetInputStart,
+  'the target input lifecycle must remain a bounded block');
+ const targetInputHandler=ui.slice(targetInputStart,targetInputEnd);
+ assert.match(targetInputHandler,/importedDomGeneration\+\+/,
+  'a changed target must retire the previous preview generation');
+ assert.match(targetInputHandler,/importedDomItems\?\.replaceChildren\(\)/,
+  'candidate actions for the previous target must disappear immediately');
+ assert.match(targetInputHandler,/目标网址已更改/);
+ assert.match(ui,/if\(generation!==importedDomGeneration\)return/,
+  'late replies from replaced candidate previews must not repaint the current list');
+ assert.match(ui,/answer\.status==='MANUAL_EXPORT_READY_RUNTIME_UNVERIFIED'/);
+ assert.match(ui,/仍未验证|未经运行时验证/,
+  'the success status must distinguish file export from runtime or business verification');
+ assert.match(ui,/answer\.candidateConsumed===true/,
+  'a consumed one-time candidate cannot be retried from a stale button');
+ assert.match(ui,/const consumed=answer\.candidateConsumed===true;/,
+  'only a capability already consumed after confirmation may imply that file staging could have started');
+ assert.match(ui,/const candidateExpiredOrUnavailable=answer\.code==='CANDIDATE_EXPIRED'\|\|\s*answer\.code==='CANDIDATE_UNAVAILABLE'/,
+  'pre-write expiry and unavailable responses must have a separate terminal receipt');
+ assert.match(ui,/if\(consumed\|\|candidateExpiredOrUnavailable\)/,
+  'a pre-write terminal result still retires its stale action');
+ assert.match(ui,/candidateExpiredOrUnavailable\s*\?\s*'本次请求未开始文件写入/,
+  'an expired or unavailable capability must not warn that this request may have left staged files');
+ assert.match(ui,/暂存可能已开始/);
+ assert.match(ui,/检查所选备份与导出目录/,
+  'a consumed failed export must tell the user to inspect possible recovery files');
+ assert.match(main,/候选观测目标：'\+capability\.context\.scenario\.targetUrl/,
+  'the final native confirmation must identify the URL bound to the candidate');
+ assert.match(main,/候选 SHA-256：'\+capability\.context\.candidateSha256/,
+  'the final native confirmation must show the reviewed candidate identity');
+ assert.match(html,/<p id="imported-dom-export-risk"[^>]*>[^<]*重新选择[^<]*SHA-256[^<]*最后确认[^<]*不会改写原始脚本[^<]*不会自动安装/s);
 });
 
 test('TASK-015/017 TEST-024/026: native-only archive has no arbitrary renderer path authority',()=>{
@@ -600,6 +882,53 @@ test('TASK-017/TEST-022: manual candidate export control exposes its consent and
   assert.match(html,/<p\s+id="scenario-export-risk"[^>]*>[^<]*独立备份目录持久保存恢复检查点/);
 });
 
+
+test('TASK-013/TEST-022/026: navigation and renderer loss revoke active DOM consent',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf('async function createMainWindow()');
+ const end=main.indexOf("win.webContents.on('did-finish-load'",start);
+ assert.ok(start>=0&&end>start);
+ const lifecycle=main.slice(start,end);
+ assert.match(lifecycle,
+  /win\.webContents\.on\('render-process-gone',\(\)=>\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+  'renderer process loss must revoke the read-only DOM observation lease');
+ assert.match(lifecycle,/win\.webContents\.on\('render-process-gone',[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'renderer crash must revoke opaque manual-export capabilities');
+ assert.match(lifecycle,
+  /win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
+  'a replacement main frame must revoke the old DOM observation before new IPC');
+ assert.match(lifecycle,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'replacement document must not inherit candidate export capabilities');
+});
+
+test('TASK-013/TEST-022/026: one dropped script cannot survive a stale renderer frame',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const begin=main.indexOf("ipcMain.handle('import:dropped',");
+ const end=main.indexOf("ipcMain.handle('import:cancel-dropped'",begin);
+ assert.ok(begin>=0&&end>begin);
+ const handler=main.slice(begin,end);
+ assert.match(handler,/const droppedFrameEpoch=mainFrameNavigationEpoch/,
+  'single-file import captures the originating renderer frame');
+ assert.match(handler,/currentFrame:\(\)=>[\s\S]*?mainFrameNavigationEpoch===droppedFrameEpoch/,
+  'late checkpoint analysis must not reinsert AST hints after navigation');
+ assert.match(handler,/if\(win!==mainWindow\|\|win\.isDestroyed\(\)\|\|[\s\S]*?droppedFrameEpoch!==mainFrameNavigationEpoch\)/,
+  'old single-file invocation never returns success after page replacement');
+});
+
+test('TASK-013/TEST-022/026: native import completion is fenced to originating main frame',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf('const runNativeImport = async');
+ const end=main.indexOf("ipcMain.handle('import:get-progress'",start);
+ const handler=main.slice(start,end);
+ assert.ok(start>=0&&end>start);
+ assert.match(handler,/const nativeFrameEpoch=mainFrameNavigationEpoch/);
+ assert.match(handler,/mainFrameNavigationEpoch===nativeFrameEpoch/);
+ assert.match(handler,/currentFrame:currentNativeFrame/);
+ assert.match(handler,/if\(currentNativeFrame\(\)\)[\s\S]*?scenarioSession\.recordImported/);
+ assert.match(handler,/if\(!currentNativeFrame\(\)\)return \{canceled:true/);
+ assert.match(main,/readMainOnlyDiagnosticHints\(previews\[i\]\),script\.filename,candidateSource,[\s\S]*?owner\.currentFrame/);
+ assert.match(main,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?nativeImportController\?\.abort\(\)/);
+});
 
 test('TASK-017/TEST-022: native import progress ignores stale batches and out-of-order phase receipts',()=>{
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
@@ -2075,6 +2404,192 @@ test('TASK-017/TEST-002/022: manual scenario registration stays optional advance
  assert.ok(section.includes('id="scenario-list"'));
 });
 
+test('TASK-013/TEST-022/026: ordinary imported DOM batch derives selectors in main',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const sectionStart=html.indexOf('<section id="diagnosis-workspace"');
+ const sectionEnd=html.indexOf('</section>',sectionStart);
+ assert.ok(sectionStart>=0&&sectionEnd>sectionStart,
+  'the ordinary diagnosis workspace must exist');
+ if(sectionStart<0||sectionEnd<=sectionStart)return;
+ const diagnosis=html.slice(sectionStart,sectionEnd+'</section>'.length);
+ const panelStart=diagnosis.indexOf('<div id="imported-dom-diagnosis"');
+ const panelEnd=diagnosis.indexOf('<div data-scenario-context-slot>',panelStart);
+ assert.ok(panelStart>=0&&panelEnd>panelStart,
+  'the ordinary workflow must expose a batch DOM observation action');
+ const panel=panelStart>=0&&panelEnd>panelStart?
+  diagnosis.slice(panelStart,panelEnd):'';
+ assert.match(panel,/id="imported-dom-target"/,
+  'the batch target URL is explicit configuration');
+ assert.match(panel,/id="imported-dom-run"/,
+  'the user can start the ordinary read-only DOM batch');
+ assert.match(panel,/id="imported-dom-result"/,
+  'the ordinary flow must display UNKNOWN and per-script blocking results');
+ assert.doesNotMatch(panel,/<input[^>]*(?:selector|选择器|CSS)/i,
+  'the ordinary batch path must not ask the user to type CSS selectors');
+ assert.match(panel,/不会执行脚本/);
+ assert.match(panel,/候选的短时导出上下文只保存在主进程内存，最长五分钟/,
+  'the ordinary UI must disclose the bounded in-memory candidate export context');
+ assert.match(panel,/不证明.*Tampermonkey.*GM.*业务/);
+ assert.match(ui,/diagnoseImportedBatch\(targetUrl\)/,
+  'the renderer may send only the configured target URL');
+ assert.match(preload,/diagnoseImportedBatch:\s*\(targetUrl: string\): Promise<unknown> =>\s*ipcRenderer\.invoke\('scenario:diagnose-imported-batch',targetUrl\)/);
+ assert.match(main,/ipcMain\.handle\('scenario:diagnose-imported-batch'/,
+  'the main process owns the imported-script diagnostic batch');
+ assert.match(main,/importedDomDiagnosticIndex\.plan\(/);
+ const handlerStart=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const handlerEnd=main.indexOf("ipcMain.handle('scenario:inspect'",handlerStart);
+ assert.ok(handlerStart>=0&&handlerEnd>handlerStart,
+  'the new IPC handler must be bounded before the existing manual scenario path');
+ const handler=handlerStart>=0&&handlerEnd>handlerStart?
+  main.slice(handlerStart,handlerEnd):'';
+ assert.match(handler,/dialog\.showMessageBox/,
+  'each real navigation requires native consent');
+ assert.match(handler,/readOwnedBrowser\(\)/,
+  'ordinary DOM observations require the application-owned Chrome');
+ assert.match(handler,/openApprovedTarget/);
+ assert.match(handler,/observeApprovedDomSeries/,
+  'the same consented DOM series must feed triage and candidate generation');
+ assert.match(handler,/proposeImportedDomCandidate/);
+ assert.match(handler,/readUtf8CandidateSource/);
+ assert.match(handler,/clearCandidateSources/,
+  'retained source must be cleared when the batch settles');
+ assert.match(handler,/if\(!plan\.targetUrl\)\{\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);/,
+  'an invalid-target attempt must release retained source before returning');
+ assert.match(handler,/if\(!owned\)\{\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);/,
+  'a no-browser attempt must release retained source before returning');
+ assert.match(handler,/if\(lease===null\)return \{ok:false,code:'OBSERVATION_BUSY'/,
+  'a busy operation must not clear another active operation’s source cache');
+ assert.match(handler,/candidateStatus/);
+ assert.doesNotMatch(handler,/candidateSource\s*:/,
+  'full candidate source must never be returned over IPC');
+ assert.match(handler,/candidateFields:Pick<ImportedDomResultItem/,
+  'the IPC response must be narrowed to explicit candidate summary fields');
+ assert.doesNotMatch(handler,/\.\.\.proposal/,
+  'the internal proposal object must not be spread into an IPC response');
+ assert.doesNotMatch(ui,/candidateSource/,
+  'the renderer contract must contain only bounded candidate summaries');
+ assert.match(ui,/候选预览（仅内存，尚未保存、应用或验证）/);
+ assert.doesNotMatch(handler,/tampermonkeyVerified:\s*true|businessVerified:\s*true|automaticPatchAllowed:\s*true/);
+
+ const importHandlers=main.slice(main.indexOf('const runNativeImport = async'),
+  main.indexOf("ipcMain.handle('import:get-progress'"));
+ assert.match(importHandlers,/scenarioObserveInProgress/,
+  'a new native import cannot repopulate the source cache during DOM observation');
+ const droppedBegin=main.slice(main.indexOf("ipcMain.handle('import:dropped-batch:begin'"),
+  main.indexOf("ipcMain.handle('import:dropped-batch:add'"));
+ assert.match(droppedBegin,/scenarioObserveInProgress/,
+  'a new dropped batch cannot start during DOM observation');
+ const singleDrop=main.slice(main.indexOf("ipcMain.handle('import:dropped',"),
+  main.indexOf("ipcMain.handle('import:cancel-dropped'"));
+ assert.match(singleDrop,/scenarioObserveInProgress/,
+  'single dropped imports cannot start during DOM observation');
+ assert.match(main,/recordImportedDomForCurrentOwner/,
+  'an async import result must not write into a replacement window index');
+});
+
+test('TASK-013/TEST-022/023/026: rejected DOM batch preserves reviewed export grants',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+  const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+  assert.ok(start>=0&&end>start);
+  const handler=main.slice(start,end);
+  const lease=handler.indexOf('const lease=diagnosticGate.reserve()');
+  const busy=handler.indexOf("if(lease===null)return {ok:false,code:'OBSERVATION_BUSY'");
+  const retired=handler.indexOf('importedDomCandidateExportStore.clearOwner(win)');
+  assert.ok(lease>=0&&busy>lease&&retired>busy,
+    'invalid/no-browser/busy requests must not revoke a previously reviewed one-use export');
+  assert.doesNotMatch(handler.slice(0,retired),/importedDomCandidateExportStore\.clearOwner\(/,
+    'revocation must not precede successful reservation of the diagnostic gate');
+  assert.match(handler.slice(busy,retired),/truncatedScripts:plan\.truncatedScripts,\.\.\.unverified\};/,
+    'busy operations must return before any native export grant is retired');
+});
+
+test('TASK-013/TEST-022/026: rejected DOM batch cannot abort an independent native AI discovery',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'expected the real imported-batch handler');
+ const handler=main.slice(start,end);
+ const busy=handler.indexOf("if(lease===null)return {ok:false,code:'OBSERVATION_BUSY'");
+ const abort=handler.indexOf('nativeAiDiscoveryController?.abort()');
+ const retire=handler.indexOf('importedDomCandidateExportStore.clearOwner(win)');
+ assert.ok(busy>=0&&abort>busy&&retire>abort,
+  'only an accepted diagnostic gate may supersede native AI discovery or reviewed exports');
+ assert.doesNotMatch(handler.slice(0,busy),/nativeAiDiscoveryController\?\.abort\(\)/,
+  'invalid URL, missing browser, no eligible script and busy requests cannot interrupt AI discovery');
+});
+
+test('TASK-013/TEST-022/NFR-009: consent time is excluded from the 120-second DOM batch budget',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const handler=main.slice(start,end);
+ const dialogAt=handler.indexOf('const consent=await dialog.showMessageBox(win,');
+ const acceptedAt=handler.indexOf('if(consent.response!==0||revoked())');
+ const openedAt=handler.indexOf('const opened=await openApprovedTarget(',acceptedAt);
+ const startTimerAt=handler.indexOf('deadline=setTimeout(()=>');
+ assert.ok(dialogAt>=0&&acceptedAt>dialogAt&&startTimerAt>acceptedAt&&openedAt>startTimerAt,
+  'the execution budget starts only after native consent and before opening Chrome');
+ assert.match(handler.slice(startTimerAt,openedAt),/deadlineExpired=true;\s*controller\.abort\(\);\s*\},120000\);/,
+  'retain the exact fail-closed 120-second timeout after consent');
+ assert.match(handler,/finally\{\s*clearTimeout\(deadline\);/,
+  'both rejected and successful consent must safely clear the optional deadline');
+});
+
+test('TASK-013/TEST-002/022: interrupted DOM batch UI preserves limited per-script evidence without export actions',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const entry=ui.indexOf('void window.healer.diagnoseImportedBatch(targetUrl).then(result=>');
+ const failed=ui.indexOf('if(!result.ok){',entry);
+ const succeeded=ui.indexOf('const items=Array.isArray(result.items)?result.items.slice(0,1000):[];',failed);
+ assert.ok(entry>=0&&failed>entry&&succeeded>failed,
+  'expected the batch DOM failure receipt branch');
+ const block=ui.slice(failed,succeeded);
+ assert.match(block,/const observedBeforeStop=blockedItems\.filter\(item=>item\.domStatus==='LIMITED_DOM_SIGNAL_ONLY'\)\.length;/,
+  'a failed batch must distinguish previously observed limited DOM signals');
+ assert.match(block,/item\.domStatus==='LIMITED_DOM_SIGNAL_ONLY'/,
+  'each per-script failure row must retain truthful partial evidence');
+ assert.match(block,/批次已中止[^']*候选[^']*不可用/,
+  'partial evidence must be clearly unverified with no candidate export authority');
+ assert.doesNotMatch(block,/exportImportedDomCandidate\(/,
+  'failure receipts never present a candidate export action');
+});
+
+test('TASK-013/TEST-022: DOM result assembly failures keep actual observation attempts',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'expected the real imported batch handler');
+ const handler=main.slice(start,end);
+ const assembly=handler.indexOf('const triage=summarizeReadOnlyScenarioDomSeries');
+ const next=handler.indexOf('if(revoked()&&results.length<plan.items.length)',assembly);
+ assert.ok(assembly>=0&&next>assembly,'expected the per-script result assembly loop');
+ const block=handler.slice(assembly,next);
+ assert.match(block,/catch\{\s*results\.push\(blockedItem\(item,'OBSERVATION_FAILED',job\.attempts\)\);\s*\}/,
+  'an exception after a completed DOM observation must not falsely report zero attempts');
+});
+
+test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or return success',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const handler=main.slice(start,end);
+ assert.match(handler,/let observationReceiptDelivered=false;/,
+  'only a completely delivered batch receipt can retain export capabilities');
+ assert.match(handler,/const cancelledItems=results\.map\(item=>item\.candidateStatus==='CANDIDATE_ONLY'[\s\S]*?candidateExportId:undefined[\s\S]*?return \{ok:false,code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED',\s*items:cancelledItems/,
+  'cancellation or timeout after partial observation must never return ok:true');
+ assert.match(handler,/observationReceiptDelivered=true;\s*return \{ok:true,status:'UNKNOWN'/,
+  'receipt ownership must be marked only at the final success path');
+ assert.match(handler,/finally\{\s*clearTimeout\(deadline\);\s*importedDomProgress=null;\s*importedDomDiagnosticIndex\.clearCandidateSources\(\);\s*if\(!observationReceiptDelivered\)importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'failure/cancelled observations must revoke partial one-use export handles');
+ assert.match(handler,/if\(revoked\(\)\|\|win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)/,
+  'window and owned-browser replacement must remain fail-closed');
+});
+
 test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not optional manual scenarios',()=>{
  const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
  const workspace=html.match(/<section id="import-workspace"[\s\S]*?<\/section>/)?.[0];
@@ -2084,6 +2599,16 @@ test('TASK-017/TEST-002/022: import completion routes to controlled Chrome, not 
   'the ordinary next step after import must lead to controlled Chrome setup');
  assert.doesNotMatch(workspace,/data-open-workspace="scenario-workspace"/,
   'optional manual scenario registration must not be presented as the ordinary next step');
+});
+
+test('TASK-013/TEST-022/026: full test command registers candidate planner and source-lifecycle regressions',()=>{
+ const manifest=JSON.parse(readFileSync(join(process.cwd(),'package.json'),'utf8')) as
+  {scripts?:{test?:string}};
+ const command=manifest.scripts?.test??'';
+ assert.match(command,/dist\/tests\/diagnostics\/imported-dom-diagnostic-index\.test\.js/,
+  'CI and npm test must execute the source expiry/ownership regression tests');
+ assert.match(command,/dist\/tests\/repair\/imported-dom-candidate\.test\.js/,
+  'CI and npm test must execute candidate eligibility regressions');
 });
 
 
@@ -2136,4 +2661,348 @@ test('TASK-017/TEST-002/022: desktop ordinary user journey enforces unforced sel
 
   assert.ok(html.includes('UNKNOWN / 受阻'));
   assert.ok(ui.includes('无法判断是否已安装'));
+});
+
+test('TASK-013/TEST-023/026: native candidate export verifies original before directory dialogs and checks capability lifetime',()=>{
+  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+  const start=main.indexOf("ipcMain.handle('scenario:export-imported-candidate'");
+  const end=main.indexOf("ipcMain.handle('scenario:cancel'",start);
+  assert.ok(start>=0&&end>start);
+  const handler=main.slice(start,end);
+  const picked=handler.indexOf('const sourcePath=source.filePaths[0]');
+  const initialRead=handler.indexOf('const initial=await importApprovedPaths([sourcePath],controller.signal)');
+  const firstBackupDialog=handler.indexOf('const backup=await dialog.showOpenDialog');
+  const finalRead=handler.indexOf('const current=await importApprovedPaths([sourcePath],controller.signal)');
+  const exportDialog=handler.indexOf('const destination=await dialog.showOpenDialog');
+  assert.ok(picked>=0&&initialRead>picked&&firstBackupDialog>initialRead,
+   'source identity must be validated before asking for backup or export folders');
+  assert.ok(handler.indexOf('initial.scripts[0].filename!==capability.filename')>initialRead&&
+   handler.indexOf('initial.scripts[0].filename!==capability.filename')<firstBackupDialog);
+  assert.ok(handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')>initialRead&&
+   handler.indexOf('initial.scripts[0].sha256!==capability.context.originalSha256')<firstBackupDialog);
+  assert.ok(finalRead>exportDialog,'source is re-read after destination dialogs to reject changed bytes');
+  assert.ok((handler.match(/importedDomCandidateExportStore\.isReserved\(win,id\)/g)??[]).length>=3,
+   'short-lived candidate authority must be rechecked before/between awaited native dialogs');
+  assert.match(handler,/const exportFrameEpoch=mainFrameNavigationEpoch;/,
+   'native export binds initiating main-document generation');
+  assert.match(handler,/const exportSenderFrame=event\.senderFrame;/,
+   'native export captures authorized sender frame');
+  assert.match(handler,/mainFrameNavigationEpoch!==exportFrameEpoch/,
+   'full navigation during dialogs revokes export');
+  assert.match(handler,/win\.webContents\.mainFrame!==exportSenderFrame/,
+   'replaced renderer cannot continue export dialogs');
+  assert.match(ui,/请重新导入原始脚本，再重新进行 DOM 观察/,
+   'expired and consumed candidate receipts need explicit recovery instructions');
+});
+
+test('TASK-013/TEST-022/026: Electron shell smoke waits for recovered import state before consecutive file changes',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const begin=main.indexOf('const waitForImportReady=async');
+ const end=main.indexOf('const uiScenarioSelect=',begin);
+ assert.ok(begin>=0&&end>begin);
+ const smoke=main.slice(begin,end);
+ const firstDispatch=smoke.indexOf("input.dispatchEvent(new Event('change',{bubbles:true}))");
+ const secondDispatch=smoke.indexOf("input.dispatchEvent(new Event('change',{bubbles:true}))",
+  firstDispatch+1);
+ const helper=smoke.indexOf('const waitForImportReady=async');
+ const firstDrop=smoke.indexOf("area.dispatchEvent(new DragEvent('drop'");
+ const firstDropIdle=smoke.indexOf('const firstDropIdle=await waitForImportReady()');
+ const badDrop=smoke.indexOf('const badDrop=new DataTransfer()');
+ const badDropIdle=smoke.indexOf('const badDropIdle=await waitForImportReady()');
+ const directoryScan=smoke.indexOf('const oldEntry=Object.getOwnPropertyDescriptor');
+ assert.ok(helper>=0&&helper<firstDrop&&firstDropIdle>firstDrop&&
+  firstDropIdle<badDrop&&badDropIdle>badDrop&&badDropIdle<directoryScan,
+  'independent drags must wait for native finish and acknowledged recovery');
+ const scanIdle=smoke.indexOf('const scanIdle=await waitForImportReady()');
+ const batchIdle=smoke.indexOf('const batchIdle=await waitForImportReady()');
+ assert.ok(helper>=0&&scanIdle>helper&&scanIdle<firstDispatch,
+  'cancelled directory-scan recovery must settle before a new file-change event');
+ assert.ok(firstDispatch>=0&&batchIdle>firstDispatch&&batchIdle<secondDispatch,
+  'the previous file-input batch must fully settle before the next change event');
+ assert.match(smoke,/NO_PENDING_RECOVERY/,
+  'a rendered import row is not proof that main acknowledged its recovery receipt');
+ assert.match(smoke,/select-files.*?disabled/,
+  'the real file-input control must be checked for idle state');
+ assert.match(smoke,/choose-files.*?disabled/);
+ assert.match(smoke,/choose-folder.*?disabled/);
+ assert.match(smoke,/cancel-import.*?disabled/);
+ assert.match(smoke,/if\(!firstDropIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+ assert.match(smoke,/if\(!badDropIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+ assert.match(smoke,/if\(!scanIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+ assert.match(smoke,/if\(!batchIdle\)throw Error\('SHELL_SMOKE_IMPORT_NOT_IDLE'\)/);
+});
+
+test('TASK-013/TEST-022: ordinary batch DOM observation has a scoped in-panel cancel action',()=>{
+ const html=readFileSync(join(process.cwd(),'app/ui/index.html'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const panelStart=html.indexOf('<div id="imported-dom-diagnosis"');
+ const panelEnd=html.indexOf('<div data-scenario-context-slot>',panelStart);
+ assert.ok(panelStart>=0&&panelEnd>panelStart);
+ const panel=html.slice(panelStart,panelEnd);
+ assert.match(panel,/<button id="imported-dom-cancel" type="button"[^>]*disabled/);
+ assert.match(ui,/const importedDomCancelButton=document\.getElementById\('imported-dom-cancel'\)/);
+ assert.match(ui,/importedDomCancelButton\.disabled=!importedDomBusy\|\|importedDomCancelRequested/);
+ assert.match(ui,/importedDomCancelButton\?\.addEventListener\('click'/);
+ assert.match(ui,/void window\.healer\.cancelScenarioInspection\(\)/);
+ assert.match(ui,/importedDomCancelRequested=true/);
+ assert.match(ui,/importedDomCancelRequested=false/);
+ assert.match(ui,/没有可靠取消回执|取消请求未确认/);
+});
+
+test('TASK-013/TEST-002/022: renderer skips unrelated file names before charging batch bytes',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('async function importFiles(files: readonly File[])');
+ const end=ui.indexOf('/** Read only the files of a folder',start);
+ assert.ok(start>=0&&end>start,'ordinary importFiles implementation must exist');
+ const body=ui.slice(start,end);
+ const filenameCheck=body.indexOf("if (!/\\.user\\.js$/i.test(file.name))");
+ const byteCheck=body.indexOf('if (readBytes + file.size > MAX_BATCH_BYTES)');
+ const byteCharge=body.indexOf('readBytes += file.size');
+ assert.ok(filenameCheck>=0&&filenameCheck<byteCheck&&filenameCheck<byteCharge,
+  'an unrelated file must never consume the 128 MiB renderer budget before a valid userscript');
+ assert.match(body,/file.name \+ ': NOT_USER_SCRIPT'/,
+  'non-userscript selections must remain visible as independent failures');
+ assert.match(body,/droppedImportProgress\.processed=index\+1/,
+  'skipping an unrelated file must not stall batch progress reporting');
+});
+
+test('TASK-013/TEST-022/026: native batch candidate source lookup binds SHA and filename',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'native diagnosis handler must be present');
+ const body=main.slice(start,end);
+ assert.match(body,/readUtf8CandidateSource\(\s*item\.scriptSha256\s*,\s*item\.filename\s*\)/,
+  'an imported hash alone must not select candidate source bytes for a different filename');
+});
+
+test('TASK-013/TEST-022/026: candidate proposal exceptions preserve completed DOM observation evidence',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'native batch diagnosis handler must remain present');
+ const body=main.slice(start,end);
+ // An isolated candidate error must not fall through to the outer
+ // OBSERVATION_FAILED catch and discard an already accepted DOM result.
+ assert.match(body,/candidatePreviewCount\+\+;\s*try\s*\{\s*const proposal=proposeImportedDomCandidate\(/,
+  'candidate generation must have its own guarded failure boundary');
+ assert.match(body,/catch\s*\{[\s\S]*?candidateFields=\{candidateStatus:'NOT_PROPOSED',\s*candidateReason:'PREVIEW_FAILED'\};\s*\}/,
+  'a candidate-only exception must be reported without erasing the DOM observation');
+ assert.match(body,/domStatus:'LIMITED_DOM_SIGNAL_ONLY'/,
+  'the previously completed read-only observation remains in the per-item result');
+});
+
+test('TASK-013/TEST-022/026: candidate preview failure is legible without revoking DOM evidence',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function importedDomCandidateReason(');
+ const end=ui.indexOf('function importedDomCandidateExportReason(',start);
+ assert.ok(start>=0&&end>start,'candidate result translator must remain available');
+ const messages=ui.slice(start,end);
+ assert.match(messages,/PREVIEW_FAILED:'[^']*候选[^']*失败[^']*DOM[^']*保留[^']*未修改'/,
+  'candidate-generation errors need a clear, read-only, no-mutation explanation');
+});
+
+test('TASK-013/TEST-022: absent owned Chrome preserves each script static block receipt',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const body=main.slice(start,end);
+ const noBrowser=body.slice(body.indexOf('if(!owned){'),body.indexOf('const win=mainWindow;'));
+ assert.match(noBrowser,/clearCandidateSources\(\)/,
+  'failure must not retain source bytes without an owned browser');
+ assert.match(noBrowser,/plan\.items\.map\(item=>/);
+ assert.match(noBrowser,/item\.status==='READY_FOR_INSPECTION'/);
+ assert.match(noBrowser,/blockedItem\(item,'BROWSER_NOT_RUNNING'\)/);
+ assert.match(noBrowser,/blockedItem\(item\)/,
+  'already blocked scripts must retain their distinct static-block reasons');
+ assert.match(noBrowser,/items:.*perScriptBlocks/,
+  'global absence of browser must still return per-script bounded receipts');
+ const uiStart=ui.indexOf('if(!result.ok){',ui.indexOf('diagnoseImportedBatch(targetUrl).then('));
+ const uiEnd=ui.indexOf('const items=Array.isArray(result.items)',uiStart);
+ assert.ok(uiStart>=0&&uiEnd>uiStart);
+ const failure=ui.slice(uiStart,uiEnd);
+ assert.match(failure,/Array\.isArray\(result\.items\)/);
+ assert.match(failure,/importedDomItems\?\.append\(row\)/);
+ assert.match(failure,/importedDomBlockReason\(item\.code\)/);
+ assert.match(failure,/重新导入/,
+  'source-lifetime revocation must be explained without promising candidate reuse');
+});
+
+test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'batch DOM diagnosis must remain reachable');
+ const body=main.slice(start,end);
+ const guard=body.indexOf('if(candidatePreviewCount<16)');
+ const source=body.indexOf('const source=importedDomDiagnosticIndex.readUtf8CandidateSource',guard);
+ const absent=body.indexOf('if(source===null)',source);
+ const proposal=body.indexOf('proposeImportedDomCandidate(',absent);
+ const charge=body.indexOf('candidatePreviewCount++',guard);
+ assert.ok(guard>=0&&source>guard&&absent>source&&proposal>absent&&
+  charge>absent&&charge<proposal,
+  'a missing source must not spend a proposal slot; only source-backed evaluations spend one');
+ assert.match(body,/BATCH_PREVIEW_LIMIT/,
+  'the maximum of sixteen actually attempted proposals must remain enforced');
+});
+
+test('TASK-013/TEST-022: startup dropped-batch recovery owns the renderer import lock',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.match(ui,/let startupRecoveryPending = true;/,
+  'new renderer must visibly indicate pending recovery until its receipt settles');
+ const summary=ui.slice(ui.indexOf('function updateImportSummary()'),ui.indexOf('function logLine('));
+ assert.match(summary,/startupRecoveryPending\s*\?/,
+  'pending recovery must be shown in the accessible import status');
+ const handlers=ui.indexOf("cancelImport?.addEventListener('click'");
+ const bootStart=ui.indexOf('void locked(async () => {',handlers);
+ const pickerStart=ui.indexOf("chooseFile?.addEventListener('click'",handlers);
+ assert.ok(handlers>=0&&bootStart>handlers&&pickerStart>bootStart,
+  'startup recovery lock must be established before picker handlers');
+ const boot=ui.slice(bootStart,pickerStart);
+ assert.match(boot,/void locked\(async \(\) => \{/,
+  'recovery must hold the same synchronous lock used by picker and drop handlers');
+ assert.match(boot,/await recoverDroppedImportBatch\(\)/,
+  'startup lock must not release before native recovery finishes');
+ assert.match(boot,/finally \{[\s\S]*startupRecoveryPending = false;[\s\S]*updateImportSummary\(\)/,
+  'status must leave recovery state even after a rejected recovery IPC');
+ assert.doesNotMatch(boot,/void recoverDroppedImportBatch\(\)/,
+  'fire-and-forget bootstrap must not allow overlapping new imports');
+});
+
+test('TASK-013/TEST-022: dropped directory entry errors isolate siblings and later roots',async()=>{
+ const ts=await import('typescript');
+ const vm=await import('node:vm');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=ui.indexOf('function readDropEntry<T>(');
+ const end=ui.indexOf("cancelImport?.addEventListener('click'",start);
+ assert.ok(start>=0&&end>start,'bounded dropped-folder scan must exist');
+ const source=ui.slice(start,end)+
+  '\n(globalThis as unknown as {scan:typeof filesFromDrop}).scan=filesFromDrop;';
+ const js=ts.transpileModule(source,{compilerOptions:{
+  target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None
+ }}).outputText;
+ const lines:string[]=[];
+ const env:Record<string,unknown>={
+  MAX_DIRECTORY_ENTRIES:10000,MAX_DIRECTORY_DEPTH:8,MAX_FILES:1000,
+  cancelRequested:false,failedCount:0,
+  logLine:(line:string)=>lines.push(line),updateImportSummary:()=>{},
+  setTimeout,clearTimeout,AbortController
+ };
+ vm.runInNewContext(js,env,{timeout:1000});
+ const file=(name:string,rejected=false)=>({
+  name,isFile:true,isDirectory:false,
+  file:(ok:(v:unknown)=>void,fail:(e:Error)=>void)=>
+   rejected?fail(new Error('file read denied')):ok({name})
+ });
+ const folder=(name:string,entries:unknown[],rejected=false)=>{
+  let consumed=false;
+  return {name,isFile:false,isDirectory:true,createReader:()=>({
+   readEntries:(ok:(v:unknown[])=>void,fail:(e:Error)=>void)=>{
+    if(rejected){fail(new Error('directory read denied'));return;}
+    if(consumed){ok([]);return;}
+    consumed=true;ok(entries);
+   }
+  })};
+ };
+ const roots=[
+  folder('root',[
+   file('bad.user.js',true),file('first.user.js'),
+   folder('denied',[],true),file('second.user.js')
+  ]),
+  folder('another-root',[file('third.user.js')]),
+  file('bad-root.user.js',true),
+  file('last-root.user.js')
+ ];
+ const result=await (env.scan as (data:unknown,signal:AbortSignal)=>Promise<Array<{name:string}>>)({
+  items:roots.map(entry=>({kind:'file',webkitGetAsEntry:()=>entry})),files:[]
+ },new AbortController().signal);
+ // Snapshot values into this Node realm: a vm Array has a distinct prototype.
+ assert.deepEqual(Array.from(result,item=>item.name),[
+  'first.user.js','second.user.js','third.user.js','last-root.user.js'
+ ]);
+ assert.equal(env.failedCount,3,'each unreadable entry counts as an isolated failure');
+ assert.deepEqual(lines,[
+  'bad.user.js: READ_OR_IMPORT_FAILED',
+  'denied: DIRECTORY_READ_FAILED',
+  'bad-root.user.js: READ_OR_IMPORT_FAILED'
+ ]);
+});
+
+
+test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries and preserves per-script blocked receipts',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.ok(main.includes("import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator'"),
+  'the real native DOM batch must reuse the existing bounded coordinator');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'the native imported DOM batch handler must remain separately auditable');
+ const handler=main.slice(start,end);
+ assert.match(handler,/new ReadOnlyBatchCoordinator\(\{\s*count:ready\.length,\s*concurrency:1,\s*maxAttempts:2,\s*timeoutMs:120000\s*\}/,
+  'each script must receive at most two sequential read-only attempts within the existing batch deadline');
+ assert.match(handler,/const retryable=observation\.code==='CDP_FAILED';[\s\S]*?return retryable\?'RETRYABLE_FAILURE':'PERMANENT_FAILURE'/,
+  'only a bounded transient CDP observation failure may consume the retry budget');
+ assert.match(handler,/controller\.signal\.addEventListener\('abort',cancelCoordinator/,
+  'batch cancellation and owner revocation must cancel queued retries');
+ assert.match(handler,/batchSnapshot\.jobs\[index\]/,
+  'the final per-script receipt must be derived from the coordinator outcome');
+ assert.match(handler,/attempts:job\.attempts/,
+  'the user-visible receipt must retain the actual attempt count');
+ assert.match(handler,/if\(revoked\(\)\|\|win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)\{[\s\S]*?code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED',[\s\S]*?items:cancelledItems/,
+  'the final synchronous receipt guard must re-check cancellation and batch timeout before returning success');
+ assert.match(handler,/if\(!opened\.ok\)[\s\S]*?items:plan\.items\.map/,
+  'a shared target-open failure must return a blocked receipt for every imported script');
+ assert.match(ui,/item\.attempts/,
+  'the UI must disclose actual attempts instead of hiding retry behavior');
+ assert.match(handler,/\.\.\.unverified/);
+ assert.match(main,/const unverified = \{tampermonkeyVerified:false as const,gmApiVerified:false as const,/);
+ assert.match(main,/businessVerified:false as const,automaticPatchAllowed:false as const\}/);
+});
+
+
+test('TASK-013/TEST-022/026: invalid imported DOM URL must not call a TDZ-uninitialized fallback helper', () => {
+  const source=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const begin=source.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+  const end=source.indexOf("ipcMain.handle('scenario:export-imported-candidate'",begin);
+  assert.ok(begin>=0&&end>begin,'expected real imported-batch IPC path');
+  const handler=source.slice(begin,end);
+  const plan=handler.indexOf('const plan=importedDomDiagnosticIndex.plan(targetInput);');
+  const helper=handler.indexOf('const blockedItem=');
+  const invalid=handler.indexOf('if(!plan.targetUrl){');
+  assert.ok(plan>=0&&helper>=0&&invalid>=0,'expected the real invalid-URL fail-closed path');
+  assert.ok(plan<helper&&helper<invalid,
+    'INVALID_TARGET_URL must be returned after blockedItem is initialized, not rejected by a TDZ ReferenceError');
+  assert.match(handler.slice(invalid,invalid+350),/code:'INVALID_TARGET_URL'/);
+});
+
+
+test('TASK-013/TEST-022/026: imported-batch DOM progress is read-only, bounded and main-owned',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const preload=readFileSync(join(process.cwd(),'app/preload/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ assert.ok(approvedIpcChannels.includes('scenario:imported-batch-progress' as typeof approvedIpcChannels[number]));
+ assert.match(main,/ipcMain\.handle\('scenario:imported-batch-progress'/);
+ assert.match(main,/if\(args\.length\)return \{active:false as const\}/);
+ assert.match(main,/importedDomProgress\s*=\s*\{phase:'AWAITING_CONSENT'/);
+ assert.match(main,/importedDomProgress\s*=\s*null/);
+ assert.match(preload,/getImportedDomProgress:\s*\(\):\s*Promise<unknown>\s*=>\s*ipcRenderer\.invoke\('scenario:imported-batch-progress'\)/);
+ assert.match(ui,/getImportedDomProgress\(\):Promise<\{/);
+ assert.match(ui,/window\.healer\.getImportedDomProgress\(\)/);
+ assert.match(ui,/clearInterval\(importedDomProgressTimer\)/);
+});
+
+
+test('TASK-013/TEST-022: late progress polling cannot overwrite a delivered final diagnosis receipt',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const click=ui.indexOf("importedDomRunButton?.addEventListener('click'");
+ const end=ui.indexOf("clearInterval(importedDomProgressTimer)",click);
+ assert.ok(click>=0&&end>click,'expected the real ordinary diagnosis UI flow');
+ const flow=ui.slice(click,end+150);
+ assert.match(flow,/let importedDomFinalDelivered=false;/);
+ assert.match(flow,/if\(importedDomFinalDelivered\|\|generation!==importedDomGeneration/);
+ assert.match(flow,/diagnoseImportedBatch\(targetUrl\)\.then\(result=>\{\r?\n  importedDomFinalDelivered=true;/);
+ assert.match(flow,/\}\)\.catch\(\(\)=>\{\r?\n  importedDomFinalDelivered=true;/);
 });

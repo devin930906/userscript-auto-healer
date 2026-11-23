@@ -21,10 +21,23 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   // Fixed read-only counter query, no source/path data and no raw event subscription.
   getNativeImportProgress: (): Promise<unknown> => ipcRenderer.invoke('import:get-progress'),
   cancelDroppedImport: (): Promise<unknown> => ipcRenderer.invoke('import:cancel-dropped'),
+  beginDroppedImportBatch: (): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:begin'),
+  addDroppedImportBatch: (batchId: string, name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:add', batchId, name, bytes),
+  finishDroppedImportBatch: (batchId: string): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:finish', batchId),
+  recoverDroppedImportBatch: (): Promise<unknown> => ipcRenderer.invoke('import:dropped-batch:recover'),
+  acknowledgeDroppedImportRecovery: (recoveryId: string): Promise<unknown> =>
+    ipcRenderer.invoke('import:dropped-batch:acknowledge', recoveryId),
   importDropped: (name: string, bytes: Uint8Array): Promise<unknown> => ipcRenderer.invoke('import:dropped', name, bytes),
   registerScenario: (input: unknown): Promise<unknown> => ipcRenderer.invoke('scenario:register',input),
   inspectScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:inspect',id),
+  // Ordinary batch DOM observations accept only one user-configured target URL.
+  // Main resolves the imported script identities and all selectors internally.
+  diagnoseImportedBatch: (targetUrl: string): Promise<unknown> =>
+    ipcRenderer.invoke('scenario:diagnose-imported-batch',targetUrl),
+  getImportedDomProgress: (): Promise<unknown> => ipcRenderer.invoke('scenario:imported-batch-progress'),
   readScenarioHistory: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:history',id),
+  // Only a short-lived opaque ID; all source and destination paths are native-selected.
+  exportImportedDomCandidate: (candidateId: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-imported-candidate',candidateId),
   exportManualScenario: (id: string): Promise<unknown> => ipcRenderer.invoke('scenario:export-manual',id),
   // No renderer-supplied path, file bytes, hashes, consent or restore options.
   inspectRestoreIntent: (): Promise<unknown> => ipcRenderer.invoke('restore:inspect-intent'),
@@ -52,3 +65,4 @@ contextBridge.exposeInMainWorld('healer', Object.freeze({
   observeGmFixture: (mode: 'broken' | 'fixed'): Promise<unknown> => ipcRenderer.invoke('gm-probe:observe',mode),
   stopGmProbe: (): Promise<unknown> => ipcRenderer.invoke('gm-probe:stop')
 }));
+
