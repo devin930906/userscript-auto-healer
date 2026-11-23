@@ -256,6 +256,26 @@ export class ReadOnlyBatchCoordinator{
  private controller:AbortController|null=null;
  private starting=false;
  private inFlight:Promise<ReadOnlyBatchSnapshot>|null=null;
+ // A terminal/cancelled scheduling receipt does NOT prove that an async
+ // read-only DOM worker has retired. Keep an explicit lifecycle fence for
+ // the privileged main-process diagnostic gate.
+ private readonly pendingWorkers=new Set<Promise<ReadOnlyWorkResult>>();
+ /** Resolve only after every already-started underlying worker settles.
+  * If an adapter never retires, callers must keep exclusive authority held.
+  * This is not a new browser/manager capability or worker abort mechanism. */
+ async whenWorkersRetired():Promise<void>{
+  while(this.pendingWorkers.size>0)
+   await Promise.allSettled(Array.from(this.pendingWorkers));
+ }
+ private startTrackedWorker(ordinal:number,signal:AbortSignal):Promise<ReadOnlyWorkResult>{
+  const task=this.worker(ordinal,signal);
+  this.pendingWorkers.add(task);
+  void task.then(
+   ()=>{this.pendingWorkers.delete(task);},
+   ()=>{this.pendingWorkers.delete(task);}
+  );
+  return task;
+ }
  constructor(options:Options,worker:ReadOnlyWorker,checkpoint?:unknown){
   const opts=validateOptions(options);
   if(typeof worker!=='function')throw Error('INVALID_BATCH_WORKER');
@@ -422,7 +442,7 @@ export class ReadOnlyBatchCoordinator{
     });
     try{
      const settled=await Promise.race([
-      this.worker(job.ordinal,controller.signal),
+      this.startTrackedWorker(job.ordinal,controller.signal),
       cancelled,
       deadlineReached
      ]);
