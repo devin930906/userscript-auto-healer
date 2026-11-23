@@ -641,6 +641,24 @@ test('TASK-013/TEST-023/026: imported candidate export uses a one-use main-only 
   'closing the owning window clears its pending review capabilities');
 });
 
+test('TASK-013/TEST-022/023: accepted fresh imports retire prior manual candidate export capabilities',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const native=main.slice(main.indexOf('const runNativeImport = async ('),
+  main.indexOf("ipcMain.handle('import:get-progress'"));
+ assert.match(native,/if\\(choice\\.canceled[\\s\\S]*?return \\{canceled:true[\\s\\S]*?\\};[\\s\\S]*?importedDomCandidateExportStore\\.clearOwner\\(win\\)/,
+  'a completed native file/folder selection invalidates earlier candidate export grants');
+ const batch=main.slice(main.indexOf("ipcMain.handle('import:dropped-batch:begin'"),
+  main.indexOf("ipcMain.handle('import:dropped-batch:add'"));
+ assert.match(batch,/if\\(scenarioObserveInProgress[\\s\\S]*?return \\{ok:false,code:'IMPORT_BUSY'\\};[\\s\\S]*?importedDomCandidateExportStore\\.clearOwner\\(win\\)/,
+  'a newly authorized dropped batch invalidates older export grants');
+ const single=main.slice(main.indexOf("ipcMain.handle('import:dropped',"),
+  main.indexOf("ipcMain.handle('import:cancel-dropped'"));
+ assert.match(single,/const result=importDroppedBytes\\(name,data\\);[\\s\\S]*?if\\('code' in result\\)return \\{ok:false,code:result\\.code\\};[\\s\\S]*?importedDomCandidateExportStore\\.clearOwner\\(win\\)/,
+  'a valid single dropped file invalidates previous candidate grants without allowing invalid data to do so');
+ assert.doesNotMatch(native,/importedDomCandidateExportStore\\.clearOwner\\(win\\)[\\s\\S]*?if\\(choice\\.canceled/,
+  'canceling a native picker must not revoke already reviewed candidates');
+});
+
 test('TASK-013/017 TEST-022/023: imported DOM candidate export is per-item, accessible and stale-reply fenced',()=>{
  const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
