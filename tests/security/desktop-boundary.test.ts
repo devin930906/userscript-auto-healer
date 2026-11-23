@@ -2451,7 +2451,7 @@ test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or 
  const handler=main.slice(start,end);
  assert.match(handler,/let observationReceiptDelivered=false;/,
   'only a completely delivered batch receipt can retain export capabilities');
- assert.match(handler,/if\(revoked\(\)\)return \{ok:false,code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED'/,
+ assert.match(handler,/const cancelledItems=results\.map\(item=>item\.candidateStatus==='CANDIDATE_ONLY'[\s\S]*?candidateExportId:undefined[\s\S]*?return \{ok:false,code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED',\s*items:cancelledItems/,
   'cancellation or timeout after partial observation must never return ok:true');
  assert.match(handler,/observationReceiptDelivered=true;\s*return \{ok:true,status:'UNKNOWN'/,
   'receipt ownership must be marked only at the final success path');
@@ -2818,7 +2818,7 @@ test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries 
   'a shared target-open failure must return a blocked receipt for every imported script');
  assert.match(ui,/item\.attempts/,
   'the UI must disclose actual attempts instead of hiding retry behavior');
- assert.match(handler,/automaticPatchAllowed:false/);
- assert.match(handler,/tampermonkeyVerified:false/);
- assert.match(handler,/businessVerified:false/);
+ assert.match(handler,/\.\.\.unverified/);
+ assert.match(main,/const unverified = \{tampermonkeyVerified:false as const,gmApiVerified:false as const,/);
+ assert.match(main,/businessVerified:false as const,automaticPatchAllowed:false as const\}/);
 });
