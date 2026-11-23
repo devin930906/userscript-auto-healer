@@ -515,3 +515,26 @@ test('TASK-012/TEST-023: accessor array slots cannot execute during manager reco
   assert.equal(result.reason,'UNTRUSTED_INPUT');
   assert.equal(result.automaticPatchAllowed,false);
 });
+
+
+test('TASK-012/TEST-023: batch install rejects accessor-backed script arrays before Chrome access', async () => {
+  const script={scriptId:'s-1',name:'Selected',installUrl:'https://example.com/test.user.js'};
+  let getterCalls=0;
+  const hostile=[script];
+  Object.defineProperty(hostile,'0',{enumerable:true,configurable:true,
+    get(){getterCalls++;return script;}});
+  const result=await launchBatchUserscriptInstallation(
+    {},hostile,{userApproved:true});
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.code,'INVALID_OPTIONS',
+    'untrusted array structure must be rejected before checking a browser session');
+  assert.equal(getterCalls,0,'never invoke a selected-script indexed getter');
+  assert.equal(result.automaticInstallAllowed,false);
+
+  const sparse=new Array(1);
+  const sparseResult=await launchBatchUserscriptInstallation(
+    {},sparse,{userApproved:true});
+  assert.equal(sparseResult.status,'BLOCKED');
+  assert.equal(sparseResult.code,'INVALID_OPTIONS');
+  assert.equal(sparseResult.automaticSilentInstallForbidden,true);
+});
