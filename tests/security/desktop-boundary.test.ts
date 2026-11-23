@@ -2903,3 +2903,16 @@ test('TASK-013/TEST-022/026: imported-batch DOM progress is read-only, bounded a
  assert.match(ui,/window\.healer\.getImportedDomProgress\(\)/);
  assert.match(ui,/clearInterval\(importedDomProgressTimer\)/);
 });
+
+
+test('TASK-013/TEST-022: late progress polling cannot overwrite a delivered final diagnosis receipt',()=>{
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const click=ui.indexOf("importedDomRunButton?.addEventListener('click'");
+ const end=ui.indexOf("clearInterval(importedDomProgressTimer)",click);
+ assert.ok(click>=0&&end>click,'expected the real ordinary diagnosis UI flow');
+ const flow=ui.slice(click,end+150);
+ assert.match(flow,/let importedDomFinalDelivered=false;/);
+ assert.match(flow,/if\(importedDomFinalDelivered\|\|generation!==importedDomGeneration/);
+ assert.match(flow,/diagnoseImportedBatch\(targetUrl\)\.then\(result=>\{\n  importedDomFinalDelivered=true;/);
+ assert.match(flow,/\}\)\.catch\(\(\)=>\{\n  importedDomFinalDelivered=true;/);
+});
