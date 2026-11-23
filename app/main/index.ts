@@ -1575,6 +1575,7 @@ function registerSafeIpc(): void {
       deadlineExpired=true;
       controller.abort();
     },120000);
+    let observationReceiptDelivered=false;
     let candidatePreviewCount=0;
     const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
       win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned;
@@ -1689,8 +1690,8 @@ function registerSafeIpc(): void {
         }
       }
       results.sort((a,b)=>a.ordinal-b.ordinal);
-      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
-        return {ok:false,code:'CANCELLED',...unverified};
+      if(revoked())return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',...unverified};
+      observationReceiptDelivered=true;
       return {ok:true,status:'UNKNOWN' as const,
         reason:'DOM_SIGNAL_DOES_NOT_VERIFY_SCRIPT_OR_BUSINESS',
         targetMatchedCount:ready.length,truncatedScripts:plan.truncatedScripts,
@@ -1700,6 +1701,7 @@ function registerSafeIpc(): void {
     }finally{
       clearTimeout(deadline);
       importedDomDiagnosticIndex.clearCandidateSources();
+      if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
       if(scenarioObserveController===controller)scenarioObserveController=null;
       scenarioObserveInProgress=false;
       diagnosticGate.release(lease);
