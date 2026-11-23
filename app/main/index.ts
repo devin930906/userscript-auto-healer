@@ -1293,6 +1293,9 @@ function registerSafeIpc(): void {
         controller.signal.aborted || (kind==='folder'&&choice.filePaths.length!==1))
         return {canceled:true,scripts:[],errors:[],duplicates:0,
           unprocessed:controller.signal.aborted?choice.filePaths.length:0};
+      // A fresh native source selection supersedes old reviewed candidate grants.
+      // Native picker cancellation above leaves previously reviewed grants intact.
+      importedDomCandidateExportStore.clearOwner(win);
       if(kind==='files'&&choice.filePaths.length>0)saveRememberedPath('scripts',choice.filePaths[0]);
       else if(kind==='folder'&&choice.filePaths.length===1)saveRememberedPath('scriptFolder',choice.filePaths[0]);
       nativeImportCounters={phase:kind==='folder'?'SCANNING':'IMPORTING',
@@ -1361,6 +1364,9 @@ function registerSafeIpc(): void {
     if(scenarioObserveInProgress||nativeImportController||droppedImportController||manualExportInProgress||
         nativeSelectionInProgress||profilePreparationInProgress||launchInProgress)
       return {ok:false,code:'IMPORT_BUSY'};
+    // New accepted batches must not retain export handles from a previous
+    // import/DOM observation. A blocked begin above does not revoke them.
+    importedDomCandidateExportStore.clearOwner(win);
     const controller=new AbortController();
     const batchId=randomUUID();
     droppedImportController=controller;
@@ -1439,6 +1445,9 @@ function registerSafeIpc(): void {
       return {ok:false,code:'IMPORT_BUSY'};
     const result=importDroppedBytes(name,data);
     if('code' in result)return {ok:false,code:result.code};
+    // An accepted single dropped script starts a new source review lifecycle.
+    // Invalid input above must not revoke capabilities or write source files.
+    importedDomCandidateExportStore.clearOwner(win);
     const controller=new AbortController();
     droppedImportController=controller;
     try{
