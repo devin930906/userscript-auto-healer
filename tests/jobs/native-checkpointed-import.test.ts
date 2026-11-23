@@ -21,7 +21,23 @@ function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
  // Node uses this variable to tell a child that it is already under the test
  // runner. Remove it when deliberately starting a separate child test runner.
  delete childEnv.NODE_TEST_CONTEXT;
- return execFileSync(process.execPath,args,{encoding:'utf8',env:childEnv});
+ try{
+  return execFileSync(process.execPath,args,{encoding:'utf8',env:childEnv});
+ }catch(error){
+  // execFileSync's thrown message omits TAP written to stdout. Without
+  // exposing the child's failed assertion the parent CI can only report
+  // ERR_TEST_FAILURE, hiding the cause of isolated Worker regressions.
+  const stdout=error&&typeof error==='object'&&'stdout' in error&&
+    typeof error.stdout==='string'?error.stdout:'';
+  const stderr=error&&typeof error==='object'&&'stderr' in error&&
+    typeof error.stderr==='string'?error.stderr:'';
+  const rows=stdout.split(/\r?\n/);
+  const failureAt=rows.findIndex(row=>/^not ok \d+ - /.test(row));
+  const relevant=failureAt>=0?rows.slice(failureAt,failureAt+55).join('\n'):
+    stdout.slice(-8192);
+  throw new Error('Isolated Node test runner failed; bounded child TAP diagnostics:\n'+
+   relevant.slice(0,8192)+'\n'+stderr.slice(-2048),{cause:error});
+ }
 }
 
 test('TASK-013/TEST-022: nested node test runner executes its selected test body',async()=>{
