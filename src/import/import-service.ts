@@ -259,7 +259,10 @@ export class DroppedImportBatch{
       return {ok:false,processed:this.#processed,code:'INVALID_DRAG_DATA'};
     }
     const length=nativeByteLength(bytes);
-    if(length===null){
+    // The intrinsic byteLength getter also accepts Uint16Array/Uint32Array.
+    // Rejected non-byte views must not consume the physical-read budget or
+    // starve later valid scripts in the same authorized dropped batch.
+    if(length===null||!(bytes instanceof Uint8Array)){
       const invalid=importDroppedBytes(name,bytes);
       if('code' in invalid){
         this.#errors.push(invalid);
