@@ -892,9 +892,13 @@ test('TASK-013/TEST-022/026: navigation and renderer loss revoke active DOM cons
  assert.match(lifecycle,
   /win\.webContents\.on\('render-process-gone',\(\)=>\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
   'renderer process loss must revoke the read-only DOM observation lease');
+ assert.match(lifecycle,/win\.webContents\.on\('render-process-gone',[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'renderer crash must revoke opaque manual-export capabilities');
  assert.match(lifecycle,
   /win\.webContents\.on\('did-start-navigation',[\s\S]*?if\(isMainFrame&&!isInPlace\)\{[\s\S]*?cancelScenarioObservation\(\);[\s\S]*?abortDroppedImportForWindow\(win\);/,
   'a replacement main frame must revoke the old DOM observation before new IPC');
+ assert.match(lifecycle,/if\(isMainFrame&&!isInPlace\)\{[\s\S]*?importedDomCandidateExportStore\.clearOwner\(win\);/,
+  'replacement document must not inherit candidate export capabilities');
 });
 
 test('TASK-013/TEST-022/026: one dropped script cannot survive a stale renderer frame',()=>{
