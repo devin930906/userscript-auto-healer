@@ -485,3 +485,33 @@ test('TASK-012/TEST-023: one ID-less manager observation cannot authenticate two
     assert.equal(result.automaticRollbackAllowed,false);
   }
 });
+
+
+test('TASK-012/TEST-023: accessor array slots cannot execute during manager reconciliation', () => {
+  const validImport={scriptId:'safe-id',name:'Safe',version:'1.0.0',sha256:origSha};
+  const validObservation={scriptId:'safe-id',name:'Safe',version:'1.0.0',
+    activeScriptSha256:origSha,injected:true,gmApiVerified:true};
+  let observationGetterCalls=0;
+  const observations=[validObservation];
+  Object.defineProperty(observations,'0',{configurable:true,enumerable:true,
+    get(){observationGetterCalls++;return validObservation;}});
+  const observed=reconcileBatchImportedScriptsVersionState(
+    [validImport],observations,{userApproved:true});
+  assert.equal(observationGetterCalls,0,
+    'untrusted manager evidence must never execute an indexed getter');
+  assert.equal(observed.status,'BLOCKED');
+  assert.equal(observed.reason,'PROBE_EVIDENCE_INVALID');
+  assert.equal(observed.automaticInstallAllowed,false);
+
+  let importedGetterCalls=0;
+  const imported=[validImport];
+  Object.defineProperty(imported,'0',{configurable:true,enumerable:true,
+    get(){importedGetterCalls++;return validImport;}});
+  const result=reconcileBatchImportedScriptsVersionState(
+    imported,[validObservation],{userApproved:true});
+  assert.equal(importedGetterCalls,0,
+    'untrusted imported array must never execute an indexed getter');
+  assert.equal(result.status,'BLOCKED');
+  assert.equal(result.reason,'UNTRUSTED_INPUT');
+  assert.equal(result.automaticPatchAllowed,false);
+});

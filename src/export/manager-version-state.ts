@@ -120,6 +120,30 @@ function extractPlain(input: unknown, allowedKeys: readonly string[]): Record<st
   return out;
 }
 
+/** Snapshot only own-data array slots before inspecting manager/import evidence.
+ * Array iteration itself can invoke indexed getters, inherited iterators or
+ * Proxy traps. Never run those when reconciling untrusted manager identities.
+ */
+function snapshotOwnDataArray(input: unknown, maxLength: number): unknown[] | null {
+  try {
+    if (nodeTypes.isProxy(input) || !Array.isArray(input) ||
+        Object.getPrototypeOf(input) !== Array.prototype ||
+        input.length > maxLength) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(input);
+    if (Reflect.ownKeys(descriptors).length !== input.length + 1) return null;
+    const snapshot: unknown[] = [];
+    for (let i = 0; i < input.length; i++) {
+      const slot = descriptors[String(i)];
+      if (!slot || !Object.prototype.hasOwnProperty.call(slot, 'value'))
+        return null;
+      snapshot.push(slot.value);
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
 const EXPORT_RECEIPT_KEYS = [
@@ -322,22 +346,8 @@ export function reconcileBatchImportedScriptsVersionState(
       });
     }
 
-    if (!Array.isArray(untrustedImportedScripts) || nodeTypes.isProxy(untrustedImportedScripts)) {
-      return Object.freeze({
-        status: 'BLOCKED' as const,
-        reason: 'UNTRUSTED_INPUT' as const,
-        totalCount: 0,
-        matchedCount: 0,
-        divergedCount: 0,
-        missingCount: 0,
-        invalidCount: 0,
-        items: Object.freeze([]),
-        missingScriptIds: Object.freeze([]),
-        ...noAuthority
-      });
-    }
-
-    if (untrustedImportedScripts.length > 500) {
+    const importedRows = snapshotOwnDataArray(untrustedImportedScripts, 500);
+    if (!importedRows) {
       return Object.freeze({
         status: 'BLOCKED' as const,
         reason: 'UNTRUSTED_INPUT' as const,
@@ -358,7 +368,8 @@ export function reconcileBatchImportedScriptsVersionState(
     const ambiguousLegacyNames = new Set<string>();
 
     if (untrustedInstalledObservations !== null && untrustedInstalledObservations !== undefined) {
-      if (!Array.isArray(untrustedInstalledObservations) || nodeTypes.isProxy(untrustedInstalledObservations)) {
+      const observationRows = snapshotOwnDataArray(untrustedInstalledObservations, 500);
+      if (!observationRows) {
         return Object.freeze({
           status: 'BLOCKED' as const,
           reason: 'PROBE_EVIDENCE_INVALID' as const,
@@ -373,7 +384,7 @@ export function reconcileBatchImportedScriptsVersionState(
         });
       }
 
-      for (const obs of untrustedInstalledObservations) {
+      for (const obs of observationRows) {
         if (!obs || typeof obs !== 'object' || Array.isArray(obs) || nodeTypes.isProxy(obs)) {
           return Object.freeze({
             status: 'BLOCKED' as const,
@@ -452,7 +463,7 @@ export function reconcileBatchImportedScriptsVersionState(
     // A legacy name-only manager observation cannot authenticate two imports.
     // Exact-ID evidence remains authoritative for each distinct script ID.
     const importedNameCounts = new Map<string, number>();
-    for (const raw of untrustedImportedScripts) {
+    for (const raw of importedRows) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) continue;
       const descriptor = Object.getOwnPropertyDescriptors(raw);
       const importedName = descriptor.name?.value;
@@ -468,7 +479,7 @@ export function reconcileBatchImportedScriptsVersionState(
     let missingCount = 0;
     let invalidCount = 0;
 
-    for (const raw of untrustedImportedScripts) {
+    for (const raw of importedRows) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw) || nodeTypes.isProxy(raw)) {
         invalidCount++;
         items.push(Object.freeze({
