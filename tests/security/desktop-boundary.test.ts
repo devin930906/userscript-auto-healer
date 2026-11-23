@@ -2806,7 +2806,7 @@ test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries 
  const handler=main.slice(start,end);
  assert.match(handler,/new ReadOnlyBatchCoordinator\(\{\s*count:ready\.length,\s*concurrency:1,\s*maxAttempts:2,\s*timeoutMs:120000\s*\}/,
   'each script must receive at most two sequential read-only attempts within the existing batch deadline');
- assert.match(handler,/observation\.code==='CDP_FAILED'[\s\S]*?return 'RETRYABLE_FAILURE'/,
+ assert.match(handler,/return observation\.code==='CDP_FAILED'\?'RETRYABLE_FAILURE':'PERMANENT_FAILURE'/,
   'only a bounded transient CDP observation failure may consume the retry budget');
  assert.match(handler,/controller\.signal\.addEventListener\('abort',cancelCoordinator/,
   'batch cancellation and owner revocation must cancel queued retries');
