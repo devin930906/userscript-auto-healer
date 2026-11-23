@@ -2522,6 +2522,24 @@ test('TASK-013/TEST-022/026: rejected DOM batch cannot abort an independent nati
   'invalid URL, missing browser, no eligible script and busy requests cannot interrupt AI discovery');
 });
 
+test('TASK-013/TEST-022/NFR-009: consent time is excluded from the 120-second DOM batch budget',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const handler=main.slice(start,end);
+ const dialogAt=handler.indexOf('const consent=await dialog.showMessageBox(win,');
+ const acceptedAt=handler.indexOf('if(consent.response!==0||revoked())');
+ const openedAt=handler.indexOf('const opened=await openApprovedTarget(',acceptedAt);
+ const startTimerAt=handler.indexOf('deadline=setTimeout(()=>');
+ assert.ok(dialogAt>=0&&acceptedAt>dialogAt&&startTimerAt>acceptedAt&&openedAt>startTimerAt,
+  'the execution budget starts only after native consent and before opening Chrome');
+ assert.match(handler.slice(startTimerAt,openedAt),/deadlineExpired=true;\s*controller\.abort\(\);\s*\},120000\);/,
+  'retain the exact fail-closed 120-second timeout after consent');
+ assert.match(handler,/finally\{\s*if\(deadline\)clearTimeout\(deadline\);/,
+  'both rejected and successful consent must safely clear any started deadline');
+});
+
 test('TASK-013/TEST-022: DOM result assembly failures keep actual observation attempts',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
