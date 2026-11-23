@@ -1550,12 +1550,12 @@ function registerSafeIpc(): void {
     }
     const owned=readOwnedBrowser();
     if(!owned){
+      importedDomDiagnosticIndex.clearCandidateSources();
       // Even without a running owned browser, preserve each script's static
       // eligibility result. Eligible items remain NOT_OBSERVED, never verified.
       const perScriptBlocks=plan.items.map(item=>
         item.status==='READY_FOR_INSPECTION'
           ?blockedItem(item,'BROWSER_NOT_RUNNING'):blockedItem(item));
-      importedDomDiagnosticIndex.clearCandidateSources();
       return {ok:false,code:'BROWSER_NOT_RUNNING',
         items:perScriptBlocks,truncatedScripts:plan.truncatedScripts,...unverified};
     }
