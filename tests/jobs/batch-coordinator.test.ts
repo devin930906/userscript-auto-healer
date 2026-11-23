@@ -544,6 +544,49 @@ test('TEST-022/NFR-009: a stalled worker without user cancellation times out and
  }
 });
 
+test('TASK-013/TEST-022/NFR-009: sequential workers share one batch deadline',async()=>{
+ // Regranting timeoutMs to each later script can multiply total run time.
+ const processed:number[]=[];
+ let secondAt=0;
+ let secondStarted!:()=>void;
+ const secondEntered=new Promise<void>(resolve=>{secondStarted=resolve;});
+ const queue=new ReadOnlyBatchCoordinator(
+  {count:3,concurrency:1,maxAttempts:1,timeoutMs:180},async ordinal=>{
+   processed.push(ordinal);
+   if(ordinal===0){
+    await new Promise<void>(resolve=>setTimeout(resolve,100));
+    return 'DONE';
+   }
+   if(ordinal===1){
+    secondAt=performance.now();
+    secondStarted();
+    await new Promise<void>(()=>{}); // ignores cancellation on purpose
+   }
+   return 'DONE';
+  });
+ let watchdog:NodeJS.Timeout|undefined;
+ try{
+  const run=queue.run();
+  await Promise.race([secondEntered,run.then(()=>{})]);
+  const receipt=await Promise.race([run,
+   new Promise<never>((_,reject)=>{
+    watchdog=setTimeout(()=>reject(Error('BATCH_DEADLINE_NOT_ENFORCED')),4000);
+   })
+  ]);
+  assert.ok(processed.length<=2,'no later dispatch after a batch deadline');
+  assert.equal(receipt.jobs[2].state,'CANCELLED');
+  assert.equal(receipt.automaticPatchAllowed,false);
+  assert.equal(receipt.businessVerified,false);
+  if(secondAt>0){
+   assert.ok(performance.now()-secondAt<155,
+    'the stalled second job must inherit the first job\'s spent budget');
+   assert.deepEqual(receipt.jobs.map(x=>x.state),['SUCCEEDED','FAILED','CANCELLED']);
+  }
+ }finally{
+  if(watchdog)clearTimeout(watchdog);
+ }
+});
+
 test('TEST-022/NFR-009: user cancellation before worker deadline stays CANCELLED',async()=>{
  let entered!:()=>void;
  const started=new Promise<void>(resolve=>{entered=resolve;});

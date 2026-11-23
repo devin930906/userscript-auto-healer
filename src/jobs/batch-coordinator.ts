@@ -348,6 +348,8 @@ export class ReadOnlyBatchCoordinator{
   }
   const controller=new AbortController();
   this.controller=controller;
+  // A single monotonic budget covers ALL sequential read-only jobs.
+  const batchDeadline=performance.now()+this.timeoutMs;
   const take=():MutableJob|undefined=>{
    if(controller.signal.aborted)return undefined;
    const job=this.jobs.find(j=>j.state==='QUEUED');
@@ -403,7 +405,7 @@ export class ReadOnlyBatchCoordinator{
       timedOut=true;
       this.cancel();
       resolve(undefined);
-     },this.timeoutMs);
+     },Math.max(0,batchDeadline-performance.now()));
     });
     try{
      const settled=await Promise.race([
