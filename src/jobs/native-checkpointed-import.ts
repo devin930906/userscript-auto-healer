@@ -120,9 +120,9 @@ export async function runCheckpointedNativeImportAnalysis(
  // the native importer's verified bytes, ordered and domain-separated.
  // v1/v2 did not bind the decoder and v3 grouped only by file count,
  // allowing the isolated Worker's 1 MiB budget to starve valid later files.
- // v4 leaves older on-disk scheduling hints intact in separate directories.
+ // v5 isolates the 120-second batch budget from obsolete 15-second v4 scheduling hints.
  // No persisted success can substitute for current-session AST evidence.
- const nameHash=createHash('sha256').update('uah-native-import-batch-v4\0');
+ const nameHash=createHash('sha256').update('uah-native-import-batch-v5\0');
  const groups:Array<{scripts:typeof bound;fingerprint:string}>=[];
  for(const script of bound){
   nameHash.update(script.sha256);nameHash.update('\0');
@@ -337,8 +337,11 @@ export async function runCheckpointedNativeImportAnalysis(
   observations[ordinal]=previews;
   return 'DONE' as const;
  };
+ // A single coordinator deadline governs the entire batch; it must match
+ // the native 120-second cap rather than accidentally using a per-segment
+ // 15-second total. Each isolated Worker retains its 10-second deadline.
  const options={count:groups.length,concurrency:1,maxAttempts:2,
-  timeoutMs:15000,jobHashes:groups.map(g=>g.fingerprint)};
+  timeoutMs:MAX_TOTAL_PREVIEW_MS,jobHashes:groups.map(g=>g.fingerprint)};
  const loaded=await loadReadOnlyBatchJournal(directory,options,worker);
  if(loaded.status==='BLOCKED'&&loaded.reason!=='NOT_FOUND')
   return fail(count,loaded.reason);

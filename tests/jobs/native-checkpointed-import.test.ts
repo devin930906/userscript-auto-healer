@@ -1142,7 +1142,7 @@ test('TASK-013/TEST-022/026: restored FAILED checkpoint does not imply prior Wor
   const root=join(userData,'readonly-journals');
   await mkdir(root,{recursive:true});
   const nameHash=createHash('sha256')
-   .update('uah-native-import-batch-v4\0')
+   .update('uah-native-import-batch-v5\0')
    .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
    .digest('hex');
   const batchDirectory=join(root,'batch-'+nameHash);
@@ -1151,7 +1151,8 @@ test('TASK-013/TEST-022/026: restored FAILED checkpoint does not imply prior Wor
    .update('uah-native-import-segment-v3\0').update('0').update('\0')
    .update(script.sha256).update('\0').update(script.textEncoding).update('\0')
    .digest('hex');
-  const options={count:1,maxAttempts:2,concurrency:1,timeoutMs:15000,
+  const options={count:1,maxAttempts:2,concurrency:1,
+    timeoutMs:MAX_TOTAL_PREVIEW_MS,
    jobHashes:[segmentHash]};
   const seed=new ReadOnlyBatchCoordinator(options,async()=> 'DONE');
   const exhausted={...seed.snapshot(),jobs:[{
