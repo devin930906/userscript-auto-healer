@@ -2522,6 +2522,20 @@ test('TASK-013/TEST-022/026: rejected DOM batch cannot abort an independent nati
   'invalid URL, missing browser, no eligible script and busy requests cannot interrupt AI discovery');
 });
 
+test('TASK-013/TEST-022: DOM result assembly failures keep actual observation attempts',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start,'expected the real imported batch handler');
+ const handler=main.slice(start,end);
+ const assembly=handler.indexOf('const triage=summarizeReadOnlyScenarioDomSeries');
+ const next=handler.indexOf('if(revoked()&&results.length<plan.items.length)',assembly);
+ assert.ok(assembly>=0&&next>assembly,'expected the per-script result assembly loop');
+ const block=handler.slice(assembly,next);
+ assert.match(block,/catch\{\s*results\.push\(blockedItem\(item,'OBSERVATION_FAILED',job\.attempts\)\);\s*\}/,
+  'an exception after a completed DOM observation must not falsely report zero attempts');
+});
+
 test('TASK-013/TEST-022/026: cancelled DOM batch cannot retain export grants or return success',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
