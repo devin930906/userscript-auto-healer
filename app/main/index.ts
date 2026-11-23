@@ -1617,10 +1617,7 @@ function registerSafeIpc(): void {
     scenarioObserveController=controller;
     scenarioObserveInProgress=true;
     let deadlineExpired=false;
-    const deadline=setTimeout(()=>{
-      deadlineExpired=true;
-      controller.abort();
-    },120000);
+    let deadline:NodeJS.Timeout|undefined;
     let observationReceiptDelivered=false;
     let candidatePreviewCount=0;
     const revoked=()=>controller.signal.aborted||epoch!==scenarioObserveEpoch||
@@ -1642,6 +1639,13 @@ function registerSafeIpc(): void {
         return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
           truncatedScripts:plan.truncatedScripts,...unverified};
       }
+      // Consent time is not batch execution time. Start the fixed 120-second
+      // stop budget only after explicit native authorization, before the
+      // first controlled Chrome operation. Rejection leaves no running timer.
+      deadline=setTimeout(()=>{
+        deadlineExpired=true;
+        controller.abort();
+      },120000);
       if(importedDomProgress)importedDomProgress={...importedDomProgress,phase:'OPENING_TARGET'};
       const opened=await openApprovedTarget(owned,plan.targetUrl,true,controller.signal);
       if(revoked())return {ok:false,code:'CANCELLED',
@@ -1822,7 +1826,7 @@ function registerSafeIpc(): void {
       return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
         truncatedScripts:plan.truncatedScripts,...unverified};
     }finally{
-      clearTimeout(deadline);
+      if(deadline)clearTimeout(deadline);
       importedDomProgress=null;
       importedDomDiagnosticIndex.clearCandidateSources();
       if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
