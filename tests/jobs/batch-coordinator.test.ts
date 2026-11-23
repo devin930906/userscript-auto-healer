@@ -587,6 +587,36 @@ test('TASK-013/TEST-022/NFR-009: sequential workers share one batch deadline',as
  }
 });
 
+test('TASK-013/TEST-022/NFR-009: late Worker success cannot outrun the monotonic batch deadline',async()=>{
+ const {performance}=require('node:perf_hooks') as typeof import('node:perf_hooks');
+ let now=0;
+ const clock=mock.method(performance,'now',()=>now);
+ try{
+  const dispatched:number[]=[];
+  const late=new ReadOnlyBatchCoordinator(
+   {count:2,concurrency:1,maxAttempts:1,timeoutMs:50},async ordinal=>{
+    dispatched.push(ordinal);
+    now=60; // Worker result arrives after deadline before queued timer fires.
+    return 'DONE' as const;
+   });
+  const lateReceipt=await late.run();
+  assert.deepEqual(dispatched,[0],'the expired batch must not dispatch another worker');
+  assert.deepEqual(lateReceipt.jobs.map(job=>job.state),['FAILED','CANCELLED'],
+   'late DONE must be rejected even when the timer has not executed yet');
+  assert.equal(lateReceipt.automaticPatchAllowed,false);
+  assert.equal(lateReceipt.businessVerified,false);
+  now=0;
+  const onTime=new ReadOnlyBatchCoordinator(
+   {count:1,concurrency:1,maxAttempts:1,timeoutMs:50},async()=>{
+    now=20;
+    return 'DONE' as const;
+   });
+  const onTimeReceipt=await onTime.run();
+  assert.equal(onTimeReceipt.jobs[0].state,'SUCCEEDED',
+   'an on-time result must remain accepted');
+ }finally{clock.mock.restore();}
+});
+
 test('TASK-013/TEST-022: a slow first journal save cannot dispatch past the batch deadline',async()=>{
  const dispatched:number[]=[];
  const observed:string[][]=[];

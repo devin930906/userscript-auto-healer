@@ -432,6 +432,13 @@ export class ReadOnlyBatchCoordinator{
      if(deadline)clearTimeout(deadline);
      removeAbortListener();
     }
+    // A Worker may resolve after the monotonic deadline while its timer
+    // callback is still queued. Never turn that late read-only receipt into
+    // SUCCEEDED or launch another job just because Promise.race won first.
+    if(!timedOut&&!controller.signal.aborted&&expired()){
+     timedOut=true;
+     this.cancel();
+    }
     if(timedOut)job.state='FAILED';
     else if(controller.signal.aborted)job.state='CANCELLED';
     else if(outcome==='DONE')job.state='SUCCEEDED';
