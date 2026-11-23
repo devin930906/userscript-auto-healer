@@ -1751,13 +1751,13 @@ function registerSafeIpc(): void {
       }
       // Keep window and owned-browser identity explicit at the success boundary.
       // A changed owner must never receive a successful batch or export grants.
-      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned){
+      if(revoked()||win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned){
         const cancelledItems=results.map(item=>item.candidateStatus==='CANDIDATE_ONLY'
           ?{...item,candidateStatus:'NOT_PROPOSED' as const,
              candidateReason:'BATCH_CANCELLED',candidateExportId:undefined}
           :item);
-        return {ok:false,code:'CANCELLED',items:cancelledItems,
-          truncatedScripts:plan.truncatedScripts,...unverified};
+        return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',
+          items:cancelledItems,truncatedScripts:plan.truncatedScripts,...unverified};
       }
       observationReceiptDelivered=true;
       return {ok:true,status:'UNKNOWN' as const,

@@ -2814,6 +2814,8 @@ test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries 
   'the final per-script receipt must be derived from the coordinator outcome');
  assert.match(handler,/attempts:job\.attempts/,
   'the user-visible receipt must retain the actual attempt count');
+ assert.match(handler,/if\(revoked\(\)\|\|win!==mainWindow\|\|win\.isDestroyed\(\)\|\|readOwnedBrowser\(\)!==owned\)\{[\s\S]*?code:deadlineExpired\?'TIME_BUDGET_EXHAUSTED':'CANCELLED',[\s\S]*?items:cancelledItems/,
+  'the final synchronous receipt guard must re-check cancellation and batch timeout before returning success');
  assert.match(handler,/if\(!opened\.ok\)[\s\S]*?items:plan\.items\.map/,
   'a shared target-open failure must return a blocked receipt for every imported script');
  assert.match(ui,/item\.attempts/,
