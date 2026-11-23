@@ -657,6 +657,12 @@ test('TASK-013/TEST-022/023: accepted fresh imports retire prior manual candidat
   'a valid single dropped file invalidates previous candidate grants without allowing invalid data to do so');
  assert.doesNotMatch(native,/importedDomCandidateExportStore\.clearOwner\(win\)[\s\S]*?if\(choice\.canceled/,
   'canceling a native picker must not revoke already reviewed candidates');
+ assert.match(ui,/function retireImportedDomCandidatesAfterImport\(\):void\{[\s\S]*?importedDomGeneration\+\+[\s\S]*?importedDomItems\?\.replaceChildren\(\)/,
+  'the renderer must remove earlier candidate export actions when a new import is accepted');
+ assert.match(ui,/if\(!result\.canceled[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
+  'native import must not clear candidate actions when the picker is canceled');
+ assert.match(ui,/batchId=started\.batchId;[\s\S]*?retireImportedDomCandidatesAfterImport\(\)/,
+  'a newly accepted dropped batch must retire stale candidate actions');
 });
 
 test('TASK-013/017 TEST-022/023: imported DOM candidate export is per-item, accessible and stale-reply fenced',()=>{
