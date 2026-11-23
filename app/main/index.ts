@@ -1538,12 +1538,6 @@ function registerSafeIpc(): void {
       return {ok:false,code:'OBSERVATION_BUSY',...unverified};
     if(mainWindow)importedDomCandidateExportStore.clearOwner(mainWindow);
     const plan=importedDomDiagnosticIndex.plan(targetInput);
-    if(!plan.targetUrl){
-      importedDomDiagnosticIndex.clearCandidateSources();
-      return {ok:false,code:'INVALID_TARGET_URL',
-        items:plan.items.map(item=>blockedItem(item,'INVALID_TARGET_URL')),
-        truncatedScripts:plan.truncatedScripts,...unverified};
-    }
     type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
       domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
       checkedSelectorCount:number;attempts:number;triageStatus?:string;faultCategory?:string;
@@ -1559,6 +1553,12 @@ function registerSafeIpc(): void {
       code:code??('code' in item?item.code:undefined),checkedSelectorCount:0,attempts,
       ...unverified
     });
+    if(!plan.targetUrl){
+      importedDomDiagnosticIndex.clearCandidateSources();
+      return {ok:false,code:'INVALID_TARGET_URL',
+        items:plan.items.map(item=>blockedItem(item,'INVALID_TARGET_URL')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+    }
     const ready=plan.items.filter((item)=>item.status==='READY_FOR_INSPECTION');
     const blocked=plan.items.filter((item)=>item.status==='BLOCKED');
     const results:ImportedDomResultItem[]=blocked.map(item=>blockedItem(item));
