@@ -2097,10 +2097,14 @@ function registerSafeIpc(): void {
       return {ok:false,code:'EXPORT_BUSY',...unverified};
     }
     const controller=new AbortController();
+    const exportFrameEpoch=mainFrameNavigationEpoch;
+    const exportSenderFrame=event.senderFrame;
     const abortOnWindowClose=()=>controller.abort();
     win.once('closed',abortOnWindowClose);
     let consumed=false;
-    const invalidated=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed();
+    const invalidated=()=>controller.signal.aborted||win!==mainWindow||win.isDestroyed()||
+      mainFrameNavigationEpoch!==exportFrameEpoch||
+      event.senderFrame!==exportSenderFrame||win.webContents.mainFrame!==exportSenderFrame;
     manualExportInProgress=true;
     nativeSelectionInProgress=true;
     try{

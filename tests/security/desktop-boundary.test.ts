@@ -2602,6 +2602,14 @@ test('TASK-013/TEST-023/026: native candidate export verifies original before di
   assert.ok(finalRead>exportDialog,'source is re-read after destination dialogs to reject changed bytes');
   assert.ok((handler.match(/importedDomCandidateExportStore\.isReserved\(win,id\)/g)??[]).length>=3,
    'short-lived candidate authority must be rechecked before/between awaited native dialogs');
+  assert.match(handler,/const exportFrameEpoch=mainFrameNavigationEpoch;/,
+   'native export binds initiating main-document generation');
+  assert.match(handler,/const exportSenderFrame=event\.senderFrame;/,
+   'native export captures authorized sender frame');
+  assert.match(handler,/mainFrameNavigationEpoch!==exportFrameEpoch/,
+   'full navigation during dialogs revokes export');
+  assert.match(handler,/win\.webContents\.mainFrame!==exportSenderFrame/,
+   'replaced renderer cannot continue export dialogs');
   assert.match(ui,/请重新导入原始脚本，再重新进行 DOM 观察/,
    'expired and consumed candidate receipts need explicit recovery instructions');
 });
