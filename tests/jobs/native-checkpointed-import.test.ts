@@ -37,6 +37,18 @@ test('TASK-013/TEST-022: nested node test runner executes its selected test body
  }finally{await rm(home,{recursive:true,force:true});}
 });
 
+test('TASK-013/TEST-022/026: failed isolated child preserves diagnostic TAP details',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'uah-nested-node-failure-'));
+ try{
+  const childFile=join(home,'nested-failure.test.cjs');
+  await writeFile(childFile,
+   "const {test}=require('node:test');test('failed nested sentinel',()=>{throw Error('UAH_CHILD_FAILURE_SENTINEL');});\\n".replace('\\\\n','\\n'));
+  assert.throws(()=>runNodeTestChild(['--test','--test-reporter=tap',childFile]),
+   /UAH_CHILD_FAILURE_SENTINEL/,
+   'the outer CI failure must expose the child assertion instead of only ERR_TEST_FAILURE');
+ }finally{await rm(home,{recursive:true,force:true});}
+});
+
 test('TASK-013/TEST-022/026: checkpointed native import must reject an array Proxy without reading properties',async()=>{
  let traps=0;
  const hostile=new Proxy([] as unknown as Parameters<
