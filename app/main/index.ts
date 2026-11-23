@@ -1462,6 +1462,7 @@ function registerSafeIpc(): void {
     // An accepted single dropped script starts a new source review lifecycle.
     // Invalid input above must not revoke capabilities or write source files.
     importedDomCandidateExportStore.clearOwner(win);
+    const droppedFrameEpoch=mainFrameNavigationEpoch;
     const controller=new AbortController();
     droppedImportController=controller;
     try{
@@ -1469,8 +1470,11 @@ function registerSafeIpc(): void {
       // It shares the main-owned durable, read-only checkpointed AST path;
       // no script is executed, applied or sent to a browser/manager.
       const summary=await summarizeResult({scripts:[result],errors:[],duplicates:0},
-        {window:win,index:importedDomDiagnosticIndex},controller.signal);
-      if(win!==mainWindow||win.isDestroyed())
+        {window:win,index:importedDomDiagnosticIndex,
+          currentFrame:()=>win===mainWindow&&!win.isDestroyed()&&
+            mainFrameNavigationEpoch===droppedFrameEpoch},controller.signal);
+      if(win!==mainWindow||win.isDestroyed()||
+         droppedFrameEpoch!==mainFrameNavigationEpoch)
         return {ok:false,code:'WINDOW_CLOSED'};
       // Cancellation only stops optional AST work. Validated imported bytes
       // were already read, so retain the SHA for this window's staged history.
