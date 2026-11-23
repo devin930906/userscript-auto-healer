@@ -1784,7 +1784,7 @@ function registerSafeIpc(): void {
             automaticPatchAllowed:false as const,tampermonkeyVerified:false as const,
             businessVerified:false as const});
         }catch{
-          results.push(blockedItem(item,'OBSERVATION_FAILED'));
+          results.push(blockedItem(item,'OBSERVATION_FAILED',job.attempts));
         }
       }
       if(revoked()&&results.length<plan.items.length){
