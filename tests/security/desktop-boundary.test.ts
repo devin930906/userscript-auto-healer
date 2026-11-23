@@ -2871,3 +2871,19 @@ test('TASK-013/TEST-022/026: imported DOM batch uses bounded per-script retries 
  assert.match(main,/const unverified = \{tampermonkeyVerified:false as const,gmApiVerified:false as const,/);
  assert.match(main,/businessVerified:false as const,automaticPatchAllowed:false as const\}/);
 });
+
+
+test('TASK-013/TEST-022/026: invalid imported DOM URL must not call a TDZ-uninitialized fallback helper', () => {
+  const source=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+  const begin=source.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+  const end=source.indexOf("ipcMain.handle('scenario:export-imported-candidate'",begin);
+  assert.ok(begin>=0&&end>begin,'expected real imported-batch IPC path');
+  const handler=source.slice(begin,end);
+  const plan=handler.indexOf('const plan=importedDomDiagnosticIndex.plan(targetInput);');
+  const helper=handler.indexOf('const blockedItem=');
+  const invalid=handler.indexOf('if(!plan.targetUrl){');
+  assert.ok(plan>=0&&helper>=0&&invalid>=0,'expected the real invalid-URL fail-closed path');
+  assert.ok(plan<helper&&helper<invalid,
+    'INVALID_TARGET_URL must be returned after blockedItem is initialized, not rejected by a TDZ ReferenceError');
+  assert.match(handler.slice(invalid,invalid+350),/code:'INVALID_TARGET_URL'/);
+});
