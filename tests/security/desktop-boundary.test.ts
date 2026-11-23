@@ -2648,6 +2648,34 @@ test('TASK-013/TEST-022/026: candidate preview failure is legible without revoki
   'candidate-generation errors need a clear, read-only, no-mutation explanation');
 });
 
+test('TASK-013/TEST-022: absent owned Chrome preserves each script static block receipt',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
+ const end=main.indexOf("ipcMain.handle('scenario:inspect'",start);
+ assert.ok(start>=0&&end>start);
+ const body=main.slice(start,end);
+ const noBrowser=body.slice(body.indexOf('if(!owned){'),body.indexOf('const win=mainWindow;'));
+ assert.match(noBrowser,/clearCandidateSources\(\)/,
+  'failure must not retain source bytes without an owned browser');
+ assert.match(noBrowser,/plan\.items\.map\(item=>/);
+ assert.match(noBrowser,/item\.status==='READY_FOR_INSPECTION'/);
+ assert.match(noBrowser,/blockedItem\(item,'BROWSER_NOT_RUNNING'\)/);
+ assert.match(noBrowser,/blockedItem\(item\)/,
+  'already blocked scripts must retain their distinct static-block reasons');
+ assert.match(noBrowser,/items:.*perScriptBlocks/,
+  'global absence of browser must still return per-script bounded receipts');
+ const uiStart=ui.indexOf('if(!result.ok){',ui.indexOf('diagnoseImportedBatch(targetUrl).then('));
+ const uiEnd=ui.indexOf('const items=Array.isArray(result.items)',uiStart);
+ assert.ok(uiStart>=0&&uiEnd>uiStart);
+ const failure=ui.slice(uiStart,uiEnd);
+ assert.match(failure,/Array\.isArray\(result\.items\)/);
+ assert.match(failure,/importedDomItems\?\.append\(row\)/);
+ assert.match(failure,/importedDomBlockReason\(item\.code\)/);
+ assert.match(failure,/重新导入/,
+  'source-lifetime revocation must be explained without promising candidate reuse');
+});
+
 test('TASK-013/TEST-022: unavailable import sources do not exhaust 16 candidate proposal slots',()=>{
  const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
  const start=main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'");
