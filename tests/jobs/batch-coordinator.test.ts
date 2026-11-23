@@ -587,6 +587,48 @@ test('TASK-013/TEST-022/NFR-009: sequential workers share one batch deadline',as
  }
 });
 
+test('TASK-013/TEST-022: a slow first journal save cannot dispatch past the batch deadline',async()=>{
+ const dispatched:number[]=[];
+ const observed:string[][]=[];
+ const queue=new ReadOnlyBatchCoordinator(
+  {count:2,concurrency:1,maxAttempts:1,timeoutMs:35},async ordinal=>{
+   dispatched.push(ordinal);
+   return 'DONE';
+  });
+ const result=await queue.run(async()=>{
+  observed.push(queue.snapshot().jobs.map(j=>j.state));
+  if(observed.length===1)
+   await new Promise<void>(resolve=>setTimeout(resolve,80));
+ });
+ assert.deepEqual(dispatched,[],'worker must not start after initial checkpoint consumes budget');
+ assert.deepEqual(result.jobs.map(j=>j.state),['CANCELLED','CANCELLED']);
+ assert.deepEqual(observed.at(-1),['CANCELLED','CANCELLED'],
+  'cancellation must be durably observable after initial checkpoint timeout');
+});
+
+test('TASK-013/TEST-022: a slow terminal checkpoint cancels queued work without redispatch',async()=>{
+ const dispatched:number[]=[];
+ const observed:string[][]=[];
+ let delayed=false;
+ const queue=new ReadOnlyBatchCoordinator(
+  {count:2,concurrency:1,maxAttempts:1,timeoutMs:45},async ordinal=>{
+   dispatched.push(ordinal);
+   return 'DONE';
+  });
+ const result=await queue.run(async()=>{
+  const states=queue.snapshot().jobs.map(j=>j.state);
+  observed.push(states);
+  if(states[0]==='SUCCEEDED'&&!delayed){
+   delayed=true;
+   await new Promise<void>(resolve=>setTimeout(resolve,90));
+  }
+ });
+ assert.deepEqual(dispatched,[0]);
+ assert.deepEqual(result.jobs.map(j=>j.state),['SUCCEEDED','CANCELLED']);
+ assert.deepEqual(observed.at(-1),['SUCCEEDED','CANCELLED'],
+  'deadline cancellation must be checkpointed before run settles');
+});
+
 test('TEST-022/NFR-009: user cancellation before worker deadline stays CANCELLED',async()=>{
  let entered!:()=>void;
  const started=new Promise<void>(resolve=>{entered=resolve;});
