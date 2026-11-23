@@ -3076,3 +3076,35 @@ test('TASK-015/TEST-024/026: delayed history archive cannot cross native frame o
  assert.match(handler,/code:'HISTORY_UNAVAILABLE'[\s\S]*?automaticPatchAllowed:false[\s\S]*?automaticRollbackAllowed:false[\s\S]*?tampermonkeyVerified:false[\s\S]*?businessVerified:false/,
   'stale requests must return a fail-closed response with no manager or repair authority');
 });
+
+test('TASK-013/TEST-022/026: cancelled dropped batch rejects late file append without losing earlier batch',()=>{
+ const main=readFileSync(join(process.cwd(),'app/main/index.ts'),'utf8');
+ const ui=readFileSync(join(process.cwd(),'app/ui/index.ts'),'utf8');
+ const start=main.indexOf("ipcMain.handle('import:dropped-batch:add'");
+ const end=main.indexOf("ipcMain.handle('import:dropped-batch:finish'",start);
+ assert.ok(start>=0&&end>start,'native dropped-batch append must remain a separate authorized IPC');
+ const handler=main.slice(start,end);
+ const authorized=handler.indexOf('authorizeSender(event)');
+ const ownership=handler.indexOf("code:'STALE_BATCH'");
+ const controller=handler.indexOf('const controller=droppedImportController;');
+ const cancelled=handler.indexOf('controller.signal.aborted',controller);
+ const accepted=handler.indexOf('return session.batch.add(name,data)');
+ assert.ok(authorized>=0&&ownership>authorized&&controller>ownership&&
+  cancelled>controller&&accepted>cancelled,
+  'cancellation must be checked after native ownership but before consuming new bytes');
+ assert.match(handler.slice(cancelled,accepted),/code:controller\?\.signal\.aborted\?'CANCELLED':'STALE_BATCH'/);
+ const append=ui.indexOf('const appended=await window.healer.addDroppedImportBatch(');
+ assert.ok(append>=0,'renderer must retain the existing bounded batch API');
+ const read=ui.lastIndexOf('await file.arrayBuffer()',append);
+ const localAbort=ui.indexOf('if(cancelRequested)',read);
+ assert.ok(read>=0&&localAbort>read&&localAbort<append,
+  'a cancellation during async byte reading must stop dispatch before IPC');
+ const cancelledReply=ui.indexOf("appended.code==='CANCELLED'",append);
+ const nextError=ui.indexOf("appended.code==='STALE_BATCH'",append);
+ assert.ok(cancelledReply>append&&cancelledReply<nextError,
+  'native cancellation must stop later appends, not be treated as another file failure');
+ assert.match(ui.slice(cancelledReply,nextError),/unprocessedCount\+=files\.length-index;/,
+  'the rejected current file and all remaining files must be accounted as unprocessed');
+ assert.match(main.slice(end),/const result=session\.batch\.finish\(\)/,
+  'the finish/recover path must remain available for bytes accepted before cancellation');
+});

@@ -1402,6 +1402,12 @@ function registerSafeIpc(): void {
         session.frameEpoch!==mainFrameNavigationEpoch||
         session.owner!==win||!win||win.isDestroyed())
       return {ok:false,processed:0,code:'STALE_BATCH'};
+    // A file.arrayBuffer() can finish after the user cancelled a dropped
+    // import. Do not accept late bytes into the native batch; finish/recover
+    // still retains all previously validated scripts without re-adding them.
+    const controller=droppedImportController;
+    if(!controller||controller.signal.aborted)
+      return {ok:false,processed:0,code:controller?.signal.aborted?'CANCELLED':'STALE_BATCH'};
     return session.batch.add(name,data);
   });
   ipcMain.handle('import:dropped-batch:finish',async(event,batchId:unknown)=>{
@@ -2580,7 +2586,7 @@ async function createMainWindow(): Promise<void> {
       "releaseFirstRead(); " +
       "const cancelled=await new Promise(resolve=>{const start=Date.now();const tick=()=>{ " +
       "const lines=Array.from(document.querySelectorAll('#import-list li')).map(x=>x.textContent); " +
-      "if(lines.some(x=>x.includes('用户取消导入：其余 1 份文件未读取。')) && " +
+      "if(lines.some(x=>x.includes('用户取消导入：其余 2 份文件未加入批次。')) && " +
       "document.getElementById('cancel-import').disabled)resolve(true); " +
       "else if(Date.now()-start>3000)resolve(false);else setTimeout(tick,40);};tick();}); " +
       // The canceled-row log is emitted before the finish IPC and recovery
@@ -2663,9 +2669,9 @@ async function createMainWindow(): Promise<void> {
       "document.getElementById('scenario-export-manual').disabled && " +
       "noManualRestore.ok === false && noManualRestore.code === 'CANCELLED' && noInventory.ok === false && noInventory.code === 'CANCELLED' && " +
       "rendered === true && badDropReported && scanCancelReady && pendingCallbackBeforeCancel && scanCancelled && isolated && canCancel && cancelled && " +
-      "document.getElementById('import-summary').textContent.includes('成功 5') && " +
+      "document.getElementById('import-summary').textContent.includes('成功 4') && " +
       "document.getElementById('import-summary').textContent.includes('失败 2') && " +
-      "document.getElementById('import-summary').textContent.includes('未处理 1') && " +
+      "document.getElementById('import-summary').textContent.includes('未处理 2') && " +
       "document.getElementById('import-summary').textContent.includes('重复 2') && " +
       "document.getElementById('cancel-import').disabled === true && " +
       "blockedAutoDomInput.ok === false && blockedAutoDomInput.code === 'INVALID_TARGET_URL' && " +
@@ -2688,7 +2694,7 @@ async function createMainWindow(): Promise<void> {
       "a.security.sandboxed === true && " +
       "a.security.isolated === true, droppedCancelReadStarted:firstReadDidStart, " +
       "droppedCancelAcknowledged:cancelled, " +
-      "droppedCancelSummaryCorrect:['成功 5','失败 2','未处理 1','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
+      "droppedCancelSummaryCorrect:['成功 4','失败 2','未处理 2','重复 2'].every(label=>document.getElementById('import-summary').textContent.includes(label)), " +
       "keys:Object.keys(a).sort(),nativeHash:nativeFiles.scripts[0]?.sha256}; })()",
       true
     ) as { ok?: boolean; keys?: string[]; nativeHash?:string;

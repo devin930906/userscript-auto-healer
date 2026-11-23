@@ -537,7 +537,20 @@ async function importFiles(files: readonly File[]): Promise<void> {
       // Byte reading may finish first; native IPC can abort the shared AST worker.
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
+        // A cancellation can arrive while file.arrayBuffer() is pending.
+        // Avoid sending already-read bytes after revocation; the native IPC
+        // independently rejects a late add that races this local check.
+        if(cancelRequested){
+          unprocessedCount+=files.length-index;
+          logLine('用户取消导入：其余 '+(files.length-index)+' 份文件未加入批次。');
+          break;
+        }
         const appended=await window.healer.addDroppedImportBatch(batchId,file.name,bytes);
+        if(!appended.ok&&appended.code==='CANCELLED'){
+          unprocessedCount+=files.length-index;
+          logLine('用户取消导入：其余 '+(files.length-index)+' 份文件未加入批次。');
+          break;
+        }
         if(!appended.ok&&(appended.code==='STALE_BATCH'||appended.code==='BATCH_FINALIZED')){
           failedCount++;
           logLine(file.name+': '+appended.code);
