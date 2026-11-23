@@ -112,6 +112,25 @@ test('TASK-013/TEST-022/026: retained source lookup is bound to its imported fil
  assert.equal(index.readUtf8CandidateSource(hash,'original.user.js'),source);
 });
 
+test('TASK-013/TEST-022/026: reimport updates filename without reusing earlier candidate bytes',()=>{
+ const source='// ==UserScript==\\n// @name Reimport identity\\n// ==/UserScript==\\n';
+ const hash=createHash('sha256').update(source,'utf8').digest('hex');
+ const index=new ImportedDomDiagnosticIndex();
+ index.recordImported(hash,hints('#old'),'first.user.js',source);
+ assert.equal(index.readUtf8CandidateSource(hash,'first.user.js'),source);
+ // A new native import with identical bytes may lack a new eligible UTF-8
+ // candidate snapshot. The old sidecar must not be rebound to another name.
+ index.recordImported(hash,hints('#old'),'second.user.js');
+ assert.equal(index.plan('https://example.org/app').items[0].filename,'second.user.js');
+ assert.equal(index.readUtf8CandidateSource(hash,'first.user.js'),null);
+ assert.equal(index.readUtf8CandidateSource(hash,'second.user.js'),null);
+ index.recordImported(hash,hints('#old'),'second.user.js',source);
+ assert.equal(index.readUtf8CandidateSource(hash,'first.user.js'),null);
+ assert.equal(index.readUtf8CandidateSource(hash,'second.user.js'),source);
+ assert.equal(index.plan('https://example.org/app').items.length,1,
+  'identical source bytes remain a single per-window diagnostic identity');
+});
+
 test('TASK-013/TEST-022/026: UTF-8 candidate source stays main-only and clears after batch use',()=>{
  const source='// ==UserScript==\n// @match https://example.org/*\n// @grant none\n// ==/UserScript==\ndocument.querySelector("#old");\n';
  const hash=createHash('sha256').update(source,'utf8').digest('hex');
