@@ -1833,7 +1833,6 @@ function registerSafeIpc(): void {
       importedDomDiagnosticIndex.clearCandidateSources();
       if(!observationReceiptDelivered)importedDomCandidateExportStore.clearOwner(win);
       if(scenarioObserveController===controller)scenarioObserveController=null;
-      scenarioObserveInProgress=false;
       // Cancellation/timeout can settle the coordinator before an in-flight
       // CDP observer settles. The existing exclusive lease must outlive every
       // such read-only operation so the next diagnostic cannot overlap it.
@@ -1841,10 +1840,13 @@ function registerSafeIpc(): void {
       // reopening the application is safer than overlapping CDP operations.
       if(observationCoordinator){
         void observationCoordinator.whenWorkersRetired().then(
-          ()=>{diagnosticGate.release(lease);},
-          ()=>{/* Unknown retirement cannot authorize a new diagnostic. */}
+          ()=>{scenarioObserveInProgress=false;diagnosticGate.release(lease);},
+          ()=>{/* Unknown retirement cannot authorize a new diagnostic or import. */}
         );
-      }else diagnosticGate.release(lease);
+      }else{
+        scenarioObserveInProgress=false;
+        diagnosticGate.release(lease);
+      }
     }
   });
 
