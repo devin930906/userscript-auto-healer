@@ -7,6 +7,7 @@ import {ImportedDomDiagnosticIndex,recordImportedDomForCurrentOwner}
 import {ImportedDomCandidateExportStore}
   from '../../src/diagnostics/imported-dom-diagnostic-index';
 import {analyzeImportedOutcomeWithCheckpoint} from '../../src/jobs/native-checkpointed-import';
+import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import { basename, dirname, join, win32 } from 'node:path';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1522,21 +1523,23 @@ function registerSafeIpc(): void {
     const plan=importedDomDiagnosticIndex.plan(targetInput);
     if(!plan.targetUrl){
       importedDomDiagnosticIndex.clearCandidateSources();
-      return {ok:false,code:'INVALID_TARGET_URL',...unverified};
+      return {ok:false,code:'INVALID_TARGET_URL',
+        items:plan.items.map(item=>blockedItem(item,'INVALID_TARGET_URL')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
     }
     type ImportedDomResultItem={ordinal:number;filename:string;status:'UNKNOWN';
       domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
-      checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
+      checkedSelectorCount:number;attempts:number;triageStatus?:string;faultCategory?:string;
       evidenceCount?:number;reason?:string;automaticPatchAllowed:false;
       candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
       candidateExportId?:string;
       candidateOriginalSha256?:string;candidateSha256?:string;
       candidateBefore?:string;candidateAfter?:string;
       tampermonkeyVerified:false;businessVerified:false};
-    const blockedItem=(item:typeof plan.items[number],code?:string)=>({
+    const blockedItem=(item:typeof plan.items[number],code?:string,attempts=0)=>({
       ordinal:item.ordinal,filename:item.filename??('脚本 '+(item.ordinal+1)),
       status:'UNKNOWN' as const,domStatus:'NOT_OBSERVED' as const,
-      code:code??('code' in item?item.code:undefined),checkedSelectorCount:0,
+      code:code??('code' in item?item.code:undefined),checkedSelectorCount:0,attempts,
       ...unverified
     });
     const ready=plan.items.filter((item)=>item.status==='READY_FOR_INSPECTION');
@@ -1562,10 +1565,14 @@ function registerSafeIpc(): void {
     const win=mainWindow;
     if(!win||win.isDestroyed()){
       importedDomDiagnosticIndex.clearCandidateSources();
-      return {ok:false,code:'NO_WINDOW',...unverified};
+      return {ok:false,code:'NO_WINDOW',
+        items:plan.items.map(item=>blockedItem(item,'NO_WINDOW')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
     }
     const lease=diagnosticGate.reserve();
-    if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',...unverified};
+    if(lease===null)return {ok:false,code:'OBSERVATION_BUSY',
+      items:plan.items.map(item=>blockedItem(item,'OBSERVATION_BUSY')),
+      truncatedScripts:plan.truncatedScripts,...unverified};
     const controller=new AbortController();
     const epoch=scenarioObserveEpoch;
     scenarioObserveController=controller;
@@ -1587,19 +1594,70 @@ function registerSafeIpc(): void {
         defaultId:1,cancelId:1,noLink:true,
         message:'允许在受控 Chrome 执行批量只读 DOM 计数，并在严格符合条件时生成最多 16 项仅内存候选预览？',
         detail:plan.targetUrl+'\n将检查 '+ready.length+' 份脚本中的最多 '+
-          selectorCount+' 个 AST 字面选择器，最多观测 120 秒。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
+          selectorCount+' 个 AST 字面选择器，批次最长 120 秒。每个脚本最多尝试 2 次，仅对临时 CDP 通信失败重试 1 次；其他失败、取消、权限拒绝及目标不匹配不会重试。不会执行脚本、收集页面内容、修改文件或检查 Tampermonkey / GM / 业务结果。'+
           '\n候选源码只在主进程内存短暂保留，整个批次最多 16 MiB，观测结束或窗口关闭后清除。符合条件的候选可由你另行发起原生文件选择、独立目录选择及最终保存确认，创建备份和人工候选；本次观察本身不会写入或导出任何文件。'+
           '\n结果只代表限定 DOM 计数或一条待审阅字面选择器差异；登录状态和真实业务断言仍需另行配置与验证。'
       });
-      if(consent.response!==0||revoked())
-        return {ok:false,code:controller.signal.aborted?'CANCELLED':'NOT_AUTHORIZED',...unverified};
+      if(consent.response!==0||revoked()){
+        const code=controller.signal.aborted||revoked()?'CANCELLED':'NOT_AUTHORIZED';
+        return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
+          truncatedScripts:plan.truncatedScripts,...unverified};
+      }
       const opened=await openApprovedTarget(owned,plan.targetUrl,true,controller.signal);
-      if(revoked())return {ok:false,code:'CANCELLED',...unverified};
-      if(!opened.ok)return {ok:false,code:opened.code,...unverified};
-      for(const item of plan.items){
-        if(item.status!=='READY_FOR_INSPECTION')continue;
-        if(revoked()){
-          results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
+      if(revoked())return {ok:false,code:'CANCELLED',
+        items:plan.items.map(item=>blockedItem(item,'CANCELLED')),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+      if(!opened.ok)return {ok:false,code:opened.code,
+        items:plan.items.map(item=>blockedItem(item,opened.code)),
+        truncatedScripts:plan.truncatedScripts,...unverified};
+      const observations:Array<Awaited<ReturnType<typeof observeApprovedDomSeries>>|undefined>=
+        Array.from({length:ready.length});
+      const observationCodes:Array<string|undefined>=Array.from({length:ready.length});
+      let coordinator!:ReadOnlyBatchCoordinator;
+      coordinator=new ReadOnlyBatchCoordinator({
+        count:ready.length,concurrency:1,maxAttempts:2,timeoutMs:120000
+      },async(index,signal)=>{
+        const item=ready[index];
+        if(!item||signal.aborted||revoked()){
+          observationCodes[index]='CANCELLED';
+          coordinator.cancel();
+          return 'PERMANENT_FAILURE';
+        }
+        try{
+          const observation=await observeApprovedDomSeries(
+            owned,opened,plan.targetUrl,true,
+            item.selectorSites.map(site=>site.selector),3,250,signal);
+          if(signal.aborted||revoked()){
+            observationCodes[index]='CANCELLED';
+            coordinator.cancel();
+            return 'PERMANENT_FAILURE';
+          }
+          if(observation.ok){
+            observations[index]=observation;
+            observationCodes[index]=undefined;
+            return 'DONE';
+          }
+          observationCodes[index]=observation.code;
+          return observation.code==='CDP_FAILED'?'RETRYABLE_FAILURE':'PERMANENT_FAILURE';
+        }catch{
+          observationCodes[index]='OBSERVATION_FAILED';
+          return 'PERMANENT_FAILURE';
+        }
+      });
+      const cancelCoordinator=()=>coordinator.cancel();
+      controller.signal.addEventListener('abort',cancelCoordinator,{once:true});
+      let batchSnapshot:ReturnType<ReadOnlyBatchCoordinator['snapshot']>;
+      try{batchSnapshot=await coordinator.run();}
+      finally{controller.signal.removeEventListener('abort',cancelCoordinator);}
+      for(let index=0;index<ready.length;index++){
+        const item=ready[index];
+        const job=batchSnapshot.jobs[index];
+        const observation=observations[index];
+        if(job.state!=='SUCCEEDED'||!observation){
+          const code=job.state==='CANCELLED'
+            ?(deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED')
+            :observationCodes[index]??(job.state==='FAILED'?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED');
+          results.push(blockedItem(item,code,job.attempts));
           continue;
         }
         try{
@@ -1615,16 +1673,9 @@ function registerSafeIpc(): void {
               kind:'selector-present' as const,selector:site.selector
             }))
           };
-          const observation=await observeApprovedDomSeries(
-            owned,opened,plan.targetUrl,true,
-            item.selectorSites.map(site=>site.selector),3,250,controller.signal);
-          if(revoked()){
-            results.push(blockedItem(item,deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED'));
-            continue;
-          }
           const triage=summarizeReadOnlyScenarioDomSeries(scenario,observation,true);
           if(triage.status!=='LIMITED_DOM_SIGNAL_ONLY'||triage.code!=='NONE'){
-            results.push(blockedItem(item,triage.code||'OBSERVATION_BLOCKED'));
+            results.push(blockedItem(item,triage.code||'OBSERVATION_BLOCKED',job.attempts));
             continue;
           }
           let candidateFields:Pick<ImportedDomResultItem,
@@ -1671,7 +1722,7 @@ function registerSafeIpc(): void {
           results.push({ordinal:item.ordinal,
             filename:item.filename??('脚本 '+(item.ordinal+1)),
             status:'UNKNOWN' as const,domStatus:'LIMITED_DOM_SIGNAL_ONLY' as const,
-            checkedSelectorCount:triage.checkedAssertions,
+            attempts:job.attempts,checkedSelectorCount:triage.checkedAssertions,
             triageStatus:triage.triage.status,
             faultCategory:triage.triage.category,
             evidenceCount:triage.triage.evidenceIds.length,
@@ -1690,18 +1741,33 @@ function registerSafeIpc(): void {
         }
       }
       results.sort((a,b)=>a.ordinal-b.ordinal);
-      if(revoked())return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',...unverified};
+      if(revoked()){
+        const cancelledItems=results.map(item=>item.candidateStatus==='CANDIDATE_ONLY'
+          ?{...item,candidateStatus:'NOT_PROPOSED' as const,
+             candidateReason:'BATCH_CANCELLED',candidateExportId:undefined}
+          :item);
+        return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'CANCELLED',
+          items:cancelledItems,truncatedScripts:plan.truncatedScripts,...unverified};
+      }
       // Keep window and owned-browser identity explicit at the success boundary.
       // A changed owner must never receive a successful batch or export grants.
-      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned)
-        return {ok:false,code:'CANCELLED',...unverified};
+      if(win!==mainWindow||win.isDestroyed()||readOwnedBrowser()!==owned){
+        const cancelledItems=results.map(item=>item.candidateStatus==='CANDIDATE_ONLY'
+          ?{...item,candidateStatus:'NOT_PROPOSED' as const,
+             candidateReason:'BATCH_CANCELLED',candidateExportId:undefined}
+          :item);
+        return {ok:false,code:'CANCELLED',items:cancelledItems,
+          truncatedScripts:plan.truncatedScripts,...unverified};
+      }
       observationReceiptDelivered=true;
       return {ok:true,status:'UNKNOWN' as const,
         reason:'DOM_SIGNAL_DOES_NOT_VERIFY_SCRIPT_OR_BUSINESS',
         targetMatchedCount:ready.length,truncatedScripts:plan.truncatedScripts,
         items:results,...unverified};
     }catch{
-      return {ok:false,code:deadlineExpired?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED',...unverified};
+      const code=deadlineExpired?'TIME_BUDGET_EXHAUSTED':'OBSERVATION_FAILED';
+      return {ok:false,code,items:plan.items.map(item=>blockedItem(item,code)),
+        truncatedScripts:plan.truncatedScripts,...unverified};
     }finally{
       clearTimeout(deadline);
       importedDomDiagnosticIndex.clearCandidateSources();

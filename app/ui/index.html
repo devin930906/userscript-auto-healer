@@ -154,7 +154,7 @@
       <header class="page-heading"><h2>诊断与记录</h2><p>发起只读 DOM 检查，管理定时复检和观察历史。</p></header>
       <div id="imported-dom-diagnosis" class="panel">
         <h3>批量只读 DOM 观察</h3>
-        <p>输入一个目标网址后，程序会从已导入脚本的隔离 AST 结果中自动取出有界的字面选择器；只有静态 @match 明确覆盖此网址的脚本才会访问。每次访问前都会显示系统确认。此操作不会执行脚本、收集页面内容或改动文件。</p>
+        <p>输入一个目标网址后，程序会从已导入脚本的隔离 AST 结果中自动取出有界的字面选择器；只有静态 @match 明确覆盖此网址的脚本才会访问。本批开始前会显示一次系统确认；确认后按顺序检查匹配脚本。此操作不会执行脚本、收集页面内容或改动文件。</p>
         <p id="imported-dom-export-risk">满足严格条件时，结果可附一条仅供审阅的字面选择器候选差异。候选的短时导出上下文只保存在主进程内存，最长五分钟。你可为单项重新选择同一份 .user.js；系统会重新核对显示文件名和 SHA-256，再由原生对话框选择独立备份及导出目录，并在最后确认后另存新文件。最终确认前取消不会创建候选文件；本操作不会改写原始脚本，也不会自动安装、执行或应用候选。文件导出不证明登录状态、脚本注入、Tampermonkey、GM API 或业务恢复，缺少可靠条件的脚本会逐项显示为未知或受阻。</p>
         <label for="imported-dom-target">本批目标网址（HTTP/HTTPS）</label>
         <input id="imported-dom-target" type="url" maxlength="4096" placeholder="https://example.com/page">

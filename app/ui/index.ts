@@ -96,7 +96,7 @@ interface Window {
       truncatedScripts?:boolean;
       items?:readonly {ordinal:number;filename:string;status:'UNKNOWN';
         domStatus:'NOT_OBSERVED'|'LIMITED_DOM_SIGNAL_ONLY';code?:string;
-        checkedSelectorCount:number;triageStatus?:string;faultCategory?:string;
+        checkedSelectorCount:number;attempts:number;triageStatus?:string;faultCategory?:string;
         evidenceCount?:number;reason?:string;
         candidateStatus?:'CANDIDATE_ONLY'|'NOT_PROPOSED';candidateReason?:string;
         candidateExportId?:string;
@@ -1824,6 +1824,9 @@ function importedDomBlockReason(code:string|undefined):string{
   SELECTOR_LIMIT_EXCEEDED:'选择器数量超过本轮只读观测上限',
   BUSINESS_AND_MANAGER_ACCEPTANCE_REQUIRED:'业务、登录状态和管理器运行仍未知',
   BROWSER_NOT_RUNNING:'请先启动本程序管理的独立 Chrome',
+  OBSERVATION_BUSY:'另一个诊断任务正在运行，本批尚未开始',
+  NOT_AUTHORIZED:'未获系统授权，本批没有访问目标网页',
+  CDP_FAILED:'CDP 通信失败；本项最多尝试两次后仍未取得可靠证据',
   TIME_BUDGET_EXHAUSTED:'本轮达到 120 秒上限，未观测项目保持未知',
   CANCELLED:'本次观测已取消',
   OBSERVATION_FAILED:'只读 DOM 观测失败，没有生成验证结论'
@@ -1836,6 +1839,7 @@ function importedDomCandidateReason(code:string|undefined):string{
   BATCH_PREVIEW_LIMIT:'本批候选预览达到 16 项上限',
   PREVIEW_NOT_ATTEMPTED:'本项未尝试生成候选预览',
   PREVIEW_FAILED:'候选生成失败；已完成的只读 DOM 观察结果仍保留，原始脚本未修改',
+  BATCH_CANCELLED:'本批已取消，候选导出权限已撤销；请重新导入并观测',
   INVALID_INPUT:'候选输入无效',NOT_AUTHORIZED:'缺少原生授权',
   SOURCE_IDENTITY_MISMATCH:'源码身份与导入哈希不一致',
   SOURCE_TOO_LARGE:'源码超过 256 KiB 限制',
@@ -1930,7 +1934,8 @@ importedDomRunButton?.addEventListener('click',()=>{
    for(const item of blockedItems){
     if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
     const row=document.createElement('li');
-    row.textContent=item.filename+': '+importedDomBlockReason(item.code);
+    row.textContent=item.filename+': '+importedDomBlockReason(item.code)+
+     (item.attempts>0?'（尝试 '+item.attempts+' 次）':'（未开始）');
     importedDomItems?.append(row);
    }
    return;
@@ -1949,6 +1954,7 @@ importedDomRunButton?.addEventListener('click',()=>{
   for(const item of items){
    if(!item||typeof item.filename!=='string'||typeof item.ordinal!=='number')continue;
    const row=document.createElement('li');
+   const attemptsLabel=item.attempts>0?'（尝试 '+item.attempts+' 次）':'（未开始）';
    row.textContent=item.filename+': '+(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'
     ?'只读观察 '+item.checkedSelectorCount+' 个 AST 选择器；'+
      (item.triageStatus??'UNKNOWN')+' / '+(item.faultCategory??'UNKNOWN')+
@@ -1958,7 +1964,7 @@ importedDomRunButton?.addEventListener('click',()=>{
         (item.candidateBefore??'')+' → '+(item.candidateAfter??'')
        :item.candidateStatus==='NOT_PROPOSED'
         ?'；'+importedDomCandidateReason(item.candidateReason):'')
-    :importedDomBlockReason(item.code));
+    :importedDomBlockReason(item.code))+attemptsLabel;
    if(item.domStatus==='LIMITED_DOM_SIGNAL_ONLY'&&
       item.candidateStatus==='CANDIDATE_ONLY'){
     if(typeof item.candidateExportId==='string'&&item.candidateExportId.length>0){
