@@ -13,7 +13,7 @@ import {runCheckpointedNativeImportAnalysis} from '../../src/jobs/native-checkpo
 import {BATCH_JOURNAL_FILENAME,saveReadOnlyBatchJournal} from '../../src/jobs/batch-journal';
 import {ReadOnlyBatchCoordinator} from '../../src/jobs/batch-coordinator';
 import {previewImportedScriptAnalysis,unavailableImportPreview} from '../../src/analyze/import-preview';
-import {readMainOnlyDiagnosticHints} from '../../src/analyze/isolated-batch-preview';
+import {readMainOnlyDiagnosticHints,MAX_TOTAL_PREVIEW_MS} from '../../src/analyze/isolated-batch-preview';
 import {runImportedReadOnlyAnalysisQueue} from '../../src/jobs/imported-analysis-queue';
 
 function runNodeTestChild(args:string[],extraEnv:NodeJS.ProcessEnv={}):string{
