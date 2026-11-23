@@ -1617,7 +1617,8 @@ function registerSafeIpc(): void {
               candidateStatus:'NOT_PROPOSED',candidateReason:'PREVIEW_NOT_ATTEMPTED'
             };
           if(candidatePreviewCount<16){
-            const source=importedDomDiagnosticIndex.readUtf8CandidateSource(item.scriptSha256);
+            const source=importedDomDiagnosticIndex.readUtf8CandidateSource(
+              item.scriptSha256,item.filename);
             if(source===null){
               candidateFields={candidateStatus:'NOT_PROPOSED',candidateReason:'SOURCE_UNAVAILABLE'};
             }else{
