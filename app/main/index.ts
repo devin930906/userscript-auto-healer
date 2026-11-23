@@ -2221,6 +2221,8 @@ async function createMainWindow(): Promise<void> {
   win.webContents.on('render-process-gone',()=>{
     // The destroyed renderer must not retain an authorized DOM observation.
     cancelScenarioObservation();
+    importedDomCandidateExportStore.clearOwner(win);
+    importedDomDiagnosticIndex.clearCandidateSources();
     nativeImportController?.abort();
     abortDroppedImportForWindow(win);
   });
@@ -2228,6 +2230,8 @@ async function createMainWindow(): Promise<void> {
     if(isMainFrame&&!isInPlace){
       // A new document needs fresh native consent; abort the old DOM lease.
       cancelScenarioObservation();
+      importedDomCandidateExportStore.clearOwner(win);
+      importedDomDiagnosticIndex.clearCandidateSources();
       nativeImportController?.abort();
       abortDroppedImportForWindow(win);
     }
