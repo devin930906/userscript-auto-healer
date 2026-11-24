@@ -111,8 +111,8 @@ test('TASK-011/TEST-020/021: end-to-end atomic candidate mutation and subsequent
     assert.equal(applyResult.candidateSha256, candSha);
     assert.equal(applyResult.automaticPatchAllowed, false);
     assert.equal(applyResult.automaticRollbackAllowed, false);
-    assert.equal(applyResult.tampermonkeyVerified, true);
-    assert.equal(applyResult.businessVerified, true);
+    assert.equal(applyResult.tampermonkeyVerified, false);
+    assert.equal(applyResult.businessVerified, false);
 
     // Verify source on disk now contains candidate bytes
     const onDiskAfterApply = await readFile(sourcePath);
@@ -600,5 +600,29 @@ test('TASK-011/TEST-020/021: mutation options accessor is rejected without execu
     assert.equal(accessed, false, 'untrusted options getter must not run');
     assert.equal(result.status, 'BLOCKED');
     assert.deepEqual(await readFile(sourcePath), originalSource);
+  });
+});
+
+test('TASK-011/TEST-020/021: native-only mutation does not attest manager or business recovery', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    const result = await executeRecoverableAtomicMutation({
+      sourcePath,
+      backupDirectory: backupDir,
+      backupFileName,
+      expectedOriginalSha256: origSha,
+      expectedCandidateSha256: candSha,
+      candidateSource: candidateSource.toString('utf8'),
+      userApproved: true,
+      mutateApproved: true
+    });
+    assert.equal(result.status, 'APPLIED_NATIVE_ONLY');
+    assert.deepEqual(await readFile(sourcePath), candidateSource);
+    assert.equal(result.automaticPatchAllowed, false);
+    assert.equal(result.automaticRollbackAllowed, false);
+    assert.deepEqual(
+      {tampermonkeyVerified: result.tampermonkeyVerified, businessVerified: result.businessVerified},
+      {tampermonkeyVerified: false, businessVerified: false},
+      'native disk mutation cannot establish manager execution or business recovery'
+    );
   });
 });
