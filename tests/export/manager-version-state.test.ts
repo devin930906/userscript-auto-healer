@@ -564,3 +564,16 @@ test('TASK-012/TEST-023: install refuses accessor-backed descriptors before brow
   assert.equal(inheritedResult.code,'INVALID_OPTIONS');
   assert.equal(inheritedCalls,0);
 });
+
+test('TASK-012/TEST-023: matching bytes cannot conceal a different installed version', () => {
+  const imported = [{scriptId:'version-check',name:'Version Check',version:'2.0.0',sha256:candSha}];
+  const observed = [{scriptId:'version-check',name:'Version Check',version:'1.0.0',
+    activeScriptSha256:candSha,injected:true,gmApiVerified:true}];
+  const result = reconcileBatchImportedScriptsVersionState(imported, observed, {userApproved:true});
+  assert.equal(result.status,'COMPLETED');
+  assert.equal(result.matchedCount,0);
+  assert.equal(result.divergedCount,1);
+  assert.equal(result.items[0].status,'INSTALLED_VERSION_DIVERGED');
+  assert.equal(result.items[0].managerVerified,false);
+  assert.equal(result.automaticInstallAllowed,false);
+});
