@@ -374,6 +374,51 @@ test('TASK-013/TEST-022: valid later scripts are not skipped by earlier segment 
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('TASK-013/TEST-022/NFR-009: later read-only AST segment survives obsolete 12-second scheduler cutoff',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'uah-ast-120s-multisegment-'));
+ const performance=require('node:perf_hooks').performance as Performance;
+ let clock:ReturnType<typeof mock.method>|undefined;
+ let patch:ReturnType<typeof mock.method>|undefined;
+ try{
+  const paths:string[]=[];
+  for(let index=0;index<17;index++){
+   const path=join(root,`batch-budget-${index}.user.js`);
+   await writeFile(path,'// ==UserScript==\\n// @name batch-budget-'+index+
+    '\\n// @match https://example.org/*\\n// ==/UserScript==\\n'+
+    `document.querySelector("#batch-budget-${index}");`);
+   paths.push(path);
+  }
+  const scripts=(await importApprovedPaths(paths)).scripts;
+  assert.equal(scripts.length,17);
+  let now=0;
+  clock=mock.method(performance,'now',()=>now);
+  const isolated=require('../../src/analyze/isolated-batch-preview') as
+   typeof import('../../src/analyze/isolated-batch-preview');
+  let calls=0;
+  patch=mock.method(isolated,'previewImportedBatchOffMain',async(
+   ...args:Parameters<typeof isolated.previewImportedBatchOffMain>
+  )=>{
+   calls++;
+   assert.equal(args[5],120000,'every segment shares the original 120s deadline');
+   if(calls===1)now=16000; // The first segment finishes after the old 12s cutoff.
+   return {previews:args[0].map(previewImportedScriptAnalysis),
+    safeToContinue:true} as unknown as
+    Awaited<ReturnType<typeof isolated.previewImportedBatchOffMain>>;
+  });
+  const reported:number[]=[];
+  const previews=await runImportedReadOnlyAnalysisQueue(scripts,undefined,
+   processed=>reported.push(processed));
+  assert.equal(calls,2,'a valid second segment must still dispatch at 16s');
+  assert.deepEqual(reported,[16,17]);
+  assert.deepEqual(previews.map(row=>row.status),Array(17).fill('STATIC_ANALYSIS_ONLY'));
+  assert.equal(previews.every(row=>row.automaticPatchAllowed===false&&
+   row.tampermonkeyVerified===false&&row.businessVerified===false),true);
+ }finally{
+  patch?.mock.restore();clock?.mock.restore();
+  await rm(root,{recursive:true,force:true});
+ }
+});
+
 test('TASK-013/REQ-022/TEST-022: exhausted segment retries preserve successful sibling AST previews',async()=>{
  const root=await mkdtemp(join(tmpdir(),'uah-ast-per-script-recovery-'));
  try{

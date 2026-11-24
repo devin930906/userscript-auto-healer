@@ -18,7 +18,6 @@ import {acquireNativeAstWorkerLease,previewImportedBatchOffMain,
  type NativeAstWorkerLease} from '../analyze/isolated-batch-preview';
 import {ReadOnlyBatchCoordinator} from './batch-coordinator';
 
-const SEGMENT_TIMEOUT_MS=12000;
 const SHA256=/^[0-9a-f]{64}$/;
 const ENCODINGS=new Set<ImportedScript['textEncoding']>([
  'utf-8','utf-8-bom','utf-16le-bom','utf-16be-bom','gb18030-explicit'
@@ -246,7 +245,10 @@ export async function runImportedReadOnlyAnalysisQueue(
   expireDeadlineIfNeeded();
   const coordinator=new ReadOnlyBatchCoordinator({
    count:segmentCount,concurrency:1,maxAttempts:2,
-   timeoutMs:SEGMENT_TIMEOUT_MS,jobHashes:groups.map(group=>group.hash)
+   // The shared scheduler must honour the same 120-second batch deadline as
+   // the isolated Worker and the parent AbortController. A 12-second
+   // coordinator-wide timeout used to abandon valid later import segments.
+   timeoutMs:MAX_TOTAL_PREVIEW_MS,jobHashes:groups.map(group=>group.hash)
   },async (ordinal,workerSignal)=>{
    if(expireDeadlineIfNeeded()||workerSignal.aborted||!safeToLaunchWorkers)
     return 'PERMANENT_FAILURE';
