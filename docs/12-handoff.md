@@ -522,33 +522,33 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **状态与下一步**：本次只完成受控只读 DOM 观察调度与取消边界，不执行导入用户脚本、不自动应用修复、不自动回滚、不证明 Tampermonkey/GM/业务成功。持久任务队列、可信检查点/崩溃恢复、脚本执行与安全应用、失败回滚、完整 TM/GM/业务正反证据、TEST-022/GATE-007、最终真实 Windows GUI 与用户人工验收均未完成。PR #925 不合并，Issue #857 及相关 Issues 保持 Open，候选 Artifact 不发布为 Release。
 
 
-## 2026-11-24 live-main reconciliation — TASK-013 integration and current continuation
+## 2026-11-24 实时主干状态核对——TASK-013 整合与当前续接
 
-> Evidence baseline: `main@e151a8597d2e74e6be1f5876184a95cdf18541de`. This section supersedes older statements above that still describe PR #925 as open or unmerged. Historical entries remain unchanged as time-specific records.
+> 证据基准：`main@e151a8597d2e74e6be1f5876184a95cdf18541de`。本节修正上方仍将 PR #925 描述为开放或未合并的历史快照；历史记录按当时状态保留，不回写篡改。
 
-### Confirmed integration state
+### 已确认的整合状态
 
-- PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) is **Merged** (2026-11-23 17:53:04 UTC), merge commit `b15d2b7d92cbd43a4e794b34e7a8ebb5ae23fc01`, source head `484fa0677d812871393893701d6e464732aad5f7`. Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) remains **Open**; the PR delivered a bounded TASK-013 slice, not the complete task.
-- TASK-013 follow-up PRs are also merged: [#944](https://github.com/devin930906/userscript-auto-healer/pull/944) → `ddbb47088328171103327fde4fb2d972c11a355f` (hold the diagnostic lease until cancelled read-only workers retire); [#945](https://github.com/devin930906/userscript-auto-healer/pull/945) → `1fd002a734dbd7a23517e9476637564161f74772` (retain the native import busy fence until retirement); [#946](https://github.com/devin930906/userscript-auto-healer/pull/946) → `8d89a8ef1bd6002e72ae5dd946d679e7ab7fb3fc` (prevent ordinary inspection overlapping active imports); [#948](https://github.com/devin930906/userscript-auto-healer/pull/948) → `51eb2ad2ae0cb2cc4790bf4efce845073fa42dd8` (reject late file bytes after dropped-batch cancellation).
-- Current `main` HEAD at this reconciliation is `e151a8597d2e74e6be1f5876184a95cdf18541de`. Main Application Skeleton run [#45361522839](https://github.com/devin930906/userscript-auto-healer/actions/runs/45361522839) completed successfully on that SHA: boundary and Windows shell smoke passed; optional AST-worker and Chrome-startup diagnostics were skipped. This is a main-branch machine check, not full TEST-022 or Stable acceptance.
-- The only Open PR returned by the repository's current Open-PR listing is Draft [#956](https://github.com/devin930906/userscript-auto-healer/pull/956), TASK-010, head `f3f411b0d2dd58ac30d3f70b89b9fedbd3025954`, based on the current main SHA. It is independent of TASK-013 and must not be treated as a TASK-013 PR or merged while still Draft. Its current Application boundary/shell smoke, Issue fence and Windows candidate packaging checks completed successfully; the candidate package remains non-Stable.
+- PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 已于 2026-11-23 17:53:04 UTC 合并，合并提交为 `b15d2b7d92cbd43a4e794b34e7a8ebb5ae23fc01`，来源 HEAD 为 `484fa0677d812871393893701d6e464732aad5f7`。Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 仍为 Open；该 PR 只交付 TASK-013 的有限范围，不代表整个 TASK 完成。
+- TASK-013 后续 PR 也已合并：[PR #944](https://github.com/devin930906/userscript-auto-healer/pull/944) → `ddbb47088328171103327fde4fb2d972c11a355f`（取消后的只读 Worker 未退出前保留诊断租约）；[PR #945](https://github.com/devin930906/userscript-auto-healer/pull/945) → `1fd002a734dbd7a23517e9476637564161f74772`（Worker 退出前保留原生导入 busy fence）；[PR #946](https://github.com/devin930906/userscript-auto-healer/pull/946) → `8d89a8ef1bd6002e72ae5dd946d679e7ab7fb3fc`（阻止普通场景检查与活动导入重叠）；[PR #948](https://github.com/devin930906/userscript-auto-healer/pull/948) → `51eb2ad2ae0cb2cc4790bf4efce845073fa42dd8`（取消后的拖放批次拒绝迟到文件字节）。
+- 本次核对时 `main` HEAD 为 `e151a8597d2e74e6be1f5876184a95cdf18541de`。主干 Application Skeleton 工作流 [#45361522839](https://github.com/devin930906/userscript-auto-healer/actions/runs/45361522839) 已在该 SHA 完成：boundary 与 Windows shell smoke 通过；可选 AST-worker 与 Chrome-startup 诊断按条件跳过。该结果是主干机器检查，不代表 TEST-022 或 Stable 验收完成。
+- 仓库实时 Open-PR 列表目前仅返回 Draft [PR #956](https://github.com/devin930906/userscript-auto-healer/pull/956)，属于 TASK-010，HEAD `f3f411b0d2dd58ac30d3f70b89b9fedbd3025954`，基于当前 main SHA。它与 TASK-013 独立，不得当作 TASK-013 PR；当前仍为 Draft，不应提前合并。其 Application boundary/shell smoke、Issue fence 与 Windows candidate packaging 检查已完成成功，但候选包不是 Stable 发行文件。
 
-### Durable checkpoint scope — do not duplicate or overclaim
+### 持久检查点范围——不得重复开发或夸大能力
 
-- The repository already contains `src/jobs/batch-journal.ts` and `src/jobs/native-checkpointed-import.ts`. The native imported AST path uses a bounded, hash-bound, scheduling-only journal under the app-owned userData area; on re-import, source bytes are revalidated and AST previews are run again. The persisted journal is not an authentication token, script authority, repair receipt or proof of current browser/manager state.
-- This AST checkpoint path does **not** establish durable recovery for the later dynamic-DOM diagnosis/repair lifecycle. A previous DOM observation can become stale after restart, target-page change or Chrome-session replacement; a future resume path must revalidate the current owned browser/session and obtain fresh per-script DOM evidence rather than trusting a persisted `SUCCEEDED` state to skip observation.
-- Do not create a second generic journal or duplicate the existing AST checkpoint. First define and test the exact restart semantics for dynamic observations, browser/target identity binding, cancellation, worker retirement, and safe replay. Preserve fail-closed behavior and never persist script source, arbitrary paths, credentials, cookies or privileged authority in a scheduling checkpoint.
+- 仓库已经存在 `src/jobs/batch-journal.ts` 与 `src/jobs/native-checkpointed-import.ts`。原生导入 AST 路径使用位于应用自有 userData 下、有界且绑定哈希的只读调度日志；用户重新导入时会重新校验源字节并重新运行 AST 预览。该日志不是身份认证凭据、脚本执行授权、修复凭据，也不能证明当前浏览器或管理器状态。
+- 现有 AST 检查点不等于后续动态 DOM 诊断/修复流程已经具备跨重启持久恢复。重启、目标页面变化或 Chrome 会话替换后，旧 DOM 观察可能已经过期；未来恢复必须重新核验当前受控浏览器/会话，并取得每个脚本的新鲜 DOM 证据，不能仅凭持久化的 `SUCCEEDED` 状态跳过观察。
+- 不得另建第二套通用日志或重复实现现有 AST 检查点。首先定义并测试动态观察的重启语义、浏览器/目标身份绑定、取消、Worker 退出及安全重放规则。检查点不得保存脚本源码、任意路径、凭据、Cookie 或特权授权。
 
-### Remaining TASK-013 / Issue #857 acceptance
+### TASK-013 / Issue #857 尚未完成的验收范围
 
-- Durable and trustworthy recovery semantics for the ordinary dynamic-DOM batch across process restart/crash remain incomplete; current in-process cancellation/reload and AST scheduling checkpoints are narrower capabilities.
-- The three ordinary import entrypoints still need one complete per-script workflow: fresh diagnosis, trusted evidence, conservative candidate review, authorized application only when all prerequisites are satisfied, and verified failure recovery/rollback. A read-only DOM signal or exported candidate is not a repaired script.
-- Real owned-Chrome Tampermonkey installation/injection, GM round-trip, business positive/negative assertions and failure recovery remain dependent on #486/#487/#488/#489/#603 as applicable. Optional AI integration remains tracked by #604; desktop journey by #607; final Stable sign-off by #610.
-- Keep #857 and #610 Open. Do not infer TEST-022/GATE-007 or Stable completion from merged PRs, green shell smoke, AST journal persistence, isolated manager matrices or candidate EXE/ZIP artifacts.
+- 普通动态 DOM 批次跨进程重启/崩溃的可信恢复语义仍未完成；现有进程内取消/renderer reload 处理与 AST 调度检查点只覆盖更窄的能力。
+- 三种普通导入入口仍需形成完整的逐脚本流程：新鲜诊断、可信证据、保守候选审阅、仅在全部前置条件满足时授权应用，以及经过验证的失败恢复/回滚。只读 DOM 信号或导出候选不等于脚本已经修复。
+- 真实受控 Chrome 下的 Tampermonkey 安装/注入、GM 往返、业务正反断言与失败恢复，仍依赖 #486/#487/#488/#489/#603 等适用任务；可选 AI 由 #604 追踪，桌面用户旅程由 #607 追踪，最终 Stable 签核由 #610 追踪。
+- 保持 #857 与 #610 为 Open。不得根据 PR 已合并、shell smoke 通过、AST 日志持久化、隔离管理器矩阵或候选 EXE/ZIP 工件推断 TEST-022/GATE-007 或 Stable 已通过。
 
-### Current continuation entry
+### 当前续接入口
 
-- Next formal task: **TASK-013 / Issue #857**. Before any new write, reread current `main`, the current #857 body/comments, relevant files under `src/jobs/`, `app/main/`, `app/preload/`, `app/ui/` and their tests; compare against this exact baseline and any newly opened PRs.
-- A safe implementation plan must explicitly distinguish: (1) durable AST scheduling hints already implemented; (2) dynamic DOM observations that must be fresh after restart; (3) candidate/application/rollback authority, which cannot be granted by checkpoint data. Use a new isolated branch and PR for a non-overlapping, test-first slice; run the exact Windows Actions checks on its new head before integration.
-- Current Open issues at this snapshot: #486, #487, #488, #489, #510, #857, #603, #604, #605, #606, #607, #608, #609 and #610. Verify live status again before acting; this list is a dated snapshot, not a permanent count.
-- No local workspace, local `npm test`, real-user Windows GUI run, final human acceptance or Stable Release was executed in this reconciliation.
+- 下一项正式任务：**TASK-013 / Issue #857**。任何新写入前，重新读取当前 `main`、#857 最新正文/评论、`src/jobs/`、`app/main/`、`app/preload/`、`app/ui/` 及相关测试，并对照此基准与新出现的 PR。
+- 安全实施方案必须明确区分：(1) 已有的持久 AST 调度提示；(2) 重启后必须重新获取的动态 DOM 观察；(3) 检查点本身不能授予的候选应用/回滚权限。新工作使用独立分支和 PR，先建立失败测试，再以新 HEAD 执行对应 Windows Actions 检查后才进入整合判定。
+- 本快照的 Open Issues 为 #486、#487、#488、#489、#510、#857、#603、#604、#605、#606、#607、#608、#609、#610。执行时必须重新读取实时状态；此列表仅为当前快照，不是永久数量。
+- 本次状态核对没有本地工作区、未执行本地 `npm test`、未运行真实用户 Windows GUI、未完成最终人工验收，也未创建 Stable Release。
