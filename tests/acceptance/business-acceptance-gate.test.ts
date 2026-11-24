@@ -489,3 +489,31 @@ test('TASK-010 / TEST-018/021: whitespace-only evidence identifiers cannot estab
     assert.equal(result.businessVerified, false);
   }
 });
+
+for (const receiptKind of ['native', 'legacy'] as const) {
+  for (const field of ['displacedBackupFileName', 'journalFileName'] as const) {
+    test(`TASK-010 / TEST-018/021: reject whitespace-only ${field} in ${receiptKind} rollback receipt`, () => {
+      const receipt = {
+        status: 'RESTORED_NATIVE_ONLY',
+        originalSha256: origSha,
+        displacedSha256: candSha,
+        displacedBackupFileName: 'candidate.user.js.bak-12345',
+        journalFileName: 'restore.journal.json',
+        automaticPatchAllowed: false,
+        automaticRollbackAllowed: false,
+        tampermonkeyVerified: false,
+        ...(receiptKind === 'native' ? {businessVerified: false} : {businessRecoveredVerified: false}),
+        [field]: ' \t '
+      };
+      const result = evaluateRollbackAcceptanceGate(receipt, origSha, candSha, validOptions);
+      assert.deepEqual(result, {
+        status: 'BLOCKED',
+        reason: 'ROLLBACK_RECEIPT_INVALID',
+        automaticPatchAllowed: false,
+        automaticRollbackAllowed: false,
+        tampermonkeyVerified: false,
+        businessVerified: false
+      });
+    });
+  }
+}
