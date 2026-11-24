@@ -1466,3 +1466,21 @@ test('TASK-013/TEST-022: interrupted serial cancellation remains terminal even a
  }
  assert.equal(dispatched,0);
 });
+
+test('TASK-013/TEST-022: synchronous startup cannot reserve a competing checkpoint run',async()=>{
+ const visited:number[]=[];
+ const reservations:(symbol|null)[]=[];
+ let coordinator!:ReadOnlyBatchCoordinator;
+ coordinator=new ReadOnlyBatchCoordinator({count:2,concurrency:1},async ordinal=>{
+  visited.push(ordinal);
+  if(ordinal===0)reservations.push(coordinator.reserveCheckpointedRun());
+  return 'DONE';
+ });
+ const result=await coordinator.run();
+ assert.deepEqual(reservations,[null]);
+ assert.deepEqual(visited,[0,1]);
+ assert.deepEqual(result.jobs.map(job=>job.state),['SUCCEEDED','SUCCEEDED']);
+ const ticket=coordinator.reserveCheckpointedRun();
+ assert.ok(ticket);
+ coordinator.releaseCheckpointedRun(ticket);
+});
