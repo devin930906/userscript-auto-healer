@@ -321,6 +321,25 @@ test('TASK-013/TEST-022: each completed job and active read-only attempt is dura
  });
 });
 
+test('TASK-013/TEST-022: durable progress observers receive exactly the saved journal snapshot',async()=>{
+ await withJournal(async directory=>{
+  const {readFileSync}=require('node:fs') as typeof import('node:fs');
+  const observed:string[][]=[];
+  const coordinator=new ReadOnlyBatchCoordinator(options,completed);
+  const result=await runCheckpointedReadOnlyBatch(directory,coordinator,snapshot=>{
+   const disk=JSON.parse(readFileSync(join(directory,BATCH_JOURNAL_FILENAME),'utf8'));
+   assert.deepEqual(snapshot,disk,
+    'the advisory progress callback must describe the persisted state, not a later live state');
+   observed.push(snapshot.jobs.map(job=>job.state));
+  });
+  assert.equal(result.status,'BATCH_SETTLED_CHECKPOINTED_UNVERIFIED');
+  assert.deepEqual(observed,[
+   ['RUNNING','QUEUED'],['SUCCEEDED','QUEUED'],
+   ['SUCCEEDED','RUNNING'],['SUCCEEDED','SUCCEEDED']
+  ]);
+ });
+});
+
 test('TASK-013/TEST-022: failed checkpoint refuses dispatch without overwriting foreign lock',async()=>{
  await withJournal(async directory=>{
   let called=0;
