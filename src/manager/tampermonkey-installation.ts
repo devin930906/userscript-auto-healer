@@ -199,6 +199,9 @@ export async function readTampermonkeyManagerCardAfterInventoryReady(
   let receipt:unknown;
   try{receipt=await evaluate(Math.min(CDP_COMMAND_TIMEOUT_MS,remaining));}
   catch{return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};}
+  // A ready receipt is not valid evidence if the asynchronous read exhausted its budget.
+  if(deadline-now()<=0)
+   return {ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'};
   const inventoryPending=isManagerInventoryPending(receipt);
   const card=parseTampermonkeyExtensionCardReceipt(receipt);
   if(card.ok||!inventoryPending)return card;
