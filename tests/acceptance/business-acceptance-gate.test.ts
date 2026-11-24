@@ -399,8 +399,16 @@ test('TASK-010 / TEST-018/021: evaluateRollbackAcceptanceGate validates native r
   assert.equal(success.journalFileName, 'restore.journal.json');
   assert.equal(success.automaticPatchAllowed, false);
   assert.equal(success.automaticRollbackAllowed, false);
-  assert.equal(success.tampermonkeyVerified, true);
-  assert.equal(success.businessVerified, true);
+  // Native byte restoration is not evidence of manager execution or business recovery.
+  assert.deepEqual([success.tampermonkeyVerified, success.businessVerified], [false, false]);
+
+  const {businessRecoveredVerified, ...nativeFields} = validRollbackReceipt;
+  const nativeReceipt = {...nativeFields, businessVerified: false};
+  const native = evaluateRollbackAcceptanceGate(nativeReceipt, origSha, candSha, validOptions);
+  assert.equal(native.status, 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED');
+  assert.deepEqual([native.tampermonkeyVerified, native.businessVerified], [false, false]);
+  assert.equal(native.automaticPatchAllowed, false);
+  assert.equal(native.automaticRollbackAllowed, false);
 
   // Hash mismatch
   const foreignSha = 'f'.repeat(64);
