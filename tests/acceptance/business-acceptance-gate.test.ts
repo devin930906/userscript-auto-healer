@@ -517,3 +517,17 @@ for (const receiptKind of ['native', 'legacy'] as const) {
     });
   }
 }
+
+test('TASK-010 / TEST-018/021: impossible calendar dates cannot certify business recovery', (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-03-01T00:05:00Z'));
+  const result = evaluateBusinessAcceptanceGate(
+    validAudit, validBackup,
+    {...validOriginalEvidence, observedAt: '2026-02-29T00:00:00Z'},
+    {...validCandidateEvidence, observedAt: '2026-03-01T00:01:00Z'},
+    validOptions
+  );
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.businessVerified, false);
+  assert.equal(result.tampermonkeyVerified, false);
+  assert.equal(result.automaticPatchAllowed, false);
+});
