@@ -546,6 +546,7 @@ export function reconcileBatchImportedScriptsVersionState(
           managerVerified: false
         }));
       } else if (
+        matchedObs.version === expectedVersion &&
         matchedObs.activeScriptSha256 === expectedSha256 &&
         matchedObs.injected === true &&
         matchedObs.gmApiVerified === true
