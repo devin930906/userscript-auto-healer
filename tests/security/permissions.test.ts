@@ -578,8 +578,8 @@ test('TASK-018/TEST-018/026: rollback acceptance gate strictly rejects corrupt r
   assert.equal(accepted.status, 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED');
   assert.equal(accepted.automaticPatchAllowed, false);
   assert.equal(accepted.automaticRollbackAllowed, false);
-  assert.equal(accepted.tampermonkeyVerified, true);
-  assert.equal(accepted.businessVerified, true);
+  // A native-only receipt attests byte restoration, not live manager/business recovery.
+  assert.deepEqual([accepted.tampermonkeyVerified, accepted.businessVerified], [false, false]);
 
   // 2. Refusal on mismatched original digest
   const badOrig = evaluateRollbackAcceptanceGate(

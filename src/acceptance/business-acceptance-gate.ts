@@ -332,8 +332,8 @@ export type RollbackAcceptanceResult =
       journalFileName: string;
       automaticPatchAllowed: false;
       automaticRollbackAllowed: false;
-      tampermonkeyVerified: true;
-      businessVerified: true;
+      tampermonkeyVerified: false;
+      businessVerified: false;
     }>;
 
 export function evaluateRollbackAcceptanceGate(
@@ -416,8 +416,9 @@ export function evaluateRollbackAcceptanceGate(
       journalFileName: receipt.journalFileName as string,
       automaticPatchAllowed: false as const,
       automaticRollbackAllowed: false as const,
-      tampermonkeyVerified: true as const,
-      businessVerified: true as const
+      // Native restoration does not attest manager execution or business recovery.
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const
     });
   } catch {
     return fail('UNTRUSTED_INPUT');
