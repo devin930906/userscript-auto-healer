@@ -602,3 +602,27 @@ test('TASK-011/TEST-020/021: mutation options accessor is rejected without execu
     assert.deepEqual(await readFile(sourcePath), originalSource);
   });
 });
+
+test('TASK-011/TEST-020/021: native-only mutation does not attest manager or business recovery', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    const result = await executeRecoverableAtomicMutation({
+      sourcePath,
+      backupDirectory: backupDir,
+      backupFileName,
+      expectedOriginalSha256: origSha,
+      expectedCandidateSha256: candSha,
+      candidateSource: candidateSource.toString('utf8'),
+      userApproved: true,
+      mutateApproved: true
+    });
+    assert.equal(result.status, 'APPLIED_NATIVE_ONLY');
+    assert.deepEqual(await readFile(sourcePath), candidateSource);
+    assert.equal(result.automaticPatchAllowed, false);
+    assert.equal(result.automaticRollbackAllowed, false);
+    assert.deepEqual(
+      {tampermonkeyVerified: result.tampermonkeyVerified, businessVerified: result.businessVerified},
+      {tampermonkeyVerified: false, businessVerified: false},
+      'native disk mutation cannot establish manager execution or business recovery'
+    );
+  });
+});
