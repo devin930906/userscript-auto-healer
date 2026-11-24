@@ -274,7 +274,11 @@ export function evaluateBusinessAcceptanceGate(
 
     const origTime = Date.parse(orig.observedAt);
     const candTime = Date.parse(cand.observedAt);
-    if (!Number.isFinite(origTime) || !Number.isFinite(candTime)) {
+    // Date.parse can normalize impossible calendar dates and 24:00 into a later day.
+    // Compare the UTC whole-second representation while preserving accepted fractional precision.
+    if (!Number.isFinite(origTime) || !Number.isFinite(candTime) ||
+        new Date(origTime).toISOString().slice(0, 19) !== orig.observedAt.slice(0, 19) ||
+        new Date(candTime).toISOString().slice(0, 19) !== cand.observedAt.slice(0, 19)) {
       return blocked('UNTRUSTED_EVIDENCE_INPUT');
     }
     const now = Date.now();
