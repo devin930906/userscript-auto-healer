@@ -245,7 +245,7 @@ export class ReadOnlyBatchCoordinator{
   * Reserve synchronously before the first filesystem await. */
  #checkpointReservation:symbol|null=null;
  reserveCheckpointedRun():symbol|null{
-  if(this.#checkpointReservation||this.inFlight)return null;
+  if(this.#checkpointReservation||this.inFlight||this.starting)return null;
   this.#checkpointReservation=Symbol('uah-checkpoint-run');
   return this.#checkpointReservation;
  }
