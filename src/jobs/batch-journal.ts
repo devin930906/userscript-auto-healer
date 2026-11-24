@@ -393,8 +393,7 @@ export async function runCheckpointedReadOnlyBatch(
      lastPersisted=pending;
      // Advisory UI progress belongs only to an actually saved checkpoint.
      // No status callback can authorize repair or invalidate the batch.
-     try{onDurableTransition?.(
-      ReadOnlyBatchCoordinator.prototype.snapshot.call(coordinator));}
+     try{onDurableTransition?.(pending);}
      catch{/* Native progress observers cannot change the journal result. */}
     },ticket
    );
