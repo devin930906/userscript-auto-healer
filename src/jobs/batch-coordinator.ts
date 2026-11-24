@@ -214,14 +214,19 @@ function validateCheckpoint(input:unknown,opts:ValidatedOptions,
   // Only a PROCESS RESTART turns an interrupted attempt into queued/failed.
   // Persistence comparison must preserve a live RUNNING terminal attempt:
   // it may still succeed before the worker returns, even at maxAttempts.
-  const state=normalizeInterrupted&&job.state==='RUNNING'
-    ?(job.attempts===opts.maxAttempts?'FAILED':'QUEUED')
-    :job.state as BatchJobState;
-  jobs.push({ordinal:i,state,attempts:job.attempts});
+  jobs.push({ordinal:i,state:job.state as BatchJobState,attempts:job.attempts});
  }
  // Inspect the persisted RAW states before normalizing interrupted RUNNING
  // attempts. Accept RUNNING alongside CANCELLED during abort settlement.
  if(anyQueued&&anyCancelled)throw Error('INVALID_BATCH_CHECKPOINT');
+ // Persisted cancellation is batch-wide, including workers interrupted
+ // before their abort settlement was saved. Never redispatch those workers.
+ if(normalizeInterrupted){
+  for(const job of jobs){
+   if(job.state==='RUNNING')job.state=anyCancelled?'CANCELLED':
+    job.attempts===opts.maxAttempts?'FAILED':'QUEUED';
+  }
+ }
  return jobs;
  }catch{throw Error('INVALID_BATCH_CHECKPOINT');}
 }
@@ -307,7 +312,7 @@ export class ReadOnlyBatchCoordinator{
   * This is NOT checkpoint authentication and grants no script authority.
   * Persistence compares the original RUNNING state without restart
   * normalization; only constructor recovery turns an interrupted attempt into
-  * QUEUED or FAILED according to its retry budget.
+  * CANCELLED, QUEUED or FAILED according to cancellation and retry budget.
   */
  mayPersistOver(previous:unknown):boolean{
   let persisted:MutableJob[];
