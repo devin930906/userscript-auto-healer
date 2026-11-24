@@ -383,8 +383,8 @@ test('TASK-013/TEST-022/NFR-009: later read-only AST segment survives obsolete 1
   const paths:string[]=[];
   for(let index=0;index<17;index++){
    const path=join(root,`batch-budget-${index}.user.js`);
-   await writeFile(path,'// ==UserScript==\\n// @name batch-budget-'+index+
-    '\\n// @match https://example.org/*\\n// ==/UserScript==\\n'+
+   await writeFile(path,'// ==UserScript==\n// @name batch-budget-'+index+
+    '\n// @match https://example.org/*\n// ==/UserScript==\n'+
     `document.querySelector("#batch-budget-${index}");`);
    paths.push(path);
   }
