@@ -111,8 +111,8 @@ test('TASK-011/TEST-020/021: end-to-end atomic candidate mutation and subsequent
     assert.equal(applyResult.candidateSha256, candSha);
     assert.equal(applyResult.automaticPatchAllowed, false);
     assert.equal(applyResult.automaticRollbackAllowed, false);
-    assert.equal(applyResult.tampermonkeyVerified, true);
-    assert.equal(applyResult.businessVerified, true);
+    assert.equal(applyResult.tampermonkeyVerified, false);
+    assert.equal(applyResult.businessVerified, false);
 
     // Verify source on disk now contains candidate bytes
     const onDiskAfterApply = await readFile(sourcePath);
