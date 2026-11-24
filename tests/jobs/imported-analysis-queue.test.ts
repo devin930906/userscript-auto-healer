@@ -508,7 +508,10 @@ test('TASK-013/TEST-022/NFR-009: global deadline bounds per-script recovery',asy
  let expireDeadline:(()=>void)|undefined;
  globalThis.setTimeout=((callback:(...args:unknown[])=>void,delay?:number,
   ...args:unknown[])=>{
-  if(delay!==undefined&&delay>100000){
+  // The global 120-second timer is registered before the coordinator's
+  // now-equivalent 120-second timer. Retain the first callback so this
+  // test explicitly expires the parent budget, not just its scheduler.
+  if(delay!==undefined&&delay>100000&&!expireDeadline){
    expireDeadline=()=>callback(...args);
    return originalSetTimeout(()=>undefined,delay);
   }
