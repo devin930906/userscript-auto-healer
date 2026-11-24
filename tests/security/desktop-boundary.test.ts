@@ -3036,6 +3036,12 @@ test('TASK-013/TEST-022/026: imported-batch DOM progress is read-only, bounded a
  assert.match(main,/if\(args\.length\)return \{active:false as const\}/);
  assert.match(main,/importedDomProgress\s*=\s*\{phase:'AWAITING_CONSENT'/);
  assert.match(main,/importedDomProgress\s*=\s*null/);
+ const progressHandler=main.slice(main.indexOf("ipcMain.handle('scenario:imported-batch-progress'"),
+   main.indexOf("ipcMain.handle('scenario:diagnose-imported-batch'"));
+ assert.match(progressHandler,/if\(!scenarioObserveInProgress\)return Object\.freeze\(\{active:false as const\}\)/);
+ assert.match(progressHandler,/if\(!progress\)return Object\.freeze\(\{[\s\S]*?active:true as const,phase:'RETIRING_WORKERS' as const/);
+ assert.match(ui,/phase\?:'AWAITING_CONSENT'\|'OPENING_TARGET'\|'OBSERVING'\|'RETIRING_WORKERS'/);
+ assert.match(ui,/progress\.phase==='RETIRING_WORKERS'/);
  assert.match(preload,/getImportedDomProgress:\s*\(\):\s*Promise<unknown>\s*=>\s*ipcRenderer\.invoke\('scenario:imported-batch-progress'\)/);
  assert.match(ui,/getImportedDomProgress\(\):Promise<\{/);
  assert.match(ui,/window\.healer\.getImportedDomProgress\(\)/);

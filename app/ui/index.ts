@@ -92,7 +92,7 @@ interface Window {
       tampermonkeyVerified:false;businessVerified:false;
       automaticPatchAllowed:false}>;
     getImportedDomProgress():Promise<{active:boolean;
-      phase?:'AWAITING_CONSENT'|'OPENING_TARGET'|'OBSERVING';
+      phase?:'AWAITING_CONSENT'|'OPENING_TARGET'|'OBSERVING'|'RETIRING_WORKERS';
       processed?:number;total?:number;currentIndex?:number;attempts?:number}>;
     diagnoseImportedBatch(targetUrl:string):Promise<{ok:boolean;code?:string;
       status?:'UNKNOWN';reason?:string;targetMatchedCount?:number;
@@ -1946,6 +1946,8 @@ importedDomRunButton?.addEventListener('click',()=>{
     importedDomResult.textContent='等待系统原生确认；尚未访问网页或执行脚本。';
    }else if(progress.phase==='OPENING_TARGET'){
     importedDomResult.textContent='正在打开已授权目标网页；仅准备只读 DOM 观测。';
+   }else if(progress.phase==='RETIRING_WORKERS'){
+    importedDomResult.textContent='正在等待上一次只读浏览器检查完全结束；暂不能开始另一批诊断。';
    }else if(progress.phase==='OBSERVING'&&
      typeof progress.processed==='number'&&typeof progress.total==='number'&&
      typeof progress.currentIndex==='number'&&typeof progress.attempts==='number'&&

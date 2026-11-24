@@ -1557,11 +1557,16 @@ function registerSafeIpc(): void {
     authorizeSender(event);
     if(args.length)return {active:false as const};
     const progress=importedDomProgress;
-    return scenarioObserveInProgress&&progress
-      ?Object.freeze({active:true as const,phase:progress.phase,
-        processed:progress.processed,total:progress.total,
-        currentIndex:progress.currentIndex,attempts:progress.attempts})
-      :Object.freeze({active:false as const});
+    if(!scenarioObserveInProgress)return Object.freeze({active:false as const});
+    // A timed-out or cancelled DOM worker may outlive the diagnosis receipt.
+    // The exclusive diagnostic gate stays held until that worker retires.
+    // Never report idle while the main process still blocks new diagnostics.
+    if(!progress)return Object.freeze({
+      active:true as const,phase:'RETIRING_WORKERS' as const
+    });
+    return Object.freeze({active:true as const,phase:progress.phase,
+      processed:progress.processed,total:progress.total,
+      currentIndex:progress.currentIndex,attempts:progress.attempts});
   });
   // Ordinary batch path: selector sites are resolved exclusively from the
   // main-only AST sidecar. The renderer submits only the configured URL; it
