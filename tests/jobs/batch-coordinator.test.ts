@@ -152,7 +152,12 @@ test('TASK-013/TEST-022/026: parallel cancelled checkpoint cannot replay any que
  ]};
  const accepted=new ReadOnlyBatchCoordinator(options,worker,valid);
  assert.deepEqual(accepted.snapshot().jobs.map(j=>j.state),
-  ['QUEUED','QUEUED','CANCELLED']);
+  ['CANCELLED','CANCELLED','CANCELLED']);
+ const completed=await accepted.run();
+ assert.equal(dispatched,0,'persisted cancellation forbids restarting interrupted workers');
+ assert.deepEqual(completed.jobs.map(j=>j.state),['CANCELLED','CANCELLED','CANCELLED']);
+ assert.equal(accepted.mayPersistOver(valid),true);
+ assert.doesNotThrow(()=>new ReadOnlyBatchCoordinator(options,worker,completed));
 });
 
 test('TASK-013/TEST-022/026: a cancelled serial checkpoint must not resume a later queued job',async()=>{
@@ -1439,4 +1444,25 @@ test('TASK-013/TEST-022: unattended batch diagnostic pipeline enforces per-scrip
   assert.equal(finalSnapshot.automaticPatchAllowed, false);
   assert.equal(finalSnapshot.tampermonkeyVerified, false);
   assert.equal(finalSnapshot.businessVerified, false);
+});
+
+test('TASK-013/TEST-022: interrupted serial cancellation remains terminal even at retry limit',async()=>{
+ const options={count:2,concurrency:1,maxAttempts:2,jobHashes:[SCRIPT_A,SCRIPT_B]};
+ let dispatched=0;
+ const worker=async()=>{dispatched++;return 'DONE' as const;};
+ const initial=new ReadOnlyBatchCoordinator(options,worker).snapshot();
+ for(const attempts of [1,2]){
+  const interrupted={...initial,jobs:[
+   {ordinal:0,state:'RUNNING' as const,attempts},
+   {ordinal:1,state:'CANCELLED' as const,attempts:0}
+  ]};
+  const restored=new ReadOnlyBatchCoordinator(options,worker,interrupted);
+  const result=await restored.run();
+  assert.deepEqual(result.jobs.map(j=>j.state),['CANCELLED','CANCELLED']);
+  assert.equal(result.jobs[0].attempts,attempts);
+  assert.equal(restored.mayPersistOver(interrupted),true);
+  assert.equal(result.automaticPatchAllowed,false);
+  assert.equal(result.businessVerified,false);
+ }
+ assert.equal(dispatched,0);
 });
