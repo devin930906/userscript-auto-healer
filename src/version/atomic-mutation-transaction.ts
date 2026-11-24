@@ -579,6 +579,25 @@ export async function executeRecoverableAtomicMutation(
   }
 }
 
+// Snapshot only own data properties before touching any untrusted values.
+function snapshotBoundaryRecord(input: unknown, fields: readonly string[]): Record<string, unknown> | null {
+  if (!input || typeof input !== 'object' || nodeTypes.isProxy(input) || Array.isArray(input)) {
+    return null;
+  }
+  const proto = Object.getPrototypeOf(input);
+  if (proto !== Object.prototype && proto !== null) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  if (Reflect.ownKeys(descriptors).some(key =>
+    typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(descriptors[key], 'value')
+  )) return null;
+  const snapshot: Record<string, unknown> = Object.create(null);
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(descriptors, field)) return null;
+    snapshot[field] = descriptors[field].value;
+  }
+  return snapshot;
+}
+
 /**
  * End-to-end integration entry point connecting TASK-010 business acceptance gate
  * with the TASK-011 atomic mutation transaction.
@@ -590,15 +609,11 @@ export async function applyBusinessAcceptedCandidate(
   signal?: AbortSignal
 ): Promise<AtomicMutationResult> {
   try {
-    if (
-      !acceptanceReceipt ||
-      typeof acceptanceReceipt !== 'object' ||
-      nodeTypes.isProxy(acceptanceReceipt)
-    ) {
-      return block('ACCEPTANCE_UNVERIFIED');
-    }
-
-    const receipt = acceptanceReceipt as Record<string, unknown>;
+    const receipt = snapshotBoundaryRecord(acceptanceReceipt, [
+      'status', 'tampermonkeyVerified', 'businessVerified',
+      'originalSha256', 'candidateSha256', 'backupFileName'
+    ]);
+    if (!receipt) return block('ACCEPTANCE_UNVERIFIED');
     if (
       receipt.status !== 'BUSINESS_ACCEPTED_AWAITING_TRANSACTION' ||
       receipt.tampermonkeyVerified !== true ||
@@ -619,15 +634,11 @@ export async function applyBusinessAcceptedCandidate(
       return block('HASH_MISMATCH');
     }
 
-    if (
-      !untrustedOptions ||
-      typeof untrustedOptions !== 'object' ||
-      nodeTypes.isProxy(untrustedOptions)
-    ) {
-      return block('INVALID_REQUEST');
-    }
+    const rawOpts = snapshotBoundaryRecord(untrustedOptions, [
+      'sourcePath', 'backupDirectory', 'userApproved', 'mutateApproved'
+    ]);
+    if (!rawOpts) return block('INVALID_REQUEST');
 
-    const rawOpts = untrustedOptions as Record<string, unknown>;
     const mutationPayload = {
       sourcePath: rawOpts.sourcePath,
       backupDirectory: rawOpts.backupDirectory,
