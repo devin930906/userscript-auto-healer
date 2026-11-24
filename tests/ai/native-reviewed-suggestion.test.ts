@@ -440,3 +440,17 @@ test('TASK-014/TEST-015/016: buildAiAssistedDiagnosticEvidence creates valid evi
     assert.ok(candidatePkg.candidateSource.includes('document.querySelector("#healed")'));
   }
 });
+
+test('TASK-014/TEST-015/016: literal native approval is required for suggestion',async()=>{
+  const store=new NativeAiEvidenceStore();
+  assert.equal(store.record('native_scope',A,'#private-selector','UNKNOWN'),true);
+  const evidence=store.resolve('native_scope');
+  let requests=0;
+  const transport:typeof fetch=async()=>{requests++;return response();};
+  for(const malformed of ['false',1,{},[]]){
+    const result=await requestNativeReviewedAiSuggestion(config(),evidence,
+      async()=>malformed as unknown as boolean,undefined,transport);
+    assert.deepEqual(result,{ok:false,code:'CANCELLED',automaticPatchAllowed:false});
+  }
+  assert.equal(requests,0,'malformed dialog replies must not authorize provider traffic');
+});
