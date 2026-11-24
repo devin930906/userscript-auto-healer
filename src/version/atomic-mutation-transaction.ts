@@ -69,8 +69,8 @@ export type AtomicMutationResult =
       rollbackReady: true;
       automaticPatchAllowed: false;
       automaticRollbackAllowed: false;
-      tampermonkeyVerified: true;
-      businessVerified: true;
+      tampermonkeyVerified: false;
+      businessVerified: false;
     }>;
 
 function block(reason: AtomicMutationFailureReason): AtomicMutationResult {
@@ -555,8 +555,8 @@ export async function executeRecoverableAtomicMutation(
       rollbackReady: true as const,
       automaticPatchAllowed: false as const,
       automaticRollbackAllowed: false as const,
-      tampermonkeyVerified: true as const,
-      businessVerified: true as const
+      tampermonkeyVerified: false as const,
+      businessVerified: false as const
     });
   } catch {
     return block('IO_FAILURE');
