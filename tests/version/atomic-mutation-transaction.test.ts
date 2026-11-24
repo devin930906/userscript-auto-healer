@@ -546,3 +546,59 @@ test('TASK-011/TEST-020: applyBusinessAcceptedCandidate fails closed on unverifi
     assert.deepEqual(content, originalSource);
   });
 });
+
+test('TASK-011/TEST-020/021: acceptance receipt accessor is rejected without execution', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    let accessed = false;
+    const receipt = Object.freeze({
+      get status() {
+        accessed = true;
+        return 'BUSINESS_ACCEPTED_AWAITING_TRANSACTION';
+      },
+      originalSha256: origSha,
+      candidateSha256: candSha,
+      backupFileName,
+      faultEvidenceId: 'fixture-only',
+      automaticPatchAllowed: false,
+      automaticRollbackAllowed: false,
+      tampermonkeyVerified: true,
+      businessVerified: true
+    });
+    const result = await applyBusinessAcceptedCandidate(receipt, candidateSource.toString('utf8'), {
+      sourcePath, backupDirectory: backupDir, userApproved: true, mutateApproved: true
+    });
+    assert.equal(accessed, false, 'untrusted receipt getter must not run');
+    assert.equal(result.status, 'BLOCKED');
+    assert.deepEqual(await readFile(sourcePath), originalSource);
+  });
+});
+
+test('TASK-011/TEST-020/021: mutation options accessor is rejected without execution', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    let accessed = false;
+    const receipt = Object.freeze({
+      status: 'BUSINESS_ACCEPTED_AWAITING_TRANSACTION',
+      originalSha256: origSha,
+      candidateSha256: candSha,
+      backupFileName,
+      faultEvidenceId: 'fixture-only',
+      automaticPatchAllowed: false,
+      automaticRollbackAllowed: false,
+      tampermonkeyVerified: true,
+      businessVerified: true
+    });
+    const options = {
+      get sourcePath() {
+        accessed = true;
+        return sourcePath;
+      },
+      backupDirectory: backupDir,
+      userApproved: true,
+      mutateApproved: true
+    };
+    const result = await applyBusinessAcceptedCandidate(receipt, candidateSource.toString('utf8'), options);
+    assert.equal(accessed, false, 'untrusted options getter must not run');
+    assert.equal(result.status, 'BLOCKED');
+    assert.deepEqual(await readFile(sourcePath), originalSource);
+  });
+});
