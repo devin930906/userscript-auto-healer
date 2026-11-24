@@ -475,3 +475,17 @@ test('TASK-010 / TEST-018/021: identical original and candidate bytes cannot est
   assert.equal(result.tampermonkeyVerified, false);
   assert.equal(result.businessVerified, false);
 });
+
+test('TASK-010 / TEST-018/021: whitespace-only evidence identifiers cannot establish business acceptance', () => {
+  for (const [audit, backup] of [
+    [{...validAudit, faultEvidenceId: '   '}, validBackup],
+    [validAudit, {...validBackup, backupFileName: '   '}]
+  ] as const) {
+    const result = evaluateBusinessAcceptanceGate(
+      audit, backup, validOriginalEvidence, validCandidateEvidence, validOptions
+    );
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.automaticPatchAllowed, false);
+    assert.equal(result.businessVerified, false);
+  }
+});
