@@ -461,3 +461,17 @@ test('TASK-010 / TEST-018/021: evaluateRollbackAcceptanceGate validates native r
   assert.equal(proxyResult.reason, 'ROLLBACK_RECEIPT_INVALID');
   assert.equal(trapCount, 0, 'Proxy traps on rollback receipt must not execute');
 });
+
+test('TASK-010 / TEST-018/021: identical original and candidate bytes cannot establish repair acceptance', () => {
+  const result = evaluateBusinessAcceptanceGate(
+    {...validAudit, candidateSha256: origSha},
+    {...validBackup, candidateSha256: origSha},
+    validOriginalEvidence,
+    {...validCandidateEvidence, candidateSha256: origSha},
+    validOptions
+  );
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.automaticPatchAllowed, false);
+  assert.equal(result.tampermonkeyVerified, false);
+  assert.equal(result.businessVerified, false);
+});
