@@ -621,16 +621,22 @@ test('TASK-013/TEST-022/026: native single-file recovery bounds a hung adapter a
  const clock=mock.method(performance,'now',()=>now);
  let lastDigest='';
  let calls=0;
+ const phases:string[]=[];
+ const elapsed=()=>Number(process.hrtime.bigint()/1000000n);
+ let startedAt=0;
+ const mark=(phase:string)=>phases.push(`${phase}:${elapsed()-startedAt}ms`);
  const never=new Promise<never>(()=>{});
  const patch=mock.method(isolated,'previewImportedBatchOffMain',
   async(...args:Parameters<typeof actual>)=>{
    calls++;
    const selected=args[0];
+   mark(`adapter-${calls}-size-${selected.length}`);
    if(selected.length>1)return {previews:selected.map(()=>unavailableImportPreview(
     'ISOLATED_ANALYSIS_FAILED','NOT_CHECKED')),
     safeToContinue:true} as unknown as Awaited<ReturnType<typeof actual>>;
    if(createHash('sha256').update(selected[0].bytes).digest('hex')===lastDigest)
-    return actual(...args);
+    return actual(...args).then(result=>{mark('later-analysis-completed');return result;});
+   mark('hung-recovery-entered');
    controller.abort();
    now=120001;
    return never;
@@ -646,11 +652,12 @@ test('TASK-013/TEST-022/026: native single-file recovery bounds a hung adapter a
   lastDigest=createHash('sha256').update(scripts[16].bytes).digest('hex');
   const userData=join(home,'userdata');
   await mkdir(userData);
+  startedAt=elapsed();
   const pending=runCheckpointedNativeImportAnalysis(
    join(userData,'readonly-journals'),scripts,controller.signal);
   const result=await Promise.race([pending,new Promise<'PENDING'>(resolve=>
    setTimeout(()=>resolve('PENDING'),1000))]);
-  assert.notEqual(result,'PENDING','single-file recovery must remain bounded');
+  assert.notEqual(result,'PENDING',`single-file recovery must remain bounded; phases=${phases.join(',')}; calls=${calls}; elapsed=${elapsed()-startedAt}ms`);
   const outcome=result as Awaited<typeof pending>;
   assert.equal(outcome.status,'BLOCKED');
   assert.equal(calls,4,'two failed segment attempts, one later success, then one bounded recovery');
