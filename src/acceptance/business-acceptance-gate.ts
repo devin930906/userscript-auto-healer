@@ -244,6 +244,11 @@ export function evaluateBusinessAcceptanceGate(
       return blocked('AUDIT_NOT_REVIEWABLE');
     }
 
+    // A no-op candidate cannot establish that a source change repaired the fault.
+    if (origSha === candSha) {
+      return blocked('AUDIT_NOT_REVIEWABLE');
+    }
+
     if (backup.sourceSha256 !== origSha || orig.sourceSha256 !== origSha) {
       return blocked('ORIGINAL_HASH_MISMATCH');
     }
