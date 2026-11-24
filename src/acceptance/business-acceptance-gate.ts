@@ -406,9 +406,9 @@ export function evaluateRollbackAcceptanceGate(
 
     if (
       typeof receipt.displacedBackupFileName !== 'string' ||
-      receipt.displacedBackupFileName.length === 0 ||
+      receipt.displacedBackupFileName.trim().length === 0 ||
       typeof receipt.journalFileName !== 'string' ||
-      receipt.journalFileName.length === 0
+      receipt.journalFileName.trim().length === 0
     ) {
       return fail('ROLLBACK_RECEIPT_INVALID');
     }
