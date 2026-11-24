@@ -219,3 +219,18 @@ test('TASK-007: launchApprovedTampermonkeyInstallation enforces authorization an
  assert.deepEqual(unverified,{ok:false,code:'UNVERIFIED_BROWSER'});
 });
 
+
+
+test('TASK-007: ready inventory received at or after the deadline cannot attest installation or absence',async()=>{
+ const empty={result:{type:'object',value:{managerPage:true,inventoryReady:true,matchingCount:0}}};
+ for(const receipt of [card({}),empty]){
+  for(const elapsed of [1000,1001]){
+   let now=0;
+   const result=await readTampermonkeyManagerCardAfterInventoryReady(async()=>{
+    now+=elapsed;
+    return receipt;
+   },{timeoutMs:1000,now:()=>now,wait:async()=>{assert.fail('late receipt must not retry');}});
+   assert.deepEqual(result,{ok:false,code:'INSPECTION_UNAVAILABLE',stage:'manager-card'});
+  }
+ }
+});
