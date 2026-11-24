@@ -291,8 +291,8 @@ export function evaluateBusinessAcceptanceGate(
     }
 
     const backupFileName = backup.backupFileName;
-    if (typeof backupFileName !== 'string' || backupFileName.length === 0 ||
-        typeof faultEvidenceId !== 'string' || faultEvidenceId.length === 0) {
+    if (typeof backupFileName !== 'string' || backupFileName.trim().length === 0 ||
+        typeof faultEvidenceId !== 'string' || faultEvidenceId.trim().length === 0) {
       return blocked('UNTRUSTED_EVIDENCE_INPUT');
     }
 
