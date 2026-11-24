@@ -400,15 +400,13 @@ test('TASK-010 / TEST-018/021: evaluateRollbackAcceptanceGate validates native r
   assert.equal(success.automaticPatchAllowed, false);
   assert.equal(success.automaticRollbackAllowed, false);
   // Native byte restoration is not evidence of manager execution or business recovery.
-  assert.equal(success.tampermonkeyVerified, false);
-  assert.equal(success.businessVerified, false);
+  assert.deepEqual([success.tampermonkeyVerified, success.businessVerified], [false, false]);
 
   const {businessRecoveredVerified, ...nativeFields} = validRollbackReceipt;
   const nativeReceipt = {...nativeFields, businessVerified: false};
   const native = evaluateRollbackAcceptanceGate(nativeReceipt, origSha, candSha, validOptions);
   assert.equal(native.status, 'ROLLBACK_ACCEPTED_ORIGINAL_RESTORED');
-  assert.equal(native.tampermonkeyVerified, false);
-  assert.equal(native.businessVerified, false);
+  assert.deepEqual([native.tampermonkeyVerified, native.businessVerified], [false, false]);
   assert.equal(native.automaticPatchAllowed, false);
   assert.equal(native.automaticRollbackAllowed, false);
 
