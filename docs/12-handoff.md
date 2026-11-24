@@ -520,3 +520,35 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - **Windows 候选产物**：Candidate Packaging [#45148068037](https://github.com/devin930906/userscript-auto-healer/actions/runs/45148068037) success。工作流从 PR 合成 merge commit `3b619813b5a419147666ef3a60baf0cfdb44436` 构建 v1.1.3 候选；安装程序 `Userscript-Auto-Healer-v1.1.3-3b619813b5a4-CANDIDATE-Setup.exe` SHA-256 `e6b5ad08c444ac7a631c58d0b1a6dac40725d4b957c08e76e5b5fcda1f989762`；便携包 `Userscript-Auto-Healer-v1.1.3-3b619813b5a4-CANDIDATE-Portable.zip` SHA-256 `7ac71b35e8d3baaf89b15ccdafe32648a9a2b7503298a8a7f52bb6c882a643cd`。候选机器检查通过：161 文件安装载荷 SHA-256 parity、合成旧 Inno 安装器升级与 AppData 保留（不是实际历史版本迁移）、干净候选安装、Electron 启动、卸载与 userData 保留、ZIP 完整性及便携 staging/extract/install 检查。Artifact [14805317987](https://github.com/devin930906/userscript-auto-healer/actions/runs/45148068037/artifacts/14805317987) 大小 278,135,894 bytes，外层 Artifact ZIP SHA-256 `1b33de942ab58b0d860203bb03d8301af64e66ef3f11e81e1adaa5a6ea2f71cc`，到期 `2026-11-26T09:40:12Z`。外层 Artifact ZIP 不等于项目自身 Portable ZIP。
 - **Tampermonkey 试验边界**：TASK-007 matrix [#45148068016](https://github.com/devin930906/userscript-auto-healer/actions/runs/45148068016) 快照为 13/21 jobs success、8 pending/in progress、0 failure；签名 CRX 获取步骤名称明确注明 NOT store attestation。不得据此宣称官方商店认证、完整管理器兼容或真实业务验收。
 - **状态与下一步**：本次只完成受控只读 DOM 观察调度与取消边界，不执行导入用户脚本、不自动应用修复、不自动回滚、不证明 Tampermonkey/GM/业务成功。持久任务队列、可信检查点/崩溃恢复、脚本执行与安全应用、失败回滚、完整 TM/GM/业务正反证据、TEST-022/GATE-007、最终真实 Windows GUI 与用户人工验收均未完成。PR #925 不合并，Issue #857 及相关 Issues 保持 Open，候选 Artifact 不发布为 Release。
+
+
+## 2026-11-24 实时主干状态核对——TASK-013 整合与当前续接
+
+> 证据基准：`main@e151a8597d2e74e6be1f5876184a95cdf18541de`。本节修正上方仍将 PR #925 描述为开放或未合并的历史快照；历史记录按当时状态保留，不回写篡改。
+
+### 已确认的整合状态
+
+- PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 已于 2026-11-23 17:53:04 UTC 合并，合并提交为 `b15d2b7d92cbd43a4e794b34e7a8ebb5ae23fc01`，来源 HEAD 为 `484fa0677d812871393893701d6e464732aad5f7`。Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 仍为 Open；该 PR 只交付 TASK-013 的有限范围，不代表整个 TASK 完成。
+- TASK-013 后续 PR 也已合并：[PR #944](https://github.com/devin930906/userscript-auto-healer/pull/944) → `ddbb47088328171103327fde4fb2d972c11a355f`（取消后的只读 Worker 未退出前保留诊断租约）；[PR #945](https://github.com/devin930906/userscript-auto-healer/pull/945) → `1fd002a734dbd7a23517e9476637564161f74772`（Worker 退出前保留原生导入 busy fence）；[PR #946](https://github.com/devin930906/userscript-auto-healer/pull/946) → `8d89a8ef1bd6002e72ae5dd946d679e7ab7fb3fc`（阻止普通场景检查与活动导入重叠）；[PR #948](https://github.com/devin930906/userscript-auto-healer/pull/948) → `51eb2ad2ae0cb2cc4790bf4efce845073fa42dd8`（取消后的拖放批次拒绝迟到文件字节）。
+- 本次核对时 `main` HEAD 为 `e151a8597d2e74e6be1f5876184a95cdf18541de`。主干 Application Skeleton 工作流 [#45361522839](https://github.com/devin930906/userscript-auto-healer/actions/runs/45361522839) 已在该 SHA 完成：boundary 与 Windows shell smoke 通过；可选 AST-worker 与 Chrome-startup 诊断按条件跳过。该结果是主干机器检查，不代表 TEST-022 或 Stable 验收完成。
+- 仓库实时 Open-PR 列表目前仅返回 Draft [PR #956](https://github.com/devin930906/userscript-auto-healer/pull/956)，属于 TASK-010，HEAD `f3f411b0d2dd58ac30d3f70b89b9fedbd3025954`，基于当前 main SHA。它与 TASK-013 独立，不得当作 TASK-013 PR；当前仍为 Draft，不应提前合并。其 Application boundary/shell smoke、Issue fence 与 Windows candidate packaging 检查已完成成功，但候选包不是 Stable 发行文件。
+
+### 持久检查点范围——不得重复开发或夸大能力
+
+- 仓库已经存在 `src/jobs/batch-journal.ts` 与 `src/jobs/native-checkpointed-import.ts`。原生导入 AST 路径使用位于应用自有 userData 下、有界且绑定哈希的只读调度日志；用户重新导入时会重新校验源字节并重新运行 AST 预览。该日志不是身份认证凭据、脚本执行授权、修复凭据，也不能证明当前浏览器或管理器状态。
+- 现有 AST 检查点不等于后续动态 DOM 诊断/修复流程已经具备跨重启持久恢复。重启、目标页面变化或 Chrome 会话替换后，旧 DOM 观察可能已经过期；未来恢复必须重新核验当前受控浏览器/会话，并取得每个脚本的新鲜 DOM 证据，不能仅凭持久化的 `SUCCEEDED` 状态跳过观察。
+- 不得另建第二套通用日志或重复实现现有 AST 检查点。首先定义并测试动态观察的重启语义、浏览器/目标身份绑定、取消、Worker 退出及安全重放规则。检查点不得保存脚本源码、任意路径、凭据、Cookie 或特权授权。
+
+### TASK-013 / Issue #857 尚未完成的验收范围
+
+- 普通动态 DOM 批次跨进程重启/崩溃的可信恢复语义仍未完成；现有进程内取消/renderer reload 处理与 AST 调度检查点只覆盖更窄的能力。
+- 三种普通导入入口仍需形成完整的逐脚本流程：新鲜诊断、可信证据、保守候选审阅、仅在全部前置条件满足时授权应用，以及经过验证的失败恢复/回滚。只读 DOM 信号或导出候选不等于脚本已经修复。
+- 真实受控 Chrome 下的 Tampermonkey 安装/注入、GM 往返、业务正反断言与失败恢复，仍依赖 #486/#487/#488/#489/#603 等适用任务；可选 AI 由 #604 追踪，桌面用户旅程由 #607 追踪，最终 Stable 签核由 #610 追踪。
+- 保持 #857 与 #610 为 Open。不得根据 PR 已合并、shell smoke 通过、AST 日志持久化、隔离管理器矩阵或候选 EXE/ZIP 工件推断 TEST-022/GATE-007 或 Stable 已通过。
+
+### 当前续接入口
+
+- 下一项正式任务：**TASK-013 / Issue #857**。任何新写入前，重新读取当前 `main`、#857 最新正文/评论、`src/jobs/`、`app/main/`、`app/preload/`、`app/ui/` 及相关测试，并对照此基准与新出现的 PR。
+- 安全实施方案必须明确区分：(1) 已有的持久 AST 调度提示；(2) 重启后必须重新获取的动态 DOM 观察；(3) 检查点本身不能授予的候选应用/回滚权限。新工作使用独立分支和 PR，先建立失败测试，再以新 HEAD 执行对应 Windows Actions 检查后才进入整合判定。
+- 本快照的 Open Issues 为 #486、#487、#488、#489、#510、#857、#603、#604、#605、#606、#607、#608、#609、#610。执行时必须重新读取实时状态；此列表仅为当前快照，不是永久数量。
+- 本次状态核对没有本地工作区、未执行本地 `npm test`、未运行真实用户 Windows GUI、未完成最终人工验收，也未创建 Stable Release。
