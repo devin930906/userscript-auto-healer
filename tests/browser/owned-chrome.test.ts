@@ -917,10 +917,12 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   const root=await mkdtemp(join(ciLogRoot||tmpdir(),'uah-owned-chrome-test-'));
   let profile=join(root,'profile');
   let stop:()=>void=()=>{};
+  let observeLastBootLogMarkerAfterStop:(()=>Promise<void>)|undefined;
   let unexpectedExits=0;
   t.after(async()=>{
     stop();
     await delay(800);
+    await observeLastBootLogMarkerAfterStop?.();
     await rm(root,{recursive:true,force:true}).catch(()=>undefined);
   });
   let port=await unusedLoopbackPort();
@@ -972,6 +974,16 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const started=performance.now();
     launchBegan=started;
     chromeSpawnObservedAt=undefined;
+    observeLastBootLogMarkerAfterStop=async()=>{
+      await observeBootLogMarker(performance.now()-started);
+      if(ciLogRoot){
+        t.diagnostic('CDP_CHROME_BOOT_LOG_MARKER_AFTER_STOP_'+attemptNumber+'='+JSON.stringify({
+          observed:bootLogMarkerObserved,
+          relativeTimeBucket:bootLogMarkerBucket,
+          timeBase:chromeSpawnObservedAt===undefined?'LAUNCH_ATTEMPT':'CHROME_SPAWN_RETURNED'
+        }));
+      }
+    };
     let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
