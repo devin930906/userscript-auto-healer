@@ -552,3 +552,43 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 安全实施方案必须明确区分：(1) 已有的持久 AST 调度提示；(2) 重启后必须重新获取的动态 DOM 观察；(3) 检查点本身不能授予的候选应用/回滚权限。新工作使用独立分支和 PR，先建立失败测试，再以新 HEAD 执行对应 Windows Actions 检查后才进入整合判定。
 - 本快照的 Open Issues 为 #486、#487、#488、#489、#510、#857、#603、#604、#605、#606、#607、#608、#609、#610。执行时必须重新读取实时状态；此列表仅为当前快照，不是永久数量。
 - 本次状态核对没有本地工作区、未执行本地 `npm test`、未运行真实用户 Windows GUI、未完成最终人工验收，也未创建 Stable Release。
+
+
+## 2026-11-27 TASK-005 / Issue #510 — Windows Chrome bootstrap diagnostics on main
+
+> 证据基线：main@643cfaf2b58f61087dcd9d166b8a0f4bcac7d058。本节仅记录受控 Windows Actions 诊断；没有修改产品代码、20 秒启动期限、浏览器身份验证或测试通过判据。
+
+### 当前主干与机器验证
+
+- 当前 package.json 版本为 1.1.3；最新正式 Release 仍为 [v1.1.3](https://github.com/devin930906/userscript-auto-healer/releases/tag/v1.1.3)，发布时间为 2026-11-13。它是历史发行，不是本轮新 Stable 候选或验收凭证。
+- 主干 Application Skeleton Checks [#45954222320](https://github.com/devin930906/userscript-auto-healer/actions/runs/45954222320) 成功：1,333 tests，1,330 pass、0 fail、3 conditional skips；Windows Electron shell smoke 成功。
+- 主干 Portable Chrome Product Validation [#45954419857](https://github.com/devin930906/userscript-auto-healer/actions/runs/45954419857) 成功：64 tests，63 pass、0 fail、1 conditional skip；真实签名 Chrome 的 owned CDP HTTP 测试成功。此项不是完整 Stable 或最终用户验收。
+
+### #510 历史失败特征
+
+- 失败样本 [#45459793020](https://github.com/devin930906/userscript-auto-healer/actions/runs/45459793020) 的 owned Chrome 测试返回 CDP_TIMEOUT；诊断计数为 FETCH_REFUSED=59、FETCH_TIMEOUT=3、CHILD_RUNNING_NO_CDP=1、CDP_TIMEOUT_LISTENER_PID_MATCH=1。
+- 时间窗口为 FETCH_REFUSED=t0..t15、FETCH_TIMEOUT=t17..t20、超时后在约 t18 观察到 listener。失败样本没有 CDP_VERSION_PARSED，所以证据指向 20 秒期限内未取得可解析的 CDP HTTP 版本响应；listener 存在不等于 /json/version 已就绪，也不证明 PID 与 WebSocket proof 已完成。
+- 上述结果缩小了故障阶段，但仍不足以确认 Chrome 网络服务启动、HTTP accept/response、Runner 时序或其他具体根因。
+
+### 2026-11-27 同一 SHA 的受控对照
+
+1. [Full-suite differential #45956938775](https://github.com/devin930906/userscript-auto-healer/actions/runs/45956938775) — success，固定在同一 Windows Runner 与 SHA：
+   - 全套测试前 owned Chrome：64 tests，63 pass、0 fail、1 skip；Chrome 测试约 4.75 秒，CDP_VERSION_PARSED=t1，PID 与 WebSocket proof 通过。
+   - 完整注册测试：1,333 tests，1,331 pass、0 fail、2 skip；运行约 152.5 秒。
+   - 全套测试后 owned Chrome：64 tests，63 pass、0 fail、1 skip；CDP 版本解析、PID 与 WebSocket proof 均通过。三个阶段退出码均为 0。
+   - 本次没有复现故障；单次对照不能证明完整测试负载永远不会影响间歇性启动。
+
+2. [Cold / preinitialized Profile comparison #45957485205](https://github.com/devin930906/userscript-auto-healer/actions/runs/45957485205) — success：
+   - 预初始化 warmup 退出码 0。
+   - 冷 Profile 与预初始化 Profile 均返回 OWNED_CDP_BROWSER_VERIFIED；两者均在约 1 秒窗口完成 CDP 版本解析，PID 与 WebSocket proof 均通过。
+   - 本次未观察到 Profile 预初始化带来可辨识的启动改善；样本量为单次，不构成统计结论。
+
+3. Issue 记录已同步至 [#510 诊断评论](https://github.com/devin930906/userscript-auto-healer/issues/510#issuecomment-7212357595)。
+
+### 结论、限制与下一步
+
+- #510 仍保持 Open；两项对照均未复现历史故障，根因仍为“无法确认”。不得将绿色诊断解释为修复完成。
+- 不提高 20 秒期限，不接受迟到 listener，不放宽 PID/HTTP/WebSocket 身份验证，不跳过测试，不以关闭 Issue 或单次绿色重跑代替根因修复。
+- 本轮未运行 Candidate Packaging，未生成新的 EXE/ZIP，未指定 Stable 候选 SHA，未执行最终集中人工验收，也未创建新 Stable Release。
+- 正式产品续接入口仍为 **TASK-013 / Issue #857**；其上游管理器、修复、业务验收及导出依赖必须重新核对 [#486](https://github.com/devin930906/userscript-auto-healer/issues/486)、[#487](https://github.com/devin930906/userscript-auto-healer/issues/487)、[#488](https://github.com/devin930906/userscript-auto-healer/issues/488)、[#489](https://github.com/devin930906/userscript-auto-healer/issues/489)、[#603](https://github.com/devin930906/userscript-auto-healer/issues/603)、[#604](https://github.com/devin930906/userscript-auto-healer/issues/604)。#510 仍是 Windows 候选构建前必须继续解决的独立风险。
+- 当前审计时 Open PR 为 0、Open Issues 为 14；每次续接仍须以实时 GitHub 状态为准。Stable GATE-001..011 尚无完整通过证据。
