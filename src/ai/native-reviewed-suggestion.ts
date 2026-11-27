@@ -180,7 +180,7 @@ export async function requestNativeReviewedAiSuggestion(
     }finally{
       if(signal&&onAbort)signal.removeEventListener('abort',onAbort);
     }
-    if(!allowed||signal?.aborted)return blocked('CANCELLED');
+    if(allowed!==true||signal?.aborted)return blocked('CANCELLED');
     const consent={userApproved:true as const,approvedOrigin:origin};
     if(!gateway.enable(consent))return blocked('NOT_AUTHORIZED');
     return await gateway.suggest(consent,evidence,signal);
