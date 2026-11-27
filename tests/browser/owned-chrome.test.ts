@@ -21,6 +21,8 @@ test('TASK-005/TEST-006/008/009: boot-log parser accepts only the expected loopb
  const valid='[123:456:1127/080000.123:INFO] DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc_DEF-123';
  assert.equal(hasExpectedDevToolsListeningMarker(valid,9222),true);
  assert.equal(hasExpectedDevToolsListeningMarker(valid,9223),false);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid,0),false);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid,65536),false);
  assert.equal(hasExpectedDevToolsListeningMarker(valid.replace('127.0.0.1','localhost'),9222),false);
  assert.equal(hasExpectedDevToolsListeningMarker(valid.replace('/devtools/browser/','/devtools/page/'),9222),false);
  assert.equal(hasExpectedDevToolsListeningMarker(valid+' extra',9222),false);
@@ -42,11 +44,13 @@ type ChromeBootRelativeBucket='T0_1S'|'T1_5S'|'T5_10S'|'T10_20S'|'AFTER_20S'|'NO
 function hasExpectedDevToolsListeningMarker(logText:string,expectedPort:number):boolean{
  if(!Number.isInteger(expectedPort)||expectedPort<1||expectedPort>65535)return false;
  const prefix=`DevTools listening on ws://127.0.0.1:${expectedPort}/devtools/browser/`;
- return logText.split(/\\r?\\n/).some(rawLine=>{
+ return logText.split('\n').some(rawLine=>{
   const markerIndex=rawLine.indexOf(prefix);
   if(markerIndex<0)return false;
   const candidate=rawLine.slice(markerIndex).trim();
-  return /^DevTools listening on ws:\/\/127\\.0\\.0\\.1:\\d+\/devtools\/browser\/[A-Za-z0-9_-]+$/.test(candidate);
+  if(!candidate.startsWith(prefix))return false;
+  const browserId=candidate.slice(prefix.length);
+  return /^[A-Za-z0-9_-]+$/.test(browserId);
  });
 }
 function chromeBootRelativeBucket(elapsedMs:number):ChromeBootRelativeBucket{
