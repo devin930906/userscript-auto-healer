@@ -2994,7 +2994,7 @@ test('TASK-005: manual Windows CI diagnostic pipes only disposable Chrome stderr
     assert.ok(!observedArgs.includes('--enable-logging')&&!observedArgs.includes('--v=0'),
       'do not enable or persist unrelated Chrome log output');
     child.stderr.write(Buffer.from(marker.slice(0,81)));
-    child.stderr.write(Buffer.from(marker.slice(81)+'\\n'));
+    child.stderr.write(Buffer.from(marker.slice(81)+'\n'));
     await new Promise<void>(resolve=>setImmediate(resolve));
     assert.equal(markerObserved,true,'the exact allowlisted marker must be observed from stderr');
     assert.ok(!observedArgs.some(x=>x.includes('--no-sandbox')),
