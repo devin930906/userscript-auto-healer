@@ -75,6 +75,19 @@ async function readTestOnlyChromeBootLogMarker(profile:string,expectedPort:numbe
  finally{await handle?.close().catch(()=>undefined);}
 }
 
+test('TASK-005/TEST-006/008/009: oversized boot log reads only its bounded prefix',async()=>{
+ const profile=await mkdtemp(join(tmpdir(),'uah-boot-log-prefix-'));
+ const marker='[123:456:1127/080000.123:INFO] DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc_DEF-123';
+ try{
+  await writeFile(join(profile,'chrome_debug.log'),
+   Buffer.concat([Buffer.from(marker+'\\n'),Buffer.alloc(MAX_TEST_CHROME_BOOT_LOG_BYTES+1024,0x20)]));
+  assert.equal(await readTestOnlyChromeBootLogMarker(profile,9222),true);
+  await writeFile(join(profile,'chrome_debug.log'),
+   Buffer.concat([Buffer.alloc(MAX_TEST_CHROME_BOOT_LOG_BYTES+16,0x20),Buffer.from(marker)]));
+  assert.equal(await readTestOnlyChromeBootLogMarker(profile,9222),false);
+ }finally{await rm(profile,{recursive:true,force:true});}
+});
+
 const execFileAsync=promisify(execFile);
 
 /** The dedicated Chrome test has repeatedly passed while the same Chrome
