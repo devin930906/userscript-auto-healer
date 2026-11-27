@@ -16,6 +16,31 @@ import {PassThrough} from 'node:stream';
 import { promisify } from 'node:util';
 import { parseWindowsLoopbackListeners, resolveWindowsNetstatExecutable } from '../../src/browser/cdp-session';
 import { hasUnsafePathLink } from '../../src/version/path-boundary';
+
+test('TASK-005/TEST-006/008/009: boot-log parser accepts only the expected loopback DevTools marker',()=>{
+ const valid='[123:456:1127/080000.123:INFO] DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc_DEF-123';
+ assert.equal(hasExpectedDevToolsListeningMarker(valid,9222),true);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid,9223),false);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid.replace('127.0.0.1','localhost'),9222),false);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid.replace('/devtools/browser/','/devtools/page/'),9222),false);
+ assert.equal(hasExpectedDevToolsListeningMarker(valid+' extra',9222),false);
+ assert.equal(hasExpectedDevToolsListeningMarker('raw URL ws://127.0.0.1:9222/devtools/browser/abc_DEF-123',9222),false);
+});
+
+test('TASK-005/TEST-006/008/009: boot-log observation reports only bounded relative-time buckets',()=>{
+ assert.equal(chromeBootRelativeBucket(0),'T0_1S');
+ assert.equal(chromeBootRelativeBucket(999),'T0_1S');
+ assert.equal(chromeBootRelativeBucket(1000),'T1_5S');
+ assert.equal(chromeBootRelativeBucket(4999),'T1_5S');
+ assert.equal(chromeBootRelativeBucket(5000),'T5_10S');
+ assert.equal(chromeBootRelativeBucket(10000),'T10_20S');
+ assert.equal(chromeBootRelativeBucket(20000),'AFTER_20S');
+ assert.equal(chromeBootRelativeBucket(Number.NaN),'NOT_OBSERVED');
+});
+
+function hasExpectedDevToolsListeningMarker(_logText:string,_expectedPort:number):boolean{return false;}
+function chromeBootRelativeBucket(_elapsedMs:number):string{return 'NOT_OBSERVED';}
+
 const execFileAsync=promisify(execFile);
 
 /** The dedicated Chrome test has repeatedly passed while the same Chrome
