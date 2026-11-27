@@ -626,3 +626,53 @@ test('TASK-011/TEST-020/021: native-only mutation does not attest manager or bus
     );
   });
 });
+
+
+test('TASK-011/TEST-020/021: interrupted mutation staging requires recovery review', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    const residue = join(dirname(sourcePath), '.uah-mutate-' + randomUUID() + '.pending');
+    const residueBytes = Buffer.from('interrupted transaction evidence');
+    await writeFile(residue, residueBytes);
+    const result = await executeRecoverableAtomicMutation({
+      sourcePath,
+      backupDirectory: backupDir,
+      backupFileName,
+      expectedOriginalSha256: origSha,
+      expectedCandidateSha256: candSha,
+      candidateSource: candidateSource.toString('utf8'),
+      userApproved: true,
+      mutateApproved: true
+    });
+    assert.equal(result.status, 'BLOCKED');
+    if (result.status === 'BLOCKED') {
+      assert.equal(result.reason, 'RECOVERY_REVIEW_REQUIRED');
+    }
+    assert.deepEqual(await readFile(sourcePath), originalSource);
+    assert.deepEqual(await readFile(residue), residueBytes);
+  });
+});
+
+test('TASK-011/TEST-020/021: interrupted apply-intent staging requires recovery review', async () => {
+  await withFixture(async ({sourcePath, backupDir, backupFileName, origSha, candSha}) => {
+    const residue = join(backupDir, '.uah-apply-' + randomUUID() + '.pending');
+    const residueBytes = Buffer.from('interrupted apply-intent evidence');
+    await writeFile(residue, residueBytes);
+    const result = await executeRecoverableAtomicMutation({
+      sourcePath,
+      backupDirectory: backupDir,
+      backupFileName,
+      expectedOriginalSha256: origSha,
+      expectedCandidateSha256: candSha,
+      candidateSource: candidateSource.toString('utf8'),
+      userApproved: true,
+      mutateApproved: true
+    });
+    assert.equal(result.status, 'BLOCKED');
+    if (result.status === 'BLOCKED') {
+      assert.equal(result.reason, 'RECOVERY_REVIEW_REQUIRED');
+    }
+    assert.deepEqual(await readFile(sourcePath), originalSource);
+    assert.deepEqual(await readFile(residue), residueBytes);
+  });
+});
+

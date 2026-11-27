@@ -76,6 +76,11 @@ export async function hasInterruptedRestoreStaging(
  const cursor=await opendir(directory);
  for await(const entry of cursor){
   if(++entries>MAX_ENTRIES)throw new Error('restore directory scan limit');
+  // Interrupted candidate mutations and unpublished apply intents also
+  // require recovery review. Never remove their evidence during observation.
+  if(/^\.uah-(?:mutate|apply)-.*\.pending$/i.test(entry.name)){
+   pending=true;continue;
+  }
   if(!RESTORE_PENDING.test(entry.name)){
    // A canonical NAME alone is not recovery evidence. The published intent
    // must be a single-link regular file; a source-path mutex must be a
