@@ -1534,3 +1534,23 @@ test('TASK-013/TEST-022/026: synchronous worker cancellation cannot publish prem
  }
  assert.equal(retired,true);
 });
+
+test('TASK-013/REQ-022/TEST-022: persisted per-script stage never restores mutation authority',async()=>{
+ const api=await import('../../src/jobs/batch-coordinator');
+ const recover=(api as unknown as {recoverScriptTaskHint?:(value:unknown,hash:string)=>unknown}).recoverScriptTaskHint;
+ assert.equal(typeof recover,'function','per-script recovery contract must exist');
+ if(!recover)return;
+ const hint={schema:'uah-script-task-hint-v1',scriptHash:SCRIPT_A,stage:'VERIFIED'};
+ assert.deepEqual(recover(hint,SCRIPT_A),{
+  scriptHash:SCRIPT_A,stage:'QUEUED',historicalStage:'VERIFIED',
+  freshEvidenceRequired:true,freshConsentRequired:true,
+  automaticPatchAllowed:false,automaticRollbackAllowed:false,
+  tampermonkeyVerified:false,businessVerified:false
+ });
+ assert.equal(recover(hint,SCRIPT_B),null,'changed bytes cannot restore a task');
+ assert.equal(recover({...hint,automaticPatchAllowed:true},SCRIPT_A),null,'unexpected authority rejected');
+ assert.equal(recover({...hint,stage:'UNKNOWN_STAGE'},SCRIPT_A),null);
+ const accessor={...hint};
+ Object.defineProperty(accessor,'stage',{get(){throw Error('must not invoke accessor');}});
+ assert.equal(recover(accessor,SCRIPT_A),null);
+});
