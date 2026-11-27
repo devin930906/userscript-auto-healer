@@ -13,6 +13,10 @@ const path=require('node:path');
 const http=require('node:http');
 const {createHash}=require('node:crypto');
 const {classifyTampermonkeyPageUrl}=require('./safe-tampermonkey-page-label.cjs');
+const {
+ TAMPERMONKEY_MANAGER_CARD_EXPRESSION,
+ readTampermonkeyManagerCardAfterInventoryReady
+}=require('../dist/src/manager/tampermonkey-installation.js');
 const dir=process.env.UAH_TM_EXTENSION_DIR;
 const profile=process.env.UAH_TM_PROFILE_DIR;
 if(!dir||!profile||!path.isAbsolute(dir)||!path.isAbsolute(profile))
@@ -415,6 +419,16 @@ async function extensionCards(context){
   });
  }finally{await page.close();}
 }
+async function productManagerCardReceipt(context){
+ const page=await context.newPage();
+ try{
+  await page.goto('chrome://extensions/',{waitUntil:'domcontentloaded',timeout:20000});
+  return await readTampermonkeyManagerCardAfterInventoryReady(async timeoutMs=>{
+   const value=await page.evaluate(TAMPERMONKEY_MANAGER_CARD_EXPRESSION);
+   return {result:{type:'object',value}};
+  },{timeoutMs:4000});
+ }finally{await page.close();}
+}
 async function optIn(context,id){
  const page=await context.newPage();
  try{
@@ -533,6 +547,26 @@ async function main(){
   const manager=managerCandidates[0];
   assert.match(manager.id,/^[a-p]{32}$/);
   const id=manager.id;
+  // Exercise the exact production chrome://extensions expression and bounded
+  // inventory-readiness parser against this same disposable Chromium profile.
+  // This is a diagnostic metadata hint only, not product-owned CDP/session proof.
+  const productCard=await productManagerCardReceipt(context);
+  console.log('PRODUCT_MANAGER_CARD_EXPRESSION_DIAGNOSTIC '+JSON.stringify({
+   ok:productCard.ok,
+   status:productCard.ok?productCard.status:null,
+   code:productCard.ok?null:productCard.code,
+   stage:productCard.ok?null:productCard.stage,
+   extensionId:productCard.ok?productCard.extensionId:null,
+   version:productCard.ok&&productCard.status==='INSTALLED_METADATA_HINT_ONLY'?productCard.version:null,
+   enabled:productCard.ok&&productCard.status==='INSTALLED_METADATA_HINT_ONLY'?productCard.enabled:null,
+   matchesPocCard:productCard.ok&&productCard.status==='INSTALLED_METADATA_HINT_ONLY'&&
+     productCard.extensionId===id,
+   matchesManifestVersion:productCard.ok&&productCard.status==='INSTALLED_METADATA_HINT_ONLY'&&
+     productCard.version===manifest.version,
+   extensionAuthenticityVerified:false,
+   storeProvenanceVerified:false,
+   productOwnedSessionVerified:false
+  }));
   // MV3 service workers are event-driven and may already have suspended.
   // A missing worker at THIS instant is neither proof of a broken extension
   // nor of a valid manager installation. Record a bounded observation only;
