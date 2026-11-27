@@ -1484,3 +1484,25 @@ test('TASK-013/TEST-022: synchronous startup cannot reserve a competing checkpoi
  assert.ok(ticket);
  coordinator.releaseCheckpointedRun(ticket);
 });
+
+
+test('TASK-013/TEST-022/026: no new checkpoint reservation while cancelled worker remains live',async()=>{
+ let finish!: (value:'DONE')=>void;
+ const worker=new Promise<'DONE'>(resolve=>{finish=resolve;});
+ const coordinator=new ReadOnlyBatchCoordinator({count:1,jobHashes:[SCRIPT_A]},
+  ()=>worker);
+ const run=coordinator.run();
+ coordinator.cancel();
+ await run;
+ try{
+  const reservation=coordinator.reserveCheckpointedRun();
+  if(reservation)coordinator.releaseCheckpointedRun(reservation);
+  assert.equal(reservation,null,'cancelled scheduling is not worker retirement');
+ }finally{
+  finish('DONE');
+  await coordinator.whenWorkersRetired();
+ }
+ const ticket=coordinator.reserveCheckpointedRun();
+ assert.notEqual(ticket,null,'retirement releases the reservation fence');
+ if(ticket)coordinator.releaseCheckpointedRun(ticket);
+});
