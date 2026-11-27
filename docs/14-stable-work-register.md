@@ -596,3 +596,12 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - PR #925 HEAD `0e152ef180ef5354b522e52c19aa9c9ed176ea00` 的 `windows-shell-smoke` 与 Candidate packaging 均失败在 `SHELL_SMOKE_PRELOAD_KEY_INVENTORY_FAILED`；远端该 SHA 的 Boundary 和 Portable Chrome checks 成功，不能替代两项实际 Electron smoke。
 - 本地已修正 smoke 的 preload 键名顺序，并增加静态断言确保烟测清单与 preload 的排序后导出完全一致。`npm run build` 与 desktop-boundary 81/81 通过，`git diff --check` 通过；本机 Electron smoke 未运行。
 - 新精确 PR SHA 的 Windows checks 尚未执行；TASK-013/#857、TEST-022/GATE-007 与 Stable 发布验收仍未完成。
+
+
+## 2026-11-27 TASK-005 / Issue #510 — controlled Windows Chrome diagnostics
+
+- 证据基线：main@643cfaf2b58f61087dcd9d166b8a0f4bcac7d058。历史失败 [#45459793020](https://github.com/devin930906/userscript-auto-healer/actions/runs/45459793020) 在 20 秒内没有 CDP_VERSION_PARSED，记录 59 次 FETCH_REFUSED、3 次 FETCH_TIMEOUT，约 t18 才观察到 listener PID match；根因仍未确认。
+- 同一 SHA 的 [full-suite differential #45956938775](https://github.com/devin930906/userscript-auto-healer/actions/runs/45956938775) 成功：前后 owned Chrome 均通过；完整测试 1,333 total / 1,331 pass / 0 fail / 2 skipped。未复现故障。
+- 同一 SHA 的 [cold/preinitialized Profile comparison #45957485205](https://github.com/devin930906/userscript-auto-healer/actions/runs/45957485205) 成功：warmup 退出码 0；冷、暖 Profile 均完成 CDP、PID 与 WebSocket proof，约 1 秒级完成。单次样本不构成根因排除。
+- 详细阶段证据已写入 [Issue #510 comment](https://github.com/devin930906/userscript-auto-healer/issues/510#issuecomment-7212357595) 与 docs/12-handoff.md。没有产品代码修改；不提高 20 秒期限、不放宽身份验证、不跳过测试；#510 保持 Open。
+- 本轮未运行 Candidate Packaging、未生成新 EXE/ZIP、未执行最终人工验收；GATE-001..011 未全部通过。正式产品续接仍为 TASK-013 / #857，并须重新核对 #486/#487/#488/#489/#603/#604 上游依赖。
