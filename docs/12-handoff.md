@@ -592,3 +592,37 @@ The manual, test-only GitHub Actions lifecycle run [#41281277986](https://github
 - 本轮未运行 Candidate Packaging，未生成新的 EXE/ZIP，未指定 Stable 候选 SHA，未执行最终集中人工验收，也未创建新 Stable Release。
 - 正式产品续接入口仍为 **TASK-013 / Issue #857**；其上游管理器、修复、业务验收及导出依赖必须重新核对 [#486](https://github.com/devin930906/userscript-auto-healer/issues/486)、[#487](https://github.com/devin930906/userscript-auto-healer/issues/487)、[#488](https://github.com/devin930906/userscript-auto-healer/issues/488)、[#489](https://github.com/devin930906/userscript-auto-healer/issues/489)、[#603](https://github.com/devin930906/userscript-auto-healer/issues/603)、[#604](https://github.com/devin930906/userscript-auto-healer/issues/604)。#510 仍是 Windows 候选构建前必须继续解决的独立风险。
 - 当前审计时 Open PR 为 0、Open Issues 为 14；每次续接仍须以实时 GitHub 状态为准。Stable GATE-001..011 尚无完整通过证据。
+
+
+## 2026-11-27 live-main reconciliation — TASK-005 / TASK-013 / TASK-017
+
+> Current documentation baseline: main@e5a0030a0a29ddff42ad8ca3a1da4a37f6577b43. This is a docs-only merge after the code evidence baseline main@643cfaf2; no product code changed in PR #966.
+
+### TASK-005 / Issue #510 — third controlled Windows diagnostic
+
+- In addition to the full-suite differential #45956938775 and cold/preinitialized Profile comparison #45957485205 recorded above, bounded CPU-pressure comparison [#45957783316](https://github.com/devin930906/userscript-auto-healer/actions/runs/45957783316) completed success on the same code SHA 643cfaf2.
+- The workflow ran the isolated Chrome check once without pressure and once with exactly two test-owned Node workers capped at eight seconds. Both checks passed 64 tests / 63 pass / 0 fail / 1 conditional skip; under pressure, CDP_VERSION_PARSED=t1 and PID/WebSocket proof passed.
+- The CPU-pressure sample did not reproduce the historical timeout. It does not exclude other runner contention or rare timing conditions. Full evidence is consolidated in [Issue #510 comment](https://github.com/devin930906/userscript-auto-healer/issues/510#issuecomment-7212357595).
+- #510 remains Open and unresolved. No product code, 20-second deadline, browser ownership proof, HTTP validation, WebSocket proof or test threshold was changed. No Candidate Packaging, new EXE/ZIP, Stable candidate, final human acceptance or Release was run.
+
+### TASK-013 / Issue #857 — live-main code reconciliation
+
+- Re-read current main source after merged PR #960. Current blob identities: app/main/index.ts 3a1ba2632317a9ef5341a0cfd5662bd6ab0751e8; app/ui/index.ts f614f2579f93daaf49363c67b2333ef72791e69a; src/jobs/imported-analysis-queue.ts 76af281d203dbd66eadea7f43017f369394f512b; src/jobs/native-checkpointed-import.ts d35965cc4cd7184ddc7247c77f2dc138f66fea93; src/jobs/batch-journal.ts faf535e9f7287422d8309e2b81957d4b308825e8.
+- Native multi-select/folder and renderer file-input/drag-drop now converge on the same main-process summarizeResult → analyzeImportedOutcomeWithCheckpoint read-only AST scheduling path. The old Issue #857 body statement that renderer drop/file selection used a separate per-file AST path was stale; the Issue body has been minimally corrected on 2026-11-27.
+- Existing batch-journal / native-checkpointed-import persists read-only scheduling hints and ordered hash commitments only. It does not persist source bytes, grant authority, or complete the full durable per-script dynamic diagnosis/repair task across process restart. The source comments explicitly require a separate trusted workflow for restart recovery.
+- Remaining TASK-013 scope: durable task-level recovery with fresh consent and current re-import; end-to-end per-script dynamic diagnosis, conservative repair candidate, optional consented AI, real Tampermonkey/GM and business positive/negative proof, versioning/backup, authorized apply/export, and full TEST-022/GATE-007. Keep #857 Open.
+- Recheck upstream dependencies #486/#487/#488/#489/#603/#604 and related UI #607 before selecting a dependent implementation slice. No Issue lock/claim is required.
+
+### TASK-017 / Issue #607 — Impeccable Web static UX critique
+
+- A source-only Web evidence review was added to [Issue #607 comment](https://github.com/devin930906/userscript-auto-healer/issues/607#issuecomment-7212545970), based on app/ui/index.html, app/ui/index.css, app/ui/index.ts and docs/05-experience.md at main@e5a0030.
+- Positive source evidence: semantic tab/tabpanel relationships, responsive tab orientation, Arrow/Home/End keyboard handling, skip-to-workspace control, visible focus, named buttons, connected labels (including wrapped checkboxes), live status regions, advanced manual GM tools grouped under details, and sampled text-token/background contrast ratios above 4.5:1.
+- Main P1 UX gap: the approved single batch journey is still fragmented across seven visible workspaces (Script Library, Browser, Scenarios, Diagnosis, Candidates, Restore, AI). The static review recommends a guided primary batch journey with a persistent stage summary while retaining advanced workspaces and every native-consent/security boundary.
+- Review limitations are explicit: no rendered screenshot, live browser, automated a11y detector, Windows GUI, actual keyboard/screen-reader or resize test was available. This is not a visual QA pass, UI code change or Stable GATE pass.
+
+### Current lifecycle state
+
+- After PR #966 merged, current main is e5a0030a0a29ddff42ad8ca3a1da4a37f6577b43; package.json remains 1.1.3 and latest formal Release remains historical v1.1.3 (2026-11-13).
+- At the post-merge audit point, Open PRs were 0 and Open Issues were 14. This count is a dated observation, not a substitute for re-querying on the next session.
+- Formal product continuation remains TASK-013 / #857 after live dependency recheck; #510 remains an unresolved Windows candidate blocker; TASK-017/#607 remains dependent on TASK-013..016.
+- No current Stable candidate SHA, new EXE/ZIP, final human acceptance, complete GATE-001..011 evidence or new Stable Release exists.

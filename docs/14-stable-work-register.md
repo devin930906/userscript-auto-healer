@@ -605,3 +605,12 @@ TASK-011/TEST-020/021/026 仍只是安全受限阶段成果；真实原子安全
 - 同一 SHA 的 [cold/preinitialized Profile comparison #45957485205](https://github.com/devin930906/userscript-auto-healer/actions/runs/45957485205) 成功：warmup 退出码 0；冷、暖 Profile 均完成 CDP、PID 与 WebSocket proof，约 1 秒级完成。单次样本不构成根因排除。
 - 详细阶段证据已写入 [Issue #510 comment](https://github.com/devin930906/userscript-auto-healer/issues/510#issuecomment-7212357595) 与 docs/12-handoff.md。没有产品代码修改；不提高 20 秒期限、不放宽身份验证、不跳过测试；#510 保持 Open。
 - 本轮未运行 Candidate Packaging、未生成新 EXE/ZIP、未执行最终人工验收；GATE-001..011 未全部通过。正式产品续接仍为 TASK-013 / #857，并须重新核对 #486/#487/#488/#489/#603/#604 上游依赖。
+
+
+## 2026-11-27 live-main reconciliation — TASK-005 / TASK-013 / TASK-017
+
+- Current main after docs PR #966: e5a0030a0a29ddff42ad8ca3a1da4a37f6577b43. Code evidence baseline for the Windows diagnostic runs: 643cfaf2b58f61087dcd9d166b8a0f4bcac7d058.
+- TASK-005/#510: full-suite differential #45956938775, cold/preinitialized Profile comparison #45957485205, and bounded CPU-pressure comparison #45957783316 all passed on the same code baseline without reproducing the historical CDP_TIMEOUT. The last run used two test-owned workers capped at eight seconds; both baseline and pressure Chrome checks passed 63/63 applicable tests. This is not a root-cause fix; #510 stays Open. Full diagnostic evidence: https://github.com/devin930906/userscript-auto-healer/issues/510#issuecomment-7212357595.
+- TASK-013/#857: current native multi-select/folder and renderer file-input/drag-drop paths converge on the same read-only AST checkpoint scheduler. This corrects the stale older issue text; the Issue body has been updated. Durable full-task recovery, dynamic diagnosis/repair orchestration, authenticated real Tampermonkey/GM and business assertions, versioning/backup and full TEST-022/GATE-007 remain incomplete. Dependencies #486/#487/#488/#489/#603/#604 remain to be rechecked. Keep #857 Open.
+- TASK-017/#607: Impeccable Web static source critique is recorded at https://github.com/devin930906/userscript-auto-healer/issues/607#issuecomment-7212545970. Main finding is a fragmented seven-workspace user journey versus the approved single batch journey. The review is source-only; no rendered UI, automated a11y scan or Windows GUI test is claimed.
+- No product source changed in this reconciliation; no Candidate Packaging, new EXE/ZIP, final human acceptance or Stable Release. GATE-001..011 are not fully passed.
