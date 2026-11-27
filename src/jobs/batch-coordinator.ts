@@ -73,6 +73,36 @@ function exactData(input:unknown,keys:readonly string[]):Record<string,unknown>|
  return output;
  }catch{return null;}
 }
+/** Versioned historical hints are not authenticated execution receipts. */
+export type ScriptTaskHintStage=BatchJobState|'VERIFIED';
+export interface RecoveredScriptTaskHint{
+ readonly scriptHash:string;
+ readonly stage:'QUEUED';
+ readonly historicalStage:ScriptTaskHintStage;
+ readonly freshEvidenceRequired:true;
+ readonly freshConsentRequired:true;
+ readonly automaticPatchAllowed:false;
+ readonly automaticRollbackAllowed:false;
+ readonly tampermonkeyVerified:false;
+ readonly businessVerified:false;
+}
+/** Only accept a hint for freshly imported bytes. Never restore authority
+ * or skip a stage based on persisted historical status. No I/O here. */
+export function recoverScriptTaskHint(input:unknown,freshScriptHash:string):RecoveredScriptTaskHint|null{
+ if(typeof freshScriptHash!=='string'||!/^[0-9a-f]{64}$/.test(freshScriptHash))return null;
+ const hint=exactData(input,['schema','scriptHash','stage']);
+ if(!hint||hint.schema!=='uah-script-task-hint-v1'||hint.scriptHash!==freshScriptHash)return null;
+ const stage=hint.stage;
+ if(stage!=='VERIFIED'&&!validState.has(stage as BatchJobState))return null;
+ return Object.freeze({
+  scriptHash:freshScriptHash,
+  stage:'QUEUED' as const,
+  historicalStage:stage as ScriptTaskHintStage,
+  freshEvidenceRequired:true as const,
+  freshConsentRequired:true as const,
+  ...authority
+ });
+}
 /** An unbound positional snapshot cannot safely skip work for a new batch.
  * A digest protects against accidental cross-batch replay, NOT intentional
  * forgery of the mutable snapshot. It never grants repair or file authority.
