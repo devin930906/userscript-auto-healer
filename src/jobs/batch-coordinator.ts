@@ -266,7 +266,7 @@ export class ReadOnlyBatchCoordinator{
  // A terminal/cancelled scheduling receipt does NOT prove that an async
  // read-only DOM worker has retired. Keep an explicit lifecycle fence for
  // the privileged main-process diagnostic gate.
- private readonly pendingWorkers=new Set<Promise<ReadOnlyWorkResult>>();
+ private readonly pendingWorkers=new Set<Promise<void>>();
  /** Resolve only after every already-started underlying worker settles.
   * If an adapter never retires, callers must keep exclusive authority held.
   * This is not a new browser/manager capability or worker abort mechanism. */
@@ -275,13 +275,24 @@ export class ReadOnlyBatchCoordinator{
    await Promise.allSettled(Array.from(this.pendingWorkers));
  }
  private startTrackedWorker(ordinal:number,signal:AbortSignal):Promise<ReadOnlyWorkResult>{
-  const task=this.worker(ordinal,signal);
-  this.pendingWorkers.add(task);
-  void task.then(
-   ()=>{this.pendingWorkers.delete(task);},
-   ()=>{this.pendingWorkers.delete(task);}
-  );
-  return task;
+  // Register retirement before invoking native adapter code: it may
+  // synchronously cancel or request retirement before returning a promise.
+  let settle!:()=>void;
+  const retirement=new Promise<void>(resolve=>{settle=resolve;});
+  this.pendingWorkers.add(retirement);
+  const retire=()=>{
+   this.pendingWorkers.delete(retirement);
+   settle();
+  };
+  try{
+   const task=this.worker(ordinal,signal);
+   void task.then(retire,retire);
+   return task;
+  }catch(error){
+   // A synchronous adapter failure has no remaining underlying worker.
+   retire();
+   throw error;
+  }
  }
  constructor(options:Options,worker:ReadOnlyWorker,checkpoint?:unknown){
   const opts=validateOptions(options);
