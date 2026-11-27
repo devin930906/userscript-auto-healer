@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { access, lstat, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, mkdir, open, realpath, rm, writeFile } from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
@@ -38,8 +38,38 @@ test('TASK-005/TEST-006/008/009: boot-log observation reports only bounded relat
  assert.equal(chromeBootRelativeBucket(Number.NaN),'NOT_OBSERVED');
 });
 
-function hasExpectedDevToolsListeningMarker(_logText:string,_expectedPort:number):boolean{return false;}
-function chromeBootRelativeBucket(_elapsedMs:number):string{return 'NOT_OBSERVED';}
+type ChromeBootRelativeBucket='T0_1S'|'T1_5S'|'T5_10S'|'T10_20S'|'AFTER_20S'|'NOT_OBSERVED';
+function hasExpectedDevToolsListeningMarker(logText:string,expectedPort:number):boolean{
+ if(!Number.isInteger(expectedPort)||expectedPort<1||expectedPort>65535)return false;
+ const prefix=`DevTools listening on ws://127.0.0.1:${expectedPort}/devtools/browser/`;
+ return logText.split(/\\r?\\n/).some(rawLine=>{
+  const markerIndex=rawLine.indexOf(prefix);
+  if(markerIndex<0)return false;
+  const candidate=rawLine.slice(markerIndex).trim();
+  return /^DevTools listening on ws:\/\/127\\.0\\.0\\.1:\\d+\/devtools\/browser\/[A-Za-z0-9_-]+$/.test(candidate);
+ });
+}
+function chromeBootRelativeBucket(elapsedMs:number):ChromeBootRelativeBucket{
+ if(!Number.isFinite(elapsedMs)||elapsedMs<0)return 'NOT_OBSERVED';
+ if(elapsedMs<1000)return 'T0_1S';
+ if(elapsedMs<5000)return 'T1_5S';
+ if(elapsedMs<10000)return 'T5_10S';
+ if(elapsedMs<20000)return 'T10_20S';
+ return 'AFTER_20S';
+}
+const MAX_TEST_CHROME_BOOT_LOG_BYTES=256*1024;
+async function readTestOnlyChromeBootLogMarker(profile:string,expectedPort:number):Promise<boolean>{
+ let handle:Awaited<ReturnType<typeof open>>|undefined;
+ try{
+  handle=await open(join(profile,'chrome_debug.log'),'r');
+  const info=await handle.stat();
+  if(!info.isFile()||info.size<=0||info.size>MAX_TEST_CHROME_BOOT_LOG_BYTES)return false;
+  const buffer=Buffer.alloc(Math.min(info.size,MAX_TEST_CHROME_BOOT_LOG_BYTES));
+  const {bytesRead}=await handle.read(buffer,0,buffer.length,0);
+  return hasExpectedDevToolsListeningMarker(buffer.subarray(0,bytesRead).toString('utf8'),expectedPort);
+ }catch{return false;}
+ finally{await handle?.close().catch(()=>undefined);}
+}
 
 const execFileAsync=promisify(execFile);
 
@@ -886,12 +916,16 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   const startupStages:string[]=[];
   let startupStageWindows=createBoundedCdpStageWindows();
   let launchBegan=0;
+  let chromeSpawnObservedAt:number|undefined;
   // Pass through a variable so TS can compile this behavioural regression
   // against the old implementation, before the new optional hook exists.
   const launchOptions={userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
     onStartupStage:(stage:string)=>{
       startupStages.push(stage);
+      if(stage==='CHROME_SPAWN_RETURNED'&&chromeSpawnObservedAt===undefined){
+        chromeSpawnObservedAt=performance.now();
+      }
       startupStageWindows.observe(performance.now()-launchBegan,stage);
     }};
   // This is TEST-ONLY observation of the independently owned disposable
@@ -899,24 +933,41 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   // marker contents, queries the user profile or retries a touched browser.
   let timeline=createBoundedChromeBootstrapTimeline();
   let listenerTimeline=createBoundedListenerPresenceTimeline();
+  let bootLogAttempt=0;
   const launchWithBoundedMarkers=async()=>{
+    const attemptProfile=profile;
+    const attemptPort=port;
+    const attemptNumber=++bootLogAttempt;
+    let bootLogMarkerObserved=false;
+    let bootLogMarkerBucket:ChromeBootRelativeBucket='NOT_OBSERVED';
+    const observeBootLogMarker=async(elapsedFromAttemptStart:number)=>{
+      if(!ciLogRoot||bootLogMarkerObserved)return;
+      if(await readTestOnlyChromeBootLogMarker(attemptProfile,attemptPort)){
+        bootLogMarkerObserved=true;
+        const elapsedFromSpawn=chromeSpawnObservedAt===undefined
+          ?elapsedFromAttemptStart:performance.now()-chromeSpawnObservedAt;
+        bootLogMarkerBucket=chromeBootRelativeBucket(elapsedFromSpawn);
+      }
+    };
     const pressure=beginBoundedCiChromeCpuPressure();
     if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE=2_WORKERS_MAX_8S');
     const started=performance.now();
     launchBegan=started;
+    chromeSpawnObservedAt=undefined;
     let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
       sampling=true;
       try{
         const elapsed=performance.now()-started;
-        timeline.observe(elapsed,await redactedChromeBootstrapMarkers(profile));
+        timeline.observe(elapsed,await redactedChromeBootstrapMarkers(attemptProfile));
+        await observeBootLogMarker(elapsed);
         // Sampling once per ~2.5 s avoids competing with Chrome startup.
         // Only the binary 0/1/? result survives the native OS query.
         if(elapsed-latestListenerSampleMs>=2500){
           latestListenerSampleMs=elapsed;
           listenerTimeline.observe(elapsed,
-            await readTestOnlyLocalListenerPresence(port));
+            await readTestOnlyLocalListenerPresence(attemptPort));
         }
       }finally{sampling=false;}
     };
@@ -926,9 +977,17 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     finally{
       pressure.stop();
       clearInterval(interval);
+      await observeBootLogMarker(performance.now()-started);
+      if(ciLogRoot){
+        t.diagnostic('CDP_CHROME_BOOT_LOG_MARKER_'+attemptNumber+'='+JSON.stringify({
+          observed:bootLogMarkerObserved,
+          relativeTimeBucket:bootLogMarkerBucket,
+          timeBase:chromeSpawnObservedAt===undefined?'LAUNCH_ATTEMPT':'CHROME_SPAWN_RETURNED'
+        }));
+      }
       if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE_LISTENER_TIMELINE='+listenerTimeline.summary());
       timeline.observe(performance.now()-started,
-        await redactedChromeBootstrapMarkers(profile));
+        await redactedChromeBootstrapMarkers(attemptProfile));
     }
   };
   let result=await launchWithBoundedMarkers();
