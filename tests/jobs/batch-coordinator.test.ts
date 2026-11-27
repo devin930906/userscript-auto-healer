@@ -1506,3 +1506,31 @@ test('TASK-013/TEST-022/026: no new checkpoint reservation while cancelled worke
  assert.notEqual(ticket,null,'retirement releases the reservation fence');
  if(ticket)coordinator.releaseCheckpointedRun(ticket);
 });
+
+test('TASK-013/TEST-022/026: synchronous worker cancellation cannot publish premature retirement',async()=>{
+ let finish!: (value:'DONE')=>void;
+ const pending=new Promise<'DONE'>(resolve=>{finish=resolve;});
+ let retired=false;
+ let retirement:Promise<void>|undefined;
+ let coordinator!:ReadOnlyBatchCoordinator;
+ coordinator=new ReadOnlyBatchCoordinator({count:1,jobHashes:[SCRIPT_A]},()=>{
+  // A trusted native adapter can synchronously signal cancellation and ask
+  // the main-process gate to await retirement before returning its promise.
+  coordinator.cancel();
+  retirement=coordinator.whenWorkersRetired().then(()=>{retired=true;});
+  return pending;
+ });
+ const terminal=await coordinator.run();
+ try{
+  assert.equal(terminal.jobs[0].state,'CANCELLED');
+  assert.ok(retirement);
+  await Promise.resolve();
+  assert.equal(retired,false,'the worker is still active inside its returned promise');
+  assert.equal(terminal.automaticPatchAllowed,false);
+ }finally{
+  finish('DONE');
+  await retirement;
+  await coordinator.whenWorkersRetired();
+ }
+ assert.equal(retired,true);
+});
