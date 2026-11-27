@@ -2,7 +2,7 @@
  * This does not establish an actual WebSocket session, tab identity, Tampermonkey
  * injection, GM API support or script repair; those are separate product gates.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
 import {lstat,realpath} from 'node:fs/promises';
 import type {Readable,Writable} from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -237,6 +237,10 @@ export interface ChromeLaunchOptions {
   /** Trusted native diagnostics only; emits fixed stage labels, never URL,
    * profile, PID, response body or transport error text. Non-authoritative. */
   readonly onStartupStage?:(stage:ChromeStartupStage)=>void;
+  /** Manual Windows Actions diagnostic only. Receives raw stderr chunks from
+   * a disposable headless Chrome child; callers must parse in bounded memory
+   * and must never persist or emit the raw bytes. Ignored outside that gate. */
+  readonly onTestChromeStderrChunk?:(chunk:Buffer)=>void;
 }
 
 interface ValidatedRunnerTempDirectory {
@@ -436,7 +440,7 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
   if(prototype!==Object.prototype&&prototype!==null)return null;
   const desc=Object.getOwnPropertyDescriptors(raw);
   const allowed=new Set(['userApproved','signal','testHeadless','testExtensionDirectory',
-    'onStartupStage','onUnexpectedExit']);
+    'onStartupStage','onUnexpectedExit','onTestChromeStderrChunk']);
   for(const key of Reflect.ownKeys(desc)){
    if(typeof key!=='string'||!allowed.has(key)||
       !Object.prototype.hasOwnProperty.call(desc[key],'value'))return null;
@@ -462,16 +466,20 @@ function checkedChromeLaunchOptions(raw:unknown):ChromeLaunchOptions|null {
       !isCanonicalWindowsPath(testExtensionDirectory)))return null;
   const startup:unknown=desc.onStartupStage?.value;
   const unexpected:unknown=desc.onUnexpectedExit?.value;
+  const stderrChunk:unknown=desc.onTestChromeStderrChunk?.value;
   if((startup!==undefined&&
       (typeof startup!=='function'||nodeTypes.isProxy(startup)))||
      (unexpected!==undefined&&
-      (typeof unexpected!=='function'||nodeTypes.isProxy(unexpected))))
+      (typeof unexpected!=='function'||nodeTypes.isProxy(unexpected)))||
+     (stderrChunk!==undefined&&
+      (typeof stderrChunk!=='function'||nodeTypes.isProxy(stderrChunk))))
     return null;
   return {userApproved:true,signal:signal as AbortSignal|undefined,
     testHeadless:headless as boolean|undefined,
     testExtensionDirectory:testExtensionDirectory as string|undefined,
     onStartupStage:startup as ChromeLaunchOptions['onStartupStage'],
-    onUnexpectedExit:unexpected as ChromeLaunchOptions['onUnexpectedExit']};
+    onUnexpectedExit:unexpected as ChromeLaunchOptions['onUnexpectedExit'],
+    onTestChromeStderrChunk:stderrChunk as ChromeLaunchOptions['onTestChromeStderrChunk']};
  }catch{return null;}
 }
 /** A native cancellation must not remain blocked behind Windows filesystem
@@ -599,10 +607,10 @@ export async function launchApprovedIsolatedChrome(
     canonicalTestExtensionDirectory=extensionRecheck.value.path;
   }
   // Opt-in diagnostic is restricted to a manual Windows Actions run and a
-  // Profile strictly INSIDE the runner's temporary directory. Never use it
-  // for normal product sessions, PR/push CI or a user/default Chrome Profile.
-  // Chrome logs may contain URLs: keep raw bytes in this disposable directory,
-  // never print or upload them, and preserve all normal CDP/ownership gates.
+  // Profile strictly INSIDE the runner's temporary directory. Chromium writes
+  // the DevTools listening banner directly to stderr; capture only this
+  // disposable child's stderr pipe and pass chunks to the allowlist-only test
+  // callback. Never persist or print raw stderr, and preserve all normal gates.
   const ciTemp=process.env.RUNNER_TEMP;
   const relativeProfile=ciTemp&&isAbsolute(ciTemp)?
     relative(resolve(ciTemp),resolve(cfg.userDataDir)):null;
@@ -622,17 +630,27 @@ export async function launchApprovedIsolatedChrome(
   if(canonicalTestExtensionDirectory!==undefined)
     argv.unshift('--remote-debugging-pipe','--enable-unsafe-extension-debugging');
   if(checked.testHeadless===true)argv.unshift('--headless=new');
-  if(diagnostic)argv.unshift('--enable-logging','--v=0');
+  const captureTestStderr=diagnostic&&
+    typeof checked.onTestChromeStderrChunk==='function';
+  const stdio:StdioOptions=canonicalTestExtensionDirectory===undefined
+    ?(captureTestStderr?['ignore','ignore','pipe']:'ignore')
+    :(captureTestStderr?['ignore','ignore','pipe','pipe','pipe']:
+      ['ignore','ignore','ignore','pipe','pipe']);
   let child:ChildProcess;
   try{
     child=spawn(cfg.executablePath,argv,{
-      shell:false,windowsHide:true,
-      stdio:canonicalTestExtensionDirectory===undefined?'ignore':
-        ['ignore','ignore','ignore','pipe','pipe'],
-      ...(diagnostic?{env:{...process.env,
-        CHROME_LOG_FILE:join(cfg.userDataDir,'chrome_debug.log')}}:{})
+      shell:false,windowsHide:true,stdio
     });
   }catch{return {ok:false,code:'LAUNCH_FAILED'};}
+  if(captureTestStderr&&child.stderr){
+    child.stderr.on('data',(chunk:Buffer|string)=>{
+      try{
+        checked.onTestChromeStderrChunk?.(
+          Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));
+      }catch{/* Diagnostic observers cannot affect launch or authorization. */}
+    });
+    child.stderr.on('error',()=>undefined);
+  }
   let errored=false,exited=false,trampolineExited=false,retained=false;
   // A terminal owned-child event must cancel an in-flight CDP probe without
   // waiting for its separate network timeout. No unrelated PID is touched.

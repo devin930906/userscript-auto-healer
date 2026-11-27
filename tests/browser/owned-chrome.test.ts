@@ -61,19 +61,40 @@ function chromeBootRelativeBucket(elapsedMs:number):ChromeBootRelativeBucket{
  if(elapsedMs<20000)return 'T10_20S';
  return 'AFTER_20S';
 }
-const MAX_TEST_CHROME_BOOT_LOG_BYTES=256*1024;
-async function readTestOnlyChromeBootLogMarker(profile:string,expectedPort:number):Promise<boolean>{
- let handle:Awaited<ReturnType<typeof open>>|undefined;
- try{
-  handle=await open(join(profile,'chrome_debug.log'),'r');
-  const info=await handle.stat();
-  if(!info.isFile()||info.size<=0||info.size>MAX_TEST_CHROME_BOOT_LOG_BYTES)return false;
-  const buffer=Buffer.alloc(Math.min(info.size,MAX_TEST_CHROME_BOOT_LOG_BYTES));
-  const {bytesRead}=await handle.read(buffer,0,buffer.length,0);
-  return hasExpectedDevToolsListeningMarker(buffer.subarray(0,bytesRead).toString('utf8'),expectedPort);
- }catch{return false;}
- finally{await handle?.close().catch(()=>undefined);}
+function createBoundedDevToolsMarkerObserver(
+ expectedPort:number,onObserved:()=>void
+):(chunk:Buffer|string)=>void{
+ let tail='',observed=false;
+ return chunk=>{
+  if(observed)return;
+  const combined=tail+(Buffer.isBuffer(chunk)?chunk.toString('utf8'):chunk);
+  if(hasExpectedDevToolsListeningMarker(combined,expectedPort)){
+   observed=true;
+   tail='';
+   onObserved();
+   return;
+  }
+  // Retain only enough trailing bytes to recognize a marker split across
+  // stderr chunks. Raw Chrome stderr is never persisted or emitted.
+  tail=combined.slice(-512);
+ };
 }
+
+test('TASK-005/TEST-006/008/009: bounded stderr observer recognizes a split allowlisted marker once',()=>{
+ const marker='[123:456:1127/080000.123:INFO] DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc_DEF-123';
+ let observed=0;
+ const observe=createBoundedDevToolsMarkerObserver(9222,()=>{observed++;});
+ observe(Buffer.from(marker.slice(0,79)));
+ assert.equal(observed,0);
+ observe(Buffer.from(marker.slice(79)));
+ assert.equal(observed,1);
+ observe(Buffer.from(marker));
+ assert.equal(observed,1);
+ let rejected=0;
+ const wrongPort=createBoundedDevToolsMarkerObserver(9223,()=>{rejected++;});
+ wrongPort(Buffer.from(marker));
+ assert.equal(rejected,0);
+});
 
 const execFileAsync=promisify(execFile);
 
@@ -923,7 +944,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
   let chromeSpawnObservedAt:number|undefined;
   // Pass through a variable so TS can compile this behavioural regression
   // against the old implementation, before the new optional hook exists.
-  const launchOptions={userApproved:true,testHeadless:true,
+  let currentStderrObserver:((chunk:Buffer|string)=>void)|undefined;
+  const launchOptions={
+    userApproved:true,testHeadless:true,
     onUnexpectedExit:()=>{unexpectedExits++;},
     onStartupStage:(stage:string)=>{
       startupStages.push(stage);
@@ -931,7 +954,9 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
         chromeSpawnObservedAt=performance.now();
       }
       startupStageWindows.observe(performance.now()-launchBegan,stage);
-    }};
+    },
+    onTestChromeStderrChunk:(chunk:Buffer|string)=>currentStderrObserver?.(chunk)
+  } as Parameters<typeof launchApprovedIsolatedChrome>[1];
   // This is TEST-ONLY observation of the independently owned disposable
   // directory: polling never edits Chrome, changes the launch deadline, reads
   // marker contents, queries the user profile or retries a touched browser.
@@ -944,20 +969,16 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     const attemptNumber=++bootLogAttempt;
     let bootLogMarkerObserved=false;
     let bootLogMarkerBucket:ChromeBootRelativeBucket='NOT_OBSERVED';
-    const observeBootLogMarker=async(elapsedFromAttemptStart:number)=>{
-      if(!ciLogRoot||bootLogMarkerObserved)return;
-      if(await readTestOnlyChromeBootLogMarker(attemptProfile,attemptPort)){
-        bootLogMarkerObserved=true;
-        const elapsedFromSpawn=chromeSpawnObservedAt===undefined
-          ?elapsedFromAttemptStart:performance.now()-chromeSpawnObservedAt;
-        bootLogMarkerBucket=chromeBootRelativeBucket(elapsedFromSpawn);
-      }
-    };
     const pressure=beginBoundedCiChromeCpuPressure();
     if(pressure.workers)t.diagnostic('CDP_CI_CPU_PRESSURE=2_WORKERS_MAX_8S');
     const started=performance.now();
     launchBegan=started;
     chromeSpawnObservedAt=undefined;
+    currentStderrObserver=ciLogRoot?createBoundedDevToolsMarkerObserver(attemptPort,()=>{
+      bootLogMarkerObserved=true;
+      bootLogMarkerBucket=chromeBootRelativeBucket(
+        chromeSpawnObservedAt===undefined?Number.NaN:performance.now()-chromeSpawnObservedAt);
+    }):undefined;
     let sampling=false,latestListenerSampleMs=-Infinity;
     const poll=async()=>{
       if(sampling)return;
@@ -965,7 +986,6 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
       try{
         const elapsed=performance.now()-started;
         timeline.observe(elapsed,await redactedChromeBootstrapMarkers(attemptProfile));
-        await observeBootLogMarker(elapsed);
         // Sampling once per ~2.5 s avoids competing with Chrome startup.
         // Only the binary 0/1/? result survives the native OS query.
         if(elapsed-latestListenerSampleMs>=2500){
@@ -981,7 +1001,7 @@ test('TEST-006/008/009: isolated signed Chrome presents owned CDP HTTP only',asy
     finally{
       pressure.stop();
       clearInterval(interval);
-      await observeBootLogMarker(performance.now()-started);
+      currentStderrObserver=undefined;
       if(ciLogRoot){
         t.diagnostic('CDP_CHROME_BOOT_LOG_MARKER_'+attemptNumber+'='+JSON.stringify({
           observed:bootLogMarkerObserved,
@@ -2904,11 +2924,11 @@ test('TASK-005/TEST-006/009/026: pending native PID proof obeys remaining Chrome
   }
 });
 
-/** TASK-005/TEST-006/008/009: opt-in CI Chrome bootstrap diagnostics must
- * actually enable Chromium's own log in THIS disposable headless launch.
- * This test never reads or emits the resulting browser log.
+/** TASK-005/TEST-006/008/009: opt-in CI diagnostics capture only the
+ * allowlisted DevTools marker from the disposable Chrome child's stderr.
+ * Raw stderr bytes are parsed in bounded memory and never printed or saved.
  */
-test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging only when opted in',async t=>{
+test('TASK-005: manual Windows CI diagnostic pipes only disposable Chrome stderr when opted in',async t=>{
   if(process.platform!=='win32')return t.skip('Windows CI only');
   const {EventEmitter}=require('node:events') as typeof import('node:events');
   const cp=require('node:child_process') as typeof import('node:child_process');
@@ -2918,14 +2938,18 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
     typeof import('../../src/browser/cdp-session');
   const cfg=config('C:\\synthetic\\chrome.exe','C:\\synthetic\\owned-log',12173);
   const saved={actions:process.env.GITHUB_ACTIONS,event:process.env.GITHUB_EVENT_NAME,
-    request:process.env.UAH_TEST_CHROME_BOOT_LOG,
-    runnerTemp:process.env.RUNNER_TEMP};
-  const child=Object.assign(new EventEmitter(),{
+    request:process.env.UAH_TEST_CHROME_BOOT_LOG,runnerTemp:process.env.RUNNER_TEMP};
+  const makeChild=()=>Object.assign(new EventEmitter(),{
     pid:41273,exitCode:null as number|null,killed:false,signalCode:null as string|null,
+    stderr:new PassThrough(),
     kill(){this.killed=true;return true;}
   });
+  let child=makeChild();
   let observedArgs:ReadonlyArray<string>=[];
+  let observedStdio:unknown;
   let observedLogFile:string|undefined;
+  let markerObserved=false;
+  const marker='[123:456:1127/080000.123:INFO] DevTools listening on ws://127.0.0.1:12173/devtools/browser/abc_DEF-123';
   let session:Awaited<ReturnType<typeof launchApprovedIsolatedChrome>>|undefined;
   try{
     process.env.GITHUB_ACTIONS='true';
@@ -2942,7 +2966,9 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
     }));
     t.mock.method(cp,'spawn',(_file:string,args?:ReadonlyArray<string>,
       options?:import('node:child_process').SpawnOptions)=>{
+      child=makeChild();
       observedArgs=Array.from(args??[]);
+      observedStdio=options?.stdio;
       observedLogFile=options?.env?.CHROME_LOG_FILE;
       return child as unknown as import('node:child_process').ChildProcess;
     });
@@ -2955,18 +2981,24 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
       Browser:'Chrome/155.0.1.1',
       webSocketDebuggerUrl:'ws://127.0.0.1:12173/devtools/browser/abcdefgh-1234'
     })));
-    session=await launchApprovedIsolatedChrome(cfg,{userApproved:true,testHeadless:true});
+    const observer=createBoundedDevToolsMarkerObserver(12173,()=>{markerObserved=true;});
+    session=await launchApprovedIsolatedChrome(cfg,{
+      userApproved:true,testHeadless:true,
+      onTestChromeStderrChunk:(chunk:Buffer|string)=>observer(chunk)
+    } as Parameters<typeof launchApprovedIsolatedChrome>[1]);
     assert.equal(session.ok,true,JSON.stringify(session));
-    assert.ok(observedArgs.includes('--enable-logging'),
-      'opt-in diagnostic must direct Chrome logs to only its disposable Profile');
-    assert.ok(observedArgs.includes('--v=0'),
-      'avoid verbose URL/renderer instrumentation and extra resource load');
-    assert.equal(observedLogFile,'C:\\synthetic\\owned-log\\chrome_debug.log',
-      'Chrome log path must be confined to the disposable test profile');
+    assert.deepEqual(observedStdio,['ignore','ignore','pipe'],
+      'manual diagnostic must pipe only stderr from the disposable headless child');
+    assert.equal(observedLogFile,undefined,
+      'the DevTools marker is stderr output, not a chrome_debug.log record');
+    assert.ok(!observedArgs.includes('--enable-logging')&&!observedArgs.includes('--v=0'),
+      'do not enable or persist unrelated Chrome log output');
+    child.stderr.write(Buffer.from(marker.slice(0,81)));
+    child.stderr.write(Buffer.from(marker.slice(81)+'\n'));
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(markerObserved,true,'the exact allowlisted marker must be observed from stderr');
     assert.ok(!observedArgs.some(x=>x.includes('--no-sandbox')),
       'diagnostics must not weaken Chrome sandbox');
-    // A manual opt-in must never bleed into PR/push CI, default runs or
-    // non-headless product launches even when the environment variable leaks.
     if(session.ok)session.stop();
     for(const [event,requested,headless] of [
       ['pull_request','true',true],
@@ -2976,18 +3008,24 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
     ] as const){
       process.env.GITHUB_EVENT_NAME=event;
       process.env.UAH_TEST_CHROME_BOOT_LOG=requested;
-      child.killed=false; // fresh synthetic spawn result, no real process
+      child=makeChild();
       observedArgs=[];
+      observedStdio=undefined;
       observedLogFile=undefined;
+      markerObserved=false;
+      const normalObserver=createBoundedDevToolsMarkerObserver(12173,()=>{markerObserved=true;});
       const normal=await launchApprovedIsolatedChrome(cfg,{
-        userApproved:true,testHeadless:headless
-      });
+        userApproved:true,testHeadless:headless,
+        onTestChromeStderrChunk:(chunk:Buffer|string)=>normalObserver(chunk)
+      } as Parameters<typeof launchApprovedIsolatedChrome>[1]);
       assert.equal(normal.ok,true,JSON.stringify(normal));
-      assert.ok(!observedArgs.includes('--enable-logging')&&
-        !observedArgs.includes('--v=0'),
-        'logging flags must be absent outside manual headless CI opt-in');
-      assert.equal(observedLogFile,undefined,
-        'normal launches must not override the Chrome log destination');
+      assert.equal(observedStdio,'ignore',
+        'stderr must remain ignored outside the manual headless Actions opt-in');
+      assert.equal(observedLogFile,undefined);
+      child.stderr.write(Buffer.from(marker));
+      await new Promise<void>(resolve=>setImmediate(resolve));
+      assert.equal(markerObserved,false,
+        'no stderr observer may be active outside the manual diagnostic boundary');
       if(normal.ok)normal.stop();
     }
   }finally{
@@ -2995,8 +3033,7 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
     t.mock.reset();
     for(const [key,value] of [
       ['GITHUB_ACTIONS',saved.actions],['GITHUB_EVENT_NAME',saved.event],
-      ['UAH_TEST_CHROME_BOOT_LOG',saved.request],
-      ['RUNNER_TEMP',saved.runnerTemp]
+      ['UAH_TEST_CHROME_BOOT_LOG',saved.request],['RUNNER_TEMP',saved.runnerTemp]
     ] as const){
       if(value===undefined)delete process.env[key];
       else process.env[key]=value;
@@ -3005,7 +3042,7 @@ test('TASK-005: manual Windows CI diagnostic enables Chrome bootstrap logging on
 });
 
 
-/** TASK-007: exercise the CI-only extension argv without querying OS process
+/** TASK-007: exercise the CI-only extension argv without querying OS process/** TASK-007: exercise the CI-only extension argv without querying OS process
  * metadata. The launch and CDP pieces are mocked; only the disposable
  * directory boundary runs on Windows.
  */
