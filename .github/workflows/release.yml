@@ -118,7 +118,8 @@ jobs:
           $existing = (& gh release view $tag --json id 2>&1 | Out-String)
           if ($LASTEXITCODE -eq 0) {
             Write-Output "Updating existing release $tag"
-            & gh release upload $tag @files --clobber
+            & gh release upload $tag @files
+            if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed; existing assets are preserved." }
           } else {
             Write-Output "Creating new release $tag"
             & gh release create $tag @files --title "Userscript Auto Healer v$version" --notes-file $notesPath
