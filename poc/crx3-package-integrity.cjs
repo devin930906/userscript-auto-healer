@@ -153,8 +153,19 @@ function writeVerifiedCrx3Outputs(input,expectedId,zipPath,keyPath){
  }
  return verified;
 }
+// Explicit acquisition policy; source selection is not Store installation attestation.
+function resolveTampermonkeyPackageSources(mode='vendor-preferred'){
+ const store={kind:'chrome-web-store',url:'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=155.0.0.0&acceptformat=crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc'};
+ if(mode==='store-only')return {mode,strict:true,sources:[store]};
+ if(mode==='vendor-preferred')return {mode,strict:false,sources:[
+  {kind:'vendor',url:'https://www.tampermonkey.net/crx/tampermonkey_stable.crx'},store]};
+ throw Error('INVALID_TAMPERMONKEY_PACKAGE_SOURCE_MODE');
+}
 if(require.main===module){
  try{
+  if(process.argv.length===4&&process.argv[2]==='--source-plan'){
+   process.stdout.write(JSON.stringify(resolveTampermonkeyPackageSources(process.argv[3]))+'\n');
+  }else{
   if(process.argv.length!==5)fail();
   const [crxPath,zipPath,keyPath]=process.argv.slice(2);
   if(resolve(zipPath)===resolve(keyPath))fail();
@@ -171,10 +182,11 @@ if(require.main===module){
   process.stdout.write('CRX3 signed ZIP verified; algorithm='+verified.algorithm+
     '; developerKeyId='+verified.extensionId+
     '; verifiedPublicKeyOutput=true; storeAuthenticityVerified=false\n');
+  }
  }catch(e){
   const reason=String(e?.message||'UNKNOWN').replace(/[^a-zA-Z0-9 _=-]/g,'').slice(0,180);
   process.stderr.write('CRX3 signature/bounds validation failed; package NOT loaded: '+reason+'\n');
   process.exitCode=1;
  }
 }
-module.exports={verifyCrx3PackageIntegrity,writeVerifiedCrx3Outputs};
+module.exports={verifyCrx3PackageIntegrity,writeVerifiedCrx3Outputs,resolveTampermonkeyPackageSources};
