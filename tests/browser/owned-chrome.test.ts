@@ -67,7 +67,8 @@ async function readTestOnlyChromeBootLogMarker(profile:string,expectedPort:numbe
  try{
   handle=await open(join(profile,'chrome_debug.log'),'r');
   const info=await handle.stat();
-  if(!info.isFile()||info.size<=0||info.size>MAX_TEST_CHROME_BOOT_LOG_BYTES)return false;
+  // Read only the bounded prefix: later Chrome log growth must not hide the startup marker.
+  if(!info.isFile()||info.size<=0)return false;
   const buffer=Buffer.alloc(Math.min(info.size,MAX_TEST_CHROME_BOOT_LOG_BYTES));
   const {bytesRead}=await handle.read(buffer,0,buffer.length,0);
   return hasExpectedDevToolsListeningMarker(buffer.subarray(0,bytesRead).toString('utf8'),expectedPort);
