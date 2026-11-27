@@ -21,6 +21,14 @@ on:
       - '.github/workflows/task007-tampermonkey-cloud.yml'
   workflow_dispatch:
     inputs:
+      package_source:
+        description: 'Signed CRX download source (not Store installation attestation)'
+        required: true
+        type: choice
+        default: vendor-preferred
+        options:
+          - vendor-preferred
+          - store-only
       matrix_case:
         description: 'Select an approved focused case, original/candidate pair, or full 16-case matrix'
         required: true
@@ -57,6 +65,8 @@ jobs:
           node-version: '22'
       - name: Get vendor or official Chrome Web Store update package and verify signing key
         shell: pwsh
+        env:
+          UAH_TM_PACKAGE_SOURCE: ${{ inputs.package_source || 'vendor-preferred' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -64,19 +74,29 @@ jobs:
           if (Test-Path -LiteralPath $base) { throw 'Unexpected preexisting isolated source directory' }
           New-Item -ItemType Directory -Path $base | Out-Null
           $crx = Join-Path $base 'tampermonkey_stable.crx'
-          try {
-            Invoke-WebRequest -Uri 'https://www.tampermonkey.net/crx/tampermonkey_stable.crx' -OutFile $crx -MaximumRedirection 3 -TimeoutSec 60
-            Write-Host 'CRX origin: Tampermonkey vendor-hosted signed package'
-          } catch {
-            # Google/Chromium documents clients2.google.com as the official
-            # Chrome Web Store update endpoint. Do not use third-party mirrors,
-            # disable certificate validation or accept a mismatched signing key.
-            Write-Warning 'Vendor download unavailable: trying official Chrome Web Store update endpoint'
-            Remove-Item -LiteralPath $crx -Force -ErrorAction SilentlyContinue
-            $store = 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=155.0.0.0&acceptformat=crx3&x=id%3Ddhdgffkkebhmkfjojejmpbldmpobfkfo%26uc'
-            Invoke-WebRequest -Uri $store -OutFile $crx -MaximumRedirection 5 -TimeoutSec 90
-            Write-Host 'CRX origin: official Chrome Web Store update service'
+          $planJson = node ./poc/crx3-package-integrity.cjs --source-plan $env:UAH_TM_PACKAGE_SOURCE
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid signed package source policy' }
+          $plan = $planJson | ConvertFrom-Json
+          $acquired = $false
+          foreach ($source in $plan.sources) {
+            if ($plan.strict -and $source.kind -ne 'chrome-web-store') { throw 'Strict Store source policy violated' }
+            switch ($source.kind) {
+              'vendor' { $redirects = 3; $timeout = 60; $origin = 'Tampermonkey vendor-hosted signed package' }
+              'chrome-web-store' { $redirects = 5; $timeout = 90; $origin = 'official Chrome Web Store update service' }
+              default { throw 'Unapproved CRX source kind' }
+            }
+            try {
+              Invoke-WebRequest -Uri $source.url -OutFile $crx -MaximumRedirection $redirects -TimeoutSec $timeout
+              $acquired = $true
+              Write-Host ("CRX origin: " + $origin)
+              break
+            } catch {
+              Remove-Item -LiteralPath $crx -Force -ErrorAction SilentlyContinue
+              if ($plan.strict) { throw 'Strict Store source acquisition failed; no vendor fallback' }
+              Write-Warning 'Approved source unavailable'
+            }
           }
+          if (-not $acquired) { throw 'No approved CRX source acquired' }
           node --test ./poc/crx3-package-integrity.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'CRX3 signature parser regressions failed' }
           $verifiedZip = Join-Path $base 'verified.zip'
