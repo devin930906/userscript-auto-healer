@@ -144,3 +144,8 @@ test('TASK-021/GATE-001..011: production release pipeline strictly enforces all 
     'Release workflow must run full registered test suite before packaging'
   );
 });
+
+test('TASK-021/GATE-011: existing release attachments must never be overwritten', () => {
+  const content = readFileSync(WORKFLOW_PATH, 'utf8');
+  assert.doesNotMatch(content, /--clobber\b/, 'Official release assets must not be overwritten');
+});
