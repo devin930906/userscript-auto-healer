@@ -1,5 +1,13 @@
 # 项目开发交接
 
+> **当前最新续接（2026-11-28）**：当前集成基线 `main@e7b4482efc976a818700896ad5b9d4978922d58a`。PR [#978](https://github.com/devin930906/userscript-auto-healer/pull/978) 已 squash 合并，关联 TASK-013 / REQ-022 / TEST-022 / Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857)。该增量在 `src/jobs/batch-coordinator.ts` 增加纯函数 `recoverScriptTaskHint`，严格要求 `uah-script-task-hint-v1`、重新导入脚本 SHA-256 和精确数据对象匹配；历史阶段（包括 VERIFIED）只恢复为 QUEUED，并要求重新取得证据与用户同意，所有自动修改/回滚/Tampermonkey/业务权限仍为 false。它不是持久化逐脚本阶段账本，也没有接通完整诊断、修复、AI、真实管理器/业务流程。
+> PR RED [#46013923821](https://github.com/devin930906/userscript-auto-healer/actions/runs/46013923821)：1,342 pass / 1 expected fail / 3 skipped；PR GREEN [#46014879841](https://github.com/devin930906/userscript-auto-healer/actions/runs/46014879841)：1,346 tests / 1,343 pass / 0 fail / 3 skipped，TypeScript 与 Windows Shell Smoke 通过。合并后 main [#46119733874](https://github.com/devin930906/userscript-auto-healer/actions/runs/46119733874) 在合并 SHA 上通过：1,346 / 1,343 / 0 / 3，Windows Shell Smoke 通过。
+> 另对现有 Chrome 启动诊断工作流执行 [#46119855584](https://github.com/devin930906/userscript-auto-healer/actions/runs/46119855584)：完整 Chrome fixture 65 tests / 65 pass / 0 fail / 2 skipped；三次隔离 Chrome 启动样本及三次 TEST-013 main-frame 样本通过，未开启 CPU pressure。该结果未复现间歇 CDP_TIMEOUT，根因仍未确认；Issue [#510](https://github.com/devin930906/userscript-auto-healer/issues/510) 保持 Open。
+> #978 的临时 Windows 候选 Artifact `15206635114` 不是正式 Stable 发行文件。Issue #857 仍 Open；TASK-013 仍缺逐脚本阶段持久化、完整跨阶段编排、崩溃/重启恢复、真实脚本处理、真实 Tampermonkey/GM/业务验收及 GATE-007。Stable 双发行 EXE/ZIP、最终人工验收及正式 Release 均未完成。
+
+> 历史续接记录（2026-11-23 及更早）保留如下，仅用于追溯；其中 PR #925 Open、旧 main SHA 和旧 Actions 结果不再代表当前远端状态。
+
+
 > WebChatGPT 第（7）份指令的当前续接点见 [原始需求校准](product-rebaseline.md)。
 
 > **当前最新续接（2026-11-23）**：正式基线为 `main@96cd4028e227d4934077933f5123230c14ec0367`；PR [#925](https://github.com/devin930906/userscript-auto-healer/pull/925) 分支 `feat/task013-dropped-batch-20261119` 当前 HEAD `566648d6fac7139af36ae0c2ec3f02f816211d59`，PR 仍 Open、未合并，Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) 仍 Open。

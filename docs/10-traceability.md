@@ -1,5 +1,8 @@
 # 工程要求追踪矩阵
 
+> **2026-11-28 当前续接核验**：REQ-022 / NFR-009 → TASK-013 → TEST-022/026 → GATE-007 → Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) → PR [#978](https://github.com/devin930906/userscript-auto-healer/pull/978)（Merged）。合并提交 `e7b4482efc976a818700896ad5b9d4978922d58a`；合并后 Application Skeleton [#46119733874](https://github.com/devin930906/userscript-auto-healer/actions/runs/46119733874) 通过，1,346 tests / 1,343 pass / 0 fail / 3 skipped，Windows shell smoke 通过。PR #978 只增加与新导入 SHA-256 绑定的 fail-closed 历史阶段提示归一化，不代表逐脚本阶段已持久化或完整批处理工作流已接通；#857 保持 Open，TEST-022/GATE-007 未通过。
+
+
 > 本轮原文到现有 TASK、Issue 和验收的映射见 [原始需求校准](product-rebaseline.md)。
 
 > 现行未验收映射补充（不替换下方历史矩阵）：REQ-006..009 → TASK-005 / #856 / TEST-006..009（默认 CDP 9896、Chrome++ 与 Profile 归属）；REQ-017/018/023 → TASK-007/010/012 / #486 #488 #603 / TEST-017/018/023（真实 Tampermonkey 与脚本安装/版本；新增自管 Chrome 扩展管理页元数据只读检查（不证明 Store 来源或 GM/业务））；REQ-014/019..022 → TASK-009..013 / #487 #488 #489 #857 / TEST-014/018..022（真实诊断、自动候选、受控提交与回滚、批次验收）；REQ-015/016 → TASK-014 / #604 / TEST-015/016（可选 AI 双协议）；REQ-001..003/022 → TASK-002/013/017 / #857 #607 / TEST-001..003/022（一次启动、逐项结果）。历史实现状态不能自动令这些增量或 GATE-001..011 通过。
