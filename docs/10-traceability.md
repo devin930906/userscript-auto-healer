@@ -1,3 +1,5 @@
+> **2026-11-28 当前续接核验**：REQ-022 / NFR-009 → TASK-013 → TEST-022/026 → GATE-007 → Issue [#857](https://github.com/devin930906/userscript-auto-healer/issues/857) → PR [#978](https://github.com/devin930906/userscript-auto-healer/pull/978)（Merged）。合并提交 `e7b4482efc976a818700896ad5b9d4978922d58a`；合并后 Application Skeleton [#46119733874](https://github.com/devin930906/userscript-auto-healer/actions/runs/46119733874) 通过，1,346 tests / 1,343 pass / 0 fail / 3 skipped，Windows shell smoke 通过。PR #978 只增加与新导入 SHA-256 绑定的 fail-closed 历史阶段提示归一化，不代表逐脚本阶段已持久化或完整批处理工作流已接通；#857 保持 Open，TEST-022/GATE-007 未通过。
+
 # 工程要求追踪矩阵
 
 > 本轮原文到现有 TASK、Issue 和验收的映射见 [原始需求校准](product-rebaseline.md)。

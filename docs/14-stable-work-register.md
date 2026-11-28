@@ -1,5 +1,7 @@
 # Stable 剩余工作登记（基线快照）
 
+> **2026-11-28 当前核验补充**：`main@e7b4482efc976a818700896ad5b9d4978922d58a` 已整合 PR #978（TASK-013/#857）的逐脚本 fail-closed 历史阶段提示归一化；合并后 Application Skeleton #46119733874 为 1,346 tests / 1,343 pass / 0 fail / 3 skipped，Windows shell smoke 通过。该增量不等于逐脚本阶段持久化或完整 TEST-022/GATE-007 通过。Chrome 诊断 #46119855584 的 3 次隔离启动样本通过，但间歇 CDP_TIMEOUT 根因仍未确认，#510 保持 Open。Stable 必需 GATE、正式候选双包与最终人工验收仍未完成。
+
 > **2026-11-02 最新工作索引**：原始工作项与阶段实证继续有效；新增 Issue #603..#610 补全已批准 TASK，不代表新功能或完成验收。旧 Issue 锁交接不再是阻断，但 Windows/Chrome/Tampermonkey、安全回滚与全部 Stable GATE 仍需证据。参见 `docs/19-stable-v7-migration.md`。
 
 
@@ -23,7 +25,7 @@
 | TASK-010 | REQ-018/021；TEST-018/021 | 阶段代码已整合，产品门槛未完成 | 离线审计与阻断逻辑不提供可信管理器/业务/备份证明 | 自动验收 | TASK-007/009/011 | src/acceptance/；docs/09-development-plan.md | 增加独立真实业务前后验收及可信备份绑定 | 可信正反证据可重演且未知状态安全拒绝 |
 | TASK-011 | REQ-020/021；TEST-020/021 | 阶段代码已整合，事务能力未完成 | 原字节备份/只读恢复检查与候选暂存已实现；未完成安全原子应用和真实回滚事务 | 源脚本完整性与恢复；GATE-007 | TASK-009/010 | src/version/；docs/09-development-plan.md | 设计且测试原子提交、崩溃/锁/冲突注入与完整回滚 | 真实文件恢复一致，受阻绝不覆盖 |
 | TASK-012 | REQ-023；TEST-023 | 阶段代码已整合，管理器同步未验证 | 只读复核/手动导出不等于 Tampermonkey 已安装版本变更 | 用户升级与导出 | TASK-007/011 | src/export/；docs/09-development-plan.md | 验证授权导出、扩展内版本状态与失配恢复 | TEST-023 在真实 Tampermonkey 环境通过 |
-| TASK-013 | REQ-022；TEST-022/026 | renderer 文件选择/拖放已接入主进程受限批次；完整持久与诊断流程未完成 | 文件批次与只读 AST 已联接；reload/crash 清理钩子已实现，reload 有待 Windows smoke 验证，crash-event 尚无运行时覆盖；仍缺完整产品诊断/修复链、可恢复持久事务与真实管理器/业务验收 | 任务可靠性；GATE-007 | TASK-008..012 | src/import/；app/main/；docs/09-development-plan.md | 接入真实作业并验证崩溃、重复、取消、恢复与逐项结果 | 完整 TEST-022 持久恢复和端到端隔离回归通过 |
+| TASK-013 | REQ-022；TEST-022/026 | 内存只读协调器、持久调度检查点及逐脚本 fail-closed 恢复提示已阶段整合；完整持久任务阶段与诊断链未完成 | PR #978 的 `recoverScriptTaskHint` 仅校验新导入 SHA-256 并把历史状态归一化为 QUEUED；尚无逐脚本任务阶段的磁盘持久化、跨启动完整工作流恢复、动态诊断/修复/AI/Tampermonkey/GM/业务验收 | 任务可靠性；GATE-007 | TASK-008..012 | src/jobs/；tests/jobs/；docs/09-development-plan.md | 在现有安全 journal 基础上定义并验证逐脚本持久阶段记录、重启恢复与失败隔离，不保存源码/路径、不恢复权限 | 完整 TEST-022、崩溃/重启恢复和真实端到端验收通过 |
 | TASK-014 | REQ-015/016；TEST-015/016/026 | AI 网关阶段代码及输入 Proxy 边界修复已完成并整合；产品级验收未完成 | 本轮 `record()` 对配置／授权／证据反射前增加 `node:util.types.isProxy` 拒绝；严格负例防止触发恶意 Proxy 陷阱及未授权网络调用；尚缺正式可选 AI 接入范围与全量安全/产品实测 | 可选 AI 本地输入边界、安全与可靠性；GATE-006 | 既有可选网关，无新增生产依赖 | PR #195 已合并 main `a51bc8feafbb0e315d58c78c3e53174bc2055c50`；红 CI #39500069104（2 项新增测试失败）；绿 CI #39500385626（408 总计，407 通过、0 失败、1 条条件跳过）；Windows 候选 #39500385634 成功，但不属正式 Stable；main 合并后文档 #39501431043 成功 | 结合 TASK-018 核对全量 AI 网络/隐私安全及可选能力产品实测，不重复本轮已通过的 Proxy 负例 | 已有阶段安全边界修复保持通过；所有关联真实产品与安全 GATE 要求均取得独立验证证据 |
 | TASK-015 | REQ-024；TEST-024 | 阶段代码已整合，正式监控未验证 | 会话内短历史已实现；缺已授权周期复检、持久记录和管理器业务真实性 | 健康监控 | TASK-010/013 | src/health/；docs/09-development-plan.md | 验证明确同意的复检计划、数据生命周期与真实业务信号 | TEST-024 完整正反例和过期恢复通过 |
 | TASK-016 | REQ-025；TEST-025 | 阶段代码已整合，真实兼容回归未验证 | 只读内存兼容层不能证明真实多脚本替换/回滚 | 共享兼容行为 | TASK-009/010/015 | src/compat/；docs/09-development-plan.md | 在独立 Tampermonkey 样本中复核多脚本冲突与回退 | TEST-025 真实多脚本不回归 |
